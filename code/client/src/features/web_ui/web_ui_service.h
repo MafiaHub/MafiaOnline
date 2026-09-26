@@ -88,7 +88,7 @@ namespace Mafia1Online::Features::WebUi {
         void PushPlayers(World::WorldService &world, bool force);
         void UpdateCapture();
         void ForwardMouse(Screen live, Framework::GUI::View *target);
-        void SetResourceCursor(Framework::GUI::View *target, int x, int y, bool pressed);
+        void UpdateCursor(Framework::GUI::View *target);
         Framework::GUI::View *FocusedResourceView() const;
         bool HasFocusedResourceView() const;
         void ApplyFocus();
@@ -105,6 +105,10 @@ namespace Mafia1Online::Features::WebUi {
         Chat::ChatService *_chat                             = nullptr;
         Framework::GUI::View *_view                          = nullptr;
         int _viewId                                          = -1;
+        Framework::GUI::View *_cursorView                    = nullptr;
+        int _cursorViewId                                    = -1;
+        bool _cursorReady                                    = false;
+        std::string _lastCursorState;
         HWND _window                                         = nullptr;
         WebUiSettings _settings;
 
@@ -139,7 +143,6 @@ namespace Mafia1Online::Features::WebUi {
         int _mouseY              = -1;
         uint32_t _mouseButtons   = 0;
         int _mouseTargetId       = -1;
-        std::chrono::steady_clock::time_point _lastResourceMouseMessage;
 
         std::deque<ChatLine> _history;
         std::deque<std::string> _outgoing;

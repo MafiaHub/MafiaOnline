@@ -3,6 +3,15 @@ import { computed, signal } from '@preact/signals';
 export type Screen = 'hidden' | 'menu' | 'game';
 export type Phase = 'disconnected' | 'connecting' | 'authenticating' | 'downloading' | 'starting' | 'connected';
 
+export interface CursorState {
+    x: number;
+    y: number;
+    pressed: boolean;
+    shape: 'arrow' | 'text' | 'pointer' | 'move' | 'wait' | 'blocked' | 'none';
+}
+
+export const cursor = signal<CursorState | null>(null);
+
 export interface ServerEntry {
     host: string;
     port: number;
@@ -32,6 +41,11 @@ export interface UiState {
         port: number;
         downloading: boolean;
         progress: number;
+        currentFile: string;
+        filesDownloaded: number;
+        filesTotal: number;
+        bytesDownloaded: number;
+        bytesTotal: number;
     };
     defaults: { nickname: string; host: string; port: number };
     settings: {
@@ -87,6 +101,11 @@ export const state = signal<UiState>({
         port: 0,
         downloading: false,
         progress: 0,
+        currentFile: '',
+        filesDownloaded: 0,
+        filesTotal: 0,
+        bytesDownloaded: 0,
+        bytesTotal: 0,
     },
     defaults: { nickname: 'Player', host: '127.0.0.1', port: 27015 },
     settings: { nickname: '', recent: [], favorites: [], preferences: {} },

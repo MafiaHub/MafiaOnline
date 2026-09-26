@@ -126,8 +126,8 @@ bash builds/build.bat Mafia1OnlineServer linux64
 The client and launcher build only for Windows x86; the server builds for
 Windows x64 or Linux x64. For server configuration, copy
 `config/server.example.json` to a repository-local `server.json`, or pass it
-with `--config`. `mod.mission` is required and must be one of the 77 lowercase
-gameplay mission directory names in
+with `--config`. `mod.mission` is required and accepts a mission detected in
+server asset ZIPs or one of the 77 lowercase gameplay mission directory names in
 [`code/shared/features/world/mission_catalog.h`](code/shared/features/world/mission_catalog.h).
 The catalog was checked against the installed Steam `a1.dta`: every listed
 mission has a collision tree. The three menu-only scenes without one are
@@ -136,6 +136,11 @@ still required.
 Set the optional top-level `password` key to require a password when clients
 connect. The server publishes only whether a password is required; it does not
 send the password to clients.
+
+Place custom asset ZIPs in the server's `mods/` directory. Clients download and
+verify them before automatically loading the map, and reuse unchanged downloads
+on reconnect. See [server mods](docs/server_mods.md) for ZIP layout, new mission
+detection and the prepared Freeride Extended example.
 
 ## Client ZIP
 

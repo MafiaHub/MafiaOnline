@@ -35,9 +35,15 @@
 #include <limits>
 
 namespace Mafia1Online::Core {
+    void Server::OnAssetStreamerReady() {
+        _mods.AddUploads(*GetNetworkingEngine()->GetNetworkServer()->GetAssetStreamer());
+    }
+
     void Server::PostInit() {
         Shared::Entities::RegisterEntities();
         _mission                               = GetModConfig().Get<std::string>("mission");
+        if (!Shared::World::IsStockMission(_mission) && !_mods.HasMission(_mission)) throw std::runtime_error("Mission is neither stock nor present in mods/: " + _mission);
+        if (!GetNetworkingEngine()->GetNetworkServer()->SetSessionConfig(nlohmann::json({{"mission", _mission}, {"mods", _mods.Manifest()}}).dump())) throw std::runtime_error("Server mod manifest exceeds the session handshake limit");
         _missionState                          = Framework::CoreModules::GetReplication()->CreateEntity<Shared::Entities::MissionEntity>();
         _missionState->mission                 = _mission;
         _missionState->streaming.alwaysVisible = true;
@@ -320,6 +326,7 @@ namespace Mafia1Online::Core {
     }
 
     void Server::PostUpdate() {
+        _mods.Update();
         _players.Update();
         _combat.Update();
         _worldScript.Update();
@@ -411,6 +418,7 @@ namespace Mafia1Online::Core {
     }
 
     void Server::PreShutdown() {
+        _mods.Reset();
         _reportedCarLoadFailures.clear();
         _carLoadFailures.clear();
         _emptyCarHandoff.clear();
@@ -526,7 +534,7 @@ namespace Mafia1Online::Core {
     }
 
     bool Server::ChangeMission(std::string_view name) {
-        if (!Shared::World::IsStockMission(name) || _missionState->generation == std::numeric_limits<uint64_t>::max()) {
+        if ((!Shared::World::IsStockMission(name) && !_mods.HasMission(name)) || _missionState->generation == std::numeric_limits<uint64_t>::max()) {
             return false;
         }
         _mission               = name;

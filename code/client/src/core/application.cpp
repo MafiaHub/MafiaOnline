@@ -19,10 +19,12 @@
 #include <integrations/client/networking/engine.h>
 #include <logging/logger.h>
 #include <networking/network_client.h>
+#include <stdexcept>
 
 namespace Mafia1Online::Core {
     using Framework::Integrations::Client::ConnectionPhase;
     void Application::PostInit() {
+        if (!_mods.Install()) throw std::runtime_error("Could not hook rw_data.dll file loading");
         Shared::Entities::RegisterEntities();
         _cars.RegisterRPC();
         _combat.RegisterRPC();
@@ -112,8 +114,16 @@ namespace Mafia1Online::Core {
     }
 
     void Application::PostUpdate() {
+        _mods.Update();
+        if (auto prepared = _mods.TakeCompleted()) {
+            _assetError = prepared->error;
+            if (_assetError.empty()) _world.SetModMissions(std::move(prepared->missions));
+            else Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->error("Server mods: {}", _assetError);
+            CompleteDeferredInitialAssetProcessing(prepared->generation, _assetError.empty());
+        }
         const uint64_t previousMissionGeneration = _world.SelectedMissionGeneration();
         _world.Update();
+        if (_autoEnterPending && GetConnectionPhase() == ConnectionPhase::InGame && _world.RequestEnterGame()) _autoEnterPending = false;
         if (previousMissionGeneration != 0 && previousMissionGeneration != _world.SelectedMissionGeneration()) {
             _combat.Reset();
             _death.Reset();
@@ -187,6 +197,7 @@ namespace Mafia1Online::Core {
     }
 
     void Application::PreShutdown() {
+        _mods.Shutdown();
         _cameraFollow.Reset();
         _cameraFollow.UninstallTickHook();
         _script.Reset();
@@ -216,6 +227,8 @@ namespace Mafia1Online::Core {
     }
 
     void Application::OnConnectionClosed() {
+        _mods.Reset();
+        _autoEnterPending = false;
         _cameraFollow.Reset();
         _script.Reset();
         _sounds.Reset();
@@ -236,9 +249,20 @@ namespace Mafia1Online::Core {
         const auto &reason = GetLastDisconnectionReason();
         Features::Menu::SetStatus(reason.empty() ? "Disconnected" : "Disconnected: " + reason);
         _webUi.OnConnectionClosed(reason);
+        if (!_assetError.empty()) Features::Menu::SetStatus("Server mods: " + _assetError);
+    }
+
+    Framework::Integrations::Client::InitialAssetProcessingDecision Application::OnInitialAssetDownloadReady(uint64_t generation, const Framework::Integrations::Client::AssetDownloadStatus &) {
+        Features::Menu::SetStatus("Verifying and preparing server assets...");
+        _mods.Begin(generation, GetServerConfig(), GetAssetCachePath(), std::filesystem::path(_projectPath) / "cache" / "mods");
+        return Framework::Integrations::Client::InitialAssetProcessingDecision::Defer;
     }
 
     void Application::OnConnectionPhaseChanged(ConnectionPhase phase) {
+        if (phase == ConnectionPhase::Connecting) {
+            _assetError.clear();
+            _autoEnterPending = true;
+        }
         Features::Menu::SetConnectionActive(phase != ConnectionPhase::Disconnected);
         switch (phase) {
         case ConnectionPhase::Disconnected: Features::Menu::SetStatus("Disconnected"); break;

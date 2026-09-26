@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -175,6 +176,26 @@ namespace Mafia1Online::Features::WebUi {
         _view->LockToOrigin(url);
         _view->Display(false);
 
+        // One noninteractive cursor layer shared by the shell and every
+        // resource. It stays above full-screen modals without joining focus.
+        _cursorViewId = manager->CreateView(url + "#cursor", 0, 0);
+        _cursorView   = _cursorViewId >= 0 ? manager->GetView(_cursorViewId) : nullptr;
+        if (!_cursorView) {
+            manager->DestroyView(_viewId);
+            _view   = nullptr;
+            _viewId = -1;
+            return false;
+        }
+
+        _cursorView->LockToOrigin(url);
+        _cursorView->SetZIndex(std::numeric_limits<int>::max());
+        _cursorView->Focus(false);
+        _cursorView->Display(false);
+        _cursorView->AddEventListener("ui:ready", [this](const std::string &) {
+            _cursorReady = true;
+            _lastCursorState.clear();
+        });
+
         _instance = &instance;
         _chat     = &chat;
         _window   = static_cast<HWND>(SDK::Graphics::GetGraph()->MainWindow());
@@ -184,6 +205,9 @@ namespace Mafia1Online::Features::WebUi {
         if (!InstallWebUiHooks(*this, _window)) {
             logger->error("Web UI disabled, its hooks could not be installed");
             manager->DestroyView(_viewId);
+            manager->DestroyView(_cursorViewId);
+            _cursorView   = nullptr;
+            _cursorViewId = -1;
             _view     = nullptr;
             _viewId   = -1;
             _instance = nullptr;
@@ -210,8 +234,12 @@ namespace Mafia1Online::Features::WebUi {
             _chat->SetKeyRouter({}, {});
         }
         if (auto *manager = _instance->GetWebManager(); manager && _viewId >= 0) {
+            manager->DestroyView(_cursorViewId);
             manager->DestroyView(_viewId);
         }
+        _cursorView   = nullptr;
+        _cursorViewId = -1;
+        _cursorReady  = false;
         _view     = nullptr;
         _viewId   = -1;
         _instance = nullptr;
@@ -379,6 +407,9 @@ namespace Mafia1Online::Features::WebUi {
     }
 
     void WebUiService::Deactivate() {
+        if (_cursorView) {
+            _cursorView->Display(false);
+        }
         const bool wasReady = _pageReady;
         _pageReady          = false;
         _chatOpen           = false;
@@ -428,6 +459,16 @@ namespace Mafia1Online::Features::WebUi {
         const auto menu      = Menu::GetState();
         const auto &quick    = QuickJoin::GetConfig();
         const auto &download = _instance->GetAssetDownloadStatus();
+        std::string downloadName = download.currentFile;
+        const auto &config = _instance->GetServerConfig();
+        if (const auto mods = config.find("mods"); mods != config.end() && mods->is_array()) {
+            for (const auto &mod : *mods) {
+                if (mod.is_object() && mod.contains("sha256") && mod["sha256"].is_string() && mod.contains("name") && mod["name"].is_string() && downloadName == "mod-" + mod["sha256"].get<std::string>() + ".zip") {
+                    downloadName = mod["name"].get<std::string>();
+                    break;
+                }
+            }
+        }
         const auto current   = _instance->GetCurrentState();
         std::string nickname = menu.nickname;
         if (!quick.enabled && !_settings.Nickname().empty()) {
@@ -446,7 +487,12 @@ namespace Mafia1Online::Features::WebUi {
               {"host", current.host},
               {"port", current.port},
               {"downloading", download.downloading},
-              {"progress", download.progress}}},
+              {"progress", download.progress},
+              {"currentFile", downloadName},
+              {"filesDownloaded", download.filesDownloaded},
+              {"filesTotal", download.filesTotal},
+              {"bytesDownloaded", download.bytesDownloaded},
+              {"bytesTotal", download.bytesTotal}}},
             {"defaults", {{"nickname", nickname}, {"host", menu.host}, {"port", menu.port}}},
             {"settings", _settings.ToJson()},
         };
@@ -655,29 +701,30 @@ namespace Mafia1Online::Features::WebUi {
     }
 
     bool WebUiService::HasFocusedResourceView() const {
-        if (!_instance) return false;
-        auto *manager = _instance->GetWebManager();
-        return manager && manager->IsAnyGCViewFocused();
+        return FocusedResourceView() != nullptr;
     }
 
     // Everything the page believes is held gets its release before the view
     // loses focus, or a key or button would stay down in the page.
     void WebUiService::ReleaseHeldInput() {
-        if (!_view) {
+        auto *target = _mouseTargetId >= 0 ? _instance->GetWebManager()->GetView(_mouseTargetId) : _view;
+        if (!target) {
+            _heldKeys.clear();
+            _mouseButtons = 0;
             return;
         }
-        if (_view->HasFocus()) {
+        if (target->HasFocus()) {
             for (const WPARAM key : _heldKeys) {
                 const UINT scanCode = MapVirtualKeyA(static_cast<UINT>(key), MAPVK_VK_TO_VSC);
-                _view->ProcessKeyboardEvent(_window, WM_KEYUP, key, static_cast<LPARAM>(0xc0000001u | (scanCode << 16)));
+                target->ProcessKeyboardEvent(_window, WM_KEYUP, key, static_cast<LPARAM>(0xc0000001u | (scanCode << 16)));
             }
         }
         _heldKeys.clear();
-        auto browser = _view->GetBrowser();
+        auto browser = target->GetBrowser();
         if (browser && _mouseButtons != 0) {
             CefMouseEvent event;
-            event.x = _mouseX;
-            event.y = _mouseY;
+            event.x = _mouseX - static_cast<int>(target->GetPosition().x);
+            event.y = _mouseY - static_cast<int>(target->GetPosition().y);
             for (const auto &[bit, type] : {std::pair {SDK::Graphics::kMouseLeft, MBT_LEFT}, std::pair {SDK::Graphics::kMouseRight, MBT_RIGHT},
                                             std::pair {SDK::Graphics::kMouseMiddle, MBT_MIDDLE}}) {
                 if (_mouseButtons & bit) {
@@ -722,8 +769,16 @@ namespace Mafia1Online::Features::WebUi {
             switch (message) {
             case WM_KEYDOWN:
             case WM_SYSKEYDOWN:
+                if (std::find(_heldKeys.begin(), _heldKeys.end(), wParam) == _heldKeys.end()) {
+                    _heldKeys.push_back(wParam);
+                }
+                resource->ProcessKeyboardEvent(window, message, wParam, lParam);
+                return true;
             case WM_KEYUP:
             case WM_SYSKEYUP:
+                std::erase(_heldKeys, wParam);
+                resource->ProcessKeyboardEvent(window, message, wParam, lParam);
+                return true;
             case WM_CHAR:
                 resource->ProcessKeyboardEvent(window, message, wParam, lParam);
                 return true;
@@ -740,26 +795,11 @@ namespace Mafia1Online::Features::WebUi {
             case WM_RBUTTONUP:
             case WM_MBUTTONDOWN:
             case WM_MBUTTONUP:
-            case WM_MOUSEWHEEL: {
-                resource->ProcessMouseEvent(window, message, wParam, lParam);
-                _lastResourceMouseMessage = Clock::now();
-                POINT point {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
-                if (message == WM_MOUSEWHEEL) {
-                    ScreenToClient(window, &point);
-                }
-                _cursorX = std::clamp(static_cast<int>(point.x), 0, std::max(0, _viewportWidth - 1));
-                _cursorY = std::clamp(static_cast<int>(point.y), 0, std::max(0, _viewportHeight - 1));
-                _mouseX = _cursorX;
-                _mouseY = _cursorY;
-                if (message == WM_LBUTTONDOWN || message == WM_LBUTTONDBLCLK) _mouseButtons |= SDK::Graphics::kMouseLeft;
-                if (message == WM_LBUTTONUP) _mouseButtons &= ~SDK::Graphics::kMouseLeft;
-                if (message == WM_RBUTTONDOWN) _mouseButtons |= SDK::Graphics::kMouseRight;
-                if (message == WM_RBUTTONUP) _mouseButtons &= ~SDK::Graphics::kMouseRight;
-                if (message == WM_MBUTTONDOWN) _mouseButtons |= SDK::Graphics::kMouseMiddle;
-                if (message == WM_MBUTTONUP) _mouseButtons &= ~SDK::Graphics::kMouseMiddle;
-                SetResourceCursor(resource, _cursorX, _cursorY, (_mouseButtons & SDK::Graphics::kMouseLeft) != 0);
+            case WM_MOUSEWHEEL:
+                // DirectInput is the only mouse source, including under Wine.
+                // Mixing window messages with device polling duplicates clicks
+                // and makes the visible pointer disagree with CEF hit testing.
                 return true;
-            }
             default: break;
             }
         }
@@ -860,11 +900,34 @@ namespace Mafia1Online::Features::WebUi {
         return true;
     }
 
-    void WebUiService::SetResourceCursor(Framework::GUI::View *target, int x, int y, bool pressed) {
-        // Blink captures native scrollbars before dispatching page mousemove.
-        // Drive the software cursor from the coordinates delivered to CEF.
-        target->EvaluateScript("window.__m1oSetCursor&&window.__m1oSetCursor(" + std::to_string(x) + "," + std::to_string(y) + "," +
-            (pressed ? "true" : "false") + "," + std::to_string(_viewportWidth) + "," + std::to_string(_viewportHeight) + ")");
+    void WebUiService::UpdateCursor(Framework::GUI::View *target) {
+        const bool visible = _cursorReady && _windowActive && target;
+        _cursorView->Display(visible);
+        if (!visible) {
+            return;
+        }
+
+        const char *shape = "arrow";
+        switch (target->GetCursorType()) {
+        case CT_NONE: shape = "none"; break;
+        case CT_IBEAM: shape = "text"; break;
+        case CT_HAND: shape = "pointer"; break;
+        case CT_GRAB:
+        case CT_GRABBING:
+        case CT_MOVE: shape = "move"; break;
+        case CT_WAIT:
+        case CT_PROGRESS: shape = "wait"; break;
+        case CT_NODROP:
+        case CT_NOTALLOWED: shape = "blocked"; break;
+        default: break;
+        }
+
+        const nlohmann::json message = {{"type", "cursor:state"}, {"payload", {{"x", _cursorX}, {"y", _cursorY}, {"pressed", (_mouseButtons & SDK::Graphics::kMouseLeft) != 0}, {"shape", shape}}}};
+        const std::string encoded    = message.dump();
+        if (encoded != _lastCursorState) {
+            _lastCursorState = encoded;
+            _cursorView->EvaluateScript("window.__m1o&&window.__m1o(" + encoded + ")");
+        }
     }
 
     void WebUiService::ForwardMouse(Screen live, Framework::GUI::View *target) {
@@ -889,12 +952,12 @@ namespace Mafia1Online::Features::WebUi {
         }
         const auto now  = Native::MouseButtons();
         const int wheel = Native::MouseWheel();
-        const bool moved = x != _mouseX || y != _mouseY;
-        const bool buttonsChanged = now != _mouseButtons;
 
         CefMouseEvent event;
-        event.x         = x;
-        event.y         = y;
+        _cursorX        = x;
+        _cursorY        = y;
+        event.x         = x - static_cast<int>(target->GetPosition().x);
+        event.y         = y - static_cast<int>(target->GetPosition().y);
         event.modifiers = CefButtonFlags(now);
         if (x != _mouseX || y != _mouseY) {
             _mouseX = x;
@@ -914,9 +977,6 @@ namespace Mafia1Online::Features::WebUi {
         _mouseButtons = now;
         if (wheel != 0) {
             host->SendMouseWheelEvent(event, 0, wheel);
-        }
-        if (target != _view && (moved || buttonsChanged)) {
-            SetResourceCursor(target, x, y, (now & SDK::Graphics::kMouseLeft) != 0);
         }
     }
 
@@ -946,27 +1006,19 @@ namespace Mafia1Online::Features::WebUi {
         if (_view && _view->ShouldDisplay() == (resource != nullptr)) {
             _view->Display(resource == nullptr);
         }
-        const bool resourceMouseRecent = resource && Clock::now() - _lastResourceMouseMessage < std::chrono::milliseconds(250);
-        if (_windowActive && resource) {
-            if (_mouseTargetId != resource->GetId()) {
-                _mouseTargetId = resource->GetId();
-                _mouseX = -1;
-                _mouseY = -1;
-                _mouseButtons = 0;
-                _cursorX = _viewportWidth / 2;
-                _cursorY = _viewportHeight / 2;
-            }
-            if (!resourceMouseRecent) {
-                ForwardMouse(live, resource);
-            }
+        auto *target       = _windowActive && (resource || live == Screen::Menu || (live == Screen::Game && _captured)) ? (resource ? resource : _view) : nullptr;
+        const int targetId = target ? target->GetId() : -1;
+        if (_mouseTargetId != targetId) {
+            ReleaseHeldInput();
+            _mouseTargetId = targetId;
+            _mouseX        = -1;
+            _mouseY        = -1;
         }
-        else if (_windowActive && (live == Screen::Menu || (live == Screen::Game && _captured))) {
-            _mouseTargetId = -1;
-            ForwardMouse(live, _view);
+
+        if (target) {
+            ForwardMouse(live, target);
         }
-        else {
-            _mouseTargetId = -1;
-        }
+        UpdateCursor(target);
         if (_view && _view->HasFocus() != (_captured && _windowActive && !resource)) {
             _view->Focus(_captured && _windowActive && !resource);
         }

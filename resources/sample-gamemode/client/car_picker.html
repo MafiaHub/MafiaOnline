@@ -50,11 +50,6 @@
     .actions .choose { background: #a74233; border-color: #b45141; }
     .actions button:hover:not(:disabled), .actions button:focus-visible { filter: brightness(1.2); }
     .actions button:disabled { opacity: .48; cursor: default; }
-    /* CEF paints off-screen, so the OS cursor is not part of this view. */
-    body, body * { cursor: none !important; }
-    .modal-cursor { position: fixed; z-index: 1000; top: 0; left: 0; width: 22px; height: 26px;
-      pointer-events: none; filter: drop-shadow(0 2px 2px #000c); }
-    .modal-cursor.pressed g { transform: scale(.9); }
     @media (max-width: 720px) {
       .catalog { grid-template-rows: auto minmax(0, 1fr) auto; }
       .masthead { min-height: 62px; padding: 10px 14px; }
@@ -94,12 +89,6 @@
       <div class="actions"><button type="button" id="cancel">Close</button><button class="choose" type="button" id="choose" disabled>Drive this car</button></div>
     </footer>
   </main>
-  <svg class="modal-cursor" id="modal-cursor" viewBox="0 0 22 26" aria-hidden="true">
-    <g>
-      <path d="M1 1 L1 21 L6.5 16 L10.5 24.5 L14 23 L10 14.8 L17.5 14.8 Z" fill="#f2e6cb" stroke="#1a110b" stroke-width="1.4" stroke-linejoin="round"/>
-      <path d="M3.4 5.6 L3.4 16.4 L6.9 13.2 L8.2 12.9 L13 12.9 Z" fill="#c9a45c" opacity=".75"/>
-    </g>
-  </svg>
   <script>
     const list = document.getElementById("list");
     const search = document.getElementById("search");
@@ -109,24 +98,8 @@
     const number = document.getElementById("number");
     const status = document.getElementById("status");
     const choose = document.getElementById("choose");
-    const modalCursor = document.getElementById("modal-cursor");
     let state = {models: [], selectedId: null, previewReady: false, pending: false, message: ""};
     let pointerX = null;
-    let cursorX = window.innerWidth / 2;
-    let cursorY = window.innerHeight / 2;
-
-    // The client also calls this with its authoritative cursor position. A
-    // native scrollbar can capture mousemove before it reaches page handlers.
-    window.__m1oSetCursor = (x, y, pressed, viewportWidth = window.innerWidth, viewportHeight = window.innerHeight) => {
-      cursorX = x * window.innerWidth / viewportWidth;
-      cursorY = y * window.innerHeight / viewportHeight;
-      modalCursor.style.translate = `${cursorX}px ${cursorY}px`;
-      modalCursor.classList.toggle("pressed", Boolean(pressed));
-    };
-    window.__m1oSetCursor(cursorX, cursorY, false);
-    window.addEventListener("mousemove", (event) => window.__m1oSetCursor(event.clientX, event.clientY, modalCursor.classList.contains("pressed")));
-    window.addEventListener("mousedown", () => window.__m1oSetCursor(cursorX, cursorY, true));
-    window.addEventListener("mouseup", () => window.__m1oSetCursor(cursorX, cursorY, false));
 
     function send(name, payload = {}) {
       if (typeof callEvent === "function") callEvent(name, JSON.stringify(payload));

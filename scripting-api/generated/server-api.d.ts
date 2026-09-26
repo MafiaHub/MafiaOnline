@@ -315,11 +315,11 @@ declare global {
   type EventName = keyof EventMap;
 
   /**
-   * The server's current stock mission.
+   * The server's current mission.
    */
   interface MissionInfo {
     /**
-     * Stock mission directory name.
+     * Stock or detected mod mission directory name.
      */
     mission: string;
 
@@ -1777,8 +1777,8 @@ declare global {
    */
   const World: {
     /**
-     * Returns the current stock mission.
-     * @returns Stock mission directory name.
+     * Returns the current mission.
+     * @returns Stock or detected mod mission directory name.
      */
     getMission(): string;
 
@@ -1790,7 +1790,7 @@ declare global {
 
     /**
      * Resets the world and asks every client to load the mission. Fires missionChange.
-     * @param mission Stock mission name, such as "freeride".
+     * @param mission Stock or detected mod mission name, such as "freeride".
      * @returns False for an unknown mission.
      */
     changeMission(mission: string): boolean;

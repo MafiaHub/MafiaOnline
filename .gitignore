@@ -2,7 +2,10 @@
 /logs/
 /server.json
 /build/
+/.vite/
 /docs/reference/
 /resources/ui/
 __pycache__/
 *.pyc
+/mods/*.zip
+/mods/.cache/

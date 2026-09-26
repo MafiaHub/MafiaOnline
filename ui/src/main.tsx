@@ -9,6 +9,7 @@ import './global.css';
 import { render } from 'preact';
 import { App } from './App';
 import { startBridge } from './bridge';
+import { Cursor } from './components/Cursor';
 
-render(<App />, document.getElementById('app') as HTMLElement);
+render(location.hash === '#cursor' ? <Cursor /> : <App />, document.getElementById('app') as HTMLElement);
 void startBridge();

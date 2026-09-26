@@ -1,10 +1,10 @@
 import * as stylex from '@stylexjs/stylex';
 import { useEffect } from 'preact/hooks';
 import { send } from './bridge';
-import { Cursor } from './components/Cursor';
 import { Toasts } from './components/Toasts';
 import { GameHud } from './game/GameHud';
 import { MainMenu } from './screens/MainMenu';
+import { DownloadDialog } from './screens/Dialogs';
 import { chatOpen, pauseOpen, preferences, state } from './store';
 
 const styles = stylex.create({
@@ -45,9 +45,9 @@ export function App() {
     return (
         <div {...stylex.props(styles.root)}>
             {screen === 'menu' && <MainMenu />}
+            {screen === 'menu' && <DownloadDialog />}
             {screen === 'game' && <GameHud />}
             {screen !== 'hidden' && <Toasts />}
-            {(screen === 'menu' || (screen === 'game' && pauseOpen.value)) && <Cursor />}
         </div>
     );
 }

@@ -57,8 +57,8 @@ namespace Mafia1Online::Scripting {
         events.add_property("chatSend", "[text: string]", "Dispatched synchronously when the local player submits a chat line. Return false to keep the line client-side. Chat.send bypasses this event; asynchronous handlers cannot block it.");
         events.add_property("voiceStart", "[]", "Dispatched when the local player starts speaking on voice chat. A held push-to-talk key with no speech does not trigger it.");
         events.add_property("voiceStop", "[]", "Dispatched when the local player stops speaking.");
-        auto &mission = catalog.data_type("ClientMissionInfo", "The stock mission this client has loaded.");
-        mission.add_property("mission", "string", "Stock mission directory name.");
+        auto &mission = catalog.data_type("ClientMissionInfo", "The mission this client has loaded.");
+        mission.add_property("mission", "string", "Stock or detected mod mission directory name.");
         mission.add_property("missionGeneration", "number", "Server generation of this mission load.");
         events.add_property("missionReady", "[mission: ClientMissionInfo]", "Dispatched once the native mission has loaded, after the server's weather and frame overrides were applied.");
         events.add_property("missionUnload", "[mission: ClientMissionInfo]", "Dispatched while the native mission closes. Local sounds and HUD state are cleared right after.");
@@ -103,8 +103,8 @@ namespace Mafia1Online::Scripting {
         events.add_property("resourceStop", "[resourceName: string]", "Dispatched while a resource is stopping, before its stop callback, timers, exports and event handlers are cleaned up.");
         events.add_property("consoleCommand", "[command: string, args: string[]]", "Dispatched after the server console parses a command line that no built-in command handles.");
 
-        auto &mission = catalog.data_type("MissionInfo", "The server's current stock mission.");
-        mission.add_property("mission", "string", "Stock mission directory name.");
+        auto &mission = catalog.data_type("MissionInfo", "The server's current mission.");
+        mission.add_property("mission", "string", "Stock or detected mod mission directory name.");
         mission.add_property("missionGeneration", "number", "Generation of this mission load; it increases on every change, including a reload of the same mission.");
         events.add_property("missionChange", "[mission: MissionInfo]", "Dispatched after World.changeMission has reset the world and asked every client to load the new mission.");
         events.add_property("missionReady", "[mission: MissionInfo]", "Dispatched once each time every connected player has loaded the current mission generation. At least one player must be connected.");

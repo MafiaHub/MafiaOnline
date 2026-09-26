@@ -71,10 +71,20 @@ serif stack with upright notices for clearer reading over the scene.
 
 ### Input
 
-* Mouse (menu only): the game owns the mouse through exclusive DirectInput.
+* Mouse: the game owns the mouse through exclusive DirectInput.
   The service forwards the native menu cursor (`g_iMenuMouseX/Y`,
   `0x6bd8a0/0x6bd8a4`), `IGraph::GetMouseButtons` and `Mouse_rz` (wheel) to
-  CEF. The page draws its own cursor.
+  CEF. In a mission, it integrates the device's relative movement into one screen
+  position. The focused resource receives input before the built-in UI; window
+  mouse messages are swallowed so they cannot duplicate the device's clicks.
+  Coordinates sent to a positioned browser subtract that view's origin.
+* Cursor: one client-owned, unfocused CEF view (`index.html#cursor`) renders the
+  shared pointer above the shell and all resources. Its coordinates and pressed
+  state come from the same input sample delivered to the focused browser. CEF's
+  cursor type supplies arrow, hand, text, move, wait and blocked shapes. It hides
+  when the window loses activation or gameplay owns the mouse. Resource pages
+  keep their normal CSS cursors and never implement a cursor element or
+  `__m1oSetCursor`. DirectInput's cooperative mode and the OS cursor are unchanged.
 * Keyboard: every page key and every in-game toggle comes from window
   messages (`WM_KEYDOWN`/`WM_CHAR`/...) through the window subclass. Under
   Wine an exclusive DirectInput keyboard swallows them, so while the page is
@@ -167,5 +177,5 @@ A mock bridge stands in for the client.
   adds `--disable-gpu-rasterization --disable-software-rasterizer` and passes
   the CPU rendering switches to child command lines too. There is no IME
   composition window.
-* In game the mouse still turns the camera, because the camera reads
-  `IGraph::Mouse_rx` directly. The in-game screens are keyboard-driven.
+* Input queries are suppressed while a modal owns focus, so clicking or typing
+  in a resource cannot also move the player or fire a weapon.

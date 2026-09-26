@@ -72,7 +72,7 @@ namespace Mafia1Online::Scripting {
         void JS_ChangeMission(const v8::FunctionCallbackInfo<v8::Value> &info) {
             auto *isolate = info.GetIsolate();
             if (info.Length() != 1 || !info[0]->IsString()) {
-                ScriptArgs::Throw(isolate, "World.changeMission(mission) expects a stock mission name");
+                ScriptArgs::Throw(isolate, "World.changeMission(mission) expects a stock or detected mod mission name");
                 return;
             }
             info.GetReturnValue().Set(GetServer().ChangeMission(v8pp::from_v8<std::string>(isolate, info[0])));
@@ -545,10 +545,10 @@ namespace Mafia1Online::Scripting {
         weather.add_property("intensity", "number | null", "Rain or snow intensity from 0 to 100, or null for the preset's own.");
 
         v8pp::module world(isolate, ServerCatalog(), "World", "The shared Mafia 1 world: mission, collections, weather, scene frames, city music and effects everyone sees.");
-        world.function("getMission", &JS_GetMission, docs("string", {}, "Returns the current stock mission.", "Stock mission directory name."));
+        world.function("getMission", &JS_GetMission, docs("string", {}, "Returns the current mission.", "Stock or detected mod mission directory name."));
         world.function("getMissionGeneration", &JS_GetMissionGeneration, docs("number", {}, "Returns the current mission generation.", "It increases on every change, including a reload."));
         world.function("changeMission", &JS_ChangeMission,
-            docs("boolean", {param("mission", "string", false, "Stock mission name, such as \"freeride\".")}, "Resets the world and asks every client to load the mission. Fires missionChange.",
+            docs("boolean", {param("mission", "string", false, "Stock or detected mod mission name, such as \"freeride\".")}, "Resets the world and asks every client to load the mission. Fires missionChange.",
                 "False for an unknown mission."));
         world.function("isReady", &JS_IsReady, docs("boolean", {}, "Whether every connected player has loaded the current mission.", "True when all are ready."));
         world.function("getPlayers", &JS_GetPlayers, docs("Player[]", {}, "Lists the connected players.", "Every connected player."));

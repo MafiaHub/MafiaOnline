@@ -59,7 +59,7 @@ namespace Mafia1Online::Features::World {
             if (state->generation == _selectedMissionGeneration && state->mission == _selectedMission) {
                 return;
             }
-            if (!Shared::World::IsStockMission(state->mission)) {
+            if (!Shared::World::IsStockMission(state->mission) && std::find(_modMissions.begin(), _modMissions.end(), state->mission) == _modMissions.end()) {
                 if (!_hasRejectedMission || state->generation != _rejectedMissionGeneration || state->mission != _rejectedMission) {
                     _rejectedMission           = state->mission;
                     _rejectedMissionGeneration = state->generation;
@@ -210,6 +210,7 @@ namespace Mafia1Online::Features::World {
     }
 
     void WorldService::Reset() {
+        _modMissions.clear();
         ExitGameLoop();
         _enterRequested = false;
         _closingMenu = false;

@@ -1626,6 +1626,19 @@ mission generation is dropped.
 
 ### HUD, fade and camera
 
+Scripted camera locks temporarily enable the native wide city cache. This
+loads city segments around the active camera, including before a player has
+spawned. The service saves the original cache flag and camera clipping range
+once, restores both on unlock (even if spawning has changed the native camera
+mode), and releases the override before mission close. SDK access uses named,
+layout-checked fields and live virtual methods; no offset-based pointer reads
+are needed for these settings.
+
+| Native | Evidence and convention | Ownership and lifetime |
+| --- | --- | --- |
+| `C_cache_base_block::Tick` `0x4020b0` | `83 EC 3C 53 55 56 8B F1 33 DB 57`; `__thiscall(cache*, unsigned frameTime)`. At `0x402222`, `8B 15 8C 78 63 00 8B 42 24 8B 88 14 2F 00 00 C1 E9 09 F6 C1 01` reads the live mission's game flags and tests bit 9. IDA confirms float constants 200/230 for activation/deactivation and 550/580 when the bit is set. reM names it `C_GAME_FLAG_CACHE_RANGE`; `C_game::m_uGameFlags` is a `uint32_t` at `+0x2f14`, asserted in the typed SDK layout. | Retail continues ticking and owning the cache. No cache pointer is retained or code patched. Only the wide-range flag is restored, preserving other game flags. |
+| `I3D_camera` projection fields | reM `I3D_camera.h` asserts FOV/near/far at `0x140/0x144/0x148`; the SDK mirrors them in `NativeCameraFrame`. Existing audited `SetRange` remains the only clipping-plane writer. | The active scene owns the camera. Only float values are saved across frames. |
+
 Client-local visual frames use the same `I3D_driver::CreateFrame(FRAME_MODEL = 9,
 FRAME_DUMMY = 6)` and `C_I3D_model_cache::Open` calls that reM's
 `MODEL_CREATE` implements in `C_program_process_000_132.inl`. The frame is
@@ -1662,6 +1675,17 @@ All `G_IndicatorsClass` calls are `__thiscall` on the object at `0x6bf980`.
 | `G_IndicatorsClass::ParheliaSetFov` `0x604890` | `56 8B 74 24 08 85 F6 57`; `void __thiscall(indicators*, I3D_camera*, float radians)`, `ret 8`. Retail `CAMERA_SETFOV` converts degrees to radians and calls it so double/triple screen modes adjust FOV and aspect ratio together. The active camera's inline `GetFOV` reads `+0x140`; reM asserts that offset. | The active camera belongs to the scene. The script accepts 1–179 degrees and reads back its effective current FOV; native camera modes may update it later. No camera pointer is retained. |
 | `I3D_camera::SetRange`, LS3DF vtable `+0x58` (`0x1000b7b0`) | `D9 44 24 0C D8 64 24 08`; `void __stdcall(camera*, float near, float far)`, `ret 0xc` on the virtual call. Retail `CAMERA_SETRANGE` uses the active camera. reM shows the setter recalculates projection matrices and the near/far fields at `+0x144/+0x148`. | The script requires finite near 0.01–10 and far above near up to 5000, then calls the active camera's virtual setter. No camera pointer is retained. |
 | `G_Camera::LockAt` `0x5f39f0`, `Unlock` `0x5f3fd0` | `56 8B F1 83 7E 10 16 74 10` / `83 79 10 16 75 0D`; `void __thiscall(camera*, const S_vector& position, const S_vector& direction)` and `void __thiscall(camera*, bool restore)`. Retail `CAMERA_LOCK` copies a frame's world pose into the locked camera mode; `CAMERA_UNLOCK` passes `false`, then calls `C_game::RecomputeLightCache` `0x5b5d40`. During the first six startup ticks, lock also calls `SetCameraRotRepair` `0x5ba010`, using the tick count at `C_game+0x2b14`. | Script lock accepts value vectors only and normalizes the nonzero direction. The service unlocks its own lock before mission close. Unlock refreshes the light cache; neither argument nor a frame pointer is retained. |
+
+`Camera.lock(position, direction, roll?)` accepts an optional finite bank in radians.
+`G_Camera::LockAt` sets roll to zero, so a nonzero bank is applied afterwards via
+the existing typed `NativeFrame::SetDirection` and `Update` calls on the active
+scene camera. The already-audited `I3D_frame::SetDir` (`0x1001ab50`, entry bytes
+`81 EC D8 00 00 00 53 56 8B B4 24 E8 00 00 00`) is
+`void __stdcall(frame*, const S_vector*, float roll)`. IDA and reM agree that its
+third argument builds the Z-axis quaternion in radians, composed as roll * pitch *
+yaw. The frame and direction are borrowed for the call; no pointer is retained.
+Omitting roll keeps the original level-camera behavior. No new offsets or native
+addresses are introduced by the roll support.
 
 ## Stock mission doors
 

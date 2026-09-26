@@ -39,7 +39,8 @@ function updateAmbience() {
     const now = new Date();
     const hour = now.getHours();
     const expectedMap = hour >= DAWN_HOUR && hour < DUSK_HOUR ? DAY_MAP : NIGHT_MAP;
-    if (World.getMission() !== expectedMap) {
+    const mission = World.getMission();
+    if ([DAY_MAP, NIGHT_MAP].includes(mission) && mission !== expectedMap) {
         for (const player of World.getPlayers()) player.sendMessage("The light is changing. Lost Heaven is turning to its other hour…");
         if (!World.changeMission(expectedMap)) console.error(`[mafia1online-sample] Could not load ${expectedMap}`);
     }

@@ -46,18 +46,22 @@ namespace Mafia1Online::Features::Hud {
         std::optional<float> CameraFov() const;
         bool SetCameraFov(float degrees);
         bool SetCameraRange(float nearClip, float farClip);
-        bool LockCamera(const glm::vec3 &position, const glm::vec3 &direction);
+        bool LockCamera(const glm::vec3 &position, const glm::vec3 &direction, float roll);
         bool UnlockCamera();
 
       private:
         void ReleaseCompass();
         void ReleaseSwing();
+        void ReleaseCamera();
 
         World::WorldService *_world = nullptr;
         SDK::Scene::NativeFrame *_compassFrame = nullptr;
         uint64_t _compassEntity                = 0;
         SDK::Scene::NativeFrame *_swingFrame   = nullptr;
         bool _cameraLocked                     = false;
+        bool _restoreWideCityCache             = false;
+        float _restoreNearClip                 = 0.1f;
+        float _restoreFarClip                  = 200.0f;
         bool _countdownRunning                 = false;
     };
 } // namespace Mafia1Online::Features::Hud

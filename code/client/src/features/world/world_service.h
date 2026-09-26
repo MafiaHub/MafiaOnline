@@ -6,12 +6,14 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace Mafia1Online::Features::World {
     class WorldService final {
       public:
         void Update();
         void Reset();
+        void SetModMissions(std::vector<std::string> missions) { _modMissions = std::move(missions); }
         void NotifyMissionClosing();
         // Runs first in NotifyMissionClosing, while native systems are alive.
         void SetMissionClosingCallback(std::function<void()> callback) {
@@ -46,6 +48,7 @@ namespace Mafia1Online::Features::World {
         }
 
       private:
+        std::vector<std::string> _modMissions;
         void ReportLoadState(uint64_t generation, uint8_t state);
 
         Game::Entities::NativeObjectRegistry _nativeObjects;

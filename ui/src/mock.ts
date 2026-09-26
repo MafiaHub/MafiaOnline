@@ -19,6 +19,11 @@ export function startMock(receive: (message: InboundMessage) => void) {
             port: 0,
             downloading: false,
             progress: 0,
+            currentFile: '',
+            filesDownloaded: 0,
+            filesTotal: 0,
+            bytesDownloaded: 0,
+            bytesTotal: 0,
         },
         defaults: { nickname: 'Tommy', host: '127.0.0.1', port: 27015 },
         settings: {

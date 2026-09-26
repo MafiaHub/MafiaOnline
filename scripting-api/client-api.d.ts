@@ -281,8 +281,8 @@ declare const Camera: {
     setFov(degrees: number): boolean;
     /** Sets near and far clipping in world units (near 0.01–10; far above near and at most 5000). */
     setRange(nearClip: number, farClip: number): boolean;
-    /** Freezes the camera at a world position looking along a normalized direction. A respawn or mission close restores the player camera. */
-    lock(position: PositionLike, direction: PositionLike): boolean;
+    /** Freezes the camera at a world position and direction, with optional roll in radians (default zero). A respawn or mission close restores the player camera. */
+    lock(position: PositionLike, direction: PositionLike, roll?: number): boolean;
     /** Returns control to the player camera and refreshes the light cache. */
     unlock(): boolean;
     /**

@@ -240,13 +240,32 @@ namespace Mafia1Online::SDK::Scene {
     static_assert(offsetof(NativeFrame, _frameType) == 0x110);
     static_assert(offsetof(NativeFrame, _parent) == 0x120);
 
-    // ActiveCamera is an I3D_camera. Its inline getters read the projection
-    // fields at +0x140/+0x144/+0x148; SetRange recalculates the matrices.
+    // Typed retail I3D_camera projection, verified against the reM layout.
+    // Only SetRange may change the clipping planes: it rebuilds the matrices.
+    struct NativeCameraFrame {
+        NativeFrame frame;
+        std::byte _frameTail[0x140 - sizeof(NativeFrame)];
+        float fovRadians;
+        float nearClip;
+        float farClip;
+    };
+    static_assert(offsetof(NativeCameraFrame, fovRadians) == 0x140);
+    static_assert(offsetof(NativeCameraFrame, nearClip) == 0x144);
+    static_assert(offsetof(NativeCameraFrame, farClip) == 0x148);
+
     inline float CameraFovRadians(const NativeFrame *camera) {
-        return *reinterpret_cast<const float *>(reinterpret_cast<const std::byte *>(camera) + 0x140);
+        return reinterpret_cast<const NativeCameraFrame *>(camera)->fovRadians;
     }
     inline void CameraSetRange(NativeFrame *camera, float nearClip, float farClip) {
         reinterpret_cast<NativeCameraVTable *>(camera->vtable)->setRange(camera, nearClip, farClip);
+    }
+
+    inline float CameraNearClip(const NativeFrame *camera) {
+        return reinterpret_cast<const NativeCameraFrame *>(camera)->nearClip;
+    }
+
+    inline float CameraFarClip(const NativeFrame *camera) {
+        return reinterpret_cast<const NativeCameraFrame *>(camera)->farClip;
     }
     inline void CameraSetFov(NativeFrame *camera, float radians) {
         reinterpret_cast<NativeCameraVTable *>(camera->vtable)->setFov(camera, radians);

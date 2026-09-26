@@ -324,12 +324,13 @@ namespace Mafia1Online::Scripting {
 
         void JS_LockCamera(const v8::FunctionCallbackInfo<v8::Value> &info) {
             glm::vec3 position {}, direction {};
-            if (info.Length() != 2 || !Args::ReadPosition(info.GetIsolate(), info[0], position)
-                || !Args::ReadPosition(info.GetIsolate(), info[1], direction)) {
-                Args::Throw(info.GetIsolate(), "Camera.lock(position, direction) expects two finite Vector3 values");
+            float roll = 0.0f;
+            if (info.Length() < 2 || info.Length() > 3 || !Args::ReadPosition(info.GetIsolate(), info[0], position) || !Args::ReadPosition(info.GetIsolate(), info[1], direction) || (info.Length() == 3 && !info[2]->IsUndefined() && !Args::ReadFloat(info[2], roll))) {
+                Args::Throw(info.GetIsolate(), "Camera.lock(position, direction, roll?) expects two finite Vector3 values and an optional finite roll in radians");
                 return;
             }
-            info.GetReturnValue().Set(Hud().LockCamera(position, direction));
+
+            info.GetReturnValue().Set(Hud().LockCamera(position, direction, roll));
         }
 
         void JS_UnlockCamera(const v8::FunctionCallbackInfo<v8::Value> &info) {
@@ -455,8 +456,11 @@ namespace Mafia1Online::Scripting {
             docs("boolean", {param("nearClip", "number", false, "Near clip plane in world units, 0.01 to 10."), param("farClip", "number", false, "Far clip plane above nearClip and at most 5000 world units.")},
                 "Sets the active camera's clip planes with the retail CAMERA_SETRANGE setter.", "False while no active mission camera exists. Camera modes may subsequently update the values."));
         camera.function("lock", &JS_LockCamera,
-            docs("boolean", {param("position", position, false, "Fixed camera position in world coordinates."), param("direction", position, false, "Nonzero forward direction; normalized before use.")},
-                "Locks the camera at a world position and direction, as CAMERA_LOCK does with a frame. Call Camera.unlock to resume following the player.", "False while no active mission camera exists or direction is zero. A new local life or mission close restores the player camera."));
+            docs("boolean",
+                {param("position", position, false, "Fixed camera position in world coordinates."), param("direction", position, false, "Nonzero forward direction; normalized before use."),
+                    param("roll", "number", true, "Bank around the forward direction in radians; defaults to zero.")},
+                "Locks the camera at a world position and direction, as CAMERA_LOCK does with a frame. Call Camera.unlock to resume following the player.",
+                "False while no active mission camera exists or direction is zero. A new local life or mission close restores the player camera."));
         camera.function("unlock", &JS_UnlockCamera,
             docs("boolean", {}, "Returns from a camera lock to the previous player camera mode and refreshes the light cache.", "False while no mission is loaded."));
         camera.publish(global);

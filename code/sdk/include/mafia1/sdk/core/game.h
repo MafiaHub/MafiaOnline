@@ -14,6 +14,7 @@ namespace Mafia1Online::SDK::Core::Game {
     inline constexpr uintptr_t kRemoveTemporaryActor = 0x5a79a0;
     inline constexpr uintptr_t kNewShoot             = 0x5a84a0;
     inline constexpr uintptr_t kRandomFloat          = 0x408470;
+    inline constexpr uint32_t kWideCityCacheFlag     = 0x200;
 
     struct NativeShootRecord {
         Player::Vector3 startPosition;
@@ -73,6 +74,12 @@ namespace Mafia1Online::SDK::Core::Game {
         [[nodiscard]] uint32_t StartupTickCount() const {
             // reM C_game layout: startup tick count at +0x2b14.
             return *reinterpret_cast<const uint32_t *>(reinterpret_cast<const std::byte *>(this) + 0x2b14);
+        }
+        [[nodiscard]] bool WideCityCache() const {
+            return (_gameFlags & kWideCityCacheFlag) != 0;
+        }
+        void SetWideCityCache(bool enabled) {
+            _gameFlags = enabled ? _gameFlags | kWideCityCacheFlag : _gameFlags & ~kWideCityCacheFlag;
         }
         void SetCameraRotRepair() {
             reinterpret_cast<void(__thiscall *)(NativeGame *)>(0x5ba010)(this);
@@ -183,7 +190,9 @@ namespace Mafia1Online::SDK::Core::Game {
         bool _playerDeathTriggered;
         std::byte _unused2ad9[0x2b0c - 0x2ad9];
         uint32_t _gameTime;
-        std::byte _unused2b10[0x2fd4 - 0x2b10];
+        std::byte _unused2b10[0x2f14 - 0x2b10];
+        uint32_t _gameFlags;
+        std::byte _unused2f18[0x2fd4 - 0x2f18];
         int _playerDeathMenuTimer;
     };
 
@@ -200,5 +209,6 @@ namespace Mafia1Online::SDK::Core::Game {
     static_assert(offsetof(NativeGame, _semaphoreStateX) == 0x19c);
     static_assert(offsetof(NativeGame, _semaphoreStateZ) == 0x1a0);
     static_assert(offsetof(NativeGame, _gameTime) == 0x2b0c);
+    static_assert(offsetof(NativeGame, _gameFlags) == 0x2f14);
     static_assert(offsetof(NativeGame, _playerDeathMenuTimer) == 0x2fd4);
 } // namespace Mafia1Online::SDK::Core::Game

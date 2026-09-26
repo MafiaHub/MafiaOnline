@@ -2,7 +2,7 @@ import * as stylex from '@stylexjs/stylex';
 import { useState } from 'preact/hooks';
 import { send } from '../bridge';
 import { Button, Heading, Panel, Stepper, Toggle } from '../components/ui';
-import { type Preferences, preferences } from '../store';
+import { type Preferences, preferences, state } from '../store';
 import { colors, fonts } from '../tokens.stylex';
 
 const styles = stylex.create({
@@ -60,7 +60,29 @@ const styles = stylex.create({
         color: colors.goldBright,
         backgroundColor: 'rgba(77, 13, 15, 0.6)',
     },
+    progress: { width: '100%', height: '0.8rem', accentColor: colors.gold },
+    file: { overflowWrap: 'anywhere', textAlign: 'center', color: colors.parchment, fontSize: '0.85rem' },
 });
+
+export function DownloadDialog() {
+    const connection = state.value.connection;
+    if (connection.phase !== 'downloading' && connection.phase !== 'starting') return null;
+    const percent = Math.round(Math.max(0, Math.min(1, connection.progress)) * 100);
+    const mb = (bytes: number) => (bytes / (1024 * 1024)).toFixed(1);
+    return (
+        <div {...stylex.props(styles.scrim)} role="dialog" aria-modal="true" aria-labelledby="download-title">
+            <Panel style={styles.dialog}>
+                <h2 id="download-title">Preparing server content</h2>
+                <p {...stylex.props(styles.text)} role="status">{connection.status}</p>
+                <progress {...stylex.props(styles.progress)} max={100} value={connection.bytesTotal ? percent : undefined} aria-label="Server content download" />
+                {connection.filesTotal > 0 && <p {...stylex.props(styles.file)}>{connection.filesDownloaded} / {connection.filesTotal} files · {mb(connection.bytesDownloaded)} / {mb(connection.bytesTotal)} MB · {percent}%</p>}
+                {connection.currentFile && <p {...stylex.props(styles.file)}>{connection.currentFile}</p>}
+                <p {...stylex.props(styles.file)}>The map will load when all server content is ready.</p>
+                <div {...stylex.props(styles.actions)}><Button onClick={() => send('menu:disconnect')}>Cancel</Button></div>
+            </Panel>
+        </div>
+    );
+}
 
 const fadeChoices = [0, 6, 12, 20, 40];
 

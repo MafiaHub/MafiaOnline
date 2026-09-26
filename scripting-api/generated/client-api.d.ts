@@ -190,11 +190,11 @@ declare global {
   }
 
   /**
-   * The stock mission this client has loaded.
+   * The mission this client has loaded.
    */
   interface ClientMissionInfo {
     /**
-     * Stock mission directory name.
+     * Stock or detected mod mission directory name.
      */
     mission: string;
 
@@ -822,9 +822,10 @@ declare global {
      * Locks the camera at a world position and direction, as CAMERA_LOCK does with a frame. Call Camera.unlock to resume following the player.
      * @param position Fixed camera position in world coordinates.
      * @param direction Nonzero forward direction; normalized before use.
+     * @param roll Bank around the forward direction in radians; defaults to zero.
      * @returns False while no active mission camera exists or direction is zero. A new local life or mission close restores the player camera.
      */
-    lock(position: Vector3 | { x: number; y: number; z: number }, direction: Vector3 | { x: number; y: number; z: number }): boolean;
+    lock(position: Vector3 | { x: number; y: number; z: number }, direction: Vector3 | { x: number; y: number; z: number }, roll?: number): boolean;
 
     /**
      * Returns from a camera lock to the previous player camera mode and refreshes the light cache.

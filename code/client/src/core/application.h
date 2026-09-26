@@ -20,6 +20,7 @@
 #include "features/seat/seat_service.h"
 #include "features/web_ui/web_ui_service.h"
 #include "features/world/world_service.h"
+#include "features/mod/mod_service.h"
 
 namespace Mafia1Online::Core {
     class Application final: public Framework::Integrations::Client::Instance {
@@ -29,6 +30,7 @@ namespace Mafia1Online::Core {
         void PreShutdown() override;
         void OnConnectionClosed() override;
         void OnConnectionPhaseChanged(Framework::Integrations::Client::ConnectionPhase phase) override;
+        Framework::Integrations::Client::InitialAssetProcessingDecision OnInitialAssetDownloadReady(uint64_t generation, const Framework::Integrations::Client::AssetDownloadStatus &status) override;
         void OnChatMessageReceived(const Framework::Networking::RPC::ChatMessage &message) override;
         void ModuleRegister(Framework::Scripting::Engine *engine) override;
         void PostScriptInit() override;
@@ -41,6 +43,8 @@ namespace Mafia1Online::Core {
         Features::World::WorldService &World() {
             return _world;
         }
+
+        Features::Mod::ModService &Mods() { return _mods; }
 
         Features::Car::CarService &Cars() {
             return _cars;
@@ -67,6 +71,9 @@ namespace Mafia1Online::Core {
         }
 
       private:
+        Features::Mod::ModService _mods;
+        std::string _assetError;
+        bool _autoEnterPending = false;
         Features::World::WorldService _world;
         Features::Player::PlayerService _players;
         Features::Car::CarService _cars;

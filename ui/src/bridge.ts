@@ -12,6 +12,8 @@ import {
     scoreboardVisible,
     state,
     uid,
+    cursor,
+    type CursorState,
 } from './store';
 
 // The client talks to this page in two directions:
@@ -26,6 +28,7 @@ declare global {
 }
 
 export type InboundMessage =
+    | { type: 'cursor:state'; payload: CursorState }
     | { type: 'state'; payload: UiState }
     | { type: 'chat:message'; payload: Omit<ChatLine, 'id'> }
     | { type: 'chat:history'; payload: Omit<ChatLine, 'id'>[] }
@@ -68,6 +71,9 @@ export function send(name: OutboundEvent, payload?: unknown) {
 
 export function receive(message: InboundMessage) {
     switch (message.type) {
+        case 'cursor:state':
+            cursor.value = message.payload;
+            break;
         case 'state':
             state.value = message.payload;
             break;

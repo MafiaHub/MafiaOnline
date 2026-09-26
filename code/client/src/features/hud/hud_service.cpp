@@ -236,7 +236,7 @@ namespace Mafia1Online::Features::Hud {
         return true;
     }
 
-    bool HudService::LockCamera(const glm::vec3 &position, const glm::vec3 &direction) {
+    bool HudService::LockCamera(const glm::vec3 &position, const glm::vec3 &direction, float roll) {
         if (!Ready()) {
             return false;
         }
@@ -249,7 +249,24 @@ namespace Mafia1Online::Features::Hud {
             return false;
         }
         auto *game = Game();
-        game->Camera().LockAt({position.x, position.y, position.z}, {direction.x / length, direction.y / length, direction.z / length});
+        if (!_cameraLocked) {
+            const auto *camera    = mission->GetScene()->ActiveCamera();
+            _restoreNearClip      = SDK::Scene::CameraNearClip(camera);
+            _restoreFarClip       = SDK::Scene::CameraFarClip(camera);
+            _restoreWideCityCache = game->WideCityCache();
+            game->SetWideCityCache(true);
+        }
+
+        const SDK::Player::Vector3 forward {direction.x / length, direction.y / length, direction.z / length};
+        game->Camera().LockAt({position.x, position.y, position.z}, forward);
+
+        // Retail LockAt resets roll. Apply the bank through the live frame API.
+        if (roll != 0.0f) {
+            auto *camera = mission->GetScene()->ActiveCamera();
+            camera->SetDirection(forward, roll);
+            camera->Update();
+        }
+
         if (game->StartupTickCount() < 6) {
             game->SetCameraRotRepair();
         }
@@ -261,11 +278,25 @@ namespace Mafia1Online::Features::Hud {
         if (!Ready()) {
             return false;
         }
-        auto *game = Game();
-        game->Camera().Unlock();
-        game->RecomputeLightCache();
-        _cameraLocked = false;
+        ReleaseCamera();
         return true;
+    }
+
+    void HudService::ReleaseCamera() {
+        if (!_cameraLocked) {
+            return;
+        }
+
+        if (auto *game = Game()) {
+            game->Camera().Unlock();
+            game->SetWideCityCache(_restoreWideCityCache);
+            // Spawning can replace the locked mode before the script unlocks.
+            // Restore projection even when native PopMode is no longer reached.
+            SetCameraRange(_restoreNearClip, _restoreFarClip);
+            game->RecomputeLightCache();
+        }
+
+        _cameraLocked = false;
     }
 
     void HudService::ReleaseSwing() {
@@ -283,13 +314,7 @@ namespace Mafia1Online::Features::Hud {
     }
 
     void HudService::OnMissionClosing() {
-        if (_cameraLocked) {
-            if (auto *game = Game()) {
-                game->Camera().Unlock();
-                game->RecomputeLightCache();
-            }
-            _cameraLocked = false;
-        }
+        ReleaseCamera();
         ReleaseCompass();
         ReleaseSwing();
         _countdownRunning = false;

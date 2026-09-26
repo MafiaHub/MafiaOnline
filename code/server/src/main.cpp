@@ -2,6 +2,8 @@
 #include "shared/features/world/mission_catalog.h"
 #include "shared/version.h"
 
+#include <cstdio>
+#include <exception>
 #include <logging/logger.h>
 
 int main(int argc, char **argv) {
@@ -18,17 +20,24 @@ int main(int argc, char **argv) {
     opts.gameVersion     = "1.2";
     opts.enableSignals   = true;
     opts.modConfigSchema = {
-        {"mission", Framework::Utils::ConfigFieldType::String, "", true, true, {Mafia1Online::Shared::World::kStockMissions.begin(), Mafia1Online::Shared::World::kStockMissions.end()}, "Stock Mafia 1 gameplay mission directory name", true},
+        {"mission", Framework::Utils::ConfigFieldType::String, "", true, true, {}, "Stock or detected server mod mission directory name", true},
     };
     opts.argc = argc;
     opts.argv = argv;
 
     Mafia1Online::Core::Server server;
-    if (const auto result = server.Init(opts); !result) {
-        Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->error("Failed to start Mafia1OnlineServer: {}", result.GetError().message);
+    try {
+        server.LoadMods();
+        if (const auto result = server.Init(opts); !result) {
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->error("Failed to start Mafia1OnlineServer: {}", result.GetError().message);
+            return 1;
+        }
+        server.Run();
+        server.Shutdown();
+    }
+    catch (const std::exception &error) {
+        std::fprintf(stderr, "Mafia1OnlineServer: %s\n", error.what());
         return 1;
     }
-    server.Run();
-    server.Shutdown();
     return 0;
 }

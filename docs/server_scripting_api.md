@@ -346,7 +346,7 @@ Events.on("doorStateChange", (door, player) => {
 
 ## World
 
-- `World.getMission(): string` — Returns the current stock mission. Returns: Stock mission directory name.
+- `World.getMission(): string` — Returns the current mission. Returns: Stock or detected mod mission directory name.
 - `World.getMissionGeneration(): number` — Returns the current mission generation. Returns: It increases on every change, including a reload.
 - `World.changeMission(mission: string): boolean` — Resets the world and asks every client to load the mission. Fires missionChange. Returns: False for an unknown mission.
 - `World.isReady(): boolean` — Whether every connected player has loaded the current mission. Returns: True when all are ready.
@@ -494,9 +494,9 @@ are defined by your resources.
 | `vehicleGearChange` | `[vehicle: Vehicle]` | Dispatched after the matching vehicle state changed, from its simulation controller or a script. |
 | `vehicleDamageState` | `[vehicle: Vehicle]` | Dispatched after the matching vehicle state changed, from its simulation controller or a script. |
 
-**MissionInfo** — The server's current stock mission.
+**MissionInfo** — The server's current mission.
 
-- `mission: string` — Stock mission directory name.
+- `mission: string` — Stock or detected mod mission directory name.
 - `missionGeneration: number` — Generation of this mission load; it increases on every change, including a reload of the same mission.
 
 **MissionLoadInfo** — A client's report about loading a mission generation.

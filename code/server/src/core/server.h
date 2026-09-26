@@ -9,6 +9,7 @@
 #include "features/player/player_service.h"
 #include "features/world/mission_readiness.h"
 #include "features/world/world_script_service.h"
+#include "features/mod/mod_service.h"
 
 #include <chrono>
 #include <cstdint>
@@ -25,6 +26,8 @@ namespace Mafia1Online::Shared::Entities {
 namespace Mafia1Online::Core {
     class Server final: public Framework::Integrations::Server::Instance {
       public:
+        void LoadMods() { _mods.Load("mods"); }
+        void OnAssetStreamerReady() override;
         void PostInit() override;
         void PostUpdate() override;
         void UpdateCarControllers();
@@ -81,6 +84,7 @@ namespace Mafia1Online::Core {
         }
 
       private:
+        Features::Mod::ModService _mods;
         std::string _mission;
         Shared::Entities::MissionEntity *_missionState = nullptr;
         Features::Player::PlayerService _players;
