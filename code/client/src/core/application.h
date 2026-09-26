@@ -21,6 +21,7 @@
 #include "features/web_ui/web_ui_service.h"
 #include "features/world/world_service.h"
 #include "features/mod/mod_service.h"
+#include "features/gameplay_menu/gameplay_menu_service.h"
 
 namespace Mafia1Online::Core {
     class Application final: public Framework::Integrations::Client::Instance {
@@ -45,6 +46,7 @@ namespace Mafia1Online::Core {
         }
 
         Features::Mod::ModService &Mods() { return _mods; }
+        Features::GameplayMenu::GameplayMenuService &GameplayMenus() { return _gameplayMenus; }
 
         Features::Car::CarService &Cars() {
             return _cars;
@@ -71,6 +73,7 @@ namespace Mafia1Online::Core {
         }
 
       private:
+        void SubmitChatLine(const std::string &line);
         Features::Mod::ModService _mods;
         std::string _assetError;
         bool _autoEnterPending = false;
@@ -87,6 +90,7 @@ namespace Mafia1Online::Core {
         Features::Pickup::PickupService _pickups;
         Features::Door::DoorService _doors;
         Features::WebUi::WebUiService _webUi;
+        Features::GameplayMenu::GameplayMenuService _gameplayMenus;
         Features::Environment::EnvironmentService _environment;
         Features::Sound::SoundService _sounds;
         Features::Effects::EffectsService _effects;

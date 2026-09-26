@@ -21,6 +21,7 @@ namespace Mafia1Online::Features::Seat {
         SeatService *gService = nullptr;
 
         void __fastcall UseHook(NativeHuman *human, void *, NativeActor *target, int action, int seat, int animationSpeedState) {
+            if (gService && !gService->AllowsNativeUse(human)) return;
             auto *car = target && target->GetType() == NativeActor::Type::Car ? static_cast<NativeCar *>(static_cast<void *>(target)) : nullptr;
             const int originalSeat = action == static_cast<int>(SDK::Seat::UseAction::Exit) ? human->seatId : seat;
             if (!car && action == static_cast<int>(SDK::Seat::UseAction::Exit) && gService) {

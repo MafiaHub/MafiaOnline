@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <functional>
 #include <unordered_map>
 
 namespace Mafia1Online::SDK::World {
@@ -37,6 +38,7 @@ namespace Mafia1Online::Features::Pickup {
         // FindNearObjects result filter: true when the nearest item is a
         // replicated pickup, which the caller then hides from the native use.
         bool OnNearObjects(SDK::World::NativeItemVector &items);
+        void SetChoiceFilter(std::function<bool(SDK::World::NativeItemVector &)> filter) { _choiceFilter = std::move(filter); }
         bool SuppressNativeDrop() const;
         void OnNativeDrop(SDK::Player::NativeHuman &human, const SDK::World::NativeItemVector &items);
 
@@ -54,5 +56,6 @@ namespace Mafia1Online::Features::Pickup {
         std::unordered_map<uint64_t, Item> _items;
         uint64_t _lastRequestId = 0;
         uint64_t _lastRequestAt = 0;
+        std::function<bool(SDK::World::NativeItemVector &)> _choiceFilter;
     };
 } // namespace Mafia1Online::Features::Pickup

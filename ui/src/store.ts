@@ -116,6 +116,13 @@ export const preferences = computed<Preferences>(() => ({ ...defaultPreferences,
 export const chat = signal<ChatLine[]>([]);
 export const chatOpen = signal<{ prefill: string } | null>(null);
 export const pauseOpen = signal(false);
+export interface GameplayMenu {
+    id: number;
+    kind: 'inventory' | 'interaction';
+    title: string;
+    choices: { label: string; detail: string; canSelect: boolean; canDrop: boolean }[];
+}
+export const gameplayMenu = signal<GameplayMenu | null>(null);
 export const scoreboardVisible = signal(false);
 export const roster = signal<{ players: Player[]; mission: string }>({ players: [], mission: '' });
 export const toasts = signal<Toast[]>([]);

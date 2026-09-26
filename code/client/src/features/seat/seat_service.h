@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <unordered_map>
 
 namespace Mafia1Online::SDK::Seat { struct NativeHuman; struct NativeCar; }
@@ -22,6 +23,8 @@ namespace Mafia1Online::Features::Seat {
         void RegisterRPC();
         void Update(World::WorldService &world);
         void Reset();
+        void SetUseFilter(std::function<bool(const void *)> filter) { _useFilter = std::move(filter); }
+        bool AllowsNativeUse(const void *human) const { return !_useFilter || _useFilter(human); }
         SDK::Seat::NativeCar *CurrentNetworkCar(SDK::Seat::NativeHuman *human);
         void OnNativeUse(SDK::Seat::NativeHuman *human, SDK::Seat::NativeCar *car, int action, int seat);
         void OnNativeSteal(SDK::Seat::NativeHuman *human, SDK::Seat::NativeCar *car, int seat);
@@ -56,6 +59,7 @@ namespace Mafia1Online::Features::Seat {
         void Reconcile(World::WorldService &world);
 
         World::WorldService *_world = nullptr;
+        std::function<bool(const void *)> _useFilter;
         PendingLocal _pending;
         std::deque<QueuedEvent> _events;
         std::unordered_map<uint64_t, Animation> _animations;

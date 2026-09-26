@@ -5,7 +5,7 @@ import { Toasts } from './components/Toasts';
 import { GameHud } from './game/GameHud';
 import { MainMenu } from './screens/MainMenu';
 import { DownloadDialog } from './screens/Dialogs';
-import { chatOpen, pauseOpen, preferences, state } from './store';
+import { chatOpen, pauseOpen, gameplayMenu, preferences, state } from './store';
 
 const styles = stylex.create({
     root: {
@@ -23,6 +23,7 @@ export function App() {
     // screen the client asked for, so a stale menu never covers the game.
     useEffect(() => {
         if (screen !== 'game') {
+            gameplayMenu.value = null;
             chatOpen.value = null;
             pauseOpen.value = false;
         }

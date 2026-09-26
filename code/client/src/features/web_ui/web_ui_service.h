@@ -71,6 +71,12 @@ namespace Mafia1Online::Features::WebUi {
             return (_captured && _screen == Screen::Game) || HasFocusedResourceView();
         }
 
+        struct GameplayMenuResponse { uint64_t id; uint32_t index; bool drop; };
+        bool OpenGameplayMenu(uint64_t id, const nlohmann::json &menu);
+        void CloseGameplayMenu();
+        bool HasGameplayMenu(uint64_t id) const { return _pageReady && _gameplayMenuId == id && id != 0 && !HasFocusedResourceView(); }
+        std::optional<GameplayMenuResponse> TakeGameplayMenuResponse();
+
       private:
         struct ChatLine {
             std::string author;
@@ -116,6 +122,8 @@ namespace Mafia1Online::Features::WebUi {
         bool _captured        = false;
         bool _chatOpen        = false;
         bool _pauseOpen       = false;
+        uint64_t _gameplayMenuId = 0;
+        std::optional<GameplayMenuResponse> _gameplayMenuResponse;
         bool _scoreboardShown = false;
         bool _missionReady    = false;
         Screen _screen        = Screen::Hidden;

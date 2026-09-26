@@ -129,15 +129,15 @@ namespace Mafia1Online::Features::Chat {
 
         void __fastcall InputUpdateHook(void *input, void *, bool acquire) {
             gOriginalInputUpdate(input, acquire);
-            if (!gService || !gService->IsInputSuppressed()) {
-                return;
-            }
-            for (bool pressedOnly : {false, true}) {
-                float *state    = nullptr;
-                const int count = SDK::Input::GetState(input, &state, pressedOnly);
-                if (count > 0) {
-                    std::fill_n(state, count, 0.0f);
+            if (gService) {
+                if (gService->IsInputSuppressed()) {
+                    for (bool pressedOnly : {false, true}) {
+                        float *state    = nullptr;
+                        const int count = SDK::Input::GetState(input, &state, pressedOnly);
+                        if (count > 0) std::fill_n(state, count, 0.0f);
+                    }
                 }
+                gService->FilterInput(input);
             }
         }
 

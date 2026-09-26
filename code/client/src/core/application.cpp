@@ -16,6 +16,7 @@
 #include "features/world/world_hooks.h"
 
 #include <mafia1/sdk/ui/native_indicators.h>
+#include <mafia1/sdk/graphics/native_graph.h>
 #include <integrations/client/networking/engine.h>
 #include <logging/logger.h>
 #include <networking/network_client.h>
@@ -96,11 +97,16 @@ namespace Mafia1Online::Core {
             Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->critical("Could not install native pickup hooks");
             ExitProcess(1);
         }
+        _gameplayMenus.Install(_world, _webUi);
+        _chat.SetInputFilter([this](void *input) { _gameplayMenus.FilterInput(input); });
+        _pickups.SetChoiceFilter([this](SDK::World::NativeItemVector &items) { return _gameplayMenus.FilterNearObjects(items); });
+        _seats.SetUseFilter([this](const void *human) { return _gameplayMenus.AllowsNativeUse(human); });
         if (!_doors.Install()) {
             Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->critical("Could not install native door hooks");
             ExitProcess(1);
         }
         _world.SetMissionClosingCallback([this] {
+            _gameplayMenus.Reset();
             _script.OnMissionClosing();
             _pickups.OnMissionClosing();
             _doors.Reset();
@@ -151,7 +157,7 @@ namespace Mafia1Online::Core {
         const auto *localState = _combat.GetLocalState(_world);
         _chat.Update(_world.IsReady(), localState && localState->spawned ? std::optional<float>(localState->health) : std::nullopt);
         while (auto line = _chat.TakeOutgoing()) {
-            SendChatMessage(*line);
+            SubmitChatLine(*line);
         }
         while (auto key = _chat.TakeGameKey()) {
             // DIK_K: retail has no player siren control.
@@ -166,8 +172,9 @@ namespace Mafia1Online::Core {
             }
         }
         _webUi.Update(_world);
+        _gameplayMenus.Update();
         while (auto line = _webUi.TakeOutgoing()) {
-            SendChatMessage(*line);
+            SubmitChatLine(*line);
         }
         const auto &quickJoin = Features::QuickJoin::GetConfig();
         if (quickJoin.enabled && !_quickJoinConnectIssued && GetConnectionPhase() == ConnectionPhase::Disconnected) {
@@ -196,7 +203,23 @@ namespace Mafia1Online::Core {
         }
     }
 
+    void Application::SubmitChatLine(const std::string &line) {
+        const auto first = line.find_first_not_of(" \t\r\n");
+        const auto last = line.find_last_not_of(" \t\r\n");
+        if (first != std::string::npos && last == first + 1 && line[first] == '/' && (line[last] == 'q' || line[last] == 'Q')) {
+            // Keep this local and use the same ordered shutdown as the Quit
+            // button. Server scripts never receive the built-in command.
+            PostMessageA(static_cast<HWND>(SDK::Graphics::GetGraph()->MainWindow()), WM_CLOSE, 0, 0);
+            return;
+        }
+        SendChatMessage(line);
+    }
+
     void Application::PreShutdown() {
+        _gameplayMenus.Reset();
+        _chat.SetInputFilter({});
+        _pickups.SetChoiceFilter({});
+        _seats.SetUseFilter({});
         _mods.Shutdown();
         _cameraFollow.Reset();
         _cameraFollow.UninstallTickHook();
@@ -227,6 +250,7 @@ namespace Mafia1Online::Core {
     }
 
     void Application::OnConnectionClosed() {
+        _gameplayMenus.Reset();
         _mods.Reset();
         _autoEnterPending = false;
         _cameraFollow.Reset();

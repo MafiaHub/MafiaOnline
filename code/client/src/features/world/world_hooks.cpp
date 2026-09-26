@@ -97,6 +97,9 @@ namespace Mafia1Online::Features::World {
                 return 0;
             }
             const bool mainMenu = SDK::Menu::IsMainMenu(menu);
+            if (gNativeMissionActive) {
+                if (auto result = Application().GameplayMenus().HandleMenu(static_cast<SDK::Menu::NativeMenu *>(menu))) return *result;
+            }
             const uint32_t result = gMenuExecuteOriginal(menu, tickMission, unused);
             if (mainMenu) {
                 Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Mafia main menu closed with result {}", result);

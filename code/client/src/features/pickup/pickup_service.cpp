@@ -180,6 +180,7 @@ namespace Mafia1Online::Features::Pickup {
     }
 
     bool PickupService::OnNearObjects(SDK::World::NativeItemVector &items) {
+        if (_choiceFilter && _choiceFilter(items)) return true;
         if (!items.begin || items.begin == items.end) {
             return false;
         }

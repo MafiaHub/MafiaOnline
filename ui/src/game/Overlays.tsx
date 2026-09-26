@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { send } from '../bridge';
 import { Heading, Panel } from '../components/ui';
 import { pauseOpen, roster, state } from '../store';
@@ -32,6 +32,7 @@ const styles = stylex.create({
         color: colors.muted,
     },
     pause: {
+        pointerEvents: 'auto',
         display: 'grid',
         gridTemplateColumns: {
             default: '17rem 22rem',
@@ -51,6 +52,10 @@ const styles = stylex.create({
         gap: '0.3rem',
     },
     item: {
+        appearance: 'none',
+        backgroundColor: 'transparent',
+        textAlign: 'left',
+        cursor: 'pointer',
         display: 'flex',
         alignItems: 'center',
         gap: '0.7rem',
@@ -128,7 +133,7 @@ export function PauseMenu() {
     const [confirm, setConfirm] = useState<Action | null>(null);
     const runRef = useRef<((action: Action) => void) | null>(null);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         const close = () => {
             pauseOpen.value = false;
             send('pause:close');
@@ -168,7 +173,8 @@ export function PauseMenu() {
                     <Heading>Paused</Heading>
                     <div {...stylex.props(styles.items)}>
                         {actions.map((action, index) => (
-                            <div
+                            <button
+                                type="button"
                                 key={action.id}
                                 {...stylex.props(styles.item, index === selected && styles.itemActive)}
                                 onMouseEnter={() => {
@@ -181,7 +187,7 @@ export function PauseMenu() {
                             >
                                 <span {...stylex.props(styles.marker, index === selected && styles.markerActive)} />
                                 {confirm === action.id ? 'Sure? Enter' : action.label}
-                            </div>
+                            </button>
                         ))}
                     </div>
                     <div {...stylex.props(styles.hint, confirm !== null && styles.confirm)}>

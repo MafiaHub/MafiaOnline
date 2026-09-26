@@ -1,5 +1,5 @@
 import type { InboundMessage, OutboundEvent } from './bridge';
-import { type UiState, chatOpen, pauseOpen } from './store';
+import { type UiState, chatOpen, pauseOpen, gameplayMenu } from './store';
 
 // Browser preview (npm run dev): stands in for the game so the screens can be
 // designed without launching it. #menu or #game picks the screen.
@@ -75,6 +75,7 @@ export function startMock(receive: (message: InboundMessage) => void) {
         }, 2000);
         // Mirrors the client: Escape toggles the pause screen or closes chat.
         window.addEventListener('keydown', (event) => {
+            if (gameplayMenu.value) return;
             if (event.key === 'Escape') {
                 receive(chatOpen.value || pauseOpen.value ? { type: 'chat:closed', payload: {} } : { type: 'pause:open', payload: {} });
                 return;

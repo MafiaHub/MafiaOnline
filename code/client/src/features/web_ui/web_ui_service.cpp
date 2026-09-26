@@ -249,6 +249,8 @@ namespace Mafia1Online::Features::WebUi {
     }
 
     void WebUiService::Reset() {
+        CloseGameplayMenu();
+        _gameplayMenuResponse.reset();
         _history.clear();
         _outgoing.clear();
         _chatOpen        = false;
@@ -262,7 +264,7 @@ namespace Mafia1Online::Features::WebUi {
 
     void WebUiService::BindPage() {
         for (const char *name : {"ui:ready", "ui:alive", "ui:screen", "menu:connect", "menu:disconnect", "menu:play", "app:quit", "chat:send", "chat:close",
-                                 "pause:close", "servers:favorite", "servers:forget", "settings:save"}) {
+                                 "pause:close", "gameplay:select", "gameplay:close", "servers:favorite", "servers:forget", "settings:save"}) {
             const std::string eventName = name;
             _view->AddEventListener(eventName, [this, eventName](const std::string &payload) {
                 OnPageEvent(eventName, payload);
@@ -286,6 +288,20 @@ namespace Mafia1Online::Features::WebUi {
             return;
         }
         if (name == "ui:alive") {
+            return;
+        }
+        if (name == "gameplay:select" || name == "gameplay:close") {
+            if (!data.is_object() || !data.contains("id") || !data["id"].is_number_unsigned() || data["id"].get<uint64_t>() != _gameplayMenuId || !_gameplayMenuId) {
+                return;
+            }
+            if (name == "gameplay:select") {
+                if (!data.contains("index") || !data["index"].is_number_unsigned() || data["index"].get<uint64_t>() >= 256 ||
+                    (data.contains("drop") && !data["drop"].is_boolean())) {
+                    return;
+                }
+                _gameplayMenuResponse = GameplayMenuResponse {_gameplayMenuId, data["index"].get<uint32_t>(), data.value("drop", false)};
+            }
+            CloseGameplayMenu();
             return;
         }
         if (name == "ui:screen") {
@@ -407,6 +423,8 @@ namespace Mafia1Online::Features::WebUi {
     }
 
     void WebUiService::Deactivate() {
+        CloseGameplayMenu();
+        _gameplayMenuResponse.reset();
         if (_cursorView) {
             _cursorView->Display(false);
         }
@@ -565,6 +583,7 @@ namespace Mafia1Online::Features::WebUi {
         }
 
         if (_screen != Screen::Game) {
+            CloseGameplayMenu();
             _chatOpen  = false;
             _pauseOpen = false;
         }
@@ -598,7 +617,7 @@ namespace Mafia1Online::Features::WebUi {
     }
 
     void WebUiService::UpdateCapture() {
-        const bool want = _pageReady && (_screen == Screen::Menu || (_screen == Screen::Game && _pageScreen == Screen::Game && (_chatOpen || _pauseOpen)));
+        const bool want = _pageReady && (_screen == Screen::Menu || (_screen == Screen::Game && _pageScreen == Screen::Game && (_chatOpen || _pauseOpen || _gameplayMenuId)));
         if (want == _captured) {
             return;
         }
@@ -615,6 +634,7 @@ namespace Mafia1Online::Features::WebUi {
     }
 
     void WebUiService::CloseInGameScreens() {
+        CloseGameplayMenu();
         _closeRequestedAt.reset();
         if (!_chatOpen && !_pauseOpen) {
             return;
@@ -628,6 +648,7 @@ namespace Mafia1Online::Features::WebUi {
     // Keys already held for gameplay (walking) would otherwise auto-repeat
     // into the page; they stay latched until released.
     void WebUiService::OpenChat(const std::string &prefill) {
+        CloseGameplayMenu();
         _latched |= _keysDown;
         _chatOpen = true;
         UpdateCapture();
@@ -635,6 +656,7 @@ namespace Mafia1Online::Features::WebUi {
     }
 
     void WebUiService::OpenPause() {
+        CloseGameplayMenu();
         _latched |= _keysDown;
         _pauseOpen = true;
         UpdateCapture();
@@ -648,7 +670,7 @@ namespace Mafia1Online::Features::WebUi {
             return false;
         }
         if (key == kDikEscape) {
-            if (_chatOpen || _pauseOpen) {
+            if (_chatOpen || _pauseOpen || _gameplayMenuId) {
                 CloseInGameScreens();
             }
             else {
@@ -661,6 +683,32 @@ namespace Mafia1Online::Features::WebUi {
             return true;
         }
         return false;
+    }
+
+    bool WebUiService::OpenGameplayMenu(uint64_t id, const nlohmann::json &menu) {
+        if (!_pageReady || LiveScreen() != Screen::Game || _pageScreen != Screen::Game || HasFocusedResourceView()) {
+            return false;
+        }
+        _latched |= _keysDown;
+        _chatOpen = false;
+        _pauseOpen = false;
+        _gameplayMenuResponse.reset();
+        _gameplayMenuId = id;
+        UpdateCapture();
+        Send("gameplay:open", menu);
+        return true;
+    }
+
+    void WebUiService::CloseGameplayMenu() {
+        if (_gameplayMenuId) {
+            _gameplayMenuId = 0;
+            if (_pageReady) Send("gameplay:closed", nlohmann::json::object());
+            UpdateCapture();
+        }
+    }
+
+    std::optional<WebUiService::GameplayMenuResponse> WebUiService::TakeGameplayMenuResponse() {
+        return std::exchange(_gameplayMenuResponse, std::nullopt);
     }
 
     // ReadKey sees the same presses through DirectInput. The window messages

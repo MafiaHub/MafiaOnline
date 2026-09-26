@@ -18,8 +18,10 @@ namespace Mafia1Online::SDK::Player {
     };
     static_assert(sizeof(NativeGameItem) == 0x10);
 
-    inline constexpr uintptr_t kItemTablePointer = 0x6D4C14;
-    inline constexpr uintptr_t kItemTableCount   = 0x6D4C18;
+    inline constexpr uintptr_t kItemTablePointer    = 0x6D4C14;
+    inline constexpr uintptr_t kItemTableCount      = 0x6D4C18;
+    inline constexpr uint32_t kNoAutoSelectItemFlag = 0x100;
+    inline constexpr uint32_t kFirearmItemFlag      = 0x20;
 
     struct NativeItemDefinition {
         std::byte _name[0x20];
@@ -39,13 +41,13 @@ namespace Mafia1Online::SDK::Player {
     };
 
     inline uint32_t StockItemFlags(uint16_t itemId) {
-        const auto count = *reinterpret_cast<const uint32_t *>(kItemTableCount);
+        const auto count  = *reinterpret_cast<const uint32_t *>(kItemTableCount);
         const auto *items = *reinterpret_cast<const NativeItemDefinition *const *>(kItemTablePointer);
         return itemId < count ? items[itemId].flags : 0;
     }
 
     inline uint16_t StockMagazineCapacity(uint16_t itemId) {
-        const auto count = *reinterpret_cast<const uint32_t *>(kItemTableCount);
+        const auto count  = *reinterpret_cast<const uint32_t *>(kItemTableCount);
         const auto *items = *reinterpret_cast<const NativeItemDefinition *const *>(kItemTablePointer);
         return itemId < count && items[itemId].magazineCapacity > 0 ? static_cast<uint16_t>(items[itemId].magazineCapacity) : 0;
     }
@@ -58,7 +60,7 @@ namespace Mafia1Online::SDK::Player {
             return _selected;
         }
         [[nodiscard]] uint32_t ItemMask() const {
-            uint32_t mask = 0;
+            uint32_t mask      = 0;
             const auto include = [&mask](const NativeGameItem &item) {
                 if (item.itemId < 32 && item.itemId != 0) {
                     mask |= 1u << item.itemId;
@@ -135,9 +137,9 @@ namespace Mafia1Online::SDK::Player {
                 slot.weaponEffectLatch = 0;
                 slot.usingObject       = nullptr;
             }
-            slot.itemId       = value.itemId;
-            slot.ammoLoaded   = value.ammoLoaded;
-            slot.ammoReserve  = value.ammoReserve;
+            slot.itemId      = value.itemId;
+            slot.ammoLoaded  = value.ammoLoaded;
+            slot.ammoReserve = value.ammoReserve;
         }
 
       public:

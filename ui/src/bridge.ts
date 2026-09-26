@@ -14,6 +14,8 @@ import {
     uid,
     cursor,
     type CursorState,
+    gameplayMenu,
+    type GameplayMenu,
 } from './store';
 
 // The client talks to this page in two directions:
@@ -34,6 +36,8 @@ export type InboundMessage =
     | { type: 'chat:history'; payload: Omit<ChatLine, 'id'>[] }
     | { type: 'chat:open'; payload: { prefill: string } }
     | { type: 'pause:open'; payload: Record<string, never> }
+    | { type: 'gameplay:open'; payload: GameplayMenu }
+    | { type: 'gameplay:closed'; payload: Record<string, never> }
     | { type: 'scoreboard'; payload: { visible: boolean } }
     | { type: 'players'; payload: { players: Player[]; mission: string } }
     | { type: 'toast'; payload: { kind: Toast['kind']; text: string } }
@@ -51,6 +55,8 @@ export type OutboundEvent =
     | 'chat:send'
     | 'chat:close'
     | 'pause:close'
+    | 'gameplay:select'
+    | 'gameplay:close'
     | 'servers:favorite'
     | 'servers:forget'
     | 'settings:save';
@@ -84,12 +90,22 @@ export function receive(message: InboundMessage) {
             chat.value = message.payload.map((line) => ({ ...line, id: uid() }));
             break;
         case 'chat:open':
+            gameplayMenu.value = null;
             pauseOpen.value = false;
             chatOpen.value = { prefill: message.payload.prefill ?? '' };
             break;
         case 'pause:open':
+            gameplayMenu.value = null;
             chatOpen.value = null;
             pauseOpen.value = true;
+            break;
+        case 'gameplay:open':
+            chatOpen.value = null;
+            pauseOpen.value = false;
+            gameplayMenu.value = message.payload;
+            break;
+        case 'gameplay:closed':
+            gameplayMenu.value = null;
             break;
         case 'scoreboard':
             scoreboardVisible.value = message.payload.visible;
@@ -106,6 +122,7 @@ export function receive(message: InboundMessage) {
             pauseOpen.value = false;
             break;
         case 'session:reset':
+            gameplayMenu.value = null;
             chat.value = [];
             chatOpen.value = null;
             pauseOpen.value = false;

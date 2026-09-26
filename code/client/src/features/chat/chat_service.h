@@ -36,6 +36,9 @@ namespace Mafia1Online::Features::Chat {
         }
         // False while another front end draws the chat; messages still arrive.
         void SetNativeChatEnabled(bool enabled);
+        // Runs after chat/web capture has cleared gameplay input.
+        void SetInputFilter(std::function<void(void *)> filter) { _inputFilter = std::move(filter); }
+        void FilterInput(void *input) const { if (_inputFilter) _inputFilter(input); }
         bool RouteKey(uint32_t scanCode, unsigned char character) const {
             return _keyRouter && _keyRouter(scanCode, character);
         }
@@ -96,6 +99,7 @@ namespace Mafia1Online::Features::Chat {
         std::function<bool(uint32_t, unsigned char)> _keyRouter;
         std::function<bool()> _inputCapture;
         bool _nativeChatEnabled = true;
+        std::function<void(void *)> _inputFilter;
         std::deque<uint32_t> _gameKeys;
     };
 } // namespace Mafia1Online::Features::Chat

@@ -1719,3 +1719,41 @@ This keeps both leaves visible at sector boundaries. Scene lookups and the
 state cache are cleared at mission close. Reconnects receive the
 same server replica fields, including lock, use state, side of each leaf and
 target fraction.
+
+## Nonblocking inventory and interaction menus
+
+reM's `GM_Menu::ExecuteMenu` (`0x5eba40`, `__fastcall`, menu in ECX,
+`tickMission` in EDX, one stack boolean) owns a synchronous input/render loop.
+The player calls it with `tickMission = false` for inventory and action choices.
+Only the camera advances there; the normal mission/client update cannot return
+until the menu closes. The existing execute hook now intercepts `GM_Inventory`
+and `GM_ItemPickUp` during a server mission, copies a choice snapshot, destroys
+the uncreated menu, and immediately returns the native cancellation result.
+
+| Native | Evidence and convention | Ownership and lifetime |
+| --- | --- | --- |
+| `GM_Inventory`, vtable `0x627584` | reM `GM_Inventory.h` and constructor `0x5e2a90`: size `0x38`, inventory at `+0x30`, dropped vector at `+0x34`. SDK layout assertions cover both. | Native caller owns the inventory and output vector. They are used only within the current execute-hook call. |
+| `GM_ItemPickUp`, vtable `0x625920` | reM `GM_ItemPickUp.h`: size `0x54`; inventory/inventories/game items/dropped/removed at `+0x30/+0x34/+0x38/+0x3c/+0x40`; address vector at `+0x44`. VC6 vectors have their begin/end/capacity at `+4/+8/+0xc`. | The player builds the candidate and output vectors on its stack. No menu or vector pointer survives the hook. |
+| `G_Inventory::Select` `0x607bc0` | `8B 44 24 08 83 EC 14 83 F8 04`; `bool __thiscall(inventory*, unsigned index, unsigned slot, dropped*)`, `ret 0xc`. Slot groups are hand 0, small weapons 1, coat 2, ordinary items 3 and pickup 4. | Uses freshly reconstructed native menu arguments. The original player caller still updates weapon models and drops. |
+| `G_Inventory::Remove` `0x6095e0` | `83 EC 08 8B 44 24 0C 53 55 8B E9`; `bool __thiscall(inventory*, item*, dropped*)`, `ret 8`. | The selected item address is rebuilt from the live inventory before the call. |
+| `GM_ItemPickUp::OnClick` `0x5e3480` | `56 57 8B 7C 24 0C 8B F1`; `int __thiscall(menu*, unsigned componentId)`, `ret 4`. Component `256 + index` reads the address vector. Actions (`itemId == 1`) return `169 + index`; taking an item returns 168; cancel is 167. | Borrows a temporary address array synchronously. The SDK restores the menu's original empty vector and the global menu-loop result before `Destroy`. It never calls `Create` or enters the retail menu loop. |
+| `G_TextDatabase::GetText` `0x60fb40` | `8B 51 04 B8 00 10 00 00`; `const char* __thiscall(database*, unsigned id)`, `ret 4`, database object `0x6d8714`. Item names use `3500 + itemId`; action text uses the record's ammo-loaded field. | Text is copied and converted from the game's ANSI code page to UTF-8 before returning to the caller. |
+
+The executable's `BuildEnabledItemIdList` (`0x609bb0`) collects item **addresses**,
+despite reM's current ID-oriented name/decompilation. LEA instructions at
+`0x609be0`, `0x609bff` and `0x609c58` verify this. The service preserves retail's
+selected/weapon/coat/ordinary-item order. Ordinary inventory rows with item flag
+`0x100` cannot be selected or dropped, matching `GM_Inventory::OnCreate`.
+Ammo is shown only for the firearm flag `0x20`.
+
+A web response queues an inventory or interaction input for the next normal
+player tick (controls 24 and 10; alternate interaction 11 and fire 12/13 are
+suppressed during capture/release). Native player AI rebuilds candidates, then
+the service revalidates the chosen item, target and player/mission/spawn context
+before running the native operation. Nested corpse menus retain only copied
+choice identities. The service also uses generation-checked registry handles
+for replicated targets. Cancel, death, stream-out, session teardown and input
+focus changes discard pending menus; no mission reentrancy or background game
+calls are introduced. The existing `Use_Actor` hook rejects a replay's actor use
+until its choice has matched, so an unavailable pump cannot turn a pending
+refuel choice into retail's fallback exit-car action.

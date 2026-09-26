@@ -1,6 +1,6 @@
 # Web UI (CEF)
 
-Mafia1Online draws its main menu, chat, pause screen, player list and toasts
+Mafia1Online draws its main menu, chat, pause screen, inventory, action chooser, player list and toasts
 with Chromium (CEF). The mod ships no native menu definition. The page is a
 Preact + StyleX app in `ui/`. The client paints it off screen and composites
 it into the game's Direct3D 8 frame. If CEF, the page or its heartbeat fails,
@@ -49,6 +49,33 @@ Features::WebUi::WebUiService  <------------------------------------------+
   3D menu scene keeps running behind the page. `ChatService` keeps its hooks
   and forwards keys through `SetKeyRouter`. `SetNativeChatEnabled(false)` turns
   off only its drawing. The game-key queue (`TakeGameKey`) still works.
+
+### Inventory and interaction choices
+
+The inventory binding (normally I) and ambiguous use actions open a web overlay.
+Click a row, press 1–9, or use arrows and Enter; Escape/0 closes it. Inventory
+also provides Drop buttons and X/Delete for the selected row. Opening a menu
+captures gameplay controls while the mission, physics, damage, replication,
+voice and scripts continue running. The ESC menu's buttons explicitly enable
+pointer events inside the otherwise noninteractive overlay layout.
+
+`GameplayMenuService` intercepts only `GM_Inventory` and `GM_ItemPickUp` in a
+server mission. It copies labels and choice identities, destroys the uncreated
+native menu, and returns cancellation immediately. A web selection queues one
+normal input frame. The native player rebuilds its menu candidates, the service
+matches the requested item/target against those fresh candidates, and the native
+inventory or pickup operation executes using that call's live output vectors.
+The caller still performs its normal weapon-model update, drop or `Use_Actor`.
+Nested pickup menus retain a path of choice identities, never stack pointers.
+
+Requests are scoped to a menu ID, player binding, spawn and mission generation,
+and seating context. A target stream-out, death, mission change, disconnect,
+focus loss or another resource taking input cancels the open menu. A selection
+that no longer exists is discarded; a nearby replicated pickup cannot replace
+an explicitly selected door/seat during revalidation. Single native actions
+retain their immediate behavior. If CEF is unavailable, these modal menus are
+cancelled and logged instead of entering the blocking retail loop; normal
+weapon cycling/holstering and single interactions remain available.
 
 ### Screens and compositing
 
@@ -119,6 +146,8 @@ C++ to page, as `window.__m1o({ type, payload })`:
 | `chat:open` | `{ prefill }` |
 | `chat:closed` | `{}`. The client took the keyboard back. |
 | `pause:open` | `{}` |
+| `gameplay:open` | `{ id, kind: inventory \| interaction, title, choices: [{ label, detail, canSelect, canDrop }] }` |
+| `gameplay:closed` | `{}`. Discard the current inventory/action panel. |
 | `scoreboard` | `{ visible }` |
 | `players` | `{ mission, players: [{ id, name, health, alive, spawned, local }] }` |
 | `toast` | `{ kind: info \| success \| error, text }` |
@@ -138,9 +167,15 @@ own origin:
 | `app:quit` | none | posts `WM_CLOSE`; the existing exit path closes in order |
 | `chat:send` | `{ text }` | sanitized with `Shared::Chat::SanitizeLine` (128 code points), then sent |
 | `chat:close` / `pause:close` | none | give the keyboard back to the game (Esc is handled by the client) |
+| `gameplay:select` | `{ id, index, drop }` | queue a selection for this menu; revalidate it against fresh native candidates on the next player tick |
+| `gameplay:close` | `{ id }` | cancel this inventory/action menu and release input |
 | `servers:favorite` | `{ host, port, name, favorite }` | edits the favorites |
 | `servers:forget` | `{ host, port }` | removes a recent entry |
 | `settings:save` | `{ chatFadeSeconds, chatScale, uiScale, chatTimestamps, filmGrain, reduceMotion }` | filtered, clamped and stored |
+
+The built-in `/q` command quits the game through its normal window-close path.
+Type it in the in-game chat/command input and press Enter. It is handled locally
+before outgoing chat reaches the server, with both the web and native chat.
 
 ## Building the UI
 
