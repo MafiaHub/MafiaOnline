@@ -16,6 +16,8 @@ namespace Mafia1Online::Scripting {
     void RegisterVisualResourceCleanup(Framework::Scripting::ResourceManager &manager);
     void BeginDrawFrame();
     void RenderDrawCommands();
+    // Runs from IGraph::Present after the game scene has ended, before CEF.
+    void RenderPreviewCommands();
     void ResetLocalVisuals();
     // True only while a collision-enabled, script-owned human remains active.
     bool IsSolidLocalHumanActor(const void *actor);

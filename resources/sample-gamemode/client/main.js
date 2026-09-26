@@ -30,6 +30,7 @@ Events.on("missionReady", ({mission, missionGeneration}) => {
 
 Events.on("playerSpawn", (player) => {
     if (!player.isLocal) return;
+    Fade.in(1);
     Hud.announce("Good luck", 2);
     Events.emitServer("sample:spawned", {mission: World.getMission()});
 });
@@ -47,7 +48,9 @@ Events.on("pickupStreamOut", (pickupId, lastKnown) => {
 });
 
 Events.on("playerDeath", (player) => {
-    if (player.isLocal) Sound.play("01b_srdce.wav");
+    if (!player.isLocal) return;
+    Sound.play("01b_srdce.wav");
+    Fade.out(1);
 });
 
 // The server sends these with player.emit(name, JSON.stringify(data)).

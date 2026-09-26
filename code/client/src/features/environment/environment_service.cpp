@@ -108,6 +108,11 @@ namespace Mafia1Online::Features::Environment {
             SDK::World::SetNightMode(game, state->nightMode != 0);
         }
         _applied.nightMode = state->nightMode;
+        if (state->frameGeneration == _missionGeneration && state->semaphoreCycleMs < 30000 &&
+            state->semaphoreCycleMs != _applied.semaphoreCycleMs) {
+            game->SetSemaphoreCycle(state->semaphoreCycleMs);
+            _applied.semaphoreCycleMs = state->semaphoreCycleMs;
+        }
         const uint64_t frameGeneration = state->frameGeneration == _missionGeneration ? state->frameGeneration : 0;
         const bool frameGenerationChanged = frameGeneration != _applied.frameGeneration;
         const std::string &frames      = frameGeneration != 0 ? state->frames : std::string();

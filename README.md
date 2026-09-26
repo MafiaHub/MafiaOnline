@@ -44,8 +44,10 @@ the stock local player after the native mission loads and sends its pose to
 the server. A separate native pose report lets the sample resource choose a
 matching initial spawn. Server scripts control spawn, respawn, despawn and
 health through `Players`, and car replicas through `Cars`. A sample resource
-under `resources/sample-gamemode` spawns ready players and accepts `/car
-[model]` and `/model [stock-human.i3d]` from any connected player. In a loaded mission, press T to open the
+under `resources/sample-gamemode` spawns ready players. `/car` opens a catalog
+with native model previews and seats the player in the chosen car. `/car
+<stock-car.i3d>` can spawn a model directly, and `/model [stock-human.i3d]`
+changes the player model. In a loaded mission, press T to open the
 native chat input, Enter to send and Escape to cancel. Incoming chat uses the
 game's own HUD console; the stock lives display receives the local player's
 authoritative health. Run the server with this project directory as its

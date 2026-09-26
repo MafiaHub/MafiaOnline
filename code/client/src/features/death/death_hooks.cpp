@@ -80,6 +80,10 @@ namespace Mafia1Online::Features::Death {
                 return;
             }
             gDeathOriginal(human);
+            if (SDK::Player::CurrentPlayer() == &human->Actor()) {
+                auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
+                application->Cars().OnLocalHumanDeath(application->World(), &human->Actor());
+            }
         }
 
         void __fastcall SetActStateHook(NativeActor *actor, void *, int32_t state) {

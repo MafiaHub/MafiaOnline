@@ -150,11 +150,14 @@ namespace Mafia1Online::Features::Script {
         case Action::Steal: name = "vehiclePlayerEntered"; break;
         case Action::Exit: name = "vehiclePlayerExited"; break;
         case Action::ExitBlocked: name = "vehiclePlayerExitBlocked"; break;
+        case Action::Move: name = "vehiclePlayerSeatChanged"; break;
         default: return;
         }
         EmitEvent(name, [&](v8::Isolate *isolate, v8::Local<v8::Context> context, EventArguments &arguments) {
             auto info = v8::Object::New(isolate);
             SetField(isolate, context, info, "seat", v8::Uint32::New(isolate, event.seat));
+            SetField(isolate, context, info, "fromSeat", event.action == Action::Move ?
+                v8::Uint32::New(isolate, event.seat ^ 1).As<v8::Value>() : v8::Null(isolate).As<v8::Value>());
             SetField(isolate, context, info, "stolen", v8::Boolean::New(isolate, event.action == Action::Steal || event.action == Action::StealBegin));
             SetField(isolate, context, info, "serverSequence", Number(isolate, static_cast<double>(event.serverSequence)));
             arguments.push_back(WrapVehicle(isolate, event.carId));

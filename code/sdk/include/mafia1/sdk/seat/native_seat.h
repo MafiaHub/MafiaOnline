@@ -12,6 +12,7 @@ namespace Mafia1Online::SDK::Seat {
     inline constexpr uintptr_t kHumanInternUseCar = 0x57e020;
     inline constexpr uintptr_t kHumanFinishCarTransition = 0x5716d0;
     inline constexpr uintptr_t kHumanForceExitCar = 0x581220;
+    inline constexpr uintptr_t kHumanClimbInCar = 0x581eb0;
     inline constexpr uintptr_t kHumanThrowFromCar = 0x587d70;
     inline constexpr uintptr_t kCarGetOwner = 0x41dec0;
     inline constexpr uintptr_t kCarGetSeatProperty = 0x41dc30;
@@ -86,6 +87,11 @@ namespace Mafia1Online::SDK::Seat {
         void ForceExitCar() {
             using Call = void(__thiscall *)(NativeHuman *);
             reinterpret_cast<Call>(kHumanForceExitCar)(this);
+        }
+
+        [[nodiscard]] bool ClimbToPairedSeat() {
+            using Call = bool(__thiscall *)(NativeHuman *);
+            return reinterpret_cast<Call>(kHumanClimbInCar)(this);
         }
 
         void UseCar(NativeCar *car, UseAction action, int seat) {

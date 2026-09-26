@@ -1,6 +1,7 @@
 #pragma once
 
 #include <mafia1/sdk/player/native_actor.h>
+#include <mafia1/sdk/graphics/native_graph.h>
 
 #include <array>
 #include <cmath>
@@ -46,9 +47,28 @@ namespace Mafia1Online::SDK::Scene {
         void(__stdcall *setFov)(NativeFrame *, float);
         void *_unused54;
         void(__stdcall *setRange)(NativeFrame *, float, float);
+        void *_unused5c[3];
+        void(__stdcall *setAspectRatio)(NativeFrame *, float);
     };
     static_assert(offsetof(NativeCameraVTable, setFov) == 0x50);
     static_assert(offsetof(NativeCameraVTable, setRange) == 0x58);
+    static_assert(offsetof(NativeCameraVTable, setAspectRatio) == 0x68);
+
+    // I3D_light appends its setters at +0x50 in the retail LS3DF vtable.
+    // VC6 reverses the overloaded SetColor declarations: RGB is +0x54,
+    // vector is +0x58 (verified against the original LS3DF.dll vtable).
+    struct NativeLightVTable {
+        NativeFrameVTable frame;
+        void *_unused3c[5];
+        void(__stdcall *setLightType)(NativeFrame *, int);
+        void(__stdcall *setColorRgb)(NativeFrame *, float, float, float);
+        void(__stdcall *setColor)(NativeFrame *, const Player::Vector3 *);
+        void(__stdcall *setPower)(NativeFrame *, float);
+    };
+    static_assert(offsetof(NativeLightVTable, setLightType) == 0x50);
+    static_assert(offsetof(NativeLightVTable, setColorRgb) == 0x54);
+    static_assert(offsetof(NativeLightVTable, setColor) == 0x58);
+    static_assert(offsetof(NativeLightVTable, setPower) == 0x5c);
 
     // Original LS3DF I3D_object vtable at 0x1009c348 has
     // SetTransparency (0x10037dd0) at +0x84. Derived mesh visuals keep it.
@@ -228,6 +248,27 @@ namespace Mafia1Online::SDK::Scene {
     inline void CameraSetRange(NativeFrame *camera, float nearClip, float farClip) {
         reinterpret_cast<NativeCameraVTable *>(camera->vtable)->setRange(camera, nearClip, farClip);
     }
+    inline void CameraSetFov(NativeFrame *camera, float radians) {
+        reinterpret_cast<NativeCameraVTable *>(camera->vtable)->setFov(camera, radians);
+    }
+    inline void CameraSetAspectRatio(NativeFrame *camera, float ratio) {
+        reinterpret_cast<NativeCameraVTable *>(camera->vtable)->setAspectRatio(camera, ratio);
+    }
+    inline void LightSetType(NativeFrame *light, int type) {
+        reinterpret_cast<NativeLightVTable *>(light->vtable)->setLightType(light, type);
+    }
+    inline void LightSetColor(NativeFrame *light, float red, float green, float blue) {
+        reinterpret_cast<NativeLightVTable *>(light->vtable)->setColorRgb(light, red, green, blue);
+    }
+    inline void LightSetPower(NativeFrame *light, float power) {
+        reinterpret_cast<NativeLightVTable *>(light->vtable)->setPower(light, power);
+    }
+    inline void SectorAddLight(NativeFrame *sector, NativeFrame *light) {
+        // I3D_frame::LinkTo only attaches the frame hierarchy. Rendering reads
+        // I3D_sector::m_lights, which mission loading fills with AddLight.
+        using Call = void(__stdcall *)(NativeFrame *, NativeFrame *);
+        reinterpret_cast<Call>(Graphics::Ls3dfBase() + 0x4f3d0)(sector, light);
+    }
 
     // reM I3D_COLLISION, filled by TestColHierarchy.
     struct NativeCollision {
@@ -242,11 +283,14 @@ namespace Mafia1Online::SDK::Scene {
     static_assert(offsetof(NativeCollision, hitId) == 0x18);
 
     struct NativeSceneVTable {
-        void *_unused00[0x58 / sizeof(void *)];
+        void *_unused00[0x54 / sizeof(void *)];
+        int(__stdcall *render)(NativeScene *);
         NativeFrame *(__stdcall *findFrame)(NativeScene *, const char *, uint32_t);
         void(__stdcall *addFrame)(NativeScene *, NativeFrame *);
         int(__stdcall *deleteFrame)(NativeScene *, NativeFrame *);
-        void *_unused64[(0x74 - 0x64) / sizeof(void *)];
+        void *_unused64[(0x6c - 0x64) / sizeof(void *)];
+        void(__stdcall *setActiveCamera)(NativeScene *, NativeFrame *);
+        void *_unused70;
         int(__stdcall *transformPoints)(NativeScene *, const Player::Vector3 *, float *, uint32_t);
         void *_unused78[(0xbc - 0x78) / sizeof(void *)];
         int(__stdcall *setFrameSectorPos)(NativeScene *, NativeFrame *, const Player::Vector3 *);
@@ -257,7 +301,10 @@ namespace Mafia1Online::SDK::Scene {
         void(__stdcall *setWeatherSystemParam)(NativeScene *, uint32_t, uint32_t);
         uint32_t(__stdcall *getWeatherSystemParam)(NativeScene *, uint32_t);
         void(__stdcall *weatherSystemReset)(NativeScene *);
+        void *_unusedF4[(0x104 - 0xf4) / sizeof(void *)];
+        int(__stdcall *setViewport)(NativeScene *, uint32_t, uint32_t, uint32_t, uint32_t);
     };
+    static_assert(offsetof(NativeSceneVTable, render) == 0x54);
     static_assert(offsetof(NativeSceneVTable, findFrame) == 0x58);
     static_assert(offsetof(NativeSceneVTable, addFrame) == 0x5c);
     static_assert(offsetof(NativeSceneVTable, deleteFrame) == 0x60);
@@ -275,6 +322,7 @@ namespace Mafia1Online::SDK::Scene {
     static_assert(offsetof(NativeSceneVTable, setWeatherSystemParam) == 0xe8);
     static_assert(offsetof(NativeSceneVTable, getWeatherSystemParam) == 0xec);
     static_assert(offsetof(NativeSceneVTable, weatherSystemReset) == 0xf0);
+    static_assert(offsetof(NativeSceneVTable, setViewport) == 0x104);
 
     struct NativeScene {
         NativeSceneVTable *vtable;
@@ -287,6 +335,13 @@ namespace Mafia1Online::SDK::Scene {
         }
         NativeFrame *PrimarySector() const {
             return _primarySector;
+        }
+        // reM I3D_scene::m_vClearColor at +0x220, consumed by I3D_driver::Render.
+        void SetClearColor(const Player::Vector3 &color) { _clearColor = color; }
+        bool Render() { return vtable->render(this) >= 0; }
+        void SetActiveCamera(NativeFrame *camera) { vtable->setActiveCamera(this, camera); }
+        bool SetViewport(uint32_t x, uint32_t y, uint32_t width, uint32_t height) {
+            return vtable->setViewport(this, x, y, x + width, y + height) >= 0;
         }
         void AddFrame(NativeFrame *frame) {
             vtable->addFrame(this, frame);
@@ -331,14 +386,20 @@ namespace Mafia1Online::SDK::Scene {
         NativeFrame *_activeCamera;
         std::byte _unused180[0x90];
         NativeFrame *_primarySector;
+        std::byte _unused214[0x0c];
+        Player::Vector3 _clearColor;
     };
     static_assert(offsetof(NativeScene, _activeCamera) == 0x17c);
     static_assert(offsetof(NativeScene, _primarySector) == 0x210);
+    static_assert(offsetof(NativeScene, _clearColor) == 0x220);
 
     struct NativeDriverVTable {
-        void *_unused00[0x50 / sizeof(void *)];
+        void *_unused00[0x1c / sizeof(void *)];
+        int(__stdcall *render)(NativeDriver *, NativeScene *);
+        void *_unused20[(0x50 - 0x20) / sizeof(void *)];
         NativeFrame *(__stdcall *createFrame)(NativeDriver *, int);
     };
+    static_assert(offsetof(NativeDriverVTable, render) == 0x1c);
     static_assert(offsetof(NativeDriverVTable, createFrame) == 0x50);
 
     struct NativeDriver {
@@ -346,6 +407,15 @@ namespace Mafia1Online::SDK::Scene {
 
         NativeFrame *CreateModel() {
             return vtable->createFrame(this, 9);
+        }
+        NativeScene *CreateScene() {
+            return reinterpret_cast<NativeScene *>(vtable->createFrame(this, 13));
+        }
+        NativeFrame *CreateCamera() {
+            return vtable->createFrame(this, 3);
+        }
+        NativeFrame *CreateLight() {
+            return vtable->createFrame(this, 2);
         }
         // I3D_FRAME_TYPE FRAME_DUMMY; the caller owns the reference.
         NativeFrame *CreateDummy() {

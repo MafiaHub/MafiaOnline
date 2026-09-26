@@ -25,7 +25,7 @@ namespace Mafia1Online::Shared::Entities {
             Active,
             Exploded,
             Submerged,
-            OutOfBounds,
+            FatalFall,
         };
 
         enum class SeatResult : uint8_t {
@@ -34,6 +34,9 @@ namespace Mafia1Online::Shared::Entities {
             Stolen,
             Exited,
             ExitBlocked,
+            Moved,
+            // Life-end or disconnect cleanup; no native exit should play.
+            Cleared,
         };
 
         // Model and mission generation are fixed for this replica's lifetime.
@@ -199,8 +202,8 @@ namespace Mafia1Online::Shared::Entities {
             auto seat = static_cast<uint8_t>(seatResult);
             fields.Field(seat);
             if (!fields.Writing()) {
-                terminalState = terminal <= static_cast<uint8_t>(TerminalState::OutOfBounds) ? static_cast<TerminalState>(terminal) : TerminalState::Active;
-                seatResult    = seat <= static_cast<uint8_t>(SeatResult::ExitBlocked) ? static_cast<SeatResult>(seat) : SeatResult::None;
+                terminalState = terminal <= static_cast<uint8_t>(TerminalState::FatalFall) ? static_cast<TerminalState>(terminal) : TerminalState::Active;
+                seatResult    = seat <= static_cast<uint8_t>(SeatResult::Cleared) ? static_cast<SeatResult>(seat) : SeatResult::None;
             }
         }
     };

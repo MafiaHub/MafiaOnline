@@ -12,9 +12,9 @@
 #include <string_view>
 
 namespace Mafia1Online::Shared::Entities {
-    // Script-owned world state every client applies after each mission load:
-    // the LS3DF weather particle system, static frame visibility and city
-    // music and night mode. One global replica, so a late joiner receives it on connect.
+    // World state every client applies after each mission load: scripted
+    // weather, frames, city music and night mode, plus the server's semaphore
+    // cycle. One global replica also supplies late joiners.
     class WorldStateEntity final: public Framework::Networking::Replication::NetworkEntity {
       public:
         static constexpr const char *kTypeName = "Mafia1Online::WorldState";
@@ -39,6 +39,8 @@ namespace Mafia1Online::Shared::Entities {
         bool cityMusicEnabled = true;
         // -1 follows the mission script; 0/1 overrides it for every client.
         int8_t nightMode = -1;
+        // Milliseconds in retail's 10-phase, 30-second semaphore cycle.
+        uint16_t semaphoreCycleMs = 0;
         // Frame overrides belong to one mission generation; the frame names
         // come from that mission's scene.
         uint64_t frameGeneration = 0;
@@ -52,6 +54,7 @@ namespace Mafia1Online::Shared::Entities {
             fields.Field(rainIntensity);
             fields.Field(cityMusicEnabled);
             fields.Field(nightMode);
+            fields.Field(semaphoreCycleMs);
             fields.Field(frameGeneration);
             MafiaNet::RakString text(frames.c_str());
             fields.Field(text);
@@ -70,6 +73,7 @@ namespace Mafia1Online::Shared::Entities {
             fields.Field(rainIntensity);
             fields.Field(cityMusicEnabled);
             fields.Field(nightMode);
+            fields.Field(semaphoreCycleMs);
             fields.Field(frameGeneration);
             fields.Field(frames);
             fields.Field(frameOpacities);

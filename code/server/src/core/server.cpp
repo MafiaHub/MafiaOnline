@@ -229,8 +229,8 @@ namespace Mafia1Online::Core {
             }
         });
         // Only the current simulation controller may report a native terminal
-        // outcome. Occupants die through server combat before the terminal
-        // state clears their seats.
+        // outcome. The native contact causes death immediately; the gamemode
+        // owns the fade, respawn and eventual vehicle removal.
         const auto applyTerminal = [this](uint64_t networkId, uint64_t missionGeneration, MafiaNet::PeerGuid sender,
                                           Shared::Entities::CarEntity::TerminalState terminal) {
             auto *car = _cars.Find(networkId);
@@ -238,22 +238,34 @@ namespace Mafia1Online::Core {
                 || car->terminalState != Shared::Entities::CarEntity::TerminalState::Active) {
                 return;
             }
-            // Capture occupant identities before committing the terminal state,
-            // which clears all seats. CombatService chooses and publishes each
-            // victim's authoritative death animation.
             const auto occupantIds         = car->occupantIds;
             const auto occupantGenerations = car->occupantGenerations;
             const uint8_t seatCount        = car->seatCount;
-            for (uint8_t seat = 0; seat < seatCount; ++seat) {
-                if (auto *player = _players.FindByNetworkId(occupantIds[seat]); player && occupantIds[seat] != 0 && player->spawnGeneration == occupantGenerations[seat]) {
-                    _combat.SetHealth(player->GetNetworkID(), 0.0f, 0, std::nullopt, Features::Combat::DamageCause::Vehicle);
+            const auto killOccupants = [this, &occupantIds, &occupantGenerations, seatCount, terminal] {
+                for (uint8_t seat = 0; seat < seatCount; ++seat) {
+                    if (auto *player = _players.FindByNetworkId(occupantIds[seat]); player && occupantIds[seat] != 0 &&
+                        player->spawnGeneration == occupantGenerations[seat]) {
+                        _combat.SetHealth(player->GetNetworkID(), 0.0f, 0, std::nullopt,
+                            terminal == Shared::Entities::CarEntity::TerminalState::Submerged ?
+                                Features::Combat::DamageCause::Drowning : Features::Combat::DamageCause::Vehicle);
+                    }
                 }
+            };
+            if (terminal == Shared::Entities::CarEntity::TerminalState::Exploded) {
+                killOccupants();
             }
             if (_cars.SetTerminalState(networkId, terminal)) {
                 if (terminal == Shared::Entities::CarEntity::TerminalState::Exploded) {
                     _debris.NoteExploded(networkId);
                 }
-                Features::Script::EmitCarEvent(*this, "vehicleTerminal", *_cars.Find(networkId));
+                // Water and fall handlers can inspect the seats before combat
+                // clears them. A handler may destroy the car immediately.
+                if (auto *committed = _cars.Find(networkId)) {
+                    Features::Script::EmitCarEvent(*this, "vehicleTerminal", *committed);
+                }
+                if (terminal != Shared::Entities::CarEntity::TerminalState::Exploded) {
+                    killOccupants();
+                }
             }
         };
         Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Car::ExplosionIntent>([applyTerminal](const Shared::Car::ExplosionIntent &intent, MafiaNet::Packet *packet) {
@@ -262,7 +274,7 @@ namespace Mafia1Online::Core {
         Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Car::TerminalIntent>([applyTerminal](const Shared::Car::TerminalIntent &intent, MafiaNet::Packet *packet) {
             using State = Shared::Entities::CarEntity::TerminalState;
             const auto state = static_cast<State>(intent.state);
-            if (state == State::Submerged || state == State::OutOfBounds) {
+            if (state == State::Submerged || state == State::FatalFall) {
                 applyTerminal(intent.networkId, intent.missionGeneration, MafiaNet::ToPeerGuid(packet->guid), state);
             }
         });

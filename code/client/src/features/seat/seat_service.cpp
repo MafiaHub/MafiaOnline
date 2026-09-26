@@ -61,15 +61,18 @@ namespace Mafia1Online::Features::Seat {
         if (human->HasPendingEntry(car) && seat == human->seatId) {
             // Releases the boarding lock, which otherwise stalls the driver.
             if (human->FinishPendingEntry(car, seat)) {
-                human->ForceExitCar();
+                // The queued native removal clears the seated owner. Ejecting
+                // this soon-to-be-destroyed human would enable its collision
+                // beside the moving car and can jolt the driver.
                 return;
             }
         }
         if (human->IsSeatedIn(car, seat)) {
-            human->ForceExitCar();
-        } else {
-            ClearSeatOwner(car, seat);
+            // C_game::InvalidateActor clears this owner when the queued human
+            // is removed; leave its in-car collision state intact until then.
+            return;
         }
+        ClearSeatOwner(car, seat);
     }
 
     void ReleaseCarOccupants(NativeCar *car) {
@@ -172,28 +175,6 @@ namespace Mafia1Online::Features::Seat {
         Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(intent);
     }
 
-    bool SeatService::BlockLocalExit(NativeHuman *human, NativeCar *car, int seat) {
-        (void)seat;
-        if (!_world || !_world->IsReady() || !human || !car || &human->actor != SDK::Player::CurrentPlayer()) {
-            return false;
-        }
-        const auto actor = _world->NativeObjects().FindByNative(human);
-        const auto vehicle = _world->NativeObjects().FindByNative(car);
-        if (!actor.networkId || !vehicle.networkId || !_world->NativeObjects().Resolve(actor) || !_world->NativeObjects().Resolve(vehicle) || human->usedActorEnter != car) {
-            return false;
-        }
-        const int currentSeat = human->seatId;
-        if (currentSeat < 0 || currentSeat >= static_cast<int>(Shared::Entities::CarEntity::kMaxSeats)) {
-            return false;
-        }
-        const int pairedSeat = currentSeat ^ 1;
-        if (human->CanDropOut(-1) || (car->HasSeat(pairedSeat) && !car->GetOwner(pairedSeat) && human->CanDropOut(pairedSeat))) {
-            return false;
-        }
-        Send(vehicle.networkId, actor.networkId, static_cast<uint8_t>(currentSeat), Action::ExitBlocked);
-        return true;
-    }
-
     void SeatService::OnNativeUse(NativeHuman *human, NativeCar *car, int action, int seat) {
         if (!_world || !_world->IsReady() || !human || !car || &human->actor != SDK::Player::CurrentPlayer() ||
             (action != static_cast<int>(SDK::Seat::UseAction::Enter) && action != static_cast<int>(SDK::Seat::UseAction::Exit))) {
@@ -267,17 +248,27 @@ namespace Mafia1Online::Features::Seat {
             // Reconciliation would otherwise undo the native transition during
             // the round trip, before the server's occupant array changes.
             const auto *state = replication->GetEntity<Shared::Entities::CarEntity>(_pending.carId);
-            const bool occupied = state && seat < Shared::Entities::CarEntity::kMaxSeats && state->occupantIds[seat] == _pending.playerId &&
-                                  state->occupantGenerations[seat] == _pending.spawnGeneration;
-            if (!state || occupied != exit) {
+            const uint8_t acknowledgedSeat = _pending.moving ? static_cast<uint8_t>(seat ^ 1) : seat;
+            const bool occupied = state && acknowledgedSeat < Shared::Entities::CarEntity::kMaxSeats && state->occupantIds[acknowledgedSeat] == _pending.playerId &&
+                                  state->occupantGenerations[acknowledgedSeat] == _pending.spawnGeneration;
+            if (!state || (_pending.moving ? occupied : (exit ? !occupied : occupied))) {
                 _pending = {};
             }
             return;
         }
         bool completed = false;
         if (exit) {
-            // A blocked side can make retail climb to the paired seat first;
-            // the recorded seat is released only once the car link is gone.
+            // reM Do_ClimbInCarLR moves native ownership to the paired seat
+            // before the exit animation. Commit that transfer atomically.
+            const uint8_t pairedSeat = static_cast<uint8_t>(seat ^ 1);
+            if (human->usedActorEnter == static_cast<NativeActor *>(car) && human->seatId == pairedSeat &&
+                car->GetOwner(pairedSeat) == &human->actor) {
+                Send(_pending.carId, _pending.playerId, pairedSeat, Action::Move);
+                _pending.moving = true;
+                _pending.sent = true;
+                _pending.until = std::chrono::steady_clock::now() + kLocalAcknowledgementLimit;
+                return;
+            }
             completed = human->usedActorEnter != static_cast<NativeActor *>(car) && car->GetOwner(seat) != &human->actor;
             if (completed) {
                 Send(_pending.carId, _pending.playerId, seat, Action::Exit);
@@ -360,6 +351,12 @@ namespace Mafia1Online::Features::Seat {
                 }
                 break;
             case Action::ExitBlocked: break;
+            case Action::Move:
+                if (human->IsSeatedIn(car, event.seat ^ 1) && !car->GetOwner(event.seat) &&
+                    human->ClimbToPairedSeat()) {
+                    _animations[event.playerId] = {now + std::chrono::seconds(2), event.carId, event.seat};
+                }
+                break;
             }
         }
     }
@@ -377,6 +374,8 @@ namespace Mafia1Online::Features::Seat {
             auto &seatSequence = _seatSequences[state->GetNetworkID()];
             const bool freshExit = seatSequence != 0 && seatSequence != state->seatSequence &&
                                    state->seatResult == Shared::Entities::CarEntity::SeatResult::Exited && state->seatIndex < Shared::Entities::CarEntity::kMaxSeats;
+            const bool freshMove = seatSequence != 0 && seatSequence != state->seatSequence &&
+                                   state->seatResult == Shared::Entities::CarEntity::SeatResult::Moved && state->seatIndex < Shared::Entities::CarEntity::kMaxSeats;
             seatSequence = state->seatSequence;
             auto *car = Car(world, state->GetNetworkID());
             if (!car) {
@@ -387,6 +386,13 @@ namespace Mafia1Online::Features::Seat {
                 // Let Replay start the native exit before reconciliation forces it.
                 if (auto *leaving = Human(world, state->seatActorId); leaving && leaving->IsSeatedIn(car, state->seatIndex)) {
                     _animations[state->seatActorId] = {now + kRemoteExitGrace, state->GetNetworkID(), state->seatIndex};
+                }
+            }
+            if (freshMove && !_animations.contains(state->seatActorId)) {
+                if (auto *moving = Human(world, state->seatActorId);
+                    moving && moving->IsSeatedIn(car, state->seatIndex ^ 1) && !car->GetOwner(state->seatIndex) &&
+                    moving->ClimbToPairedSeat()) {
+                    _animations[state->seatActorId] = {now + std::chrono::seconds(2), state->GetNetworkID(), state->seatIndex};
                 }
             }
             const auto place = [&](NativeHuman *human, uint8_t seat) {
@@ -410,7 +416,9 @@ namespace Mafia1Online::Features::Seat {
                 // until the server answers. Mid-steal the throw leaves it
                 // briefly empty while the server still lists the victim;
                 // re-seating the victim then would undo the steal here only.
-                if (_pending.playerId && _pending.carId == state->GetNetworkID() && (_pending.seat & 0x7f) == seat) {
+                if (_pending.playerId && _pending.carId == state->GetNetworkID() &&
+                    (static_cast<uint8_t>(_pending.seat & 0x7f) == seat ||
+                     ((_pending.seat & 0x80) && static_cast<uint8_t>((_pending.seat & 0x7f) ^ 1) == seat))) {
                     continue;
                 }
                 const uint64_t expectedId = state->occupantIds[seat];
@@ -459,6 +467,13 @@ namespace Mafia1Online::Features::Seat {
                         // the dead human is removed at respawn.
                         if (const auto *ownerPlayer = replication->GetEntity<Shared::Entities::PlayerEntity>(ownerHandle.networkId);
                             ownerPlayer && !ownerPlayer->alive) {
+                            continue;
+                        }
+                        // The seat clear may replicate before the departing
+                        // player's removal. Keep its collision disabled until
+                        // queued native teardown clears the owner itself.
+                        if (state->seatResult == Shared::Entities::CarEntity::SeatResult::Cleared &&
+                            state->seatActorId == ownerHandle.networkId && state->seatIndex == seat) {
                             continue;
                         }
                         nativeOwner->ForceExitCar();

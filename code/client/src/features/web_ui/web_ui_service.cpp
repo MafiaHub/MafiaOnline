@@ -22,6 +22,7 @@
 #include <networking/replication/replication_manager.h>
 
 #include <imm.h>
+#include <windowsx.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -194,7 +195,7 @@ namespace Mafia1Online::Features::WebUi {
                 return OnNativeKey(scanCode, character);
             },
             [this] {
-                return _captured;
+                return HidesKeyboard();
             });
         return true;
     }
@@ -506,7 +507,12 @@ namespace Mafia1Online::Features::WebUi {
         if (!_pageReady) {
             return;
         }
-        if (++_silentTicks > kHeartbeatTicks && Clock::now() - _lastHeartbeat > kHeartbeatTimeout) {
+        // CEF can throttle the built-in page while a resource modal covers it.
+        if (HasFocusedResourceView()) {
+            _silentTicks = 0;
+            _lastHeartbeat = Clock::now();
+        }
+        else if (++_silentTicks > kHeartbeatTicks && Clock::now() - _lastHeartbeat > kHeartbeatTimeout) {
             Framework::Logging::GetLogger("Web")->error("Web UI stopped responding; the native chat is back");
             Deactivate();
             return;
@@ -616,10 +622,10 @@ namespace Mafia1Online::Features::WebUi {
     bool WebUiService::OnNativeKey(uint32_t scanCode, unsigned char character) {
         (void)character;
         // Zero is "no key"; the chat still needs it to clear its held-key state.
-        if (!_pageReady || scanCode == 0) {
+        if (scanCode == 0) {
             return false;
         }
-        if (_captured) {
+        if (HidesKeyboard()) {
             return true;
         }
         return LiveScreen() == Screen::Game && (scanCode == kDikT || scanCode == kDikSlash || scanCode == kDikEscape);
@@ -627,8 +633,31 @@ namespace Mafia1Online::Features::WebUi {
 
     void WebUiService::ApplyFocus() {
         if (_view) {
-            _view->Focus(_captured && _windowActive);
+            _view->Focus(_captured && _windowActive && !HasFocusedResourceView());
         }
+    }
+
+    Framework::GUI::View *WebUiService::FocusedResourceView() const {
+        if (!_instance) {
+            return nullptr;
+        }
+        auto *manager = _instance->GetWebManager();
+        if (!manager) {
+            return nullptr;
+        }
+        Framework::GUI::View *top = nullptr;
+        for (auto *view : manager->GetGCViews()) {
+            if (view->HasFocus() && view->ShouldDisplay() && (!top || view->GetZIndex() >= top->GetZIndex())) {
+                top = view;
+            }
+        }
+        return top;
+    }
+
+    bool WebUiService::HasFocusedResourceView() const {
+        if (!_instance) return false;
+        auto *manager = _instance->GetWebManager();
+        return manager && manager->IsAnyGCViewFocused();
     }
 
     // Everything the page believes is held gets its release before the view
@@ -686,6 +715,54 @@ namespace Mafia1Online::Features::WebUi {
         if (!_windowActive) {
             return false;
         }
+        // Resource views are separate CEF browsers. The built-in page owns its
+        // own input path; send window messages to the top focused resource view
+        // before the game or the built-in page can consume them.
+        if (auto *resource = FocusedResourceView()) {
+            switch (message) {
+            case WM_KEYDOWN:
+            case WM_SYSKEYDOWN:
+            case WM_KEYUP:
+            case WM_SYSKEYUP:
+            case WM_CHAR:
+                resource->ProcessKeyboardEvent(window, message, wParam, lParam);
+                return true;
+            case WM_IME_STARTCOMPOSITION:
+            case WM_IME_COMPOSITION:
+            case WM_IME_ENDCOMPOSITION:
+            case WM_IME_CHAR:
+                return HandleIme(resource, window, message, lParam);
+            case WM_MOUSEMOVE:
+            case WM_LBUTTONDOWN:
+            case WM_LBUTTONDBLCLK:
+            case WM_LBUTTONUP:
+            case WM_RBUTTONDOWN:
+            case WM_RBUTTONUP:
+            case WM_MBUTTONDOWN:
+            case WM_MBUTTONUP:
+            case WM_MOUSEWHEEL: {
+                resource->ProcessMouseEvent(window, message, wParam, lParam);
+                _lastResourceMouseMessage = Clock::now();
+                POINT point {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                if (message == WM_MOUSEWHEEL) {
+                    ScreenToClient(window, &point);
+                }
+                _cursorX = std::clamp(static_cast<int>(point.x), 0, std::max(0, _viewportWidth - 1));
+                _cursorY = std::clamp(static_cast<int>(point.y), 0, std::max(0, _viewportHeight - 1));
+                _mouseX = _cursorX;
+                _mouseY = _cursorY;
+                if (message == WM_LBUTTONDOWN || message == WM_LBUTTONDBLCLK) _mouseButtons |= SDK::Graphics::kMouseLeft;
+                if (message == WM_LBUTTONUP) _mouseButtons &= ~SDK::Graphics::kMouseLeft;
+                if (message == WM_RBUTTONDOWN) _mouseButtons |= SDK::Graphics::kMouseRight;
+                if (message == WM_RBUTTONUP) _mouseButtons &= ~SDK::Graphics::kMouseRight;
+                if (message == WM_MBUTTONDOWN) _mouseButtons |= SDK::Graphics::kMouseMiddle;
+                if (message == WM_MBUTTONUP) _mouseButtons &= ~SDK::Graphics::kMouseMiddle;
+                SetResourceCursor(resource, _cursorX, _cursorY, (_mouseButtons & SDK::Graphics::kMouseLeft) != 0);
+                return true;
+            }
+            default: break;
+            }
+        }
         switch (message) {
         case WM_KEYDOWN:
         case WM_SYSKEYDOWN:
@@ -695,7 +772,7 @@ namespace Mafia1Online::Features::WebUi {
         case WM_IME_STARTCOMPOSITION:
         case WM_IME_COMPOSITION:
         case WM_IME_ENDCOMPOSITION:
-        case WM_IME_CHAR: return _captured && HandleIme(window, message, lParam);
+        case WM_IME_CHAR: return _captured && HandleIme(_view, window, message, lParam);
         default: return false;
         }
     }
@@ -747,8 +824,8 @@ namespace Mafia1Online::Features::WebUi {
 
     // Off-screen CEF has no window for the IME to draw into, so compositions
     // go through the browser host's IME API instead of WM_IME_CHAR.
-    bool WebUiService::HandleIme(HWND window, UINT message, LPARAM lParam) {
-        auto browser = _view->GetBrowser();
+    bool WebUiService::HandleIme(Framework::GUI::View *target, HWND window, UINT message, LPARAM lParam) {
+        auto browser = target->GetBrowser();
         if (!browser) {
             return false;
         }
@@ -783,8 +860,15 @@ namespace Mafia1Online::Features::WebUi {
         return true;
     }
 
-    void WebUiService::ForwardMouse(Screen live) {
-        auto browser = _view->GetBrowser();
+    void WebUiService::SetResourceCursor(Framework::GUI::View *target, int x, int y, bool pressed) {
+        // Blink captures native scrollbars before dispatching page mousemove.
+        // Drive the software cursor from the coordinates delivered to CEF.
+        target->EvaluateScript("window.__m1oSetCursor&&window.__m1oSetCursor(" + std::to_string(x) + "," + std::to_string(y) + "," +
+            (pressed ? "true" : "false") + "," + std::to_string(_viewportWidth) + "," + std::to_string(_viewportHeight) + ")");
+    }
+
+    void WebUiService::ForwardMouse(Screen live, Framework::GUI::View *target) {
+        auto browser = target->GetBrowser();
         if (!browser) {
             return;
         }
@@ -805,6 +889,8 @@ namespace Mafia1Online::Features::WebUi {
         }
         const auto now  = Native::MouseButtons();
         const int wheel = Native::MouseWheel();
+        const bool moved = x != _mouseX || y != _mouseY;
+        const bool buttonsChanged = now != _mouseButtons;
 
         CefMouseEvent event;
         event.x         = x;
@@ -829,6 +915,9 @@ namespace Mafia1Online::Features::WebUi {
         if (wheel != 0) {
             host->SendMouseWheelEvent(event, 0, wheel);
         }
+        if (target != _view && (moved || buttonsChanged)) {
+            SetResourceCursor(target, x, y, (now & SDK::Graphics::kMouseLeft) != 0);
+        }
     }
 
     void WebUiService::OnPresent() {
@@ -850,8 +939,36 @@ namespace Mafia1Online::Features::WebUi {
         }
 
         const Screen live = LiveScreen();
-        if (_windowActive && (live == Screen::Menu || (live == Screen::Game && _captured))) {
-            ForwardMouse(live);
+        auto *resource = FocusedResourceView();
+        // A modal resource view may deliberately leave transparent pixels for
+        // native model rendering. Keep the built-in chat/HUD page out of that
+        // viewport while the modal owns focus; its browser stays alive.
+        if (_view && _view->ShouldDisplay() == (resource != nullptr)) {
+            _view->Display(resource == nullptr);
+        }
+        const bool resourceMouseRecent = resource && Clock::now() - _lastResourceMouseMessage < std::chrono::milliseconds(250);
+        if (_windowActive && resource) {
+            if (_mouseTargetId != resource->GetId()) {
+                _mouseTargetId = resource->GetId();
+                _mouseX = -1;
+                _mouseY = -1;
+                _mouseButtons = 0;
+                _cursorX = _viewportWidth / 2;
+                _cursorY = _viewportHeight / 2;
+            }
+            if (!resourceMouseRecent) {
+                ForwardMouse(live, resource);
+            }
+        }
+        else if (_windowActive && (live == Screen::Menu || (live == Screen::Game && _captured))) {
+            _mouseTargetId = -1;
+            ForwardMouse(live, _view);
+        }
+        else {
+            _mouseTargetId = -1;
+        }
+        if (_view && _view->HasFocus() != (_captured && _windowActive && !resource)) {
+            _view->Focus(_captured && _windowActive && !resource);
         }
         if (live == Screen::Hidden || live != _pageScreen) {
             return;

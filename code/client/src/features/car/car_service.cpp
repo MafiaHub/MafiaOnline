@@ -31,6 +31,7 @@
 #include <array>
 #include <cmath>
 #include <iterator>
+#include <limits>
 #include <string>
 #include <unordered_set>
 
@@ -86,6 +87,7 @@ namespace Mafia1Online::Features::Car {
     }
 
     void CarService::Update(World::WorldService &world) {
+        _world = &world;
         if (_simulatedSerial != _updateSerial) {
             _simulatedCars.clear();
         }
@@ -98,6 +100,29 @@ namespace Mafia1Online::Features::Car {
             }
             Reset();
             return;
+        }
+        if (_waterCamera) {
+            auto *local = SDK::Player::CurrentPlayer();
+            if (local && local != _waterCamera->player.object &&
+                world.NativeObjects().Resolve(_waterCamera->player) != local) {
+                // A new local life has replaced the drowned occupant. Release
+                // only the pose we locked, so a script's later camera lock wins.
+                auto *mission = SDK::Core::Mission::Get();
+                auto *scene = mission ? mission->GetScene() : nullptr;
+                auto *camera = scene ? scene->ActiveCamera() : nullptr;
+                if (camera) {
+                    const auto eye = camera->WorldPosition();
+                    const auto facing = camera->WorldDirection();
+                    const glm::vec3 position(eye.x, eye.y, eye.z);
+                    const glm::vec3 direction(facing.x, facing.y, facing.z);
+                    if (glm::length(position - _waterCamera->position) < 0.01f &&
+                        glm::length(direction - _waterCamera->direction) < 0.01f) {
+                        mission->Game()->Camera().Unlock();
+                        mission->Game()->RecomputeLightCache();
+                    }
+                }
+                _waterCamera.reset();
+            }
         }
 
         std::unordered_set<uint64_t> seen;
@@ -216,7 +241,8 @@ namespace Mafia1Online::Features::Car {
                     }
                 }
                 SyncRepair(world, it->first, it->second);
-                if (it->second.simulationController) {
+                const auto *state = replication->GetEntity<Shared::Entities::CarEntity>(it->first);
+                if (it->second.simulationController && (!state || state->terminalState == Shared::Entities::CarEntity::TerminalState::Active)) {
                     SyncDamage(world, it->first, it->second);
                     SyncMesh(world, it->first, it->second);
                     ApplyAuthoritativeHits(world, it->first, it->second);
@@ -226,18 +252,30 @@ namespace Mafia1Online::Features::Car {
                     ReportMesh(world, it->first, it->second);
                     DetectTerminal(world, it->first, it->second);
                 }
+                else if (it->second.simulationController && state &&
+                         (state->terminalState == Shared::Entities::CarEntity::TerminalState::Submerged ||
+                          state->terminalState == Shared::Entities::CarEntity::TerminalState::FatalFall)) {
+                    // The same native car keeps falling under its own physics
+                    // until the gamemode removes it or retail deactivates it.
+                    ReportMovement(world, it->first, it->second);
+                }
                 else {
                     // The pose is written by DriveObserver inside the actor
                     // tick. A car the game did not tick this frame (inactive)
                     // is placed here instead; a terminal car keeps its final
                     // native state.
                     Framework::Utils::TransformSnapshot pose;
-                    const auto *state = replication->GetEntity<Shared::Entities::CarEntity>(it->first);
-                    if (it->second.drivenSerial + 1 != _updateSerial && state && state->terminalState == Shared::Entities::CarEntity::TerminalState::Active &&
-                        Sample(it->first, pose)) {
-                        ApplyPose(world, it->first, pose);
+                    if (it->second.drivenSerial + 1 != _updateSerial && state) {
+                        if ((state->terminalState == Shared::Entities::CarEntity::TerminalState::Active ||
+                             state->terminalState == Shared::Entities::CarEntity::TerminalState::Submerged ||
+                             state->terminalState == Shared::Entities::CarEntity::TerminalState::FatalFall) && Sample(it->first, pose)) {
+                            ApplyPose(world, it->first, pose);
+                        }
                     }
-                    SyncDynamics(world, it->first, it->second);
+                    if (!state || (state->terminalState != Shared::Entities::CarEntity::TerminalState::Submerged &&
+                                   state->terminalState != Shared::Entities::CarEntity::TerminalState::FatalFall)) {
+                        SyncDynamics(world, it->first, it->second);
+                    }
                     SyncDamage(world, it->first, it->second);
                     SyncMesh(world, it->first, it->second);
                 }
@@ -1087,6 +1125,12 @@ namespace Mafia1Online::Features::Car {
         if (!car || !actor) {
             return;
         }
+        if (car->terminalState != Shared::Entities::CarEntity::TerminalState::Active) {
+            if (actor->EngineOn() != car->engineOn) {
+                actor->SetEngineOn(car->engineOn, true);
+            }
+            return;
+        }
         if (stream.simulationController) {
             if (!stream.hasReportedEngineState) {
                 if (actor->EngineOn() != car->engineOn) {
@@ -1156,20 +1200,11 @@ namespace Mafia1Online::Features::Car {
         if (state->terminalState == Shared::Entities::CarEntity::TerminalState::Exploded) {
             ApplyAuthoritativeExplosion(actor);
         }
-        else if (state->terminalState == Shared::Entities::CarEntity::TerminalState::Submerged ||
-                 state->terminalState == Shared::Entities::CarEntity::TerminalState::OutOfBounds) {
-            // Retail has no sink routine: a car below water or in a fall
-            // volume ends deactivated and unusable through SetActState(2),
-            // C_car::ChangeState and DeactivateCar. Reproduce that end state
-            // at the server's final pose; late joiners skip the splash.
-            const Framework::Utils::TransformSnapshot final {state->position, glm::vec3(0.0f), state->rotation};
-            if (IsFinite(final) && glm::length(final.rotation) >= 0.0001f) {
-                ApplyPose(world, networkId, final, true);
-            }
-            actor->SetEngineOn(false, true);
-            using SetActState = void(__thiscall *)(SDK::Player::NativeActor *, int32_t);
-            reinterpret_cast<SetActState>(SDK::Player::kActorSetActState)(actor, 2);
+        else if (state->terminalState == Shared::Entities::CarEntity::TerminalState::Submerged) {
+            CaptureWaterCamera(world, networkId, *actor);
         }
+        // Fall hazards also retain the native car's own physics. Retail will
+        // deactivate it if its falling velocity becomes invalid.
     }
 
     bool CarService::AllowNativeDeactivation(World::WorldService &world, void *car) const {
@@ -1194,33 +1229,81 @@ namespace Mafia1Online::Features::Car {
         if (!actor) {
             return;
         }
-        // The same checks retail makes: a wheel on water (31) or a fall volume
-        // (40) at 0x4216ca, and C_car's -85 falling-velocity cutoff at 0x4211c1.
-        using State = Shared::Entities::CarEntity::TerminalState;
-        auto terminal = State::Active;
+        // A water or fall-volume collision reports directly from the native
+        // body callback. The remaining retail invalid-vehicle outcome is a
+        // falling velocity below -85, not a coordinate-based map test.
         const auto &vehicle = actor->Vehicle();
-        for (int i = 0; i < vehicle.WheelCount() && terminal == State::Active; ++i) {
-            if (const auto *wheel = vehicle.Wheel(i)) {
-                if (wheel->surfaceMaterial == 31) {
-                    terminal = State::Submerged;
-                }
-                else if (wheel->surfaceMaterial == 40) {
-                    terminal = State::OutOfBounds;
-                }
-            }
-        }
-        if (terminal == State::Active && vehicle.LinearVelocity().y < -85.0f) {
-            terminal = State::OutOfBounds;
-        }
-        if (terminal == State::Active) {
+        const float fallingVelocity = vehicle.LinearVelocity().y;
+        if (!std::isfinite(fallingVelocity) || fallingVelocity >= -85.0f) {
             return;
         }
         Shared::Car::TerminalIntent intent;
         intent.networkId = networkId;
         intent.missionGeneration = state->missionGeneration;
-        intent.state = static_cast<uint8_t>(terminal);
+        intent.state = static_cast<uint8_t>(Shared::Entities::CarEntity::TerminalState::FatalFall);
         Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(intent);
         stream.terminalReported = true;
+    }
+
+    void CarService::CaptureWaterCamera(World::WorldService &world, uint64_t networkId, SDK::Car::NativeCar &car) {
+        auto *local = SDK::Player::CurrentPlayer();
+        auto *scene = SDK::Core::Mission::Get()->GetScene();
+        if (!local || !scene || !scene->ActiveCamera() ||
+            static_cast<SDK::Seat::NativeHuman *>(static_cast<void *>(local))->usedActorEnter !=
+                static_cast<SDK::Player::NativeActor *>(&car)) {
+            return;
+        }
+        const auto handle = world.NativeObjects().FindByNative(local);
+        if (!handle.networkId || !world.NativeObjects().Resolve(handle)) {
+            return;
+        }
+        auto *camera = scene->ActiveCamera();
+        const auto eye = camera->WorldPosition();
+        const auto facing = camera->WorldDirection();
+        const glm::vec3 position(eye.x, eye.y, eye.z);
+        const glm::vec3 direction(facing.x, facing.y, facing.z);
+        if (!IsFiniteVector(position) || !IsFiniteVector(direction) || glm::length(direction) < 0.5f) {
+            return;
+        }
+        _waterCamera = WaterCamera {handle, networkId, position, direction};
+        SDK::Core::Mission::Get()->Game()->Camera().LockAt(eye, facing);
+    }
+
+    void CarService::OnNativeWorldCollision(World::WorldService &world, SDK::Car::NativeCar *car, uint8_t material) {
+        if (!world.IsReady() || (material != 31 && material != 40)) {
+            return;
+        }
+        const auto handle = world.NativeObjects().FindByNative(car);
+        auto *replication = Framework::CoreModules::GetReplication();
+        const auto *state = handle.networkId && replication ? replication->GetEntity<Shared::Entities::CarEntity>(handle.networkId) : nullptr;
+        const auto stream = _streams.find(handle.networkId);
+        if (!state || state->missionGeneration != world.LoadedMissionGeneration() ||
+            state->terminalState != Shared::Entities::CarEntity::TerminalState::Active ||
+            stream == _streams.end() || stream->second.terminalReported || !stream->second.simulationController ||
+            state->simulationControllerGuid != static_cast<uint64_t>(replication->GetMyGUID())) {
+            return;
+        }
+        Shared::Car::TerminalIntent intent;
+        intent.networkId = handle.networkId;
+        intent.missionGeneration = state->missionGeneration;
+        intent.state = static_cast<uint8_t>(material == 31 ?
+            Shared::Entities::CarEntity::TerminalState::Submerged : Shared::Entities::CarEntity::TerminalState::FatalFall);
+        Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(intent);
+        stream->second.terminalReported = true;
+        if (material == 31) {
+            CaptureWaterCamera(world, handle.networkId, *car);
+        }
+    }
+
+    void CarService::OnLocalHumanDeath(World::WorldService &world, void *human) {
+        if (!_waterCamera || _waterCamera->player.object != human ||
+            world.NativeObjects().Resolve(_waterCamera->player) != human || !world.IsReady()) {
+            return;
+        }
+        const auto camera = *_waterCamera;
+        SDK::Core::Mission::Get()->Game()->Camera().LockAt(
+            {camera.position.x, camera.position.y, camera.position.z},
+            {camera.direction.x, camera.direction.y, camera.direction.z});
     }
 
     bool CarService::OnNativeExplosion(World::WorldService &world, SDK::Car::NativeCar *car) {
@@ -1285,10 +1368,12 @@ namespace Mafia1Online::Features::Car {
         it->second.frame->SetDirection({direction.x, direction.y, direction.z}, RollForDirection(pose.rotation, direction));
         it->second.frame->Update();
         actor->SetStoredTransform({corrected.x, corrected.y, corrected.z}, {direction.x, direction.y, direction.z});
+        const auto *state = Framework::CoreModules::GetReplication()->GetEntity<Shared::Entities::CarEntity>(networkId);
         if (snap) {
             ResetNativePhysics(*actor, networkId);
         }
-        else if (const auto stream = _streams.find(networkId); stream != _streams.end() && !stream->second.simulationController) {
+        else if (const auto stream = _streams.find(networkId); stream != _streams.end() &&
+                     (!stream->second.simulationController || (state && state->terminalState == Shared::Entities::CarEntity::TerminalState::Submerged))) {
             // An observer's native physics would otherwise settle the car on
             // its own, e.g. onto a missing wheel, and bullets test the dynamic
             // collision at that physics pose rather than at the frame.
@@ -1485,6 +1570,18 @@ namespace Mafia1Online::Features::Car {
         const auto nativeCar = _nativeById.find(networkId);
         auto *replication = Framework::CoreModules::GetReplication();
         const auto *state = replication ? replication->GetEntity<Shared::Entities::CarEntity>(networkId) : nullptr;
+        if (_world && state && (state->terminalState == Shared::Entities::CarEntity::TerminalState::Submerged ||
+                               state->terminalState == Shared::Entities::CarEntity::TerminalState::FatalFall) &&
+            nativeCar != _nativeById.end() && !nativeCar->second.removalQueued && streamIt != _streams.end() &&
+            !streamIt->second.simulationController) {
+            Framework::Utils::TransformSnapshot pose {state->position, state->velocity, state->rotation};
+            Sample(networkId, pose);
+            if (IsFinite(pose) && glm::length(pose.rotation) >= 0.0001f) {
+                ApplyPose(*_world, networkId, pose);
+            }
+            streamIt->second.drivenSerial = _updateSerial;
+            return true;
+        }
         if (streamIt == _streams.end() || streamIt->second.simulationController || nativeCar == _nativeById.end() || nativeCar->second.removalQueued || !state ||
             state->terminalState != Shared::Entities::CarEntity::TerminalState::Active || streamIt->second.poses.empty()) {
             return false;
@@ -1593,6 +1690,8 @@ namespace Mafia1Online::Features::Car {
     }
 
     void CarService::Reset() {
+        _world = nullptr;
+        _waterCamera.reset();
         _streams.clear();
     }
 } // namespace Mafia1Online::Features::Car

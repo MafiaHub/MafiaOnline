@@ -953,6 +953,41 @@ declare global {
    */
   const Scene: {
     /**
+     * Returns valid stock car IDs, display names and color-zero model filenames from the live native car database. Empty before initialization.
+     */
+    getCarCatalog(): CarCatalogEntry[];
+
+    /**
+     * Loads a stock .i3d into a private client-only showroom scene for 2D rendering. Returns null if unavailable or eight previews already exist.
+     */
+    createPreview(model: string): number | null;
+
+    /**
+     * Changes a preview's stock model; the old model stays if loading fails.
+     */
+    setPreviewModel(handle: number, model: string): boolean;
+
+    /**
+     * Sets preview pitch and roll in radians. Draw.preview supplies yaw and zoom per frame.
+     */
+    setPreviewTilt(handle: number, pitch: number, roll: number): boolean;
+
+    /**
+     * Returns a snapshot of a named child frame in the preview model, or null if unavailable.
+     */
+    getPreviewFrame(handle: number, name: string): PreviewFrame | null;
+
+    /**
+     * Changes a named child frame in the private preview scene. It never edits mission or replicated frames; invalid names or expired previews return false.
+     */
+    setPreviewFrame(handle: number, name: string, changes: { worldPosition?: Vector3 | { x: number; y: number; z: number }; rotation?: { w: number; x: number; y: number; z: number }; scale?: number | Vector3 | { x: number; y: number; z: number }; visible?: boolean }): boolean;
+
+    /**
+     * Releases a private showroom scene and its native frames.
+     */
+    destroyPreview(handle: number): boolean;
+
+    /**
      * Loads a stock .i3d as a non-interactive local model. Returns null if unavailable or the 128-frame cap is reached.
      */
     createModel(filename: string): number | null;
@@ -1043,6 +1078,56 @@ declare global {
   };
 
   /**
+   * One spawnable stock car from the loaded game's highest-priority carindex.def table.
+   */
+  interface CarCatalogEntry {
+    /**
+     * Native base car ID accepted by the server's stock car catalog.
+     */
+    id: number;
+
+    /**
+     * Retail display name decoded to UTF-8 from the game's native code page.
+     */
+    name: string;
+
+    /**
+     * Stock color-zero .i3d filename for preview and vehicle spawning.
+     */
+    model: string;
+  }
+
+  /**
+   * Snapshot of a named child in a private model preview. Look it up again after replacing the model.
+   */
+  interface PreviewFrame {
+    /**
+     * Native child frame name.
+     */
+    name: string;
+
+    /**
+     * Current world position inside the private showroom scene.
+     */
+    worldPosition: Vector3;
+
+    /**
+     * Current local quaternion.
+     */
+    rotation: { w: number; x: number; y: number; z: number };
+
+    /**
+     * Current local scale.
+     */
+    scale: Vector3;
+
+    /**
+     * Native frame visibility flag.
+     */
+    visible: boolean;
+  }
+
+  /**
    * Projection of a world point into the current game viewport.
    */
   interface WorldProjection {
@@ -1100,6 +1185,13 @@ declare global {
      * Projects and queues centered text only when on screen and not blocked by static world geometry.
      */
     worldText(text: string, position: Vector3 | { x: number; y: number; z: number }, size: number, argb: number, font?: number, checkOcclusion?: boolean): boolean;
+
+    /**
+     * Queues a stock 3D model for a screen-pixel rectangle. Draws after the game scene and before CEF, clearing the viewport to a dark background. Call each Events.render tick.
+     * @param yaw Radians; 0 faces the model's native forward orientation.
+     * @param zoom 0.5 to 2.5; 1 is stock framing, larger is closer.
+     */
+    preview(handle: number, x: number, y: number, width: number, height: number, yaw?: number, zoom?: number): boolean;
   };
 
   /**

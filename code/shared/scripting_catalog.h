@@ -173,14 +173,14 @@ namespace Mafia1Online::Scripting {
         events.add_property("pickupTaken", "[pickup: Pickup | null, player: Player | null, info: PickupEventInfo]", "Dispatched after the server moved a pickup into a player's inventory. The pickup handle is null when nothing is left on the ground.");
 
         events.add_property("vehicleSpawn", "[vehicle: Vehicle]", "Dispatched after Vehicle.spawn created a vehicle.");
-        events.add_property("vehicleDestroy", "[vehicle: Vehicle]", "Dispatched by Vehicle.destroy immediately before the vehicle is removed. A mission change removes every vehicle without this event.");
+        events.add_property("vehicleDestroy", "[vehicle: Vehicle]", "Dispatched immediately before Vehicle.destroy removes the vehicle. A mission change removes every vehicle without this event.");
         for (const char *name : {"vehicleEngineChange", "vehicleFuelChange", "vehicleLightsChange", "vehicleHornChange", "vehicleSirenChange", "vehicleGearChange", "vehicleDamageState"}) {
             events.add_property(name, "[vehicle: Vehicle]", "Dispatched after the matching vehicle state changed, from its simulation controller or a script.");
         }
         events.add_property("vehicleDamage", "[vehicle: Vehicle, damage: VehicleDamage | null]", "Dispatched when the native per-part damage snapshot changes.");
         events.add_property("vehicleOpacityChange", "[vehicle: Vehicle]", "Dispatched after Vehicle.setOpacity changes the server-owned opacity.");
         events.add_property("vehicleRepair", "[vehicle: Vehicle]", "Dispatched after Vehicle.repair starts a native damage and deformation reset on every client; a fresh damage snapshot follows from the simulation controller.");
-        events.add_property("vehicleTerminal", "[vehicle: Vehicle, state: number]", "Dispatched once a vehicle exploded (1), sank (2) or left the map (3). Occupants die through server combat first.");
+        events.add_property("vehicleTerminal", "[vehicle: Vehicle, state: number]", "Dispatched when a vehicle explodes (1), its native body hits water (2), or it enters a fall volume or native invalid-fall state (3). Water and fall occupants die through server combat immediately after this event; explosion occupants die before it. Scripts decide when to destroy the car.");
 
         auto &hit = catalog.data_type("VehicleHitInfo", "An accepted firearm pellet against a vehicle.");
         hit.add_property("shooter", "Player | null", "Player who fired, or null when they have left.");
@@ -199,11 +199,13 @@ namespace Mafia1Online::Scripting {
 
         auto &seat = catalog.data_type("VehicleSeatInfo", "An accepted seat transition.");
         seat.add_property("seat", "number", "Seat index; 0 is the driver.");
+        seat.add_property("fromSeat", "number | null", "Previous seat for a native climb across the car; otherwise null.");
         seat.add_property("stolen", "boolean", "True when the player pulled the previous driver out.");
         seat.add_property("serverSequence", "number", "Server seat sequence of the transition.");
         events.add_property("vehiclePlayerEntering", "[vehicle: Vehicle, player: Player, info: VehicleSeatInfo]", "Dispatched when the server accepts the start of a native enter or steal.");
         events.add_property("vehiclePlayerEntered", "[vehicle: Vehicle, player: Player, info: VehicleSeatInfo]", "Dispatched when a player sits in a seat, natively or through Player.putInVehicle.");
         events.add_property("vehiclePlayerExited", "[vehicle: Vehicle, player: Player, info: VehicleSeatInfo]", "Dispatched when a player leaves a seat, including by death, respawn or removeFromVehicle.");
-        events.add_property("vehiclePlayerExitBlocked", "[vehicle: Vehicle, player: Player, info: VehicleSeatInfo]", "Dispatched when a native exit was blocked.");
+        events.add_property("vehiclePlayerExitBlocked", "[vehicle: Vehicle, player: Player, info: VehicleSeatInfo]", "Dispatched when a script records an administrative blocked exit; native blocked exits use seat transfer or the retail emergency exit.");
+        events.add_property("vehiclePlayerSeatChanged", "[vehicle: Vehicle, player: Player, info: VehicleSeatInfo]", "Dispatched after a blocked-side exit moves the player into the paired seat. info.fromSeat is the prior seat.");
     }
 } // namespace Mafia1Online::Scripting

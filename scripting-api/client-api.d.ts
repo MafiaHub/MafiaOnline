@@ -322,8 +322,44 @@ interface SceneFrame {
     destroy(): boolean;
 }
 
+interface CarCatalogEntry {
+    /** Native base ID used by the stock car database and validated by the server. */
+    id: number;
+    /** Retail display name. */
+    name: string;
+    /** Stock color-zero .i3d filename. */
+    model: string;
+}
+
+interface PreviewFrame {
+    name: string;
+    worldPosition: Vector3;
+    rotation: RotationLike;
+    scale: Vector3;
+    visible: boolean;
+}
+
 /** Client-only scene frames; handles expire on mission unload or disconnect. */
 declare const Scene: {
+    /** Returns valid stock car IDs, display names and default-color model filenames from the loaded game. */
+    getCarCatalog(): CarCatalogEntry[];
+    /** Loads a stock .i3d into a private, client-only showroom scene. Up to eight previews may exist. */
+    createPreview(model: string): number | null;
+    /** Replaces a preview model; its existing model stays if loading fails. */
+    setPreviewModel(handle: number, model: string): boolean;
+    /** Sets pitch and roll in radians; Draw.preview supplies yaw per frame. */
+    setPreviewTilt(handle: number, pitch: number, roll: number): boolean;
+    /** Reads a named child frame; null if no frame exists or the preview expired. */
+    getPreviewFrame(handle: number, name: string): PreviewFrame | null;
+    /** Changes a named child frame only inside this preview. */
+    setPreviewFrame(handle: number, name: string, changes: {
+        worldPosition?: PositionLike;
+        rotation?: RotationLike;
+        scale?: number | PositionLike;
+        visible?: boolean;
+    }): boolean;
+    /** Releases the private showroom scene and its native frames. */
+    destroyPreview(handle: number): boolean;
     /** Loads a stock .i3d visual model. Returns null if missing or at the 128-frame cap. */
     createModel(filename: string): number | null;
     /** Checks that a stock model can safely be used as a native human. */
@@ -353,6 +389,8 @@ declare const Scene: {
 
 /** Per-frame 2D overlay commands; call from Events.on("render"). Colors are 0xAARRGGBB. */
 declare const Draw: {
+    /** Draws a model preview in a screen-pixel rectangle before CEF composition. Yaw is radians; zoom is 0.5–2.5 (default 1). Call each render tick. */
+    preview(handle: number, x: number, y: number, width: number, height: number, yaw?: number, zoom?: number): boolean;
     rect(x: number, y: number, width: number, height: number, argb: number): boolean;
     line(x1: number, y1: number, x2: number, y2: number, thickness: number, argb: number): boolean;
     circle(x: number, y: number, radius: number, argb: number): boolean;

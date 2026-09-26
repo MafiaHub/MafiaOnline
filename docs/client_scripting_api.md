@@ -188,6 +188,28 @@ default. Native text uses the game's stock font slots 0–3; slot 3 is the
 default. For packaged custom fonts and CSS text styling, use a resource-owned
 [Web view](#web) with `@font-face` and its `Web.emit` page bridge.
 
+For a 3D model inside a 2D dialog, call `Scene.createPreview("thunderbird00.i3d")`
+once and `Draw.preview(handle, x, y, width, height, yaw?, zoom?)` from each
+`render` event. The rectangle uses game backbuffer pixels. The preview draws
+after the mission scene and before the web view, and clears only its rectangle
+to a dark background. `yaw` is in radians; `zoom` is 0.5–2.5, with larger
+values moving the camera closer. `Scene.setPreviewTilt(handle, pitch, roll)`
+adds pitch and roll in radians. `Scene.setPreviewModel(handle, filename)` swaps
+the stock model without changing the handle. For named children,
+`Scene.getPreviewFrame(handle, name)` returns a snapshot and
+`Scene.setPreviewFrame(handle, name, { worldPosition?, rotation?, scale?, visible? })`
+edits only that preview's frame. These calls cannot alter mission geometry.
+`Scene.destroyPreview(handle)` releases its scene and frames; resource stop and
+mission unload do so automatically. Up to eight previews may exist per client.
+
+`Scene.getCarCatalog()` returns `{ id, name, model }` entries from the loaded
+game's patched stock car database. `name` is the retail display name and
+`model` is its default-color `.i3d` file. It returns an empty list before the
+native database initializes. The [sample car picker](../resources/sample-gamemode/client/car_picker.js)
+uses these entries for `/car`; its server validates the chosen stock ID before
+spawning. A web view's DOM rectangle must be converted from CSS pixels to
+backbuffer pixels, using `Web.getScreenSize()` and the page's dimensions.
+
 ```js
 let model = null;
 Events.on("missionReady", () => { model = Scene.createModelFrame("9money.i3d"); });

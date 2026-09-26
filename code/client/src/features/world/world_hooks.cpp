@@ -14,6 +14,7 @@
 #include <mafia1/sdk/script/native_program.h>
 #include <mafia1/sdk/rail/native_rail_generator.h>
 #include <mafia1/sdk/rail/native_railway.h>
+#include <mafia1/sdk/world/native_bridge.h>
 #include <logging/logger.h>
 
 #include <array>
@@ -31,6 +32,7 @@ namespace Mafia1Online::Features::World {
         using ProgramCallProcess = bool(__thiscall *)(SDK::Script::NativeProgram *, unsigned int);
         using RailGeneratorAI = void(__thiscall *)(SDK::Rail::NativeRailGenerator *, unsigned int);
         using RailwayAI = void(__thiscall *)(SDK::Rail::NativeRailway *, unsigned int);
+        using BridgeGameInit = void(__thiscall *)(SDK::World::NativeBridge *);
         MissionProgram gProgramInitOriginal = nullptr;
         MissionProgram gProgramDoneOriginal = nullptr;
         MissionProgramRun gProgramRunOriginal = nullptr;
@@ -38,6 +40,7 @@ namespace Mafia1Online::Features::World {
         ProgramCallProcess gProgramCallProcessOriginal = nullptr;
         RailGeneratorAI gRailGeneratorAIOriginal = nullptr;
         RailwayAI gRailwayAIOriginal = nullptr;
+        BridgeGameInit gBridgeGameInitOriginal = nullptr;
         using WindowProcedure = LRESULT(__stdcall *)(HWND, UINT, WPARAM, LPARAM);
         WindowProcedure gWindowProcedureOriginal = nullptr;
         bool gNativeMissionActive = false;
@@ -142,6 +145,13 @@ namespace Mafia1Online::Features::World {
             }
         }
 
+        void __fastcall BridgeGameInitHook(SDK::World::NativeBridge *bridge, void *) {
+            gBridgeGameInitOriginal(bridge);
+            if (gNativeMissionActive) {
+                bridge->ShutDown(true);
+            }
+        }
+
         void __fastcall GameTickHook(SDK::Core::Game::NativeGame *game, void *, unsigned int frameTimeMs) {
             if (gNativeMissionActive) {
                 const auto *player = game->Player();
@@ -160,7 +170,7 @@ namespace Mafia1Online::Features::World {
             gGameTickOriginal(game, frameTimeMs);
         }
 
-        constexpr std::array<uintptr_t, 8> kHookAddresses {
+        constexpr std::array<uintptr_t, 9> kHookAddresses {
             SDK::Core::Mission::kClose,
             SDK::Core::Mission::kGlobalProgramGameInit,
             SDK::Core::Mission::kGlobalProgramGameDone,
@@ -169,6 +179,7 @@ namespace Mafia1Online::Features::World {
             SDK::Script::NativeProgram::kCallProcess,
             SDK::Rail::NativeRailGenerator::kAI,
             SDK::Rail::NativeRailway::kAI,
+            SDK::World::kBridgeGameInit,
         };
     } // namespace
 
@@ -193,7 +204,8 @@ namespace Mafia1Online::Features::World {
             || MH_CreateHook(reinterpret_cast<void *>(SDK::Core::Game::kTick), reinterpret_cast<void *>(&GameTickHook), reinterpret_cast<void **>(&gGameTickOriginal)) != MH_OK
             || MH_CreateHook(reinterpret_cast<void *>(SDK::Script::NativeProgram::kCallProcess), reinterpret_cast<void *>(&ProgramCallProcessHook), reinterpret_cast<void **>(&gProgramCallProcessOriginal)) != MH_OK
             || MH_CreateHook(reinterpret_cast<void *>(SDK::Rail::NativeRailGenerator::kAI), reinterpret_cast<void *>(&RailGeneratorAIHook), reinterpret_cast<void **>(&gRailGeneratorAIOriginal)) != MH_OK
-            || MH_CreateHook(reinterpret_cast<void *>(SDK::Rail::NativeRailway::kAI), reinterpret_cast<void *>(&RailwayAIHook), reinterpret_cast<void **>(&gRailwayAIOriginal)) != MH_OK) {
+            || MH_CreateHook(reinterpret_cast<void *>(SDK::Rail::NativeRailway::kAI), reinterpret_cast<void *>(&RailwayAIHook), reinterpret_cast<void **>(&gRailwayAIOriginal)) != MH_OK
+            || MH_CreateHook(reinterpret_cast<void *>(SDK::World::kBridgeGameInit), reinterpret_cast<void *>(&BridgeGameInitHook), reinterpret_cast<void **>(&gBridgeGameInitOriginal)) != MH_OK) {
             UninstallWorldHooks();
             return false;
         }

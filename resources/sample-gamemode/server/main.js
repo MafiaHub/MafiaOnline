@@ -3,12 +3,34 @@
 const spawned = new Map();
 const lastVehicles = new Map();
 const ownedVehicles = new Map();
+const lastCarChoiceAt = new Map();
+const retiringVehicles = new Map();
 let generation = 0;
 let spawnTimer = null;
 
 const COLT = 6;
 const BAT = 4;
 const RESPAWN_DELAY_MS = 5000;
+// IDs and default-color models from patched retail tables/carindex.def in
+// a8.dta. The client reads that table for the display names. A page event
+// supplies only an ID; the server chooses the model filename.
+const CAR_MODELS_BY_ID = [
+    null,
+    "fordttud00.i3d", "fordtto00.i3d", "fordtru00.i3d", "fordtpi00.i3d", "fordtfor00.i3d", "fordtco00.i3d",
+    "foratu00.i3d", "foraro00.i3d", "forapic00.i3d", "forafo00.i3d", "forade00.i3d", "foracou00.i3d", "foraca00.i3d",
+    "chev00.i3d", "forvco00.i3d", "forvfor00.i3d", "forvro00.i3d", "forvto00.i3d", "forvtud00.i3d",
+    "chemafor00.i3d", "chematud00.i3d", "blackha00.i3d", "taxi00.i3d", "pontfor00.i3d", "ponttud00.i3d",
+    "hudcou00.i3d", "hudfor00.i3d", "hudtu00.i3d", "cordca00.i3d", "cordph00.i3d", "cordse00.i3d",
+    "buicou00.i3d", "buikfor00.i3d", "speedster00.i3d", "merced500k00.i3d", "cad_ford00.i3d", "cad_phaeton00.i3d",
+    "cad_road00.i3d", "arrow00.i3d", "hartmann00.i3d", "phantom00.i3d", "deusejco00.i3d", "bugatti00.i3d",
+    "miller00.i3d", "duesenberg00.i3d", "alfa8c00.i3d", "ambulance00.i3d", "fire00.i3d", "hearsea00.i3d",
+    "hearseca00.i3d", "airflfor00.i3d", "airfltud00.i3d", "polcad00.i3d", "poli00.i3d", "polimfor00.i3d",
+    "polimtud00.i3d", "trucka00.i3d", "truckb00.i3d", "alfa00.i3d", "thunderbird00.i3d", "TruckBx00.i3d",
+    "fordhot00.i3d", "buigang00.i3d", "black00.i3d", "lowgas00.i3d", "blackdragon00.i3d", "cord_sedanh00.i3d",
+    "flamer00.i3d", "fordapick00.i3d", "fordapicktaxi00.i3d", "fordth00.i3d", "fthot00.i3d", "hotrodp200.i3d",
+    "hotrodp300.i3d", "hotrodp400.i3d", "hotrodp500.i3d", "chevroletm6h00.i3d", "tbirdold00.i3d",
+    "fordadelh00.i3d", "hotrodp600.i3d", "phantomtaxi00.i3d",
+];
 
 function giveStarterWeapons(player) {
     return player.setInventory([
@@ -34,6 +56,7 @@ function spawnReadyPlayers() {
         spawned.clear();
         lastVehicles.clear();
         ownedVehicles.clear();
+        lastCarChoiceAt.clear();
     }
     if (!World.isReady() || ["freeride", "freeridenoc"].includes(World.getMission())) return;
 
@@ -46,6 +69,29 @@ function spawnReadyPlayers() {
     }
 }
 
+function clearRetiringVehicles() {
+    for (const timer of retiringVehicles.values()) clearTimeout(timer);
+    retiringVehicles.clear();
+}
+
+function retireVehicleAfter(id, missionGeneration, delayMs = 4000) {
+    if (retiringVehicles.has(id)) return;
+    const check = () => {
+        retiringVehicles.delete(id);
+        if (World.getMissionGeneration() !== missionGeneration) return;
+        const vehicle = vehicleById(id);
+        if (!vehicle) return;
+        // A passenger can still be in the old car. Wait for the last occupant
+        // instead of deleting a live multiplayer vehicle under them.
+        if (vehicle.getOccupants().some((occupant) => occupant !== null)) {
+            retiringVehicles.set(id, setTimeout(check, 1000));
+            return;
+        }
+        if (vehicle.destroy()) console.log(`[mafia1online-sample] Retired previous car ${id}`);
+    };
+    retiringVehicles.set(id, setTimeout(check, delayMs));
+}
+
 Events.on("resourceStart", (name) => {
     if (name === "mafia1online-sample") spawnTimer = setInterval(spawnReadyPlayers, 200);
 });
@@ -56,15 +102,18 @@ Events.on("resourceStop", (name) => {
         spawnTimer = null;
     }
     if (name === "mafia1online-sample") {
+        clearRetiringVehicles();
         spawned.clear();
         lastVehicles.clear();
         ownedVehicles.clear();
+        lastCarChoiceAt.clear();
     }
 });
 
 Events.on("playerDisconnect", (player) => {
     spawned.delete(player.id);
     lastVehicles.delete(player.id);
+    lastCarChoiceAt.delete(player.id);
     for (const id of ownedVehicles.get(player.id) ?? []) {
         const vehicle = vehicleById(id);
         if (vehicle && vehicle.getOccupants().every((occupant) => occupant === null)) vehicle.destroy();
@@ -72,15 +121,33 @@ Events.on("playerDisconnect", (player) => {
     ownedVehicles.delete(player.id);
 });
 Events.on("missionChange", () => {
+    clearRetiringVehicles();
     lastVehicles.clear();
     ownedVehicles.clear();
+    lastCarChoiceAt.clear();
 });
 Events.on("vehicleDestroy", (vehicle) => {
+    if (retiringVehicles.has(vehicle.id)) {
+        clearTimeout(retiringVehicles.get(vehicle.id));
+        retiringVehicles.delete(vehicle.id);
+    }
     for (const [playerId, id] of lastVehicles) if (id === vehicle.id) lastVehicles.delete(playerId);
     for (const [playerId, ids] of ownedVehicles) {
         ids.delete(vehicle.id);
         if (ids.size === 0) ownedVehicles.delete(playerId);
     }
+});
+Events.on("vehicleTerminal", (vehicle, state) => {
+    if (state !== 2 && state !== 3) return;
+    const id = vehicle.id;
+    const generation = World.getMissionGeneration();
+    // The engine supplies the splash and fall. This gamemode removes the
+    // terminal car after the death fade and normal respawn have had time to run.
+    setTimeout(() => {
+        if (World.getMissionGeneration() !== generation) return;
+        const current = vehicleById(id);
+        if (current && current.terminalState === state) current.destroy();
+    }, 6000);
 });
 Events.on("missionReady", spawnReadyPlayers);
 Events.on("playerMissionReady", spawnReadyPlayers);
@@ -143,7 +210,28 @@ function currentOrLastVehicle(player) {
     return player.getVehicle() ?? vehicleById(lastVehicles.get(player.id));
 }
 
-// /car [model] spawns the stock model the retail car-spawn cheat uses by default.
+function spawnPersonalCar(player, model) {
+    if (!World.isReady() || !player.spawned || !player.alive) return {ok: false, message: "Enter Free Ride before choosing a car."};
+    if (!/^[A-Za-z0-9_.-]+\.i3d$/.test(model)) return {ok: false, message: "That car model is unavailable."};
+    const oldVehicle = player.getVehicle();
+    const {x, y, z} = oldVehicle?.position ?? player.position;
+    const vehicle = Vehicle.spawn(model, {x: x + 4, y, z}, oldVehicle?.rotation ?? 0, player);
+    if (!vehicle) return {ok: false, message: "Car could not be spawned."};
+    if (!player.putInVehicle(vehicle, 0)) {
+        vehicle.destroy();
+        return {ok: false, message: "The new driver's seat is unavailable."};
+    }
+    if (!vehicle.setRadarMarker(true, 0xe8c57d)) console.warn(`[mafia1online-sample] Could not mark car ${vehicle.id} on the radar`);
+    for (const id of ownedVehicles.get(player.id) ?? []) retireVehicleAfter(id, World.getMissionGeneration());
+    if (!ownedVehicles.has(player.id)) ownedVehicles.set(player.id, new Set());
+    ownedVehicles.get(player.id).add(vehicle.id);
+    lastVehicles.set(player.id, vehicle.id);
+    console.log(`[mafia1online-sample] ${player.nickname} spawned and entered ${model} (${vehicle.id})`);
+    return {ok: true, vehicleId: vehicle.id, message: "You're in your new car. Use /tour to drive the city circuit."};
+}
+
+// /car opens the stock catalog; /car <filename> remains useful for direct
+// testing of a model that does not appear in the retail catalog.
 Events.on("playerCommand", (player, command, args) => {
     const action = command.toLowerCase();
     if (action === "help") {
@@ -151,7 +239,7 @@ Events.on("playerCommand", (player, command, args) => {
         player.sendMessage("Visit Pete, the pump, the dispensary or Salieri's back window. B buys; N selects an offer.");
         player.sendMessage("/doors, /door status|open|openback|close|ajar|lock|unlock show synchronized doors.");
         player.sendMessage("/tour [start|status|cancel] runs a timed city circuit for cash. Drive to each compass marker and stop.");
-        player.sendMessage("/car [model], /repair, /opacity 0-1, /engine, /carstate, /cardamage");
+        player.sendMessage("/car opens the car catalog; /repair, /opacity 0-1, /engine, /carstate, /cardamage");
         player.sendMessage("/weapons bat|shotgun|thompson, /fists, /drop [id], /model [file], /follow [name|off]");
         player.sendMessage("/hud [sound|countdown|watch|score|compass|clear|fade|swing], /suicide");
         return;
@@ -244,30 +332,24 @@ Events.on("playerCommand", (player, command, args) => {
         reportVehicle(player, vehicle, action);
         return;
     }
-    const model = args[0] || "thunderbird00.i3d";
-    if (!/^[A-Za-z0-9_.-]+\.i3d$/.test(model)) {
-        player.sendMessage("Use a model filename such as thunderbird00.i3d");
+    if (args.length === 0) {
+        player.emit("sample:car:open", JSON.stringify({generation: World.getMissionGeneration()}));
         return;
     }
-    if (player.getVehicle()) {
-        player.sendMessage("Leave your current car before spawning another.");
-        return;
-    }
-    const {x, y, z} = player.position;
-    const vehicle = Vehicle.spawn(model, {x: x + 4, y, z}, 0, player);
-    if (!vehicle) {
-        player.sendMessage("Car could not be spawned");
-        return;
-    }
-    for (const id of ownedVehicles.get(player.id) ?? []) {
-        const previous = vehicleById(id);
-        if (previous && previous.getOccupants().every((occupant) => occupant === null)) previous.destroy();
-    }
-    if (!ownedVehicles.has(player.id)) ownedVehicles.set(player.id, new Set());
-    ownedVehicles.get(player.id).add(vehicle.id);
-    lastVehicles.set(player.id, vehicle.id);
-    player.sendMessage(`Your ${model} is parked nearby. Use /tour to drive the city circuit.`);
-    console.log(`[mafia1online-sample] ${player.nickname} spawned ${model} (${vehicle.id})`);
+    const result = spawnPersonalCar(player, args[0]);
+    player.sendMessage(result.message);
+});
+
+Events.onClient("sample:car:choose", (player, request) => {
+    if (!request || request.generation !== World.getMissionGeneration() || !Number.isInteger(request.id)) return;
+    const model = CAR_MODELS_BY_ID[request.id];
+    if (!model) return;
+    const now = Date.now();
+    if (now - (lastCarChoiceAt.get(player.id) ?? 0) < 750) return;
+    lastCarChoiceAt.set(player.id, now);
+    const result = spawnPersonalCar(player, model);
+    player.emit("sample:car:result", JSON.stringify({id: request.id, ...result}));
+    if (result.ok) player.sendMessage(result.message);
 });
 
 // /hud [sound|countdown|watch|score|compass|clear|fade|swing] drives the

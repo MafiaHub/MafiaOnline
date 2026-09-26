@@ -12,6 +12,7 @@ namespace Mafia1Online::Shared::Car {
         Exit = 4,
         ExitBlocked = 5,
         EnterBegin = 6,
+        Move = 7,
     };
 
     struct SeatIntent {

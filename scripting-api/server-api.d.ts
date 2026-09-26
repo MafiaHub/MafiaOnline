@@ -387,7 +387,7 @@ interface WeaponActionInfo {
 interface PickupEventInfo { pickupId: number; weaponId: number; position: { x: number; y: number; z: number } | null; }
 interface VehicleHitInfo { shooter: Player | null; damage: number; position: { x: number; y: number; z: number }; shotSequence: number; pelletIndex: number; }
 interface VehiclePartInfo { debrisId: number; type: number; partIndex: number; position: { x: number; y: number; z: number }; }
-interface VehicleSeatInfo { seat: number; stolen: boolean; serverSequence: number; }
+interface VehicleSeatInfo { seat: number; fromSeat: number | null; stolen: boolean; serverSequence: number; }
 
 /** Native server events. Client events use the separate Events.onClient table. */
 interface ServerEventMap {
@@ -444,6 +444,7 @@ interface ServerEventMap {
     vehiclePlayerEntered: [vehicle: Vehicle, player: Player, info: VehicleSeatInfo];
     vehiclePlayerExited: [vehicle: Vehicle, player: Player, info: VehicleSeatInfo];
     vehiclePlayerExitBlocked: [vehicle: Vehicle, player: Player, info: VehicleSeatInfo];
+    vehiclePlayerSeatChanged: [vehicle: Vehicle, player: Player, info: VehicleSeatInfo];
     vehicleEngineChange: [vehicle: Vehicle];
     vehicleFuelChange: [vehicle: Vehicle];
     vehicleLightsChange: [vehicle: Vehicle];

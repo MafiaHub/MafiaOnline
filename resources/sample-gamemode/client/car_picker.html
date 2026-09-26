@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lost Heaven Motor Pool</title>
+  <style>
+    :root { font-family: Georgia, 'Times New Roman', serif; color: #f2e7d3; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; }
+    body { display: grid; place-items: center; }
+    button, input { font: inherit; }
+    .catalog {
+      display: grid; grid-template-rows: auto minmax(0, 1fr) auto;
+      width: min(1100px, calc(100vw - 32px)); height: min(680px, calc(100vh - 32px));
+      border: 1px solid #a88b5b; background: transparent;
+      box-shadow: 0 22px 70px #000c, inset 0 0 0 5px #1c2220;
+    }
+    .masthead { display: flex; align-items: center; gap: 16px; min-height: 79px; padding: 13px 20px; border-bottom: 1px solid #665a42; background: #111819; }
+    .seal { display: grid; place-items: center; width: 46px; height: 46px; flex: none; border: 2px solid #c5a365; border-radius: 50%; color: #c5a365; font: 700 12px Arial, sans-serif; letter-spacing: -.05em; transform: rotate(-12deg); }
+    .edition { margin: 0 0 3px; color: #c8a86e; font: 700 10px Arial, sans-serif; letter-spacing: .24em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: clamp(23px, 2.5vw, 32px); font-weight: 400; line-height: 1; }
+    .masthead .count { margin-left: auto; color: #bdbaa9; font: 12px Arial, sans-serif; white-space: nowrap; }
+    .content { display: grid; grid-template-columns: clamp(230px, 29%, 310px) minmax(0, 1fr); min-height: 0; }
+    .sidebar { display: flex; flex-direction: column; min-height: 0; padding: 16px; border-right: 1px solid #665a42; background: #e9dfc9; color: #292a24; }
+    .sidebar label { color: #7d342c; font: 700 10px Arial, sans-serif; letter-spacing: .17em; text-transform: uppercase; }
+    .search { width: 100%; margin: 8px 0 12px; padding: 10px 11px; border: 1px solid #ac9d7c; outline: none; background: #f8f1e4; color: #292a24; font: 14px Arial, sans-serif; }
+    .search:focus { border-color: #8d3228; box-shadow: 0 0 0 2px #8d322833; }
+    .list { min-height: 0; overflow-y: auto; scrollbar-color: #a48b61 #ded3bd; }
+    .entry { display: block; width: 100%; padding: 10px 11px; border: 0; border-bottom: 1px solid #d0c3aa; background: transparent; color: #33332a; text-align: left; cursor: pointer; }
+    .entry:hover, .entry:focus-visible { background: #d7c7a8; outline: none; }
+    .entry.selected { background: #80372e; color: #fff3da; }
+    .entry .name { display: block; font-size: 15px; line-height: 1.2; }
+    .entry .file { display: block; margin-top: 3px; opacity: .68; font: 10px Arial, sans-serif; }
+    .empty { padding: 13px 5px; color: #746b5d; font: 13px Arial, sans-serif; }
+    .preview-column { display: flex; flex-direction: column; min-height: 0; background: transparent; }
+    .preview-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; min-height: 49px; padding: 16px; background: #111819; }
+    .preview-head .label { color: #c8a86e; font: 700 10px Arial, sans-serif; letter-spacing: .18em; text-transform: uppercase; }
+    .preview-head .stock { color: #b3b0a1; font: 11px Arial, sans-serif; }
+    .stage { position: relative; min-height: 0; flex: 1; overflow: hidden; border: 1px solid #806b4b; background: transparent; cursor: grab; touch-action: none; }
+    .stage:active { cursor: grabbing; }
+    .stage::after { content: ''; position: absolute; inset: 7px; border: 1px solid #e1c88b66; pointer-events: none; }
+    .stage .number { position: absolute; top: 20px; left: 22px; color: #f2ddb5; text-shadow: 0 2px 6px #000; font: 700 11px Arial, sans-serif; letter-spacing: .17em; pointer-events: none; }
+    .preview-title { min-height: 66px; padding: 13px 16px 7px; background: #111819; font-size: clamp(19px, 2.2vw, 27px); line-height: 1.1; }
+    .preview-title small { display: block; margin-top: 5px; color: #c6bda9; font: 11px Arial, sans-serif; }
+    .footer { display: flex; align-items: center; gap: 15px; min-height: 62px; padding: 10px 18px; border-top: 1px solid #665a42; background: #111819; }
+    .status { flex: 1; min-width: 0; margin: 0; color: #ddc9a7; font: 12px/1.3 Arial, sans-serif; }
+    .actions { display: flex; gap: 9px; }
+    .actions button { min-height: 36px; padding: 8px 15px; border: 1px solid #bda475; background: transparent; color: #f2e7d3; font: 700 11px Arial, sans-serif; letter-spacing: .08em; text-transform: uppercase; cursor: pointer; }
+    .actions .choose { background: #a74233; border-color: #b45141; }
+    .actions button:hover:not(:disabled), .actions button:focus-visible { filter: brightness(1.2); }
+    .actions button:disabled { opacity: .48; cursor: default; }
+    /* CEF paints off-screen, so the OS cursor is not part of this view. */
+    body, body * { cursor: none !important; }
+    .modal-cursor { position: fixed; z-index: 1000; top: 0; left: 0; width: 22px; height: 26px;
+      pointer-events: none; filter: drop-shadow(0 2px 2px #000c); }
+    .modal-cursor.pressed g { transform: scale(.9); }
+    @media (max-width: 720px) {
+      .catalog { grid-template-rows: auto minmax(0, 1fr) auto; }
+      .masthead { min-height: 62px; padding: 10px 14px; }
+      .content { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(125px, 33%) minmax(0, 1fr); }
+      .sidebar { padding: 10px; border-right: 0; border-bottom: 1px solid #665a42; }
+      .search { margin: 5px 0 7px; padding: 7px 8px; }
+      .entry { padding: 7px 8px; }
+      .preview-head { min-height: 34px; padding: 8px 10px; }
+      .preview-title { min-height: 49px; padding: 7px 10px; }
+      .footer { min-height: 53px; padding: 8px 11px; }
+      .footer .status { font-size: 10px; }
+      .actions button { padding: 7px 9px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="catalog" role="dialog" aria-modal="true" aria-labelledby="catalog-title">
+    <header class="masthead">
+      <span class="seal" aria-hidden="true">LH</span>
+      <div><p class="edition">Lost Heaven · Motor Pool</p><h1 id="catalog-title">Choose your car</h1></div>
+      <span class="count" id="count">Loading catalog…</span>
+    </header>
+    <div class="content">
+      <section class="sidebar" aria-label="Available cars">
+        <label for="search">Find a model</label>
+        <input class="search" id="search" type="search" placeholder="Name or model" autocomplete="off" spellcheck="false">
+        <div class="list" id="list" role="listbox" aria-label="Stock car models"></div>
+      </section>
+      <section class="preview-column" aria-label="Car preview">
+        <div class="preview-head"><span class="label">Showroom preview</span><span class="stock">Stock model · Drag to rotate · Scroll to zoom</span></div>
+        <div class="stage" id="stage"><span class="number" id="number"></span></div>
+        <div class="preview-title" id="selected">Select a car<small>All models come from the retail catalog.</small></div>
+      </section>
+    </div>
+    <footer class="footer">
+      <p class="status" id="status">Choose a model and take the wheel.</p>
+      <div class="actions"><button type="button" id="cancel">Close</button><button class="choose" type="button" id="choose" disabled>Drive this car</button></div>
+    </footer>
+  </main>
+  <svg class="modal-cursor" id="modal-cursor" viewBox="0 0 22 26" aria-hidden="true">
+    <g>
+      <path d="M1 1 L1 21 L6.5 16 L10.5 24.5 L14 23 L10 14.8 L17.5 14.8 Z" fill="#f2e6cb" stroke="#1a110b" stroke-width="1.4" stroke-linejoin="round"/>
+      <path d="M3.4 5.6 L3.4 16.4 L6.9 13.2 L8.2 12.9 L13 12.9 Z" fill="#c9a45c" opacity=".75"/>
+    </g>
+  </svg>
+  <script>
+    const list = document.getElementById("list");
+    const search = document.getElementById("search");
+    const stage = document.getElementById("stage");
+    const count = document.getElementById("count");
+    const selected = document.getElementById("selected");
+    const number = document.getElementById("number");
+    const status = document.getElementById("status");
+    const choose = document.getElementById("choose");
+    const modalCursor = document.getElementById("modal-cursor");
+    let state = {models: [], selectedId: null, previewReady: false, pending: false, message: ""};
+    let pointerX = null;
+    let cursorX = window.innerWidth / 2;
+    let cursorY = window.innerHeight / 2;
+
+    // The client also calls this with its authoritative cursor position. A
+    // native scrollbar can capture mousemove before it reaches page handlers.
+    window.__m1oSetCursor = (x, y, pressed, viewportWidth = window.innerWidth, viewportHeight = window.innerHeight) => {
+      cursorX = x * window.innerWidth / viewportWidth;
+      cursorY = y * window.innerHeight / viewportHeight;
+      modalCursor.style.translate = `${cursorX}px ${cursorY}px`;
+      modalCursor.classList.toggle("pressed", Boolean(pressed));
+    };
+    window.__m1oSetCursor(cursorX, cursorY, false);
+    window.addEventListener("mousemove", (event) => window.__m1oSetCursor(event.clientX, event.clientY, modalCursor.classList.contains("pressed")));
+    window.addEventListener("mousedown", () => window.__m1oSetCursor(cursorX, cursorY, true));
+    window.addEventListener("mouseup", () => window.__m1oSetCursor(cursorX, cursorY, false));
+
+    function send(name, payload = {}) {
+      if (typeof callEvent === "function") callEvent(name, JSON.stringify(payload));
+    }
+    function visibleModels() {
+      const query = search.value.trim().toLocaleLowerCase();
+      return state.models.filter((model) => `${model.name} ${model.model}`.toLocaleLowerCase().includes(query));
+    }
+    function reportViewport() {
+      const rect = stage.getBoundingClientRect();
+      send("car:viewport", {x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+        pageWidth: window.innerWidth, pageHeight: window.innerHeight});
+    }
+    function render() {
+      const models = visibleModels();
+      const scrollTop = list.scrollTop;
+      const active = state.models.find((model) => model.id === state.selectedId);
+      list.replaceChildren();
+      for (const model of models) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `entry${model.id === state.selectedId ? " selected" : ""}`;
+        button.setAttribute("role", "option");
+        button.setAttribute("aria-selected", String(model.id === state.selectedId));
+        const name = document.createElement("span");
+        name.className = "name";
+        name.textContent = model.name;
+        const file = document.createElement("span");
+        file.className = "file";
+        file.textContent = model.model;
+        button.append(name, file);
+        button.addEventListener("click", () => send("car:select", {id: model.id}));
+        list.append(button);
+      }
+      if (!models.length) {
+        const empty = document.createElement("p");
+        empty.className = "empty";
+        empty.textContent = "No cars match that search.";
+        list.append(empty);
+      }
+      list.scrollTop = scrollTop;
+      count.textContent = `${models.length} of ${state.models.length} models`;
+      selected.replaceChildren(document.createTextNode(active?.name ?? "Select a car"));
+      const subtitle = document.createElement("small");
+      subtitle.textContent = active?.model ?? "All models come from the retail catalog.";
+      selected.append(subtitle);
+      number.textContent = active ? `MODEL ${String(active.id).padStart(2, "0")}` : "";
+      status.textContent = state.message || "Choose a model and take the wheel.";
+      choose.disabled = state.pending || !state.previewReady;
+      choose.textContent = state.pending ? "Starting…" : "Drive this car";
+    }
+    window.addEventListener("car:state", ({detail}) => {
+      if (!detail || !Array.isArray(detail.models)) return;
+      state = detail;
+      render();
+      reportViewport();
+    });
+    search.addEventListener("input", render);
+    document.getElementById("cancel").addEventListener("click", () => send("car:close"));
+    choose.addEventListener("click", () => send("car:choose"));
+    stage.addEventListener("pointerdown", (event) => { pointerX = event.clientX; stage.setPointerCapture(event.pointerId); });
+    stage.addEventListener("pointermove", (event) => {
+      if (pointerX === null) return;
+      const dx = event.clientX - pointerX;
+      pointerX = event.clientX;
+      if (dx) send("car:rotate", {dx});
+    });
+    stage.addEventListener("pointerup", () => { pointerX = null; });
+    stage.addEventListener("pointercancel", () => { pointerX = null; });
+    stage.addEventListener("wheel", (event) => { event.preventDefault(); send("car:zoom", {delta: event.deltaY}); }, {passive: false});
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { event.preventDefault(); send("car:close"); return; }
+      if (event.key === "Enter") { event.preventDefault(); if (!choose.disabled) send("car:choose"); return; }
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+      event.preventDefault();
+      const models = visibleModels();
+      if (!models.length) return;
+      const index = models.findIndex((model) => model.id === state.selectedId);
+      const next = models[(index + (event.key === "ArrowDown" ? 1 : -1) + models.length) % models.length];
+      send("car:select", {id: next.id});
+    });
+    new ResizeObserver(reportViewport).observe(stage);
+    window.addEventListener("resize", reportViewport);
+  </script>
+</body>
+</html>

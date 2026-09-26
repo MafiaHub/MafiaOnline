@@ -57,5 +57,7 @@ namespace Mafia1Online::Features::World {
         std::unordered_set<uint64_t> _sounds;
         std::unordered_map<std::string, uint64_t> _doors;
         std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> _doorUseAt;
+        std::chrono::steady_clock::time_point _semaphoreEpoch;
+        std::chrono::steady_clock::time_point _lastSemaphoreSync;
     };
 } // namespace Mafia1Online::Features::World

@@ -17,6 +17,7 @@ const cityGuide = {
     tour: null,
     tourUpdatedAt: 0,
     lastSecond: -1,
+    hiddenForCarPicker: false,
 };
 
 function tourSecondsLeft() {
@@ -61,7 +62,17 @@ function showGuide() {
         return;
     }
     cityGuide.pageReady = false;
+    if (cityGuide.hiddenForCarPicker) Web.hideView(cityGuide.view);
 }
+
+Events.on("sample:car:pickerOpened", () => {
+    cityGuide.hiddenForCarPicker = true;
+    if (cityGuide.view !== null) Web.hideView(cityGuide.view);
+});
+Events.on("sample:car:pickerClosed", () => {
+    cityGuide.hiddenForCarPicker = false;
+    if (cityGuide.view !== null) Web.showView(cityGuide.view);
+});
 
 Key.bind("f7", () => {
     if (!LocalPlayer?.spawned || !LocalPlayer.alive) return;

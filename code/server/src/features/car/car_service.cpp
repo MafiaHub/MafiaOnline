@@ -103,7 +103,9 @@ namespace Mafia1Online::Features::Car {
         auto *car = Find(movement.networkId);
         if (!car || senderGuid == 0 || car->simulationControllerGuid != senderGuid || car->missionGeneration != movement.missionGeneration ||
             car->transformRevision != movement.transformRevision || movement.dynamicsCommandRevision > car->dynamicsCommandRevision ||
-            car->terminalState != Shared::Entities::CarEntity::TerminalState::Active) {
+            (car->terminalState != Shared::Entities::CarEntity::TerminalState::Active &&
+             car->terminalState != Shared::Entities::CarEntity::TerminalState::Submerged &&
+             car->terminalState != Shared::Entities::CarEntity::TerminalState::FatalFall)) {
             return false;
         }
         const glm::vec3 position(movement.x, movement.y, movement.z);
@@ -695,22 +697,25 @@ namespace Mafia1Online::Features::Car {
 
     bool CarService::SetTerminalState(uint64_t networkId, Shared::Entities::CarEntity::TerminalState state) {
         auto *car = Find(networkId);
-        if (!car || state > Shared::Entities::CarEntity::TerminalState::OutOfBounds || car->terminalState != Shared::Entities::CarEntity::TerminalState::Active || state == Shared::Entities::CarEntity::TerminalState::Active) {
+        if (!car || state > Shared::Entities::CarEntity::TerminalState::FatalFall || car->terminalState != Shared::Entities::CarEntity::TerminalState::Active || state == Shared::Entities::CarEntity::TerminalState::Active) {
             return false;
         }
         car->terminalState = state;
         ++car->terminalSequence;
-        if (car->engineOn) {
+        if (state == Shared::Entities::CarEntity::TerminalState::Exploded && car->engineOn) {
             car->engineOn = false;
             ++car->engineRevision;
         }
         if (state == Shared::Entities::CarEntity::TerminalState::Exploded) {
             car->health = 0.0f;
         }
-        car->sirenOn = false;
+        if (state == Shared::Entities::CarEntity::TerminalState::Exploded) {
+            car->sirenOn = false;
+        }
         // Terminal cars have no enterable seats. The native explosion ejects
         // the corresponding humans when each client applies this revision.
-        for (uint8_t seat = 0; seat < car->seatCount && seat < Shared::Entities::CarEntity::kMaxSeats; ++seat) {
+        for (uint8_t seat = 0; state == Shared::Entities::CarEntity::TerminalState::Exploded &&
+                               seat < car->seatCount && seat < Shared::Entities::CarEntity::kMaxSeats; ++seat) {
             if (car->occupantIds[seat] == 0) {
                 continue;
             }
@@ -824,7 +829,10 @@ namespace Mafia1Online::Features::Car {
         using Result = Shared::Entities::CarEntity::SeatResult;
         _lastEviction.reset();
         auto *car = Find(intent.carId);
-        if (!car || car->terminalState != Shared::Entities::CarEntity::TerminalState::Active || intent.seat >= car->seatCount || intent.seat >= Shared::Entities::CarEntity::kMaxSeats ||
+        if (!car || (car->terminalState != Shared::Entities::CarEntity::TerminalState::Active &&
+                     !(car->terminalState == Shared::Entities::CarEntity::TerminalState::Submerged &&
+                       (intent.action == Action::Exit || intent.action == Action::ExitBlocked))) ||
+            intent.seat >= car->seatCount || intent.seat >= Shared::Entities::CarEntity::kMaxSeats ||
             intent.playerId != player.GetNetworkID() || intent.spawnGeneration != player.spawnGeneration || intent.missionGeneration != missionGeneration || car->missionGeneration != missionGeneration ||
             player.missionGeneration != missionGeneration || !player.spawned || !player.alive || intent.sequence == 0) {
             return std::nullopt;
@@ -838,7 +846,24 @@ namespace Mafia1Online::Features::Car {
         if (entering && glm::distance(player.position, car->position) > 12.0f) {
             return std::nullopt;
         }
-        if (intent.action == Action::EnterBegin) {
+        if (intent.action == Action::Move) {
+            // reM Do_ClimbInCarLR transfers native ownership before the
+            // climb animation. Move the durable seat in one server update.
+            const uint8_t from = static_cast<uint8_t>(intent.seat ^ 1);
+            if (from >= car->seatCount || car->occupantIds[from] != intent.playerId ||
+                car->occupantGenerations[from] != intent.spawnGeneration || car->occupantIds[intent.seat] != 0 ||
+                (intent.seat & ~1u) != (from & ~1u)) {
+                return std::nullopt;
+            }
+            car->occupantIds[from] = 0;
+            car->occupantGenerations[from] = 0;
+            car->occupantIds[intent.seat] = intent.playerId;
+            car->occupantGenerations[intent.seat] = intent.spawnGeneration;
+            car->seatActorId = intent.playerId;
+            car->seatIndex = intent.seat;
+            car->seatResult = Result::Moved;
+            ++car->seatSequence;
+        } else if (intent.action == Action::EnterBegin) {
             if (car->occupantIds[intent.seat] != 0 || SeatForPlayer(intent.playerId, intent.spawnGeneration)) {
                 return std::nullopt;
             }
@@ -889,7 +914,9 @@ namespace Mafia1Online::Features::Car {
                     ++car->seatSequence;
                     car->seatActorId = playerId;
                     car->seatIndex   = seat;
-                    car->seatResult  = Shared::Entities::CarEntity::SeatResult::Exited;
+                    // Life end/disconnect removes the human without a native
+                    // exit animation on clients still simulating this car.
+                    car->seatResult  = Shared::Entities::CarEntity::SeatResult::Cleared;
                 }
             }
         }

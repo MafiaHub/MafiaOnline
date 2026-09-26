@@ -119,6 +119,20 @@ namespace Mafia1Online::SDK::Core::Game {
             using Call = void(__thiscall *)(NativeGame *, bool);
             reinterpret_cast<Call>(kSetTrafficVisible)(this, visible);
         }
+        void SetSemaphoreCycle(uint16_t cycleMs) {
+            constexpr uint32_t kPhaseMs = 3000;
+            constexpr int32_t kPhaseCount = 10;
+            const int32_t phase = cycleMs / kPhaseMs;
+            _semaphoreTime = cycleMs % kPhaseMs;
+            if (_semaphoreStateX == phase && _semaphoreStateZ == (phase + 5) % kPhaseCount) {
+                return;
+            }
+            _semaphoreStateX = phase;
+            _semaphoreStateZ = (phase + 5) % kPhaseCount;
+            // Retail reads these same fields for the lamps and traffic AI.
+            using Call = void(__thiscall *)(NativeGame *);
+            reinterpret_cast<Call>(0x5ade20)(this); // C_game::TickSemaphores
+        }
         void AddTemporaryActor(Player::NativeActor *actor) {
             using Call = void(__thiscall *)(NativeGame *, Player::NativeActor *);
             reinterpret_cast<Call>(kAddTemporaryActor)(this, actor);
@@ -158,7 +172,12 @@ namespace Mafia1Online::SDK::Core::Game {
         Player::NativeCamera _camera;
         Player::NativeActor *_player;
         Player::NativeActor *_human;
-        std::byte _unusedEC[0xe8];
+        std::byte _unusedEC[0x194 - 0xec];
+        uint32_t _semaphoreTime;
+        uint32_t _semaphorePeriod;
+        int32_t _semaphoreStateX;
+        int32_t _semaphoreStateZ;
+        std::byte _unused1a4[0x1d4 - 0x1a4];
         NativeShootQueue _shootRecords;
         std::byte _unused1e4[0x28f4];
         bool _playerDeathTriggered;
@@ -176,6 +195,10 @@ namespace Mafia1Online::SDK::Core::Game {
     static_assert(offsetof(NativeGame, _human) == 0xe8);
     static_assert(offsetof(NativeGame, _shootRecords) == 0x1d4);
     static_assert(offsetof(NativeGame, _playerDeathTriggered) == 0x2ad8);
+    static_assert(offsetof(NativeGame, _semaphoreTime) == 0x194);
+    static_assert(offsetof(NativeGame, _semaphorePeriod) == 0x198);
+    static_assert(offsetof(NativeGame, _semaphoreStateX) == 0x19c);
+    static_assert(offsetof(NativeGame, _semaphoreStateZ) == 0x1a0);
     static_assert(offsetof(NativeGame, _gameTime) == 0x2b0c);
     static_assert(offsetof(NativeGame, _playerDeathMenuTimer) == 0x2fd4);
 } // namespace Mafia1Online::SDK::Core::Game

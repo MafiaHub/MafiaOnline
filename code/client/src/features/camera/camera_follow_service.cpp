@@ -93,7 +93,8 @@ namespace Mafia1Online::Features::Camera {
             auto *replication = Framework::CoreModules::GetReplication();
             replication->ForEach<CarEntity>([&](CarEntity *car) {
                 if (native || car->missionGeneration != player.missionGeneration ||
-                    car->terminalState != CarEntity::TerminalState::Active) {
+                    (car->terminalState != CarEntity::TerminalState::Active &&
+                     car->terminalState != CarEntity::TerminalState::Submerged)) {
                     return;
                 }
                 for (uint8_t seat = 0; seat < car->seatCount && seat < CarEntity::kMaxSeats; ++seat) {
@@ -275,15 +276,23 @@ namespace Mafia1Online::Features::Camera {
                 _hasView = false;
             }
             const bool playerChanged = camera.Player() != remote;
-            const bool carChanged = camera.Car() != car;
+            bool carChanged = camera.Car() != car;
             if (playerChanged && camera.Car()) {
                 camera.SetCar(nullptr);
+                carChanged = true;
             }
             if (playerChanged) {
                 camera.SetPlayer(remote);
             }
-            if (carChanged || (playerChanged && !car) || (!observer->alive && camera.Mode() == 6)) {
+            if (carChanged || (playerChanged && !car) || (!observer->alive && camera.Mode() == 6) ||
+                (car && (camera.Mode() < 7 || camera.Mode() > 15))) {
                 camera.SetCar(car);
+                if (car) {
+                    // Native LookAround can carry a side/back view across a
+                    // spectator target's entry. Let the car camera settle
+                    // to its forward-facing profile for this new target.
+                    camera.LookForward();
+                }
             }
             // The native mouse profile places the camera from the source
             // view yaw, including free look, and handles world collision.

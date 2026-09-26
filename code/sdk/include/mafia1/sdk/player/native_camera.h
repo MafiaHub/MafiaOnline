@@ -52,6 +52,12 @@ namespace Mafia1Online::SDK::Player {
             using Call = void(__thiscall *)(NativeCamera *, uint32_t, bool);
             reinterpret_cast<Call>(0x5ed400)(this, mode, force);
         }
+        // reM G_Camera::LookAround(G_CAMERA_LOOK_FORWARD) at 0x5ed330.
+        // Car camera modes use this target to choose the rear/side view.
+        void LookForward() {
+            using Call = void(__thiscall *)(NativeCamera *, int);
+            reinterpret_cast<Call>(0x5ed330)(this, 0);
+        }
         [[nodiscard]] float Pitch() const { return _pitch; }
         void SetPitch(float pitch) { _pitch = pitch; }
 

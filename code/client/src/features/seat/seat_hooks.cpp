@@ -26,9 +26,6 @@ namespace Mafia1Online::Features::Seat {
             if (!car && action == static_cast<int>(SDK::Seat::UseAction::Exit) && gService) {
                 car = gService->CurrentNetworkCar(human);
             }
-            if (car && action == static_cast<int>(SDK::Seat::UseAction::Exit) && gService && gService->BlockLocalExit(human, car, seat)) {
-                return;
-            }
             gUseOriginal(human, target, action, seat, animationSpeedState);
             if (car && gService) {
                 gService->OnNativeUse(human, car, action, originalSeat);

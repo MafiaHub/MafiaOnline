@@ -11,8 +11,8 @@ namespace Mafia1Online::Features::World {
 
 namespace Mafia1Online::Features::Environment {
     // Applies the replicated WorldStateEntity to the loaded mission: the
-    // LS3DF weather particle system, scene frame visibility and the city
-    // music. Everything is reapplied after each mission load, because
+    // LS3DF weather particle system, scene frame visibility, city music and
+    // retail semaphore cycle. Everything is reapplied after each mission load, because
     // C_mission::Open reloads the scene's weather and C_game::Init resumes
     // the city music.
     class EnvironmentService final {
@@ -28,6 +28,7 @@ namespace Mafia1Online::Features::Environment {
             float intensity     = -1.0f;
             bool cityMusic      = true;
             int8_t nightMode    = -1;
+            uint16_t semaphoreCycleMs = 0xffff;
             uint64_t frameGeneration = 0;
             std::string frames;
             std::string frameOpacities;

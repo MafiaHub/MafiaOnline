@@ -131,6 +131,23 @@ Free Ride city missions, so proximity cannot reactivate it. The actor and
 its allocations stay mission-owned for normal `GameDone` and `Close`.
 Other stock missions still use their native railway AI.
 
+### Drawbridges and city traffic lights
+
+reM `C_bridge::GameInit` resets the bridge to closed and clears its shutdown
+flag. During a multiplayer mission the client calls retail
+`C_bridge::ShutDown(true)` immediately after that initialization, leaving the
+deck, collision and bridge signals under the native closed state. Bridge AI
+then ignores opening requests. Native `GameDone` and mission close still own
+the actor.
+
+reM `C_game::Tick` advances `m_uSemaphoreTime` through ten 3000 ms phases;
+`m_iSemaphoreStateZ` starts five phases after `m_iSemaphoreStateX`.
+`TickSemaphores` reads those phase fields for lamp visuals, and traffic AI
+reads the same fields. The server replicates one 0..29999 ms cycle position
+twice per second in the always-visible world state. Each client corrects the
+native timer and derived X/Z phases and calls retail `TickSemaphores` when
+the visible phase changes. Late joiners receive the current cycle position.
+
 | Hook or call | Original retail bytes | Convention, callers and effects | Lifetime and unload |
 | --- | --- | --- | --- |
 | `C_rail_generator::AI` `0x597bf0` | `83 EC 30 8B 44 24 34 53 55 56 57 8B F9 89 7C 24 18 8B B7 80 00 00 00` | `void __thiscall(C_rail_generator*, unsigned frameMs)`, `ret 4` at `0x597fdf`. IDA confirms the retail rail-generator vtable at `0x6259e8` points to this method from its AI slot `0x625a1c`; `C_actor::Tick` calls that virtual slot at `0x406563` whenever the actor is active and not network-controlled. IDA shows the method advancing its interval, finding nearby track nodes and free vehicles, and updating the track assignment records. reM identifies the tram/metro assignment and release logic. The hook calls the original outside a server mission and skips it within one. | Mission owns the generator actor. Native `GameInit` (`0x596860`, vtable `0x625a4c`) and `GameDone` (`0x597a20`, vtable `0x625a50`) remain installed and own hidden rail pools and teardown. No generator pointer is retained. The AI hook is removed before `CloseSystem`. |
@@ -629,10 +646,9 @@ these per-wheel inputs and could perturb the car's native physics or shift
 audio. Remote clients therefore run native wheel ticks with the replicated
 steering and velocities; owner gear/RPM remain telemetry pending a validated
 per-wheel state protocol. Neither a `CAR_INWATER` result nor the vertical
-velocity invalid check proves an out-of-map terminal cause. The current
-server can set submerged/out-of-bounds terminal metadata by script, but no
-automatic native outcome and no matching native presentation have been
-verified for either state.
+velocity invalid check proves an out-of-map terminal cause. Water and fall
+volume outcomes now come from the native body collision callback's material
+ID; the separate falling velocity check reports retail's invalid-fall outcome.
 
 The simulation controller reports observed native ignition intent through
 a reliable ordered RPC. The server checks that the sender is the assigned
@@ -721,9 +737,10 @@ at `+0x2219`. That byte is set by `C_car::Collision_Filter_Body`
 `0x426340` for at least material IDs 31 and 40, and it is reset during
 activation. The evidence does not establish a unique submerged terminal
 state. Neither `C_car::Update` nor `C_Vehicle::Tick` has a proven generic
-out-of-map terminal check in the inspected source. Water and map boundary
-outcomes need separate retail collision/material and mission-script proof
-before native patches or server terminal rules are added. The old aggregate
+out-of-map terminal check in the inspected source. The multiplayer report
+reads the native body callback's material ID (31 for water, 40 for a fall
+volume); it does not use this bit as a water detector or infer a generic map
+boundary. The old aggregate
 bitmask fields do not represent model-specific light, zone, wheel or vertex
 damage. Native part snapshots and bounded vertex checkpoints now carry those
 values, while explosion debris and terminal lifecycle still need verification.
@@ -1162,10 +1179,15 @@ native camera orbit and collision from those angles, then writes the final
 view heading to `C_actor::m_vDirection` at `+0x30`. The hook restores that
 field after the tick so observer input never changes the remote actor's
 replicated heading. The source view is sent every 50 ms and smoothed locally
-over 35 ms. Cars retain retail `SetCar` camera behavior.
+  over 35 ms. Cars retain retail `SetCar` camera behavior.
 
 reM `C_human` enters/exits a car with `SetCar` only for the game player, so a
 remote human's replicated seat must drive the camera's car handoff explicitly.
+When a followed human changes, `SetPlayer` cannot keep the old car link:
+the client detaches the old car, switches player, then reattaches the new
+car even when both players occupied the same vehicle. `SetCar` chooses the
+saved car profile, and `LookAround(0)` clears an inherited side/back target
+on the new handoff; it does not rewrite the user's saved camera mode.
 Retail `SetCar` stores a borrowed car pointer at camera `+0x0c` and `End()`
 dereferences it; the client detaches a followed car before its native removal
 and a followed human before its native removal. Reconciliation runs after
@@ -1189,7 +1211,7 @@ the SDK uses native methods instead.
 | Hook or call | Original retail bytes | Convention, callers and effects | Lifetime and unload |
 | --- | --- | --- | --- |
 | `C_human::Use_Actor` `0x582180` | `81 EC F8 00 00 00 53 55 56 57 8B E9 E8 CF 83 FF FF 8B 9C 24 0C 01 00 00` | `void __thiscall(C_human*, C_actor* actor, int action, int seat, int animationSpeedState)`, `ret 16`; IDA callers include player use handling at `0x5950b8` and actor/script paths. reM identifies action 1 as enter and 2 as exit. Enter validates the car approach, selects a door animation, positions the human, reserves native car ownership and later links the frame. Exit checks free space; if the current side is blocked it tries the paired seat or forces an exit. A local-action hook observes the original result and reports the resolved network actors; it does not alter non-car actor use. | Human and car are mission-owned or temporary actors. The hook may act only while both generation-checked handles resolve and the server mission is ready. Remove it before mission/system teardown; never keep native pointers in network messages. |
-| `C_human::Can_DropOutFromCar` `0x5805c0` | `8B 44 24 04 81 EC 94 00 00 00 85 C0 53 55 8B E9 7D 06 8B 85 AC 00 00 00` | `bool __thiscall(C_human*, int seat)`, `ret 4`; called twice from `Use_Actor` at `0x5827c0`/`0x582d08`. Negative seat uses the current `m_iSeatID`. It tests ground and collision clearance, temporarily excludes the human and car collision objects, then resets the collision owner. When both current and paired exits fail, the mod can report ExitBlocked before retail's force-exit fallback. | Requires a live initialized human, car and collision scene. It retains no pointer and its scratch collision filter is restored before return. |
+| `C_human::Can_DropOutFromCar` `0x5805c0` | `8B 44 24 04 81 EC 94 00 00 00 85 C0 53 55 8B E9 7D 06 8B 85 AC 00 00 00` | `bool __thiscall(C_human*, int seat)`, `ret 4`; called twice from `Use_Actor` at `0x5827c0`/`0x582d08`. Negative seat uses the current `m_iSeatID`. It tests ground and collision clearance, temporarily excludes the human and car collision objects, then resets the collision owner. When both sides fail, retail invokes `ForceExitCar`; the mod lets this complete and reports the resulting exit. | Requires a live initialized human, car and collision scene. It retains no pointer and its scratch collision filter is restored before return. |
 | `C_human::Can_EnterToCar` `0x5808c0` | `81 EC B0 00 00 00 53 55 8B E9 56 8B 85 98 00 00 00 85 C0 74 0E 5E 5D 32` | `bool __thiscall(C_human*, C_car*, int seat, bool testHierarchy)`, `ret 12`; called by `Use_Actor` at `0x582295`. It rejects a human already in a car, checks the seat/door and swept collision, and optionally tests scene hierarchy. The local action follows this retail check. | Live mission scene and collision system required; no retained pointers. |
 | `C_human::Intern_UseCar` `0x57e020` | `83 EC 0C 55 8B 6C 24 14 56 57 8B 85 14 0D 00 00 8B F1 85 C0 75 04 33 D2` | `void __thiscall(C_human*, C_car*, int seat)`, `ret 8` in reM; IDA callers include mission spawn, scripted NPC, reload, and the native car-steal setup. It assigns `C_car::SetOwner`, sets `m_pUsedActorEnter` and seat index, installs seated animation, switches collision/shadow and inventory, links the human model to the car frame, and switches local camera/controls. Use for an authoritative late-join seat snap after both native handles are ready; it does not show an entry door animation. | Only on initialized live actors in the same mission, and only once when the target seat is not already bound to that human. Native exit/mission close must release ownership before actor destruction. |
 | `C_human::Intern_UseCar(bool)` `0x5716d0` | `64 A1 00 00 00 00 6A FF 68 78 05 62 00 50 8A 44 24 10` | `void __thiscall(C_human*, bool enter)`, `ret 4`. `C_human::Update` calls it with `true` at `0x572fe2` when `m_iAnimBlendState` (+0x410) is 1 and the `Use_Actor` door animation ends. The enter branch sets `m_pUsedActorEnter` from `m_pUsedActorLeave`, calls `C_Vehicle::LockVehicle(false)` at `0x5717f1`, links the frame, sets work state 9, then clears `m_pUsedActorLeave` and +0x410. The mod calls it to finish a replayed remote entry that must be snapped or released, instead of `0x57e020`, which never unlocks. | Only when +0x410 is 1, `m_pUsedActorEnter` is null and `m_pUsedActorLeave` is the live car, so the lock is released exactly once. |
@@ -1197,13 +1219,12 @@ the SDK uses native methods instead.
 | `C_car::SetOwner` `0x41d810` | `53 55 8B 6C 24 10 33 DB 56 3B EB 57 8B F1 0F 8C FD 03 00 00 8B 86 CC 21` | `bool __thiscall(C_car*, C_actor* owner, int seat, float massFactor)`, `ret 12`. IDA callers include `Intern_UseCar` at `0x57e086`, `Use_Actor` at `0x582568`/`0x582841`, exit and destruction paths. It validates the native in-point and existing owner, adjusts occupant mass/driver audio and material state, and stores or clears the owner. Failed assignment must not be treated as a successful seat bind. A null owner clears the seat; reM `C_game::InvalidateActor` does this only for a human whose `m_pUsedActorEnter` is the car, so a door reservation (`Use_Actor` sets `m_pUsedActorLeave` and calls `SetOwner` at `0x582568` before the seated link) survives the human's removal. The mod calls it with a null owner, the human's `m_iSeatID` and zero factor to clear such a reservation before removing that human, or on a car being removed when the reserved link cannot be completed. | Owner is borrowed and must outlive the seat assignment. Game exit, forced exit and mission teardown clear ownership. Call only while the car is live, before `RemoveTemporaryActor` of either actor; no pointer is retained. |
 | `C_car::GetOwner` `0x41dec0` | `56 8B 74 24 08 85 F6 7C 43 8B 81 CC 21 00 00 85 C0 74 39 8B 91 D0 21 00` | `C_actor* __thiscall(C_car*, int seat)`, `ret 4`; widely used by player interaction and car AI, including native steal logic. Returns null for an invalid/unoccupied seat and a borrowed actor pointer otherwise. The hook can compare the returned pointer with the resolved local human after `Use_Actor`. | Do not cache the returned actor across native destruction, stream out or mission change. |
 | `C_car::GetSeatProperty` `0x41dc30` | `83 EC 18 56 8B 74 24 20 85 F6 57 0F 8C 6B 02 00 00 8B 81 CC 21 00 00 85` | `bool __thiscall(C_car*, int seat, bool* left, bool* door, bool* rear, bool* open)`, `ret 20`. IDA callers include native exit clearance `0x580606`, entry check `0x580908`, `Use_Actor` `0x5822b9`/`0x5827ea`, and car initialization. It bounds checks the seat, rejects an absent seat record, and fills the four caller-owned output booleans. The SDK uses the return value only to avoid binding an unsupported native seat or testing an absent paired exit. | The car and its seat table must remain alive for the call. The output pointers are stack locals and are not retained; no unload side effect. |
-| `C_human::ForceExitCar` `0x581220` | `6A FF 68 08 06 62 00 64 A1 00 00 00 00 50 64 89 25 00 00 00 00 81 EC 94` | `void __thiscall(C_human*)`, plain `ret`; IDA callers include overturned-car and blocked-side exits at `0x580dc1`, `0x580f10` and `0x582d31`. It computes an alternate world exit, detaches the human frame, clears the native car owner, restores collision, shadow, camera and weapon state. It may place the human despite blocked side clearance, so a server-managed blocked exit must be decided before entering this fallback. | Call only while the human is seated in a live car. It clears car references; handle invalidation still precedes actor destruction. |
+| `C_human::ForceExitCar` `0x581220` | `6A FF 68 08 06 62 00 64 A1 00 00 00 00 50 64 89 25 00 00 00 00 81 EC 94` | `void __thiscall(C_human*)`, plain `ret`; IDA callers include overturned-car and blocked-side exits at `0x580dc1`, `0x580f10` and `0x582d31`. It probes both AI exits, then falls back above the current seat if both are blocked; it detaches the frame, clears the owner and restores collision, camera and weapon state. The client reports the exit from the seat that native code actually released. | Call only while the human is seated in a live car. It clears car references; handle invalidation still precedes actor destruction. |
 | `C_human::Do_ThrowCocotFromCar` `0x587d70` | `6A FF 68 A2 06 62 00 64 A1 00 00 00 00 50 64 89 25 00 00 00 00 81 EC AC` | `bool __thiscall(C_human*, C_car*, int seat)`, `ret 8`; player occupied-seat handling calls it at `0x594e5f` and `0x594e70` after validating the target. It checks `Can_DropOutFromCar_Free`, plays the attacker's door/throw animation, ejects a live player/entity owner through `intern_ThrowMeFromCar`, or instantiates a thrown traffic NPC. An observer can report a steal-start action; the authoritative occupant change must wait for the eventual native seat owner. | Call only on live initialized actors in the current mission. It can create/remove temporary actors and change police state, so replaying it on a late join would be unsafe. Unhook before actor teardown. |
 
-Native `Use_Actor` normally forces a fall-back exit when both sides are
-blocked. For multiplayer, the local action hook will test both sides first
-and report ExitBlocked while keeping the occupant seated; the server records
-the outcome reliably without changing the seat array. Late joins use the
+Native `Use_Actor` forces an alternate-placement exit when both sides are
+blocked. The hook lets this native path finish and reports the released seat.
+Late joins use the
 array as the durable truth and `Intern_UseCar` to bind a human directly to
 the correct native seat. Entry and steal animations are transient events and
 cannot be reconstructed from the durable array alone.
@@ -1237,14 +1258,13 @@ repair either a completed or an aborted steal.
 
 IDA's `Use_Actor` exit path at `0x582cba` chooses the paired seat by subtracting
 one for odd seats and adding one for even seats. It enters the force-exit path
-at `0x582d31` when that alternate seat does not exist, already has an owner,
-or fails `Can_DropOutFromCar`. The local hook samples both exit clearances
-before calling the original so a blocked exit leaves native ownership intact.
-When only the current side is blocked, reM shows the exit first calls
-`Do_ClimbInCarLR`, which moves the human to the paired seat while
-`m_pUsedActorEnter` stays the car. The local exit is therefore reported for
-the recorded seat only once `m_pUsedActorEnter` no longer names the car; the
-retail exit clears it together with the owner before its animation plays.
+at `0x582d31` when that seat is absent, occupied, or blocked. Otherwise
+`Do_ClimbInCarLR` (`0x581eb0`) moves native ownership and `m_iSeatID` to the
+paired seat before its animation. The client reports a `Move` intent with the
+new seat; the server validates the prior occupant and empty paired seat and
+updates both durable slots atomically. The later retail exit reports the
+new seat. Remote clients replay the native climb and the exit in order;
+reconciliation holds both seats during the local transition.
 
 After the local client reports a completed Enter, Steal or Exit it keeps the
 transition pending until the replicated occupant array agrees, or for two
@@ -1258,8 +1278,15 @@ driver, reconciliation restores the replicated engine state.
 Before a network car is removed, every human owner is ejected with
 `ForceExitCar`; a door reservation is first completed with `Intern_UseCar`
 so the exit also cancels the entry animation. Before a network human is
-removed, its seated link is released with `ForceExitCar` or, for a
-reservation, a null `C_car::SetOwner`.
+removed, an unfinished entry is completed to release the vehicle's boarding
+lock, or its reservation is cleared with a null `C_car::SetOwner`. A seated
+human remains in the car until queued native removal calls
+`C_game::InvalidateActor`, which clears the seat owner before `GameDone` and
+`Release`. Calling `ForceExitCar` here would place a collidable human next to
+the moving car and can produce a collision impulse before removal completes.
+The server records life-end and disconnect seat clears as `Cleared`, so client
+reconciliation also waits for native actor removal if the seat update arrives
+before the player deletion.
 
 ## Server-owned human damage and death
 
@@ -1419,17 +1446,31 @@ actor identity mapping.
 
 ### Car water, fall volume and occupant death
 
-Retail has no sink routine. The controller polls each tick for the same
-conditions retail uses: a wheel surface of 31 (water) or 40 (fall volume),
-or a falling speed below -85. It then reports `TerminalIntent`. The server
-accepts it only from the current simulation controller of an active car,
-kills current-generation occupants through combat, and commits Submerged or
-OutOfBounds. Every client then snaps to the final pose, turns the engine off
-silently and calls `C_actor::SetActState(2)` (`0x406da0`), so retail
-`C_car::ChangeState`/`DeactivateCar` leaves the car unusable. Until then the
-act-state hook suppresses native state-2 requests for tracked network cars.
-`RemoveTemporaryActor` uses only `m_TemporaryActors`, so a deactivated car can
-still be despawned.
+Retail has no sink routine. reM `C_car::Collision_Filter_Body` on material 31
+creates particle 37, plays sound 236 and calls `WFall_Player` for the local
+driver. The stock mission program that handles that fall event is suppressed
+in a server-managed mission. The hook runs the original callback first, then
+reports the same native body contact to the server from the current simulation
+controller. Material 40 reports the fall-volume outcome separately. A falling
+speed below -85 is the retail invalid-vehicle condition, not proof of a map
+boundary; it reports the existing terminal state 3 when no earlier collision
+was seen. The server commits the terminal state, fires `vehicleTerminal`, and
+kills current-generation occupants through combat. The native in-car death
+path plays their seat death animation. The sample gamemode fades on local
+`playerDeath`, respawns through its server death handler, and explicitly
+destroys terminal cars later. The native simulation controller continues
+physics after water contact and observers receive that pose; no server-authored
+descent or automatic sink-despawn runs. The local camera is locked at its
+pre-death pose when a seated player enters water and is restored after retail
+`C_human::Death` selects its default fatal camera. A respawn or mission close
+restores ordinary camera control.
+
+On foot, `C_human::HandleFatalMovementCollision` already supplies its own
+particle, sound and fixed fatal camera mode. The existing drowning report
+confirms death on the server; the gamemode chooses fade and respawn. Before
+terminal state, the act-state hook suppresses native state-2 requests for
+tracked network cars. `RemoveTemporaryActor` can still despawn a deactivated
+car when the gamemode destroys it.
 
 A seated player's authoritative death is replayed as a `Generic` hit:
 `C_human::Hit` routes a seated human to `HitInCar`, which ignores `Direct`

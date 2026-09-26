@@ -26,15 +26,32 @@ namespace Mafia1Online::SDK::Graphics {
     };
     static_assert(sizeof(NativeTLVertex) == 0x20);
 
+    // LS3D_VIEWPORT is byte-identical to the Direct3D 8 viewport. The engine
+    // stores this as its own cached viewport and compares it during rendering.
+    struct NativeViewport {
+        uint32_t x;
+        uint32_t y;
+        uint32_t width;
+        uint32_t height;
+        float minZ;
+        float maxZ;
+    };
+    static_assert(sizeof(NativeViewport) == 0x18);
+
     struct NativeGraphVTable {
         void *_unused00[0x0c / sizeof(void *)];
         bool(__stdcall *setTexture)(NativeGraph *, void *);
         void *(__stdcall *getMainHwnd)(NativeGraph *);
-        void *_unused14[(0x3c - 0x14) / sizeof(void *)];
+        void *_unused14[(0x30 - 0x14) / sizeof(void *)];
+        void(__stdcall *clear)(NativeGraph *, uint32_t color, float depth, uint32_t flags);
+        void *_unused34[(0x3c - 0x34) / sizeof(void *)];
         void(__stdcall *present)(NativeGraph *);
         void *_unused40[(0x44 - 0x40) / sizeof(void *)];
         void(__stdcall *setState)(NativeGraph *, int state, uint32_t value);
-        void *_unused48[(0x58 - 0x48) / sizeof(void *)];
+        void *_unused48;
+        int(__stdcall *setViewport)(NativeGraph *, NativeViewport *);
+        NativeViewport *(__stdcall *getViewport)(NativeGraph *);
+        void *_unused54;
         int(__stdcall *drawPrimitiveList)(NativeGraph *, int type, uint32_t count, void *vertices, int stream);
         void *_unused5c[(0x70 - 0x5c) / sizeof(void *)];
         int(__stdcall *screenWidth)(NativeGraph *);
@@ -55,7 +72,10 @@ namespace Mafia1Online::SDK::Graphics {
     static_assert(offsetof(NativeGraphVTable, setTexture) == 0x0c);
     static_assert(offsetof(NativeGraphVTable, getMainHwnd) == 0x10);
     static_assert(offsetof(NativeGraphVTable, present) == 0x3c);
+    static_assert(offsetof(NativeGraphVTable, clear) == 0x30);
     static_assert(offsetof(NativeGraphVTable, setState) == 0x44);
+    static_assert(offsetof(NativeGraphVTable, setViewport) == 0x4c);
+    static_assert(offsetof(NativeGraphVTable, getViewport) == 0x50);
     static_assert(offsetof(NativeGraphVTable, drawPrimitiveList) == 0x58);
     static_assert(offsetof(NativeGraphVTable, screenWidth) == 0x70);
     static_assert(offsetof(NativeGraphVTable, screenHeight) == 0x74);
@@ -96,6 +116,9 @@ namespace Mafia1Online::SDK::Graphics {
         void *MainWindow() { return vtable->getMainHwnd(this); }
         int ScreenWidth() { return vtable->screenWidth(this); }
         int ScreenHeight() { return vtable->screenHeight(this); }
+        NativeViewport Viewport() { return *vtable->getViewport(this); }
+        bool SetViewport(NativeViewport viewport) { return vtable->setViewport(this, &viewport) >= 0; }
+        void Clear(uint32_t color, float depth, uint32_t flags) { vtable->clear(this, color, depth, flags); }
         void KeyboardInit(uint32_t flags) { vtable->keyboardInit(this, flags); }
         bool TestKey(uint8_t scanCode) { return vtable->testKey(this, scanCode); }
         int MouseWheel() { return vtable->mouseWheel(this); }

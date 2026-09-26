@@ -233,6 +233,19 @@ namespace Mafia1Online::Features::Car {
 
         const void *__fastcall CollisionFilterBodyHook(SDK::Car::NativeCar *car, const void *collision,
                                                         const SDK::Player::Vector3 &position, const SDK::Player::Vector3 &normal) {
+            // reM g_collision_header packs material ID in the high byte.
+            // Let the retail body callback create its water particle/sound
+            // before reporting the same contact to the server.
+            if (collision) {
+                const auto packed = *static_cast<const uint32_t *>(collision);
+                const auto material = static_cast<uint8_t>(packed >> 24);
+                if (material == 31 || material == 40) {
+                    const void *result = gCollisionFilterBodyOriginal(car, collision, position, normal);
+                    auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
+                    application->Cars().OnNativeWorldCollision(application->World(), car, material);
+                    return result;
+                }
+            }
             // reM tDynamicCollObject marks dynamic primitives in the first
             // byte and stores its actor at +0x44. Only remote network humans
             // are ghosted: their replicated pose cannot yield to a car's

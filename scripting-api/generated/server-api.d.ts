@@ -211,7 +211,7 @@ declare global {
     vehicleSpawn: [vehicle: Vehicle];
 
     /**
-     * Dispatched by Vehicle.destroy immediately before the vehicle is removed. A mission change removes every vehicle without this event.
+     * Dispatched immediately before Vehicle.destroy removes the vehicle. A mission change removes every vehicle without this event.
      */
     vehicleDestroy: [vehicle: Vehicle];
 
@@ -266,7 +266,7 @@ declare global {
     vehicleRepair: [vehicle: Vehicle];
 
     /**
-     * Dispatched once a vehicle exploded (1), sank (2) or left the map (3). Occupants die through server combat first.
+     * Dispatched when a vehicle explodes (1), its native body hits water (2), or it enters a fall volume or native invalid-fall state (3). Water and fall occupants die through server combat immediately after this event; explosion occupants die before it. Scripts decide when to destroy the car.
      */
     vehicleTerminal: [vehicle: Vehicle, state: number];
 
@@ -296,9 +296,14 @@ declare global {
     vehiclePlayerExited: [vehicle: Vehicle, player: Player, info: VehicleSeatInfo];
 
     /**
-     * Dispatched when a native exit was blocked.
+     * Dispatched when a script records an administrative blocked exit; native blocked exits use seat transfer or the retail emergency exit.
      */
     vehiclePlayerExitBlocked: [vehicle: Vehicle, player: Player, info: VehicleSeatInfo];
+
+    /**
+     * Dispatched after a blocked-side exit moves the player into the paired seat. info.fromSeat is the prior seat.
+     */
+    vehiclePlayerSeatChanged: [vehicle: Vehicle, player: Player, info: VehicleSeatInfo];
 
     /**
      * Dispatched when one key of an entity's state changes: on the server when a script writes it, on a client when the write arrives. `value` is undefined when the key was removed and `previous` is undefined when it held nothing before, so a stored null stays distinguishable from an absent key. The entity is whatever the game's WrapScriptEntity answers, and the base Entity handle by default.
@@ -537,6 +542,11 @@ declare global {
      * Seat index; 0 is the driver.
      */
     seat: number;
+
+    /**
+     * Previous seat for a native climb across the car; otherwise null.
+     */
+    fromSeat: number | null;
 
     /**
      * True when the player pulled the previous driver out.
@@ -1271,7 +1281,7 @@ declare global {
     readonly seatCount: number;
 
     /**
-     * 0 active, 1 exploded, 2 submerged, 3 out of bounds.
+     * 0 active, 1 exploded, 2 native water contact, 3 fall volume or native invalid fall.
      */
     readonly terminalState: number;
 
@@ -1441,8 +1451,8 @@ declare global {
     setMechanicalDamage(engineHealth: number, gearboxHealth: number, bodyDamage: number, fuelTankHealth: number): boolean;
 
     /**
-     * Ends the vehicle; an explosion kills current occupants through server combat first. Fires vehicleTerminal.
-     * @param state 1 exploded, 2 submerged, 3 out of bounds.
+     * Marks the vehicle terminal and fires vehicleTerminal. Explosion occupants die before the event; water and fall occupants die after it. Scripts decide when to destroy it.
+     * @param state 1 exploded, 2 water contact, 3 fall volume or invalid fall.
      * @returns False when already terminal.
      */
     setTerminalState(state: number): boolean;

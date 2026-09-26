@@ -5,7 +5,7 @@
   "description": "Noir Free Ride with a character selector, clock-based dusk, live weather, car radio and server-owned activities",
   "mafiahub": {
     "serverScripts": ["server/main.js", "server/ambience.js", "server/selector.js", "server/doors.js", "server/shops.js", "server/visual_pickups.js", "server/tour.js"],
-    "clientScripts": ["client/main.js", "client/selector.js", "client/shops.js", "client/visual_pickups.js", "client/radio.js", "client/guide.js"],
-    "files": ["client/selector.html", "client/radio.html", "client/guide.html"]
+    "clientScripts": ["client/main.js", "client/selector.js", "client/shops.js", "client/visual_pickups.js", "client/radio.js", "client/guide.js", "client/car_picker.js"],
+    "files": ["client/selector.html", "client/radio.html", "client/guide.html", "client/car_picker.html"]
   }
 }

@@ -11,9 +11,9 @@ namespace Mafia1Online::SDK::Seat { struct NativeHuman; struct NativeCar; }
 namespace Mafia1Online::Features::World { class WorldService; }
 
 namespace Mafia1Online::Features::Seat {
-    // Retail C_game::InvalidateActor clears only a seated owner. A door
-    // reservation, or a seated human whose car disappears, must be released
-    // while both native actors are still live.
+    // Retail C_game::InvalidateActor clears a seated owner during queued human
+    // removal. An unfinished door entry still needs its boarding lock released
+    // first. A disappearing car needs every occupant released while it is live.
     void ReleaseHumanSeat(SDK::Seat::NativeHuman *human);
     void ReleaseCarOccupants(SDK::Seat::NativeCar *car);
 
@@ -23,7 +23,6 @@ namespace Mafia1Online::Features::Seat {
         void Update(World::WorldService &world);
         void Reset();
         SDK::Seat::NativeCar *CurrentNetworkCar(SDK::Seat::NativeHuman *human);
-        bool BlockLocalExit(SDK::Seat::NativeHuman *human, SDK::Seat::NativeCar *car, int seat);
         void OnNativeUse(SDK::Seat::NativeHuman *human, SDK::Seat::NativeCar *car, int action, int seat);
         void OnNativeSteal(SDK::Seat::NativeHuman *human, SDK::Seat::NativeCar *car, int seat);
 
@@ -39,6 +38,7 @@ namespace Mafia1Online::Features::Seat {
             // The outcome was sent; hold reconciliation until the replicated
             // occupant array reflects it or the acknowledgement times out.
             bool sent = false;
+            bool moving = false;
         };
         struct QueuedEvent {
             Shared::Car::SeatEvent event;

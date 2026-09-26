@@ -234,7 +234,7 @@ clients add it to the interpolated player position to pose the neck and back.
 - `nativeDamageRevision`: `number`. Revision of the native damage snapshot.
 - `meshRevision`: `number`. Revision of the accepted deformation checkpoint.
 - `seatCount`: `number`. Number of seats, 1 to 8.
-- `terminalState`: `number`. 0 active, 1 exploded, 2 submerged, 3 out of bounds.
+- `terminalState`: `number`. 0 active, 1 exploded, 2 native water contact, 3 fall volume or native invalid fall.
 - `missionGeneration`: `number`. Mission generation the vehicle belongs to.
 - `engineRevision`: `number`. Revision of the engine state.
 - `dynamicsCommandRevision`: `number`. Revision of the last script fuel, lights or horn command.
@@ -259,7 +259,7 @@ clients add it to the interpolated player position to pose the neck and back.
 - `vehicle.setSeatCount(count: number): boolean` — Changes the seat count if the removed seats are empty. Returns: False when a removed seat is taken.
 - `vehicle.setDamage(health: number, damageFlags: number, detachedParts: number): boolean` — Sets script metadata only; it does not deform the car. Fires vehicleDamageState. Returns: False when the vehicle no longer exists.
 - `vehicle.setMechanicalDamage(engineHealth: number, gearboxHealth: number, bodyDamage: number, fuelTankHealth: number): boolean` — Authors a native damage revision the simulation controller applies. Fires vehicleDamage. Returns: False before the first native damage snapshot or for out-of-range values.
-- `vehicle.setTerminalState(state: number): boolean` — Ends the vehicle; an explosion kills current occupants through server combat first. Fires vehicleTerminal. Returns: False when already terminal.
+- `vehicle.setTerminalState(state: number): boolean` — Marks the vehicle terminal and fires vehicleTerminal. Explosion occupants die before the event; water and fall occupants die after it. Scripts decide when to destroy it. Returns: False when already terminal.
 - `vehicle.explode(): boolean` — Same as setTerminalState(1). Returns: False when already terminal.
 - `vehicle.recordSeatOutcome(seat: number, player: Player, result: number): boolean` — Records an administrative seat result without native animation and fires the matching seat event. Entering or stealing seat 0 makes the player's client the simulation controller. Returns: False when the result is not valid now.
 - `Vehicle.spawn(model: string, position: Vector3 | { x: number; y: number; z: number }, rotation?: number | Quaternion, controller?: Player): Vehicle | null` — Creates a car for the current mission. Fires vehicleSpawn. Returns: The vehicle, or null before every client is mission ready.
@@ -462,17 +462,18 @@ are defined by your resources.
 | `weaponDropped` | `[pickup: Pickup | null, player: Player | null, info: PickupEventInfo]` | Dispatched when a drop or a death leaves a weapon pickup in the world. |
 | `pickupTaken` | `[pickup: Pickup | null, player: Player | null, info: PickupEventInfo]` | Dispatched after the server moved a pickup into a player's inventory. The pickup handle is null when nothing is left on the ground. |
 | `vehicleSpawn` | `[vehicle: Vehicle]` | Dispatched after Vehicle.spawn created a vehicle. |
-| `vehicleDestroy` | `[vehicle: Vehicle]` | Dispatched by Vehicle.destroy immediately before the vehicle is removed. A mission change removes every vehicle without this event. |
+| `vehicleDestroy` | `[vehicle: Vehicle]` | Dispatched immediately before Vehicle.destroy removes the vehicle. A mission change removes every vehicle without this event. |
 | `vehicleDamage` | `[vehicle: Vehicle, damage: VehicleDamage | null]` | Dispatched when the native per-part damage snapshot changes. |
 | `vehicleOpacityChange` | `[vehicle: Vehicle]` | Dispatched after `Vehicle.setOpacity` changes the server-owned opacity. |
 | `vehicleRepair` | `[vehicle: Vehicle]` | Dispatched after `Vehicle.repair` starts a native damage and deformation reset. |
-| `vehicleTerminal` | `[vehicle: Vehicle, state: number]` | Dispatched once a vehicle exploded (1), sank (2) or left the map (3). Occupants die through server combat first. |
+| `vehicleTerminal` | `[vehicle: Vehicle, state: number]` | Dispatched when a vehicle explodes (1), its native body hits water (2), or it enters a fall volume or native invalid-fall state (3). Water and fall occupants die through server combat immediately after this event; explosion occupants die before it. Scripts decide when to destroy the car. |
 | `vehicleHit` | `[vehicle: Vehicle, info: VehicleHitInfo]` | Dispatched when a pellet hit is replayed to the vehicle's simulation controller, before the resulting vehicleDamage. |
 | `vehiclePartDetached` | `[vehicle: Vehicle, info: VehiclePartInfo]` | Dispatched when the server accepts a native loose part from the vehicle's controller. |
 | `vehiclePlayerEntering` | `[vehicle: Vehicle, player: Player, info: VehicleSeatInfo]` | Dispatched when the server accepts the start of a native enter or steal. |
 | `vehiclePlayerEntered` | `[vehicle: Vehicle, player: Player, info: VehicleSeatInfo]` | Dispatched when a player sits in a seat, natively or through Player.putInVehicle. |
 | `vehiclePlayerExited` | `[vehicle: Vehicle, player: Player, info: VehicleSeatInfo]` | Dispatched when a player leaves a seat, including by death, respawn or removeFromVehicle. |
-| `vehiclePlayerExitBlocked` | `[vehicle: Vehicle, player: Player, info: VehicleSeatInfo]` | Dispatched when a native exit was blocked. |
+| `vehiclePlayerExitBlocked` | `[vehicle: Vehicle, player: Player, info: VehicleSeatInfo]` | Dispatched when a script records an administrative blocked exit; native blocked exits use seat transfer or the retail emergency exit. |
+| `vehiclePlayerSeatChanged` | `[vehicle: Vehicle, player: Player, info: VehicleSeatInfo]` | Dispatched after a blocked-side exit moves the player into the paired seat. `info.fromSeat` is the prior seat. |
 | `playerWeaponEquip` | `[player: Player, info: WeaponActionInfo]` | Dispatched after the server accepted this controller action. |
 | `playerAimChange` | `[player: Player, info: WeaponActionInfo]` | Dispatched after the server accepted this controller action. |
 | `playerWeaponDrop` | `[player: Player, info: WeaponActionInfo]` | Dispatched after the server accepted this controller action. |
@@ -565,6 +566,7 @@ are defined by your resources.
 **VehicleSeatInfo** — An accepted seat transition.
 
 - `seat: number` — Seat index; 0 is the driver.
+- `fromSeat: number | null` — Previous seat for a native climb across the car; otherwise null.
 - `stolen: boolean` — True when the player pulled the previous driver out.
 - `serverSequence: number` — Server seat sequence of the transition.
 

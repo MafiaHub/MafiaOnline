@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cstdint>
 #include <deque>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -42,6 +43,8 @@ namespace Mafia1Online::Features::Car {
         void Reset();
         SDK::Scene::NativeFrame *OnNativeDestroyed(World::WorldService &world, void *car);
         bool OnNativeExplosion(World::WorldService &world, SDK::Car::NativeCar *car);
+        void OnNativeWorldCollision(World::WorldService &world, SDK::Car::NativeCar *car, uint8_t material);
+        void OnLocalHumanDeath(World::WorldService &world, void *human);
         void OnNativeDeformed(SDK::Car::NativeCar *car);
         // C_car::AI detour. An observer car skips native physics: the
         // interpolated pose is written inside the actor tick, before the
@@ -157,6 +160,7 @@ namespace Mafia1Online::Features::Car {
         void ApplyPose(World::WorldService &world, uint64_t networkId, const Framework::Utils::TransformSnapshot &pose, bool forceSnap = false);
         void ResetNativePhysics(SDK::Car::NativeCar &actor, uint64_t networkId);
         void DetectTerminal(World::WorldService &world, uint64_t networkId, Stream &stream);
+        void CaptureWaterCamera(World::WorldService &world, uint64_t networkId, SDK::Car::NativeCar &car);
         static bool SamplePose(const Stream &stream, double time, Stream::PoseSample &out);
         static void PushPose(Stream &stream, const Stream::PoseSample &pose, double arrival, bool reset);
         static double LocalClockMs();
@@ -171,10 +175,18 @@ namespace Mafia1Online::Features::Car {
         bool ToggleSiren(World::WorldService &world);
 
       private:
+        World::WorldService *_world = nullptr;
 
         std::unordered_map<uint64_t, Stream> _streams;
         std::unordered_map<uint64_t, NativeCar> _nativeById;
         std::unordered_map<void *, uint64_t> _idByNative;
+        struct WaterCamera {
+            Game::Entities::NativeObjectHandle player;
+            uint64_t carId = 0;
+            glm::vec3 position {0.0f};
+            glm::vec3 direction {0.0f, 0.0f, 1.0f};
+        };
+        std::optional<WaterCamera> _waterCamera;
         // One render clock per frame for every observer car.
         uint64_t _updateSerial = 0;
         uint64_t _clockSerial  = ~0ull;

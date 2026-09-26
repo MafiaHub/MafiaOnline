@@ -5,8 +5,9 @@
 #include <cstdint>
 
 namespace Mafia1Online::Shared::Car {
-    // The simulation controller's native car entered water or a fall volume.
-    // State uses CarEntity::TerminalState: 2 submerged, 3 out of bounds.
+    // The simulation controller observed a native body contact with material
+    // 31 (water) or 40 (fall volume), or the retail invalid-fall condition.
+    // State uses CarEntity::TerminalState: 2 water, 3 fall/invalid.
     struct TerminalIntent {
         static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarTerminalIntent");
 

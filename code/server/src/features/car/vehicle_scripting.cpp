@@ -397,22 +397,34 @@ namespace Mafia1Online::Scripting {
         }
         auto &server = GetServer();
         auto *car    = ResolveCar();
-        if (car && state == static_cast<uint32_t>(CarEntity::TerminalState::Exploded) && car->terminalState == CarEntity::TerminalState::Active) {
-            const auto occupantIds         = car->occupantIds;
-            const auto occupantGenerations = car->occupantGenerations;
-            const uint8_t seatCount        = car->seatCount;
+        if (!car || car->terminalState != CarEntity::TerminalState::Active) return false;
+        const auto occupantIds         = car->occupantIds;
+        const auto occupantGenerations = car->occupantGenerations;
+        const uint8_t seatCount        = car->seatCount;
+        const auto killOccupants = [&server, &occupantIds, &occupantGenerations, seatCount, state] {
             for (uint8_t seat = 0; seat < seatCount; ++seat) {
-                if (auto *player = server.Players().FindByNetworkId(occupantIds[seat]); player && player->spawnGeneration == occupantGenerations[seat]) {
-                    server.Combat().SetHealth(player->GetNetworkID(), 0.0f, 0, std::nullopt, Features::Combat::DamageCause::Vehicle);
+                if (auto *player = server.Players().FindByNetworkId(occupantIds[seat]); player && occupantIds[seat] != 0 &&
+                    player->spawnGeneration == occupantGenerations[seat]) {
+                    server.Combat().SetHealth(player->GetNetworkID(), 0.0f, 0, std::nullopt,
+                        state == static_cast<uint32_t>(CarEntity::TerminalState::Submerged) ?
+                            Features::Combat::DamageCause::Drowning : Features::Combat::DamageCause::Vehicle);
                 }
             }
+        };
+        if (state == static_cast<uint32_t>(CarEntity::TerminalState::Exploded)) {
+            killOccupants();
         }
         const bool changed = server.Cars().SetTerminalState(_id, static_cast<CarEntity::TerminalState>(state));
         if (changed) {
             if (state == static_cast<uint32_t>(CarEntity::TerminalState::Exploded)) {
                 server.Debris().NoteExploded(_id);
             }
-            Features::Script::EmitCarEvent(server, "vehicleTerminal", *ResolveCar());
+            if (auto *committed = ResolveCar()) {
+                Features::Script::EmitCarEvent(server, "vehicleTerminal", *committed);
+            }
+            if (state != static_cast<uint32_t>(CarEntity::TerminalState::Exploded)) {
+                killOccupants();
+            }
         }
         return changed;
     }
@@ -540,7 +552,7 @@ namespace Mafia1Online::Scripting {
         cls.property("nativeDamageRevision", &Vehicle::GetNativeDamageRevision, property_docs("number", "Revision of the native damage snapshot."));
         cls.property("meshRevision", &Vehicle::GetMeshRevision, property_docs("number", "Revision of the accepted deformation checkpoint."));
         cls.property("seatCount", &Vehicle::GetSeatCount, property_docs("number", "Number of seats, 1 to 8."));
-        cls.property("terminalState", &Vehicle::GetTerminalState, property_docs("number", "0 active, 1 exploded, 2 submerged, 3 out of bounds."));
+        cls.property("terminalState", &Vehicle::GetTerminalState, property_docs("number", "0 active, 1 exploded, 2 native water contact, 3 fall volume or native invalid fall."));
         cls.property("missionGeneration", &Vehicle::GetMissionGeneration, property_docs("number", "Mission generation the vehicle belongs to."));
         cls.property("engineRevision", &Vehicle::GetEngineRevision, property_docs("number", "Revision of the engine state."));
         cls.property("dynamicsCommandRevision", &Vehicle::GetDynamicsCommandRevision, property_docs("number", "Revision of the last script fuel, lights or horn command."));
@@ -583,7 +595,7 @@ namespace Mafia1Online::Scripting {
                                 param("bodyDamage", "number", false, "Body damage."), param("fuelTankHealth", "number", false, "Fuel tank health.")},
                 "Authors a native damage revision the simulation controller applies. Fires vehicleDamage.", "False before the first native damage snapshot or for out-of-range values."));
         cls.function("setTerminalState", &Vehicle::SetTerminalState,
-            docs("boolean", {param("state", "number", false, "1 exploded, 2 submerged, 3 out of bounds.")}, "Ends the vehicle; an explosion kills current occupants through server combat first. Fires vehicleTerminal.", "False when already terminal."));
+            docs("boolean", {param("state", "number", false, "1 exploded, 2 water contact, 3 fall volume or invalid fall.")}, "Marks the vehicle terminal and fires vehicleTerminal. Explosion occupants die before the event; water and fall occupants die after it. Scripts decide when to destroy it.", "False when already terminal."));
         cls.function("explode", &Vehicle::Explode, docs("boolean", {}, "Same as setTerminalState(1).", "False when already terminal."));
         cls.prototype_function("recordSeatOutcome", &JS_RecordSeatOutcome,
             docs("boolean", {param("seat", "number", false, "Seat from 0 to 7."), param("player", "Player", false, "Living player of this mission."), param("result", "number", false, "1 entered, 2 stolen, 3 exited, 4 exit blocked.")},

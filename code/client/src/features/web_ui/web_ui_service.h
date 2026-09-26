@@ -63,12 +63,12 @@ namespace Mafia1Online::Features::WebUi {
         // IGraph's keyboard queries (TestKey, ReadKeys) answer "nothing held"
         // while the page owns the keyboard, so engine hotkeys stay quiet.
         bool HidesKeyboard() const {
-            return _captured;
+            return _captured || HasFocusedResourceView();
         }
         // In a mission the page's cursor takes the mouse from the camera and
         // the weapon. The main menu keeps it: its cursor is the page's cursor.
         bool HidesMouse() const {
-            return _captured && _screen == Screen::Game;
+            return (_captured && _screen == Screen::Game) || HasFocusedResourceView();
         }
 
       private:
@@ -87,10 +87,13 @@ namespace Mafia1Online::Features::WebUi {
         void PushState(bool force);
         void PushPlayers(World::WorldService &world, bool force);
         void UpdateCapture();
-        void ForwardMouse(Screen live);
+        void ForwardMouse(Screen live, Framework::GUI::View *target);
+        void SetResourceCursor(Framework::GUI::View *target, int x, int y, bool pressed);
+        Framework::GUI::View *FocusedResourceView() const;
+        bool HasFocusedResourceView() const;
         void ApplyFocus();
         void ReleaseHeldInput();
-        bool HandleIme(HWND window, UINT message, LPARAM lParam);
+        bool HandleIme(Framework::GUI::View *target, HWND window, UINT message, LPARAM lParam);
         bool OnKeyMessage(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
         bool ToggleInGame(uint32_t key);
         void OpenChat(const std::string &prefill);
@@ -135,6 +138,8 @@ namespace Mafia1Online::Features::WebUi {
         int _mouseX              = -1;
         int _mouseY              = -1;
         uint32_t _mouseButtons   = 0;
+        int _mouseTargetId       = -1;
+        std::chrono::steady_clock::time_point _lastResourceMouseMessage;
 
         std::deque<ChatLine> _history;
         std::deque<std::string> _outgoing;

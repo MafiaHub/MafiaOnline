@@ -42,6 +42,8 @@ namespace Mafia1Online::Features::World {
     }
 
     void WorldScriptService::ResetForMission(uint64_t missionGeneration) {
+        _semaphoreEpoch = std::chrono::steady_clock::now();
+        _lastSemaphoreSync = {};
         DestroyAllSounds();
         for (const auto &[name, id] : _doors) {
             if (auto *door = Framework::CoreModules::GetReplication()->GetEntity<Shared::Entities::DoorEntity>(id)) {
@@ -51,6 +53,7 @@ namespace Mafia1Online::Features::World {
         _doors.clear();
         _doorUseAt.clear();
         if (_state) {
+            _state->semaphoreCycleMs = 0;
             _state->frames.clear();
             _state->frameOpacities.clear();
             _state->frameGeneration = missionGeneration;
@@ -58,6 +61,13 @@ namespace Mafia1Online::Features::World {
     }
 
     void WorldScriptService::Update() {
+        const auto now = std::chrono::steady_clock::now();
+        if (_state && now - _lastSemaphoreSync >= std::chrono::milliseconds(500)) {
+            constexpr int64_t kCycleMs = 30000; // reM: ten 3000 ms phases.
+            _state->semaphoreCycleMs = static_cast<uint16_t>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(now - _semaphoreEpoch).count() % kCycleMs);
+            _lastSemaphoreSync = now;
+        }
         auto *replication = Framework::CoreModules::GetReplication();
         for (uint64_t id : _sounds) {
             auto *sound = replication->GetEntity<Shared::Entities::SoundEntity>(id);
