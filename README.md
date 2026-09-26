@@ -60,6 +60,11 @@ builds the generated API reference alongside the authored guides.
 The [sample Free Ride guide](docs/sample_freeride.md) covers the day/night
 missions, character selector, shops, weather, car radio, and synchronized doors.
 
+[LHRP — Lost Heaven Roleplay](gamemodes/real-life/README.md) is a separate,
+minimal TypeScript gamemode with a cinematic city login, Preact/StyleX UI,
+English and Czech translations, SQLite accounts and saved player positions.
+Its build creates an isolated server resource directory under `build/real-life`.
+
 This is still a development build. Remote player replicas now create visible
 native humans with movement animations; car replicas create native vehicles
 that can be entered and tick their physics outside the camera view. The local

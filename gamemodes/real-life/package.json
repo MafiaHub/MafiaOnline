@@ -1,0 +1,37 @@
+{
+  "name": "lost-heaven-roleplay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "format": "eslint src tests --fix && prettier --write .",
+    "format:check": "eslint src tests && prettier --check .",
+    "typecheck": "tsc -p tsconfig.server.json && tsc -p tsconfig.client.json && tsc -p tsconfig.ui.json",
+    "build": "npm run typecheck && node scripts/build.mjs",
+    "test": "tsx --test tests/*.test.ts",
+    "test:ui": "playwright test"
+  },
+  "dependencies": {
+    "@fontsource/cormorant-garamond": "^5.2.8",
+    "@fontsource/inter": "^5.2.8",
+    "@stylexjs/stylex": "^0.19.1",
+    "preact": "^10.29.8"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.28.0",
+    "@playwright/test": "^1.58.2",
+    "@preact/preset-vite": "^2.10.6",
+    "@stylexjs/unplugin": "^0.19.1",
+    "@stylistic/eslint-plugin": "^5.10.0",
+    "@types/node": "^25.0.0",
+    "esbuild": "^0.27.0",
+    "eslint": "^10.11.0",
+    "prettier": "^3.9.9",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.70.1",
+    "unplugin": "^2.3.11",
+    "vite": "^8.3.1"
+  }
+}

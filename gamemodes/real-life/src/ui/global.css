@@ -1,0 +1,121 @@
+* {
+    box-sizing: border-box;
+}
+html,
+body,
+#app {
+    margin: 0;
+    min-height: 100%;
+}
+body {
+    background: transparent;
+}
+button,
+input {
+    font: inherit;
+}
+button {
+    -webkit-tap-highlight-color: transparent;
+}
+::selection {
+    background: #c8b382;
+    color: #121615;
+}
+.loading-line {
+    width: 110px;
+    height: 1px;
+    margin-top: 25px;
+    overflow: hidden;
+    background: #363b33;
+}
+.loading-line::after {
+    content: '';
+    display: block;
+    width: 45%;
+    height: 100%;
+    background: #c8b382;
+    animation: loading 1.8s ease-in-out infinite;
+}
+@keyframes loading {
+    from {
+        transform: translateX(-100%);
+    }
+    to {
+        transform: translateX(330%);
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation: none !important;
+        transition: none !important;
+    }
+}
+/* An intentionally abstract city for browser development. In game the page is transparent. */
+.preview-city {
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    overflow: hidden;
+    background: radial-gradient(ellipse at 68% 30%, #788276, #3d514a 36%, #202f2b 70%);
+}
+.skyline {
+    position: absolute;
+    inset: 24% -2% 0;
+    opacity: 0.8;
+    background:
+        repeating-linear-gradient(0deg, transparent 0 12px, #1e2d29 12px 20px),
+        repeating-linear-gradient(90deg, #172622 0 18px, #5c6651 18px 21px, #172622 21px 32px);
+    clip-path: polygon(
+        0 29%,
+        5% 29%,
+        5% 12%,
+        8% 12%,
+        8% 8%,
+        10% 8%,
+        10% 12%,
+        13% 12%,
+        13% 47%,
+        18% 47%,
+        18% 38%,
+        25% 38%,
+        25% 14%,
+        31% 14%,
+        31% 35%,
+        38% 35%,
+        38% 25%,
+        44% 25%,
+        44% 45%,
+        51% 45%,
+        51% 17%,
+        55% 17%,
+        55% 7%,
+        59% 7%,
+        59% 0,
+        60% 0,
+        60% 7%,
+        64% 7%,
+        64% 17%,
+        67% 17%,
+        67% 50%,
+        73% 50%,
+        73% 28%,
+        80% 28%,
+        80% 42%,
+        86% 42%,
+        86% 22%,
+        91% 22%,
+        91% 8%,
+        96% 8%,
+        96% 36%,
+        100% 36%,
+        100% 100%,
+        0 100%
+    );
+}
+.skyline-far {
+    opacity: 0.25;
+    transform: translate(-6%, -10%) scaleX(-1);
+    filter: blur(2px);
+}

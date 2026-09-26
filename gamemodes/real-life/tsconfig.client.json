@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "lib": ["ES2022"], "types": [] },
+  "include": ["src/client", "src/shared", "../../scripting-api/generated/client-api.d.ts"]
+}
