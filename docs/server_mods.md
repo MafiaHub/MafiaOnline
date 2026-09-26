@@ -45,7 +45,7 @@ Free Ride maps; it preserves a configured custom mission.
 1. The initial authenticated connection obtains the mod manifest (names,
    sizes and SHA-256 hashes).
 2. The existing MafiaNet delta downloader transfers missing/changed ZIPs and
-   script packages. The download dialog shows the file, bytes and progress,
+   script packages. The connection panel shows the file, bytes and progress,
    with Cancel returning to the menu.
 3. A background worker verifies every ZIP's SHA-256, validates its paths and
    expands its assets. Each entry's decompression and CRC must succeed. The

@@ -197,6 +197,11 @@ const styles = stylex.create({
         gap: '0.55rem',
         marginTop: { default: '0.9rem', [compact]: '0.6rem' },
     },
+    downloadDetails: {
+        overflowWrap: 'anywhere',
+        color: colors.parchment,
+        fontSize: '0.85rem',
+    },
     favorite: {
         marginTop: { default: '0.6rem', [compact]: '0.3rem' },
         display: 'flex',
@@ -432,6 +437,10 @@ export function MainMenu() {
     const hostValid = /^[\x21-\x7e]{1,255}$/.test(host.trim());
     const portValid = /^\d{1,5}$/.test(port) && portNumber > 0 && portNumber <= 65535;
     const busy = connection.active && !connection.playAvailable;
+    const preparingContent = connection.phase === 'downloading' || connection.phase === 'starting';
+    const downloadPercent = Math.round(Math.max(0, Math.min(1, connection.progress)) * 100);
+    const measuredDownload = connection.downloading && connection.bytesTotal > 0;
+    const mb = (bytes: number) => (bytes / (1024 * 1024)).toFixed(1);
     const disconnected = !connection.active;
     const isError = disconnected && /^(Disconnected:|Could not|Failed|Enter|Choose|The password|Disconnect before|Nickname|Password)/.test(connection.status);
     const target = { host: host.trim(), port: portNumber };
@@ -509,12 +518,18 @@ export function MainMenu() {
                                 <span {...stylex.props(styles.statusText)}>{connection.status}</span>
                             </div>
                             {busy && (
-                                <div {...stylex.props(styles.progress)}>
-                                    {connection.downloading ? (
-                                        <div {...stylex.props(styles.progressFill)} style={{ width: `${Math.round(connection.progress * 100)}%` }} />
+                                <div {...stylex.props(styles.progress)} role="progressbar" aria-label={preparingContent ? 'Server content download' : 'Connecting to server'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={measuredDownload ? downloadPercent : undefined}>
+                                    {measuredDownload ? (
+                                        <div {...stylex.props(styles.progressFill)} style={{ width: `${downloadPercent}%` }} />
                                     ) : (
                                         !reduceMotion && <div {...stylex.props(styles.progressSweep)} />
                                     )}
+                                </div>
+                            )}
+                            {busy && preparingContent && (
+                                <div {...stylex.props(styles.downloadDetails)}>
+                                    {connection.filesTotal > 0 && <div>{connection.filesDownloaded} / {connection.filesTotal} files · {mb(connection.bytesDownloaded)} / {mb(connection.bytesTotal)} MB · {downloadPercent}%</div>}
+                                    {connection.currentFile && <div>{connection.currentFile}</div>}
                                 </div>
                             )}
                         </div>
