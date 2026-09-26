@@ -1,0 +1,29 @@
+{
+  "name": "mafia1online-ui",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Mafia1Online in-game front end (CEF): connection menu, chat, pause and player list.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fontsource/eb-garamond": "^5.3.0",
+    "@fontsource/limelight": "^5.3.0",
+    "@fontsource/playfair-display": "^5.3.0",
+    "@fontsource/special-elite": "^5.3.0",
+    "@preact/signals": "^2.11.2",
+    "@stylexjs/stylex": "^0.19.1",
+    "preact": "^10.29.8"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.28.0",
+    "@preact/preset-vite": "^2.10.6",
+    "@stylexjs/unplugin": "^0.19.1",
+    "typescript": "^5.9.2",
+    "unplugin": "^2.3.11",
+    "vite": "^8.3.1"
+  }
+}

@@ -1,0 +1,8 @@
+/cache/
+/logs/
+/server.json
+/build/
+/docs/reference/
+/resources/ui/
+__pycache__/
+*.pyc

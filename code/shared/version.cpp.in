@@ -1,0 +1,9 @@
+#define MAFIA1ONLINE_GIT_VERSION_LONG "@Mafia1Online_GIT_VERSION_LONG@"
+#define MAFIA1ONLINE_GIT_VERSION "@Mafia1Online_GIT_VERSION@"
+#define MAFIA1ONLINE_VERSION "@Mafia1Online_VERSION@"
+
+namespace Mafia1Online::Version {
+    const char *git = MAFIA1ONLINE_GIT_VERSION;
+    const char *gitLong = MAFIA1ONLINE_GIT_VERSION_LONG;
+    const char *rel = MAFIA1ONLINE_VERSION;
+} // namespace Mafia1Online::Version

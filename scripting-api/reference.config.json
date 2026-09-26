@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "slug": "mafia1online",
+  "title": "Mafia1Online Scripting API",
+  "tagline": "Build multiplayer game modes for the original Mafia with the Mafia1Online JavaScript runtime.",
+  "targets": {
+    "server": {
+      "label": "Server API",
+      "tsconfig": "tsconfig.server.json",
+      "additionalDeclarations": ["shared.d.ts"],
+      "metadataFile": "generated/server-api.json",
+      "generatedEntryPoint": "generated/server-api.d.ts",
+      "typeImports": {"../shared.js": ["EventHandler", "MessageHandler", "Unsubscribe"]},
+      "bindingSources": ["../code/server/src/features"],
+      "description": "Authoritative Node.js APIs for missions, players, vehicles, combat, and the replicated world."
+    },
+    "client": {
+      "label": "Client API",
+      "tsconfig": "tsconfig.client.json",
+      "additionalDeclarations": ["shared.d.ts"],
+      "metadataFile": "generated/client-api.json",
+      "generatedEntryPoint": "generated/client-api.d.ts",
+      "typeImports": {"../shared.js": ["EventHandler", "KeyHandler", "MessageHandler", "Unsubscribe", "WebEventHandler"]},
+      "bindingSources": ["../code/client/src/features/script"],
+      "description": "Sandboxed V8 APIs for the local HUD, camera, scene, and streamed replicas."
+    }
+  }
+}

@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lost Heaven Field Guide</title>
+  <style>
+    :root { font-family: Georgia, 'Times New Roman', serif; color: #f1e7d5; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; pointer-events: none; }
+    .guide { position: fixed; top: clamp(92px, 12vh, 130px); right: clamp(16px, 3vw, 42px); width: min(366px, calc(100vw - 32px)); text-shadow: 0 1px 2px #100f0c; }
+    .compact { display: flex; justify-content: flex-end; align-items: center; gap: 9px; padding: 9px 12px; margin-left: auto; width: max-content; max-width: 100%; background: rgba(18, 21, 23, .85); border: 1px solid rgba(219, 181, 111, .62); box-shadow: 0 8px 24px #0007; font: 700 11px/1.2 Arial, sans-serif; letter-spacing: .1em; text-transform: uppercase; }
+    .compact .mark { color: #e7bf78; }
+    .compact .route { color: #f5e5c8; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .panel { margin-top: 9px; background: rgba(17, 20, 22, .94); border: 1px solid #947345; box-shadow: 0 13px 35px #0009, inset 0 0 0 4px #292929; }
+    .inside { padding: 20px 23px 18px; }
+    .eyebrow { margin: 0 0 7px; color: #e4bc77; font: 700 10px/1.1 Arial, sans-serif; letter-spacing: .21em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: 28px; line-height: 1; font-weight: normal; letter-spacing: -.04em; }
+    .subheading { margin: 7px 0 17px; color: #b9b0a1; font: italic 13px/1.35 Georgia, serif; }
+    .rule { height: 1px; background: linear-gradient(90deg, #bb8d4d, #bb8d4d22); }
+    .page { display: none; min-height: 183px; padding-top: 14px; }
+    .page.active { display: block; }
+    h2 { margin: 0 0 10px; color: #e6be79; font: 700 11px/1.2 Arial, sans-serif; letter-spacing: .17em; text-transform: uppercase; }
+    .lead { margin: 0 0 14px; color: #eee2ce; font: 13px/1.45 Arial, sans-serif; }
+    .row { display: grid; grid-template-columns: 62px 1fr; align-items: start; gap: 8px; margin: 10px 0; color: #d1c4af; font: 12px/1.35 Arial, sans-serif; }
+    .key { display: inline-block; width: max-content; min-width: 34px; padding: 3px 5px; border: 1px solid #92794f; color: #eed6a8; text-align: center; font: 700 10px/1 Arial, sans-serif; letter-spacing: .04em; }
+    .place { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; margin: 0 0 11px; }
+    .place strong { color: #f0e1c9; font: 16px/1.1 Georgia, serif; font-weight: normal; }
+    .place span { align-self: end; color: #d6ae70; font: 700 10px/1.2 Arial, sans-serif; letter-spacing: .08em; text-transform: uppercase; }
+    .place p { grid-column: 1 / -1; margin: 0; color: #ada797; font: 12px/1.3 Arial, sans-serif; }
+    .command { margin: 9px 0; color: #cfc4b0; font: 12px/1.35 Arial, sans-serif; }
+    .command b { color: #f1d49f; font-family: Consolas, monospace; font-weight: normal; }
+    .tour { display: none; margin: 0 0 11px; padding: 12px 13px; background: #302a22; border-top: 1px solid #806439; border-bottom: 1px solid #806439; }
+    .tour.active { display: block; }
+    .tour-head { display: flex; justify-content: space-between; gap: 8px; color: #ead8b7; font: 700 10px/1.2 Arial, sans-serif; letter-spacing: .14em; text-transform: uppercase; }
+    .tour-head .time { color: #ffe0a0; font-variant-numeric: tabular-nums; }
+    .tour-name { margin: 6px 0 9px; color: #fff0d1; font: 19px/1.15 Georgia, serif; }
+    .track { height: 4px; background: #544a39; }
+    .track-fill { width: 0; height: 100%; background: #d4a454; transition: width .25s; }
+    .footer { display: flex; justify-content: space-between; gap: 10px; align-items: center; margin-top: 11px; color: #a9a08f; font: 10px/1.2 Arial, sans-serif; letter-spacing: .06em; }
+    .footer b { color: #ebd1a3; font-weight: 700; }
+    .guide:not(.expanded) .panel { display: none; }
+    @media (max-height: 650px) { .inside { padding: 14px 18px 12px; } .page { min-height: 150px; } .subheading { margin-bottom: 10px; } .place { margin-bottom: 7px; } }
+  </style>
+</head>
+<body>
+  <aside class="guide" id="guide" aria-live="polite">
+    <div class="compact"><span class="mark">LH · FIELD GUIDE</span><span class="route" id="compact-route">F7 OPEN</span></div>
+    <div class="panel"><div class="inside">
+      <p class="eyebrow">Lost Heaven · Free Ride</p>
+      <h1>City Ledger</h1>
+      <p class="subheading" id="subheading">A few useful places and jobs around town.</p>
+      <div class="rule"></div>
+      <section class="page active" data-page="0">
+        <h2>Start here</h2>
+        <p class="lead">Take a drive, meet the shopkeepers, and try a timed run across the city.</p>
+        <div class="row"><span class="key">/tour</span><span id="tour-intro">Start the city circuit as a driver. Follow the compass before time runs out.</span></div>
+        <div class="row"><span class="key">N / B</span><span>At a shop: browse offers, then buy or accept.</span></div>
+        <div class="row"><span class="key">/car</span><span>Call up a car for a quick start. Visit the pump when fuel runs low.</span></div>
+        <div class="row"><span class="key">F9</span><span>Turn the car radio on or off.</span></div>
+      </section>
+      <section class="page" data-page="1">
+        <h2>Around town</h2>
+        <div class="place"><strong>Yellow Pete</strong><span>Weapons</span><p>Colt, shotgun, Thompson and grenades.</p></div>
+        <div class="place"><strong>The Night Pump</strong><span>Fuel</span><p>Fill a nearby car before the tank runs dry.</p></div>
+        <div class="place"><strong>The Dispensary</strong><span>Health</span><p>Bandages for a rough night.</p></div>
+        <div class="place"><strong>Salieri's Back Window</strong><span>Work</span><p>Grab a bite or carry an envelope to Pete.</p></div>
+      </section>
+      <section class="page" data-page="2">
+        <h2>Useful commands</h2>
+        <p class="command"><b>/help</b> · Full command list in chat.</p>
+        <p class="command"><b>/tour</b> · Start, check, or cancel a three-stop circuit.</p>
+        <p class="command"><b>/tour</b> · Finish in 15 minutes for $240.</p>
+        <p class="command"><b>/repair</b> · Fix your current or last car.</p>
+        <p class="command"><b>/doors</b> · List synchronized doors nearby.</p>
+        <p class="command"><b>/follow name</b> · Watch another player's camera.</p>
+        <p class="command"><b>/weapons</b> · Equip a combat test kit.</p>
+      </section>
+      <div class="tour" id="tour">
+        <div class="tour-head"><span id="tour-step">City circuit</span><span class="time" id="tour-time">0:00</span></div>
+        <div class="tour-name" id="tour-name"></div>
+        <div class="track"><div class="track-fill" id="tour-progress"></div></div>
+      </div>
+      <div class="rule"></div>
+      <div class="footer"><span><b>F7</b> CLOSE / OPEN &nbsp; <b>F8</b> NEXT PAGE</span><span id="page-count">1 / 3</span></div>
+    </div></div>
+  </aside>
+  <script>
+    const guide = document.getElementById("guide");
+    const pages = [...document.querySelectorAll(".page")];
+    const fields = Object.fromEntries(["compact-route", "subheading", "tour", "tour-step", "tour-time", "tour-name", "tour-progress", "page-count", "tour-intro"]
+      .map((id) => [id, document.getElementById(id)]));
+    const locations = {downtown: "Downtown", hoboken: "Hoboken"};
+    function clock(seconds) {
+      const total = Math.max(0, Math.floor(Number(seconds) || 0));
+      return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+    }
+    window.addEventListener("guide:state", ({detail: state}) => {
+      guide.classList.toggle("expanded", Boolean(state.expanded));
+      const section = Math.max(0, Math.min(pages.length - 1, Number(state.section) || 0));
+      pages.forEach((page, index) => page.classList.toggle("active", index === section));
+      fields["page-count"].textContent = `${section + 1} / ${pages.length}`;
+      const district = locations[state.character?.locationId];
+      fields.subheading.textContent = district ? `Your story begins in ${district}.` : "A few useful places and jobs around town.";
+      const tour = state.tour;
+      fields["tour-intro"].textContent = state.driver
+        ? "At the wheel? Use /tour to start a timed city circuit."
+        : "Take the wheel, then use /tour to start a timed city circuit.";
+      fields.tour.classList.toggle("active", Boolean(tour?.active));
+      if (tour?.active) {
+        const checkpoint = Math.max(1, Number(tour.checkpoint) || 1);
+        const total = Math.max(checkpoint, Number(tour.total) || checkpoint);
+        fields["tour-step"].textContent = `Checkpoint ${checkpoint} of ${total}`;
+        fields["tour-time"].textContent = clock(tour.secondsRemaining);
+        fields["tour-name"].textContent = tour.name || "Follow the compass";
+        fields["tour-progress"].style.width = `${Math.min(100, (checkpoint - 1) / total * 100)}%`;
+        fields["compact-route"].textContent = `${checkpoint}/${total} · ${clock(tour.secondsRemaining)} · F7`;
+      } else {
+        fields["compact-route"].textContent = state.courier ? "COURIER RUN · F7"
+          : tour?.bestSeconds != null ? `BEST ${clock(tour.bestSeconds)} · F7` : "F7 OPEN";
+      }
+    });
+  </script>
+</body>
+</html>

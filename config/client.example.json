@@ -1,0 +1,10 @@
+{
+  "quickJoin": {
+    "enabled": false,
+    "nickname": "Player",
+    "host": "127.0.0.1",
+    "port": 27015,
+    "password": "",
+    "profileIndex": 0
+  }
+}

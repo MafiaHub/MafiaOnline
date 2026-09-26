@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><style>html,body{margin:0;background:transparent;overflow:hidden}</style></head>
+<body>
+  <audio id="broadcast" preload="none" crossorigin="anonymous"></audio>
+  <script>
+    const audio = document.getElementById("broadcast");
+    const stream = "https://cast1.torontocast.com:2060/;";
+    const retryDelayMs = 5_000;
+    let active = false;
+    let retryTimer = null;
+
+    function tell(event) {
+      if (typeof callEvent === "function") callEvent(event, "{}");
+    }
+    function retry() {
+      if (!active || retryTimer !== null) return;
+      tell("radio:failed");
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        if (active) audio.play().catch(retry);
+      }, retryDelayMs);
+    }
+    function stop() {
+      active = false;
+      clearTimeout(retryTimer);
+      retryTimer = null;
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+    }
+    audio.addEventListener("playing", () => {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+      tell("radio:playing");
+    });
+    audio.addEventListener("error", retry);
+    audio.addEventListener("ended", retry);
+    audio.addEventListener("stalled", retry);
+    window.addEventListener("radio:play", ({detail}) => {
+      stop();
+      active = true;
+      audio.src = stream;
+      audio.volume = Math.max(0, Math.min(1, Number(detail?.volume) || 0.72));
+      audio.play().catch(retry);
+    });
+    window.addEventListener("radio:stop", stop);
+  </script>
+</body>
+</html>

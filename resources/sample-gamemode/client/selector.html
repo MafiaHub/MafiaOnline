@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Free Ride · Lost Heaven</title>
+  <style>
+    :root { font-family: Georgia, 'Times New Roman', serif; color: #272923; }
+    * { box-sizing: border-box; }
+    body { margin: 0; overflow: hidden; background: transparent; }
+
+    /* Only the ticket covers the game; the preview and city stay clear. */
+    .ticket {
+      position: fixed;
+      left: clamp(16px, 3vw, 42px);
+      bottom: clamp(16px, 3.5vh, 38px);
+      width: min(348px, 43vw);
+      padding: 20px 22px 17px;
+      background: #efe6d3;
+      border: 1px solid #f7efdd;
+      box-shadow: 0 12px 35px rgba(0, 0, 0, .34), inset 0 0 0 5px #e3d6bc;
+      clip-path: polygon(0 0, 100% 0, 100% calc(100% - 11px), calc(100% - 11px) 100%, 0 100%);
+    }
+    .ticket::after {
+      content: '';
+      position: absolute;
+      right: 0;
+      bottom: 0;
+      border-width: 11px 11px 0 0;
+      border-style: solid;
+      border-color: #c5b697 transparent transparent transparent;
+    }
+    .masthead { display: flex; align-items: center; gap: 13px; padding-bottom: 14px; border-bottom: 2px solid #404036; }
+    .seal { display: grid; place-items: center; flex: none; width: 39px; height: 39px; border: 2px solid #962f27; border-radius: 50%; color: #962f27; font: 700 11px/1 Georgia, serif; letter-spacing: -.08em; transform: rotate(-12deg); }
+    .edition { margin: 0 0 2px; color: #685f4c; font: 700 10px/1.2 Arial, sans-serif; letter-spacing: .22em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: 27px; line-height: 1; font-weight: normal; letter-spacing: -.035em; }
+    .lead { margin: 12px 0 19px; color: #625e50; font: italic 14px/1.3 Georgia, serif; }
+    .field { margin-top: 18px; }
+    .field:first-of-type { margin-top: 0; }
+    .field-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+    .label { margin: 0; color: #8c342c; font: 700 10px/1.2 Arial, sans-serif; letter-spacing: .15em; text-transform: uppercase; }
+    .count { color: #766d5d; font: 700 10px/1.2 Arial, sans-serif; white-space: nowrap; letter-spacing: .1em; }
+    .value { display: block; margin-top: 4px; color: #252721; font-size: clamp(23px, 2.6vw, 30px); line-height: 1.05; font-weight: normal; overflow-wrap: anywhere; }
+    .detail { min-height: 17px; margin: 5px 0 0; color: #5e5c51; font: 12px/1.35 Arial, sans-serif; }
+    .instruction { display: flex; align-items: center; gap: 8px; margin-top: 16px; padding-top: 13px; border-top: 1px dashed #9c927b; }
+    .key { display: inline-block; min-width: 21px; padding: 3px 4px; border: 1px solid #5c5a4f; color: #3c3d35; text-align: center; font: 700 11px/1 Arial, sans-serif; }
+    .instruction-label { color: #505148; font: 11px/1.25 Arial, sans-serif; }
+    .enter { margin-left: auto; padding: 6px 8px; border: 0; background: #8c342c; color: #fff4de; font: 700 10px/1 Arial, sans-serif; letter-spacing: .08em; white-space: nowrap; }
+    .status { min-height: 18px; margin: 12px 0 0; color: #7c332b; font: 11px/1.35 Arial, sans-serif; }
+    .steps { display: flex; gap: 5px; margin-top: 13px; }
+    .step { flex: 1; height: 3px; background: #c6bda8; }
+    .step.active { background: #8c342c; }
+    .view-tip { margin: 8px 0 0; color: #716b5b; font: 10px/1.2 Arial, sans-serif; }
+    .waiting .enter { background: #8c8374; }
+    .pending .enter { background: #5b5e53; }
+    .pending .step { background: #c6bda8; }
+    .pending .step.active { background: #8c342c; animation: pulse 1s ease-in-out infinite alternate; }
+    @keyframes pulse { to { opacity: .3; } }
+    .world-label { position: fixed; right: clamp(18px, 3vw, 42px); top: clamp(18px, 3vh, 38px); color: #f6eddb; font: 700 11px/1.3 Arial, sans-serif; letter-spacing: .21em; text-shadow: 0 2px 8px #000, 0 0 20px #000; text-transform: uppercase; }
+    @media (max-width: 700px) {
+      .ticket { width: min(320px, 48vw); padding: 15px 17px 13px; }
+      .lead { margin-bottom: 12px; }
+      .field { margin-top: 12px; }
+      .instruction-label { display: none; }
+      .world-label { font-size: 9px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="world-label">Lost Heaven · Free Ride</div>
+  <main class="ticket waiting" id="ticket" aria-live="polite">
+    <header class="masthead">
+      <span class="seal" aria-hidden="true">LH</span>
+      <div><p class="edition">Admit one · Lost Heaven</p><h1>Free Ride</h1></div>
+    </header>
+    <p class="lead">Where will the city find you?</p>
+    <section class="field">
+      <div class="field-heading"><p class="label">Starting place</p><span class="count" id="location-count"></span></div>
+      <strong class="value" id="location">Finding your place…</strong>
+      <p class="detail" id="location-subtitle"></p>
+    </section>
+    <section class="field">
+      <div class="field-heading"><p class="label">Your character</p><span class="count" id="model-count"></span></div>
+      <strong class="value" id="model">—</strong>
+      <p class="detail" id="model-role"></p>
+    </section>
+    <div class="steps" id="steps" aria-hidden="true"></div>
+    <div class="instruction">
+      <span class="key">↑</span><span class="key">↓</span><span class="instruction-label">Place</span>
+      <span class="key">←</span><span class="key">→</span><span class="instruction-label">Character</span>
+      <span class="enter">ENTER · BEGIN</span>
+    </div>
+    <p class="view-tip">C · change camera view</p>
+    <p class="status" id="status">Loading the map…</p>
+  </main>
+  <script>
+    const fields = Object.fromEntries(["location", "location-count", "location-subtitle", "model", "model-count", "model-role", "status"]
+      .map((id) => [id, document.getElementById(id)]));
+    const ticket = document.getElementById("ticket");
+    const steps = document.getElementById("steps");
+    const count = (index, total) => total ? `${String(index + 1).padStart(2, "0")} / ${String(total).padStart(2, "0")}` : "";
+    window.addEventListener("selector:state", ({detail: state}) => {
+      ticket.classList.toggle("waiting", !state.ready);
+      ticket.classList.toggle("pending", Boolean(state.pending));
+      fields.location.textContent = state.location?.name ?? "Finding your place…";
+      fields["location-count"].textContent = count(state.locationIndex, state.locationCount);
+      fields["location-subtitle"].textContent = state.location?.subtitle ?? "";
+      fields.model.textContent = state.model?.name ?? "—";
+      fields["model-count"].textContent = count(state.modelIndex, state.modelCount);
+      fields["model-role"].textContent = state.model?.role ?? "";
+      fields.status.textContent = state.message ?? "";
+      steps.replaceChildren(...Array.from({length: state.locationCount ?? 0}, (_, index) => {
+        const segment = document.createElement("span");
+        segment.className = `step${index === state.locationIndex ? " active" : ""}`;
+        return segment;
+      }));
+    });
+  </script>
+</body>
+</html>
