@@ -3,48 +3,41 @@
 #include "features/menu/menu_hooks.h"
 #include "features/world/world_hooks.h"
 
+#include "shared/features/world/mission_actors.h"
 #include "shared/features/world/mission_catalog.h"
 #include "shared/features/world/mission_entity.h"
 #include "shared/features/world/mission_load_result.h"
 
 #include <core_modules.h>
 #include <logging/logger.h>
+#include <mafia1/sdk/core/data_file.h>
 #include <mafia1/sdk/core/mission.h>
 #include <mafia1/sdk/core/system.h>
 #include <mafia1/sdk/menu/native_menu.h>
-#include <mafia1/sdk/rail/native_railway.h>
 #include <networking/network_peer.h>
 #include <networking/replication/replication_manager.h>
 
 namespace Mafia1Online::Features::World {
     namespace {
-        // Both stock Free Ride city scenes place railway actors directly in
-        // scene2.bin. Their names run through these suffixes; absent suffixes
-        // are harmless. C_rail_generator::AI does not own these actors.
-        constexpr int kLastSalinaSuffix = 33;
-        constexpr int kLastMetroSuffix = 13;
-
-        size_t DeactivatePlacedRailways(SDK::Scene::NativeScene *scene) {
-            size_t count = 0;
-            const auto deactivate = [&](const std::string &name) {
-                auto *frame = scene->FindFrame(name.c_str());
-                auto *actor = frame ? frame->ActorOwner() : nullptr;
-                if (!actor || static_cast<uint32_t>(actor->GetType()) != SDK::Rail::NativeRailway::kActorType) {
-                    return;
+        bool HideMissionActorModels(SDK::Scene::NativeScene *scene, const std::string &mission) {
+            std::vector<uint8_t> bytes;
+            std::vector<Shared::World::MissionActorRecord> actors;
+            const auto path = "missions\\" + mission + "\\scene2.bin";
+            if (!SDK::Core::DataFile::ReadAll(path.c_str(), bytes) || !Shared::World::ReadMissionActors(bytes, actors)) {
+                Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->error("Could not read mission actor definitions for '{}'", mission);
+                return false;
+            }
+            size_t hidden = 0;
+            for (const auto &actor : actors) {
+                if (Shared::World::KeepMissionActorGeometry(actor.type))
+                    continue;
+                if (auto *frame = scene->FindFrame(actor.frame.c_str())) {
+                    frame->SetOn(false);
+                    ++hidden;
                 }
-                reinterpret_cast<SDK::Rail::NativeRailway *>(actor)->Deactivate();
-                ++count;
-            };
-
-            deactivate("salina");
-            for (int suffix = 2; suffix <= kLastSalinaSuffix; ++suffix) {
-                deactivate("salina" + std::to_string(suffix));
             }
-            deactivate("metro");
-            for (int suffix = 2; suffix <= kLastMetroSuffix; ++suffix) {
-                deactivate("metro" + std::to_string(suffix));
-            }
-            return count;
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Hidden {} mission actor models in '{}'; static map geometry retained", hidden, mission);
+            return true;
         }
     } // namespace
 
@@ -120,7 +113,9 @@ namespace Mafia1Online::Features::World {
             const uint64_t generation = _selectedMissionGeneration;
             void *mission = SDK::Core::Mission::Get();
             SetNativeMissionActive(true);
+            SetNativeMissionLoading(true);
             const int openResult = SDK::Core::Mission::Open(mission, name.c_str());
+            SetNativeMissionLoading(false);
             if (openResult != 0) {
                 Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->error("Native mission '{}' failed to open (code {})", name, openResult);
                 ReportLoadState(generation, static_cast<uint8_t>(Shared::World::MissionLoadState::SceneFailed));
@@ -129,6 +124,13 @@ namespace Mafia1Online::Features::World {
                 break;
             }
             if (WindowExitRequested()) {
+                SDK::Core::Mission::Close(mission);
+                break;
+            }
+
+            if (!HideMissionActorModels(static_cast<SDK::Core::Mission::NativeMission *>(mission)->GetScene(), name)) {
+                ReportLoadState(generation, static_cast<uint8_t>(Shared::World::MissionLoadState::SceneFailed));
+                Features::Menu::SetStatus("Mission actor definitions could not load");
                 SDK::Core::Mission::Close(mission);
                 break;
             }
@@ -161,11 +163,6 @@ namespace Mafia1Online::Features::World {
             }
 
             game->SetTrafficVisible(false);
-            if (name == "freeride" || name == "freeridenoc") {
-                const size_t railways = DeactivatePlacedRailways(static_cast<SDK::Core::Mission::NativeMission *>(mission)->GetScene());
-                Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info(
-                    "Deactivated {} placed Salina/metro railways in '{}'", railways, name);
-            }
             const auto *nativePlayer = game->Player();
             Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info(
                 "Native game initialized: player {:p}, player dead {}, death triggered {}, state {}, death timer {}",

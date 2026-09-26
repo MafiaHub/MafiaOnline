@@ -23,3 +23,6 @@ endif()
 add_executable(Mafia1OnlineCarSnapshotTests car_snapshot_tests.cpp)
 target_include_directories(Mafia1OnlineCarSnapshotTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(Mafia1OnlineCarSnapshotTests PRIVATE Framework)
+
+add_executable(Mafia1OnlineMissionActorTests mission_actor_tests.cpp)
+target_include_directories(Mafia1OnlineMissionActorTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")

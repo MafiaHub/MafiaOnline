@@ -95,50 +95,41 @@ the native `C_game` is initialized and owned by the open mission. It has no
 hook or retained pointer; native `C_mission::Close` owns cleanup. This function
 does not control tram or metro generators or their visible frames.
 
-### Stock traffic and rail behavior
+### Mission actor suppression, traffic and rail
 
-reM's `C_traffic_generator::SetVisible` switches off existing active
-pedestrian models, and `C_traffic_generator::TickElements` and its AI entry
-return while `g_bTrafficVisible` is false. `C_traffic_car::Scipni` switches
-off existing traffic car models and dynamic collisions; both traffic-car AI
-paths return while `g_bTrafficCarsDisabled` is true. `C_game::Init` initially
-enables traffic, so the world service calls `SetTrafficVisible(false)` only
-after successful native Init and before the game loop. These native functions
-keep their normal cleanup ownership.
+During `C_mission::Open` the mod intercepts `C_mission::CreateActor` at
+`0x53f7d0` (`C_actor* __thiscall(C_mission*, uint32_t type)`) and returns null
+except for doors (type 6). Doors load normally so their native interaction,
+collision and multiplayer door synchronization continue to work.
+The audited `OpenBin` actor loop (`0x541030`) explicitly skips actor Init,
+AddActor and LoadData for a null result. This scope includes Open's internal
+Close call and ends immediately when Open returns. Runtime multiplayer and
+scripted actors use the original factory; no global factory disable remains.
 
-`C_rail_generator` is separate. Its `GameInit` creates tram, metro and
-passenger model pools with the vehicle root frames initially off, and its
-`GameDone` releases those pools. The generator's `AI` method selects a track
-and a free railway from the pools, assigns the railway, then maintains active
-assignments. `C_railway::Update` turns the root and wagon frames on when its
-passenger traffic mode activates. The mod suppresses only generator AI during
-a server-owned mission. It leaves `GameInit` and `GameDone` native, so pool
-resources still follow the retail lifecycle. No rail assignment is made in
-the mod-owned game loop, and no tram or metro root or wagon frame is activated
-by this generator.
+The client also reads the selected mission's `scene2.bin` through the normal,
+mod-aware `rw_data` exports. A bounded chunk parser reads only actor records
+(root `0x4c53`, actors `0xae20`, actor `0xae21`, type `0xae22`, frame name
+`0xae23`). It hides authored actor models before collision/game initialization,
+so parked cars, humans, weapons, physical props, aircraft and rail models do
+not survive as visible, unregistered shells. Static geometry used by generic
+props, doors, villa objects, bridge decks, turnouts, pumps and clocks remains;
+only doors retain their mission actor behaviours. Malformed actor metadata
+fails mission loading. Original files and downloaded mod assets are not edited.
+The packaged `freeride_extended` scene contains 1,178 actor records, including
+120 preserved doors, 29 cars and 39 railway records; filtering uses types and
+names from the file, not a list of hardcoded Salina/metro suffixes.
 
-The stock `FREERIDE` and `FREERIDENOC` `scene2.bin` archives contain
-placed Salina and metro model frames, and their actor records assign actor
-type 8 (`C_railway`). There are 38 named rail frames in the day scene and
-36 in the night scene. They are independent of `C_rail_generator`; blocking
-generator AI alone leaves these actors in the map. After `C_game::Init`,
-the world service finds each named actor frame and calls the retail
-`C_railway::Update` at `0x4894d0` in its `DEACTIVATING` mode. reM shows
-that branch turning off the root and wagon frames and removing their dynamic
-collisions, radar markers, engine and curve sounds. It then leaves the actor in
-`INACTIVE` mode and suppresses `C_railway::AI` at `0x488140` for the two
-Free Ride city missions, so proximity cannot reactivate it. The actor and
-its allocations stay mission-owned for normal `GameDone` and `Close`.
-Other stock missions still use their native railway AI.
+`C_game::Init` enables traffic, so `SetTrafficVisible(false)` still runs after
+successful Init and before the game loop. This freezes stock pedestrian,
+traffic-car and police generation. Rail-generator and railway AI hooks skip
+native AI in every server mission. Mission rail generators are never created;
+if a runtime actor creates a pool, normal GameInit/GameDone still own it.
 
 ### Drawbridges and city traffic lights
 
-reM `C_bridge::GameInit` resets the bridge to closed and clears its shutdown
-flag. During a multiplayer mission the client calls retail
-`C_bridge::ShutDown(true)` immediately after that initialization, leaving the
-deck, collision and bridge signals under the native closed state. Bridge AI
-then ignores opening requests. Native `GameDone` and mission close still own
-the actor.
+Mission-authored bridge actors are suppressed and the authored bridge geometry
+stays visible and stationary. The bridge GameInit hook remains for any runtime
+bridge: native initialization closes it, then `ShutDown(true)` prevents opening.
 
 reM `C_game::Tick` advances `m_uSemaphoreTime` through ten 3000 ms phases;
 `m_iSemaphoreStateZ` starts five phases after `m_iSemaphoreStateX`.

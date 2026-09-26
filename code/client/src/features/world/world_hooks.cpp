@@ -4,6 +4,7 @@
 
 #include "core/application.h"
 #include "features/quick_join/quick_join.h"
+#include "shared/features/world/mission_actors.h"
 
 #include <MinHook.h>
 #include <core_modules.h>
@@ -22,39 +23,60 @@
 
 namespace Mafia1Online::Features::World {
     namespace {
-        using MissionClose                 = void(__thiscall *)(void *);
-        MissionClose gMissionCloseOriginal = nullptr;
-        using MenuExecute = uint32_t(__fastcall *)(void *, bool, bool);
-        MenuExecute gMenuExecuteOriginal = nullptr;
-        using MissionProgram = void(__thiscall *)(void *);
-        using MissionProgramRun = void(__thiscall *)(void *, char *);
-        using GameTick = void(__thiscall *)(SDK::Core::Game::NativeGame *, unsigned int);
-        using ProgramCallProcess = bool(__thiscall *)(SDK::Script::NativeProgram *, unsigned int);
-        using RailGeneratorAI = void(__thiscall *)(SDK::Rail::NativeRailGenerator *, unsigned int);
-        using RailwayAI = void(__thiscall *)(SDK::Rail::NativeRailway *, unsigned int);
-        using BridgeGameInit = void(__thiscall *)(SDK::World::NativeBridge *);
-        MissionProgram gProgramInitOriginal = nullptr;
-        MissionProgram gProgramDoneOriginal = nullptr;
-        MissionProgramRun gProgramRunOriginal = nullptr;
-        GameTick gGameTickOriginal = nullptr;
+        using MissionClose                             = void(__thiscall *)(void *);
+        MissionClose gMissionCloseOriginal             = nullptr;
+        using CreateActor                              = SDK::Player::NativeActor *(__thiscall *)(SDK::Core::Mission::NativeMission *, uint32_t);
+        CreateActor gCreateActorOriginal               = nullptr;
+        bool gNativeMissionLoading                     = false;
+        uint32_t gSuppressedActors                     = 0;
+        uint32_t gLoadedDoors                          = 0;
+        using MenuExecute                              = uint32_t(__fastcall *)(void *, bool, bool);
+        MenuExecute gMenuExecuteOriginal               = nullptr;
+        using MissionProgram                           = void(__thiscall *)(void *);
+        using MissionProgramRun                        = void(__thiscall *)(void *, char *);
+        using GameTick                                 = void(__thiscall *)(SDK::Core::Game::NativeGame *, unsigned int);
+        using ProgramCallProcess                       = bool(__thiscall *)(SDK::Script::NativeProgram *, unsigned int);
+        using RailGeneratorAI                          = void(__thiscall *)(SDK::Rail::NativeRailGenerator *, unsigned int);
+        using RailwayAI                                = void(__thiscall *)(SDK::Rail::NativeRailway *, unsigned int);
+        using BridgeGameInit                           = void(__thiscall *)(SDK::World::NativeBridge *);
+        MissionProgram gProgramInitOriginal            = nullptr;
+        MissionProgram gProgramDoneOriginal            = nullptr;
+        MissionProgramRun gProgramRunOriginal          = nullptr;
+        GameTick gGameTickOriginal                     = nullptr;
         ProgramCallProcess gProgramCallProcessOriginal = nullptr;
-        RailGeneratorAI gRailGeneratorAIOriginal = nullptr;
-        RailwayAI gRailwayAIOriginal = nullptr;
-        BridgeGameInit gBridgeGameInitOriginal = nullptr;
-        using WindowProcedure = LRESULT(__stdcall *)(HWND, UINT, WPARAM, LPARAM);
-        WindowProcedure gWindowProcedureOriginal = nullptr;
-        bool gNativeMissionActive = false;
-        bool gWindowExitRequested = false;
-        bool gReportedNativePlayerFailure = false;
-        bool gReportedSuppressedFailureMenu = false;
+        RailGeneratorAI gRailGeneratorAIOriginal       = nullptr;
+        RailwayAI gRailwayAIOriginal                   = nullptr;
+        BridgeGameInit gBridgeGameInitOriginal         = nullptr;
+        using WindowProcedure                          = LRESULT(__stdcall *)(HWND, UINT, WPARAM, LPARAM);
+        WindowProcedure gWindowProcedureOriginal       = nullptr;
+        bool gNativeMissionActive                      = false;
+        bool gWindowExitRequested                      = false;
+        bool gReportedNativePlayerFailure              = false;
+        bool gReportedSuppressedFailureMenu            = false;
 
         Core::Application &Application() {
             return *static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
         }
 
         void __fastcall MissionCloseHook(void *mission, void *) {
+            // Open calls Close internally; keep its actor suppression scope.
             Application().World().NotifyMissionClosing();
             gMissionCloseOriginal(mission);
+        }
+
+        SDK::Player::NativeActor *__fastcall CreateActorHook(SDK::Core::Mission::NativeMission *mission, void *, uint32_t type) {
+            // OpenBin explicitly accepts a null factory result and skips Init,
+            // AddActor and LoadData. Runtime replicated/script actors use the
+            // original factory once scene loading has finished. Scene doors
+            // keep native interaction and the existing door synchronization.
+            if (gNativeMissionLoading) {
+                if (!Shared::World::LoadMissionActor(type)) {
+                    ++gSuppressedActors;
+                    return nullptr;
+                }
+                ++gLoadedDoors;
+            }
+            return gCreateActorOriginal(mission, type);
         }
 
         LRESULT __stdcall WindowProcedureHook(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -142,8 +164,7 @@ namespace Mafia1Online::Features::World {
         }
 
         void __fastcall RailwayAIHook(SDK::Rail::NativeRailway *railway, void *, unsigned int frameTimeMs) {
-            const auto &mission = Application().World().SelectedMission();
-            if (!gNativeMissionActive || (mission != "freeride" && mission != "freeridenoc")) {
+            if (!gNativeMissionActive) {
                 gRailwayAIOriginal(railway, frameTimeMs);
             }
         }
@@ -173,8 +194,9 @@ namespace Mafia1Online::Features::World {
             gGameTickOriginal(game, frameTimeMs);
         }
 
-        constexpr std::array<uintptr_t, 9> kHookAddresses {
+        constexpr std::array<uintptr_t, 10> kHookAddresses {
             SDK::Core::Mission::kClose,
+            SDK::Core::Mission::kCreateActor,
             SDK::Core::Mission::kGlobalProgramGameInit,
             SDK::Core::Mission::kGlobalProgramGameDone,
             SDK::Core::Mission::kGlobalProgramRun,
@@ -201,7 +223,8 @@ namespace Mafia1Online::Features::World {
         if (MH_CreateHook(reinterpret_cast<void *>(SDK::Core::Mission::kClose), reinterpret_cast<void *>(&MissionCloseHook), reinterpret_cast<void **>(&gMissionCloseOriginal)) != MH_OK) {
             return false;
         }
-        if (MH_CreateHook(reinterpret_cast<void *>(SDK::Core::Mission::kGlobalProgramGameInit), reinterpret_cast<void *>(&ProgramInitHook), reinterpret_cast<void **>(&gProgramInitOriginal)) != MH_OK
+        if (MH_CreateHook(reinterpret_cast<void *>(SDK::Core::Mission::kCreateActor), reinterpret_cast<void *>(&CreateActorHook), reinterpret_cast<void **>(&gCreateActorOriginal)) != MH_OK
+            || MH_CreateHook(reinterpret_cast<void *>(SDK::Core::Mission::kGlobalProgramGameInit), reinterpret_cast<void *>(&ProgramInitHook), reinterpret_cast<void **>(&gProgramInitOriginal)) != MH_OK
             || MH_CreateHook(reinterpret_cast<void *>(SDK::Core::Mission::kGlobalProgramGameDone), reinterpret_cast<void *>(&ProgramDoneHook), reinterpret_cast<void **>(&gProgramDoneOriginal)) != MH_OK
             || MH_CreateHook(reinterpret_cast<void *>(SDK::Core::Mission::kGlobalProgramRun), reinterpret_cast<void *>(&ProgramRunHook), reinterpret_cast<void **>(&gProgramRunOriginal)) != MH_OK
             || MH_CreateHook(reinterpret_cast<void *>(SDK::Core::Game::kTick), reinterpret_cast<void *>(&GameTickHook), reinterpret_cast<void **>(&gGameTickOriginal)) != MH_OK
@@ -230,16 +253,29 @@ namespace Mafia1Online::Features::World {
         MH_RemoveHook(reinterpret_cast<void *>(SDK::Menu::kExecuteMenu));
         MH_DisableHook(SDK::Graphics::WindowProcedure());
         MH_RemoveHook(SDK::Graphics::WindowProcedure());
-        gNativeMissionActive = false;
-        gReportedNativePlayerFailure = false;
+        gNativeMissionActive           = false;
+        gNativeMissionLoading          = false;
+        gReportedNativePlayerFailure   = false;
         gReportedSuppressedFailureMenu = false;
     }
 
     void SetNativeMissionActive(bool active) {
         gNativeMissionActive = active;
         if (!active) {
-            gReportedNativePlayerFailure = false;
+            gNativeMissionLoading          = false;
+            gReportedNativePlayerFailure   = false;
             gReportedSuppressedFailureMenu = false;
+        }
+    }
+
+    void SetNativeMissionLoading(bool loading) {
+        gNativeMissionLoading = loading;
+        if (loading) {
+            gSuppressedActors = 0;
+            gLoadedDoors      = 0;
+        }
+        else {
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Suppressed {} mission-file actor spawns; kept {} doors", gSuppressedActors, gLoadedDoors);
         }
     }
 
