@@ -11,6 +11,8 @@ export const EVENT = {
     cameraSaved: 'real-life:camera-saved',
     recorder: 'real-life:recorder',
     recorderState: 'real-life:recorder-state',
+    positionCapture: 'real-life:position-capture',
+    positionCaptured: 'real-life:position-captured',
 } as const;
 
 export type Locale = 'en' | 'cs';

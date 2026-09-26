@@ -7,6 +7,7 @@ export interface Session {
     locale: Locale;
     busy: boolean;
     entered: boolean;
+    announced?: boolean;
     respawnAt: number;
     rememberUntil: number;
     remembered?: RememberedAccount;

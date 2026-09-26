@@ -2,6 +2,7 @@ import { can, isRole, type Permission } from '../shared/permissions';
 import { adminText, type AdminMessage } from './messages';
 import type { Accounts } from './accounts';
 import type { Session } from './session';
+import { propertyText } from './property-messages';
 
 const permissions: Record<string, Permission> = {
     car: 'car.spawn',
@@ -87,10 +88,16 @@ export class AdminCommands {
         switch (command) {
             case 'help':
                 this.reply(session, 'helpUser');
+                player.sendMessage(propertyText(session.locale, 'help'), 0xc8b382);
 
                 if (can(session.account.role, 'player.kick')) {
                     this.reply(session, 'helpAdmin');
                     this.reply(session, 'helpAdminTools');
+                }
+
+                if (can(session.account.role, 'property.edit')) {
+                    player.sendMessage(propertyText(session.locale, 'editorHelp'), 0xc8b382);
+                    player.sendMessage(propertyText(session.locale, 'interiorHelp'), 0xc8b382);
                 }
 
                 break;
@@ -172,6 +179,7 @@ export class AdminCommands {
         }
 
         vehicle.setVirtualWorld(player.virtualWorld);
+        vehicle.setRadarMarker(true);
 
         if (!player.putInVehicle(vehicle, 0)) {
             vehicle.destroy();
@@ -454,6 +462,10 @@ export class AdminCommands {
                 { player: args[0] ?? '' },
             );
         }
+    }
+
+    claimCar(vehicle: Vehicle): void {
+        this.cars.delete(vehicle.id);
     }
 
     release(player: Player): void {

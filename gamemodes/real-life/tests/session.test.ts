@@ -14,12 +14,26 @@ class TestPlayer {
     spawned = false;
     alive = false;
     model = '';
+    money = 25;
+    setMoney(amount: number) {
+        this.money = amount;
+
+        return true;
+    }
+
     nickname = 'Guest';
     virtualWorld = 0;
     position = { x: 0, y: 0, z: 0 };
     rotation = { w: 1, x: 0, y: 0, z: 0 };
     states: SessionState[] = [];
     kicks: string[] = [];
+    messages: string[] = [];
+    sendMessage(text: string) {
+        this.messages.push(text);
+
+        return true;
+    }
+
     constructor(readonly id: number) {}
     getIP() {
         return `127.0.0.${this.id}`;
@@ -168,6 +182,23 @@ test('resource gates spawning, restores disconnected players and rejects concurr
         assert.equal(first.nickname, 'Angelo');
         assert.ok(isModel(first.model));
         assert.equal(first.virtualWorld, 0);
+        assert.deepEqual(first.messages, ['Ahoj, hráč Angelo se připojil!']);
+        timers[0]();
+        assert.equal(first.messages.length, 1);
+        const english = connect(90);
+
+        await handlers.get(EVENT.auth)!(english, {
+            generation: 1,
+            mode: 'register',
+            username: 'English',
+            password: 'long-password',
+            locale: 'en',
+        });
+
+        assert.equal(english.messages.at(-1), 'Hey, English connected!');
+        assert.equal(first.messages.at(-1), 'Ahoj, hráč English se připojil!');
+        handlers.get('playerDisconnect')!(english);
+        players.splice(players.indexOf(english), 1);
         const second = connect(2);
 
         const resume = (player: TestPlayer) =>

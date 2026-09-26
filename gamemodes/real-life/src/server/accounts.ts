@@ -14,6 +14,7 @@ export interface Account {
     model: string | null;
     place: SavedPlace | null;
     role: Role;
+    money: number;
 }
 interface AccountRow {
     id: number;
@@ -27,6 +28,7 @@ interface AccountRow {
     z: number | null;
     heading: number | null;
     role: string;
+    money: number;
 }
 
 export class Accounts {
@@ -73,6 +75,27 @@ export class Accounts {
             this.db.exec("ALTER TABLE accounts ADD COLUMN role TEXT NOT NULL DEFAULT 'user'");
         }
 
+        if (!columns.some((column) => column.name === 'money')) {
+            this.db.exec(
+                'ALTER TABLE accounts ADD COLUMN money INTEGER NOT NULL DEFAULT 25 CHECK (money >= 0 AND money <= 1000000000)',
+            );
+        }
+
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS house_owners (
+                house_id INTEGER PRIMARY KEY,
+                account_id INTEGER NOT NULL REFERENCES accounts(id),
+                unlocked INTEGER NOT NULL DEFAULT 0 CHECK (unlocked IN (0, 1))
+            ) STRICT;
+            CREATE TABLE IF NOT EXISTS garage_saves (
+                house_id INTEGER NOT NULL REFERENCES house_owners(house_id),
+                slot INTEGER NOT NULL,
+                model TEXT NOT NULL,
+                snapshot TEXT NOT NULL,
+                PRIMARY KEY (house_id, slot)
+            ) STRICT;
+        `);
+
         this.db
             .prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)')
             .run('server_id', randomUUID());
@@ -98,6 +121,7 @@ export class Accounts {
             locale: row.locale,
             model: row.model,
             role: isRole(row.role) ? row.role : 'user',
+            money: row.money,
             place:
                 row.mission !== null &&
                 row.x !== null &&
@@ -140,6 +164,94 @@ export class Accounts {
                 place.heading,
                 id,
             );
+    }
+
+    balance(id: number): number {
+        return this.db.prepare('SELECT money FROM accounts WHERE id = ?').get(id)!.money as number;
+    }
+
+    setBalance(id: number, money: number): void {
+        if (!Number.isSafeInteger(money) || money < 0 || money > 1_000_000_000) {
+            throw new Error('Invalid balance');
+        }
+
+        this.db.prepare('UPDATE accounts SET money = ? WHERE id = ?').run(money, id);
+    }
+
+    houseOwner(id: number): { accountId: number; unlocked: boolean } | undefined {
+        const row = this.db
+            .prepare('SELECT account_id, unlocked FROM house_owners WHERE house_id = ?')
+            .get(id);
+
+        return row
+            ? { accountId: row.account_id as number, unlocked: row.unlocked === 1 }
+            : undefined;
+    }
+
+    buyHouse(accountId: number, houseId: number, price: number): 'bought' | 'owned' | 'funds' {
+        if (!Number.isSafeInteger(price) || price <= 0 || price > 1_000_000_000) {
+            throw new Error('Invalid price');
+        }
+
+        this.db.exec('BEGIN IMMEDIATE');
+
+        try {
+            if (this.houseOwner(houseId)) {
+                this.db.exec('ROLLBACK');
+
+                return 'owned';
+            }
+
+            const paid = this.db
+                .prepare('UPDATE accounts SET money = money - ? WHERE id = ? AND money >= ?')
+                .run(price, accountId, price);
+
+            if (!paid.changes) {
+                this.db.exec('ROLLBACK');
+
+                return 'funds';
+            }
+
+            this.db
+                .prepare('INSERT INTO house_owners (house_id, account_id) VALUES (?, ?)')
+                .run(houseId, accountId);
+
+            this.db.exec('COMMIT');
+
+            return 'bought';
+        } catch (error) {
+            this.db.exec('ROLLBACK');
+            throw error;
+        }
+    }
+
+    lockHouse(houseId: number, accountId: number, unlocked: boolean): boolean {
+        return Boolean(
+            this.db
+                .prepare(
+                    'UPDATE house_owners SET unlocked = ? WHERE house_id = ? AND account_id = ?',
+                )
+                .run(unlocked ? 1 : 0, houseId, accountId).changes,
+        );
+    }
+
+    saveGarage(houseId: number, slot: number, model: string, snapshot: string): void {
+        this.db
+            .prepare(
+                'INSERT INTO garage_saves (house_id, slot, model, snapshot) VALUES (?, ?, ?, ?) ON CONFLICT(house_id, slot) DO UPDATE SET model = excluded.model, snapshot = excluded.snapshot',
+            )
+            .run(houseId, slot, model, snapshot);
+    }
+
+    garages(): { houseId: number; slot: number; model: string; snapshot: string }[] {
+        return this.db
+            .prepare('SELECT house_id AS houseId, slot, model, snapshot FROM garage_saves')
+            .all() as unknown as {
+            houseId: number;
+            slot: number;
+            model: string;
+            snapshot: string;
+        }[];
     }
 
     close(): void {

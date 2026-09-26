@@ -108,6 +108,13 @@ class TestPlayer {
 }
 
 class TestVehicle {
+    radarVisible = false;
+    setRadarMarker(visible: boolean) {
+        this.radarVisible = visible;
+
+        return true;
+    }
+
     virtualWorld = 0;
     destroyed = false;
     occupants = new Set<TestPlayer>();
@@ -230,12 +237,38 @@ test('every privileged command checks the stored rank and rejects unauthenticate
     assert.equal(accounts.find('Angelo')?.role, 'admin');
     run(player, 'car');
     assert.equal(cars.length, 1);
+    assert.equal(cars[0].radarVisible, true);
     commands.handleConsole('setrole', ['Angelo', 'user']);
     run(player, 'car');
     assert.equal(player.messages.at(-1), adminText('en', 'denied'));
     session.account = undefined;
     run(player, 'car');
     assert.equal(player.messages.at(-1), adminText('en', 'loginRequired'));
+});
+
+test('help lists property use and all editor commands according to rank', (t) => {
+    const { connect, run } = setup(t);
+    const user = connect('Visitor').player;
+    const admin = connect('Editor', 'admin').player;
+
+    run(user, 'help');
+    assert.match(user.messages.join('\n'), /house_buy/);
+    assert.doesNotMatch(user.messages.join('\n'), /house_entry|savepos/);
+    run(admin, 'help');
+    const help = admin.messages.join('\n');
+
+    for (const command of [
+        'house_entry',
+        'house_garage',
+        'house_set',
+        'interior_entry',
+        'interior_exit',
+        'interior_go',
+        'interior_remove',
+        'savepos',
+    ]) {
+        assert.ok(help.includes('/' + command), command);
+    }
 });
 
 test('follow changes only the camera and resets on off, demotion and resource cleanup', (t) => {

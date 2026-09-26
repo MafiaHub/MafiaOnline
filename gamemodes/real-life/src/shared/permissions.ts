@@ -1,4 +1,6 @@
 export type Permission =
+    | 'position.save'
+    | 'property.edit'
     | 'car.spawn'
     | 'player.kick'
     | 'player.ban'
@@ -9,6 +11,8 @@ export type Permission =
 export const roles = {
     user: [],
     admin: [
+        'position.save',
+        'property.edit',
         'car.spawn',
         'player.kick',
         'player.ban',

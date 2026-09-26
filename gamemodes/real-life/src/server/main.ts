@@ -3,6 +3,9 @@ import { resolve } from 'node:path';
 import { randomInt } from 'node:crypto';
 import { Accounts } from './accounts';
 import { AdminCommands } from './admin';
+import { Properties } from './properties';
+import { Positions } from './positions';
+import { PROPERTY_EVENT } from '../shared/properties';
 import { adminText } from './messages';
 import type { Session } from './session';
 import { hashPassword, verifyPassword } from './password';
@@ -36,6 +39,8 @@ const sessions = new Map<number, Session>();
 const online = new Set<number>();
 const limits = new RateLimit();
 const admin = new AdminCommands(accounts, sessions, saveSafely);
+const properties = new Properties(data, accounts, sessions, (vehicle) => admin.claimCar(vehicle));
+const positions = new Positions(data, accounts, sessions);
 let hashing = 0;
 let stopping = false;
 let nextPrivateWorld = 0x40000000;
@@ -124,7 +129,7 @@ function save(session: Session): void {
         return;
     }
 
-    const place: SavedPlace = {
+    const place: SavedPlace = properties.savedPlace(session) ?? {
         mission,
         position: { x: position.x, y: position.y, z: position.z },
         heading,
@@ -179,10 +184,23 @@ function enter(session: Session): void {
 
     player.setVirtualWorld(0);
     player.setNickname(account.username);
+    player.setMoney(accounts.balance(account.id));
     session.entered = true;
     session.remembered = undefined;
     saveSafely(session);
     send(session);
+
+    if (!session.announced) {
+        session.announced = true;
+        for (const recipient of sessions.values()) {
+            if (recipient.entered) {
+                recipient.player.sendMessage(
+                    adminText(recipient.locale, 'playerConnected', { player: account.username }),
+                    0xc8b382,
+                );
+            }
+        }
+    }
 }
 
 async function authenticate(player: Player, payload: unknown): Promise<void> {
@@ -354,10 +372,55 @@ events.onClient(EVENT.forget, (_sender, payload) => {
     }
 });
 
-events.on('consoleCommand', (command, args) => admin.handleConsole(command, args));
+events.onClient(PROPERTY_EVENT.use, (sender, payload) => properties.use(sender as Player, payload));
+events.onClient(EVENT.positionCaptured, (sender, payload) =>
+    positions.captured(sender as Player, payload),
+);
+
+events.on('playerMoneyChange', (player, _previous, money) => {
+    const session = sessions.get(player.id);
+
+    if (session?.account && session.entered) {
+        accounts.setBalance(session.account.id, money);
+    }
+});
+
+events.on('consoleCommand', (command, args) => {
+    if (command.toLowerCase() === 'setmoney') {
+        const account = accounts.find(args[0] ?? '');
+        const money = Number(args[1]);
+
+        if (
+            args.length !== 2 ||
+            !account ||
+            !Number.isSafeInteger(money) ||
+            money < 0 ||
+            money > 1_000_000_000
+        ) {
+            process.stdout.write('[lhrp] Console: setmoney <username> <dollars> (0–1000000000)\n');
+
+            return;
+        }
+
+        accounts.setBalance(account.id, money);
+        for (const session of sessions.values()) {
+            if (session.account?.id === account.id && session.entered) {
+                session.player.setMoney(money);
+            }
+        }
+
+        return;
+    }
+
+    admin.handleConsole(command, args);
+});
 
 events.on('playerCommand', (player, command, args) => {
-    if (admin.handle(player, command, args)) {
+    if (
+        positions.handle(player, command, args) ||
+        properties.handle(player, command, args) ||
+        admin.handle(player, command, args)
+    ) {
         return;
     }
 
@@ -369,6 +432,8 @@ events.on('playerCommand', (player, command, args) => {
 
     saveSafely(session);
     admin.release(player);
+    properties.release(player);
+    positions.release(player);
 
     if (session.rememberToken) {
         accounts.forget(session.rememberToken);
@@ -396,6 +461,8 @@ events.on('playerDisconnect', (player) => {
 
     saveSafely(session); // Native handle is still valid during playerDisconnect.
     admin.release(player);
+    properties.release(player);
+    positions.release(player);
 
     if (session.account) {
         online.delete(session.account.id);
@@ -414,6 +481,8 @@ events.on('playerDeath', (player) => {
 
 events.on('missionChange', () => {
     admin.reset();
+    properties.reset();
+    positions.reset();
     // The native world has already reset: keep the last checkpoint, never save the reset pose.
     for (const session of sessions.values()) {
         session.entered = false;
@@ -432,12 +501,22 @@ events.on('resourceStart', (name) => {
 
 const spawnTimer = setInterval(() => {
     admin.update();
+    positions.update();
+
+    try {
+        properties.update();
+    } catch (error) {
+        process.stderr.write(`[${RESOURCE}] Property update failed: ${error}\n`);
+    }
+
     for (const session of sessions.values()) {
         if (session.respawnAt && Date.now() >= session.respawnAt && World.isReady()) {
             const position = session.player.getSuggestedSpawn();
 
             if (position && session.player.respawn(position)) {
                 session.respawnAt = 0;
+                session.player.setVirtualWorld(0);
+                properties.release(session.player);
             }
         }
 
@@ -465,6 +544,8 @@ events.on('resourceStop', (name) => {
     }
 
     admin.reset();
+    properties.reset();
+    positions.reset();
     sessions.clear();
     online.clear();
     accounts.close();

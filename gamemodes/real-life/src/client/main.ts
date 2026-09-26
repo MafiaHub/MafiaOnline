@@ -1,3 +1,5 @@
+import './properties';
+import './positions';
 import { Cinematic } from './cinematic';
 import { CameraRecorder } from './recorder';
 import { isCameraPaths } from '../shared/camera';
