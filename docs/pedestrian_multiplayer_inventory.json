@@ -1,0 +1,1194 @@
+{
+  "schema_version": 1,
+  "research_date": "2026-09-26",
+  "purpose": "Reproducible source/binary inventory for pedestrian_multiplayer_research.md; no installed hooks or runtime validation.",
+  "limitations": [
+    "Working trees contain local changes; hashes identify the examined files.",
+    "Tracker status and similarity are existing records, not freshly rerun byte matches or behavioral accuracy.",
+    "Entry bytes contain absolute operands and may cross instructions; they are identification samples, not detour lengths or portable signatures.",
+    "All ABI contracts and supported binary variants require implementation-time verification.",
+    "Inventory covers the selected owners plus generator methods filed under other owners; the full engine call graph is not claimed."
+  ],
+  "snapshots": {
+    "reM": {
+      "root": "/home/david/Developer/reM",
+      "git_head": "ae770c41670791d05cbd59abac3b2b34a771542a",
+      "working_tree_has_changes": true,
+      "files": [
+        {
+          "path": "projects/Game/src/actors/C_traffic_generator.h",
+          "sha256": "3f7d7e5df7e6262c0467cbc9f725a99e1d7a1524502b3d7dd89e9497b0478847"
+        },
+        {
+          "path": "projects/Game/src/actors/C_traffic_generator.cpp",
+          "sha256": "bac4fce4bd78b132de0fb4fb8db4d082b5b69987cb0f05a83757fe7e5937e09b"
+        },
+        {
+          "path": "projects/Game/src/ai/C_traffic_element.h",
+          "sha256": "17cfec780f20652b26144975ae57e2aab994fccd50e8a3b4aaf231bdb84c26be"
+        },
+        {
+          "path": "projects/Game/src/ai/C_traffic_element.cpp",
+          "sha256": "44772e17b8ea26002cd392ef8c225ef3fce6018b011fbae67abdec44c1542213"
+        },
+        {
+          "path": "projects/Game/src/actors/C_don_ocas.h",
+          "sha256": "076fdf49c984c3a9fcbf9670b2facd333128b9cd5eff9b17131b9b8f4e9fd5d5"
+        },
+        {
+          "path": "projects/Game/src/actors/C_don_ocas.cpp",
+          "sha256": "b0a8ade936c873fd5663f7450d9ae2e23bc2c4577f45bba40f8db384b3a6e631"
+        },
+        {
+          "path": "projects/Game/src/core/C_game.cpp",
+          "sha256": "c3d3cdef5729a1b55bf611a3c2332e4b92813b7c01c0351f019b0eb40e500b7d"
+        },
+        {
+          "path": "projects/Game/src/core/C_mission.cpp",
+          "sha256": "b75f5125f59e6c2806f50759c16bc349773d171bdf6508cd3e50c0682c68e8a3"
+        },
+        {
+          "path": "projects/Game/src/core/WinMain.cpp",
+          "sha256": "171945ef041ec5bce8d5ab2ca092bf6d04f58da4485966a378f15dfc5d8ad778"
+        },
+        {
+          "path": "projects/Game/src/actors/C_actor.cpp",
+          "sha256": "1c2812d5463bb196776ba90749ea29201132c607ac42b6de1c2f39116a1271c6"
+        },
+        {
+          "path": "projects/Game/src/actors/C_human.cpp",
+          "sha256": "aca78379d04d5e771329be71c1f964c51a2ffbd62ba0153c3d6f2382ad386e32"
+        },
+        {
+          "path": "projects/Game/src/actors/C_entity.cpp",
+          "sha256": "063c6a6fde49326556dc158eaf1896de13ae0478bcf7a61b32a81a7209ddcd30"
+        },
+        {
+          "path": "projects/Game/src/actors/C_animations_machine_de_luxe.cpp",
+          "sha256": "92cc27738bb37a5774abcd5926d50f8c7791b9cf70fdb0d4ee1c43fb7595e541"
+        },
+        {
+          "path": "projects/Game/src/ai/C_shvestky.cpp",
+          "sha256": "2076947f97527b7c37bede44848b2c78fa887cf0460de32af01a27ec2699113f"
+        },
+        {
+          "path": "projects/Game/src/ai/C_web_path.cpp",
+          "sha256": "f92055aa8b022841dd07a428c580d09c92f410a8add2d808209ae4ca1e03aba5"
+        },
+        {
+          "path": "projects/Game/src/ai/C_web_node.h",
+          "sha256": "7344f8adf967c7be589825119a93064da6a7adc03c185de7433d5c4058d057a6"
+        },
+        {
+          "path": "projects/Game/src/collision/g_collision.h",
+          "sha256": "f2c699c9ce42978e8414f40cb9843e31db0834d78f9763333441c1b894c22f24"
+        },
+        {
+          "path": "projects/Game/src/collision/g_collision.cpp",
+          "sha256": "84359dc54f5b97222072924038d694b8770cbe02dfd06a19b2d8084b49593ed7"
+        },
+        {
+          "path": "projects/Game/src/actors/C_traffic_car.cpp",
+          "sha256": "c0761cc34a07a37b39da1230615b8d7bc1b7b33117b85085914b52f0ad9ef636"
+        },
+        {
+          "path": "projects/Game/src/actors/C_rail_generator.cpp",
+          "sha256": "91f9756f83bf0c48e428329f5a38e9140a427d804bc98a7f90eb79af5147a219"
+        }
+      ]
+    },
+    "mafia1online": {
+      "root": "/home/david/Developer/Framework/code/projects/mafia1online",
+      "git_head": "22434aa12aed8f899ab4685c56cb5ec17dd53dba",
+      "working_tree_has_changes": true,
+      "files": [
+        {
+          "path": "code/client/src/features/world/world_service.cpp",
+          "sha256": "59bb1eac7fd868fbb346efb2120028e3820bd9413536f598e6eb93c7d1a7e28b"
+        },
+        {
+          "path": "code/client/src/features/world/world_hooks.cpp",
+          "sha256": "6882e4b1d5136c9f9ca3ff8a5d636a5d0ae82e972654c40914f9a57201560184"
+        },
+        {
+          "path": "code/shared/register_entities.cpp",
+          "sha256": "cce50127006d5892f9204afb3fbe93e786189a192aeb22572e735ebf88f75c9a"
+        },
+        {
+          "path": "code/shared/features/player/player_entity.h",
+          "sha256": "ac2efc628b5b24774100e150bd484042a0dbf0b442f93a11b38b7e7692138fd7"
+        },
+        {
+          "path": "code/client/src/game/entities/native_object_registry.h",
+          "sha256": "363957b3e049dedec0946b72cb3d4846737d1ed1ad86b1884e370c6f43101947"
+        },
+        {
+          "path": "code/client/src/game/entities/native_object_registry.cpp",
+          "sha256": "88ff1237df9992518b1ad4cd264c33cbeefea66d36fb904b24e57fa870b5d685"
+        },
+        {
+          "path": "code/client/src/features/combat/combat_hooks.cpp",
+          "sha256": "be5cedaad07e85d6017a5998cf5319bfcd6a532157a56083e4507895928882af"
+        },
+        {
+          "path": "code/client/src/features/combat/combat_service.cpp",
+          "sha256": "0cce4b577787ff49cf1aca6b6c245e78acab690deb60d0e4282d96f6c3b30b5d"
+        },
+        {
+          "path": "code/server/src/features/combat/combat_service.cpp",
+          "sha256": "4694ce2e40a742ff0fd3f0369b0b2a50f691291d0c25fa30abccebe87a0a9644"
+        },
+        {
+          "path": "code/shared/features/combat/hit_report.h",
+          "sha256": "657ece0f5b2be2accb35cd8986d5abc6ffc898af3ef12b195de640541b97d0c0"
+        },
+        {
+          "path": "code/shared/features/combat/combat_protocol.h",
+          "sha256": "af5298511199e777ecfd01efebc25f350bea4c54ea825325511a260b67a21311"
+        },
+        {
+          "path": "code/sdk/include/mafia1/sdk/player/native_actor.h",
+          "sha256": "7cbedd00cf6e0db3ecbe83f54e23d9e4ca296db9e44b7eaac129022ee4bfef0d"
+        }
+      ]
+    },
+    "framework": {
+      "root": "/home/david/Developer/Framework",
+      "git_head": "81b8633b90b53f2ab756f0877f9f099fd68a961b",
+      "working_tree_has_changes": false,
+      "files": [
+        {
+          "path": "code/framework/src/networking/replication/network_entity.h",
+          "sha256": "5731a8a4a3c8811c07e40e5ea54ab1cd3f923633ddef469ab93a3bdeaa01ec48"
+        },
+        {
+          "path": "code/framework/src/networking/replication/interest_grid.cpp",
+          "sha256": "fd0252999f322cbbff38cdb62fb1e478235c4a36b08b4e754b11f8c56d2d36e9"
+        },
+        {
+          "path": "code/framework/src/networking/replication/replication_manager.cpp",
+          "sha256": "98ec39764fd19922c6ef36b37b9bb5729f1da20fc76a8a85136c393ddad0469f"
+        },
+        {
+          "path": "code/framework/src/networking/replication/delegation.h",
+          "sha256": "c75f3ba9e52372e946183a023045d5c8d5728cb589574d582159a31b9b1f6e55"
+        }
+      ]
+    }
+  },
+  "binary": {
+    "path": "/home/david/Developer/reM/original-binaries/Game.exe",
+    "sha256": "303eb95ee2de3433511ce0cb518921dcb96b62b0f64ebfcc436723ff5083f298",
+    "size_bytes": 2355200,
+    "image_base": "0x400000",
+    "machine": "PE32 i386"
+  },
+  "direct_binary_disassembly_inspected": [
+    {
+      "function": "C_traffic_generator::AI",
+      "range": "0x44edb0..0x44edcd",
+      "scope": "entry visibility/activation guard only"
+    },
+    {
+      "function": "C_traffic_element::Deactivate",
+      "range": "0x4587c0..0x4588c8",
+      "scope": "complete body including generator decrement and free-element delete"
+    }
+  ],
+  "functions": [
+    {
+      "address": "0x44c520",
+      "name": "g_vTrafficElements dynamic initializer",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "compiler-generated dynamic initializer for g_vTrafficElements",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44c520__g-vtrafficelements-static-init.json",
+      "tracker_sha256": "36a638d6cd4f65642a3383d28797ddc9b025ba7e85167a04cadd15c7d48082ca",
+      "implementation_file": "projects/Game/src/actors/C_traffic_generator.cpp",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "e8 0b 00 00 00 e9 26 00 00 00 90 90 90 90 90 90 51 8a 44 24 03 a2 64 d7"
+    },
+    {
+      "address": "0x44c530",
+      "name": "g_vTrafficElements vector constructor",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "compiler-generated vector constructor for g_vTrafficElements",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44c530__g-vtrafficelements-init.json",
+      "tracker_sha256": "eada8063c5918fadf2c1eeb24648280f1d9d5728f02eb768344cbf2c7b35cf8d",
+      "implementation_file": "projects/Game/src/actors/C_traffic_generator.cpp",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "51 8a 44 24 03 a2 64 d7 63 00 33 c0 a3 68 d7 63 00 a3 6c d7 63 00 a3 70"
+    },
+    {
+      "address": "0x44c560",
+      "name": "g_vTrafficElements atexit destructor",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "compiler-generated atexit destructor for g_vTrafficElements",
+      "tracker_status": "OUT_OF_SCOPE",
+      "tracker_match_pct": null,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44c560__g-vtrafficelements-atexit-dtor.json",
+      "tracker_sha256": "82a74962f268b143c1c2752ef39d827673233e1d3371eb21e2b1095c09194851",
+      "implementation_file": "projects/Game/src/actors/C_traffic_generator.cpp",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "8a 0d 60 d7 63 00 b0 01 84 c8 75 29 8a d1 0a d0 a1 68 d7 63 00 50 88 15"
+    },
+    {
+      "address": "0x44c5a0",
+      "name": "g_vSpawnedTrafficElements dynamic initializer",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "compiler-generated dynamic initializer for g_vSpawnedTrafficElements",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44c5a0__g-vspawnedtrafficelements-static-init.json",
+      "tracker_sha256": "5f10fb4712f00a9305d8b7641d9af53d8fc50c7912a97444726ac31475993f78",
+      "implementation_file": "projects/Game/src/actors/C_traffic_generator.cpp",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "e8 0b 00 00 00 e9 26 00 00 00 90 90 90 90 90 90 51 8a 44 24 03 a2 50 d7"
+    },
+    {
+      "address": "0x44c5b0",
+      "name": "g_vSpawnedTrafficElements vector constructor",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "compiler-generated vector constructor for g_vSpawnedTrafficElements",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44c5b0__g-vspawnedtrafficelements-init.json",
+      "tracker_sha256": "005534baeff467397f3162bdc25272b3e359975ba440ae8f105fd0c6b98555e2",
+      "implementation_file": "projects/Game/src/actors/C_traffic_generator.cpp",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "51 8a 44 24 03 a2 50 d7 63 00 33 c0 a3 54 d7 63 00 a3 58 d7 63 00 a3 5c"
+    },
+    {
+      "address": "0x44c5e0",
+      "name": "g_vSpawnedTrafficElements atexit destructor",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "compiler-generated atexit destructor for g_vSpawnedTrafficElements",
+      "tracker_status": "OUT_OF_SCOPE",
+      "tracker_match_pct": null,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44c5e0__g-vspawnedtrafficelements-atexit-dtor.json",
+      "tracker_sha256": "9ede0057f82040c8439a59167445413d0e602b89f3fb54206208de9ebe80a7ad",
+      "implementation_file": "projects/Game/src/actors/C_traffic_generator.cpp",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "8a 0d 60 d7 63 00 b0 02 84 c8 75 29 8a d1 0a d0 a1 54 d7 63 00 50 88 15"
+    },
+    {
+      "address": "0x44c640",
+      "name": "C_don_ocas::C_don_ocas",
+      "owner": "C_don_ocas",
+      "signature_from_tracker": "C_don_ocas::C_don_ocas((void))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44c640__c-don-ocas-c-don-ocas.json",
+      "tracker_sha256": "f1676d845e1b51d9749386db7b17176f58a14620c6830634ee9d0baa3c36ecd4",
+      "implementation_file": "projects/Game/src/actors/C_don_ocas.cpp",
+      "function_annotation_line": 64,
+      "binary_first_24_bytes_not_a_signature": "56 8b f1 e8 d8 96 fb ff c7 06 f8 3e 62 00 c7 46 10 13 00 00 00 8b c6 5e"
+    },
+    {
+      "address": "0x44c660",
+      "name": "C_don_ocas::__dl",
+      "owner": "C_don_ocas",
+      "signature_from_tracker": "C_don_ocas::__dl((void))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44c660__c-don-ocas-dl.json",
+      "tracker_sha256": "0a9d076ab084d7cc98f8407d3a4d10d77a301007957aebd12616bba0fda9969e",
+      "implementation_file": "projects/Game/src/actors/C_don_ocas.cpp",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "56 8b f1 e8 18 00 00 00 f6 44 24 08 01 74 09 56 e8 81 36 1c 00 83 c4 04"
+    },
+    {
+      "address": "0x44c680",
+      "name": "C_don_ocas::~C_don_ocas",
+      "owner": "C_don_ocas",
+      "signature_from_tracker": "C_don_ocas::~C_don_ocas((void))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44c680__c-don-ocas-c-don-ocas.json",
+      "tracker_sha256": "9bbc27e303f4d5926a1532d9acdb98f57b752c3784ae82afcbd8bc1751e48ff8",
+      "implementation_file": "projects/Game/src/actors/C_don_ocas.cpp",
+      "function_annotation_line": 73,
+      "binary_first_24_bytes_not_a_signature": "c7 01 f8 3e 62 00 e9 05 97 fb ff 90 90 90 90 90 56 8b f1 e8 08 99 fb ff"
+    },
+    {
+      "address": "0x44c690",
+      "name": "C_don_ocas::GameInit",
+      "owner": "C_don_ocas",
+      "signature_from_tracker": "C_don_ocas::GameInit((void))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44c690__c-don-ocas-gameinit.json",
+      "tracker_sha256": "cd54a2ad34e80b103fe99cf2a6a624fa623b86f3b835bfb8c60fbbf31fb0f062",
+      "implementation_file": "projects/Game/src/actors/C_don_ocas.cpp",
+      "function_annotation_line": 78,
+      "binary_first_24_bytes_not_a_signature": "56 8b f1 e8 08 99 fb ff c6 46 65 01 5e c3 90 90 a1 68 d7 63 00 83 ec 3c"
+    },
+    {
+      "address": "0x44c6a0",
+      "name": "C_don_ocas::IsPossibleColl",
+      "owner": "C_don_ocas",
+      "signature_from_tracker": "C_don_ocas::IsPossibleColl((C_actor *, S_vector, S_vector, float, float &, C_actor **))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 44.403669724770644,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44c6a0__c-don-ocas-ispossiblecoll.json",
+      "tracker_sha256": "ca978b2fe0798adc413cdaedb4c92a5ba3d80f4d0e7504bf00d6023d9a6c24e1",
+      "implementation_file": "projects/Game/src/actors/C_don_ocas.cpp",
+      "function_annotation_line": 220,
+      "binary_first_24_bytes_not_a_signature": "a1 68 d7 63 00 83 ec 3c 53 32 db 85 c0 56 0f 84 8c 03 00 00 8b 35 6c d7"
+    },
+    {
+      "address": "0x44ca50",
+      "name": "C_don_ocas::Collision",
+      "owner": "C_don_ocas",
+      "signature_from_tracker": "C_don_ocas::Collision((C_actor *, S_vector const &, S_vector const &, S_vector const &, float, I3D_frame *))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 55.88235294117647,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44ca50__c-don-ocas-collision.json",
+      "tracker_sha256": "9bef186219718f6e444469b337e0445fc4c5b4cfaa0a7456391d7b30e74ef8ac",
+      "implementation_file": "projects/Game/src/actors/C_don_ocas.cpp",
+      "function_annotation_line": 85,
+      "binary_first_24_bytes_not_a_signature": "8b 4c 24 18 83 ec 0c 57 e8 d3 3d 00 00 8b f8 85 ff 0f 84 7e 02 00 00 53"
+    },
+    {
+      "address": "0x44ccf0",
+      "name": "C_don_ocas::Hit",
+      "owner": "C_don_ocas",
+      "signature_from_tracker": "C_don_ocas::Hit((E_hit_type, S_vector const &, S_vector const &, S_vector const &, float, C_actor *, unsigned int, I3D_frame *))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 70.87087087087087,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44ccf0__c-don-ocas-hit.json",
+      "tracker_sha256": "7d149cb7de6956c39b987d87a85c2b6b7c9f4c948df8603dda91f2256c9f6ef9",
+      "implementation_file": "projects/Game/src/actors/C_don_ocas.cpp",
+      "function_annotation_line": 154,
+      "binary_first_24_bytes_not_a_signature": "64 a1 00 00 00 00 6a ff 68 4b e1 61 00 50 8b 4c 24 2c 64 89 25 00 00 00"
+    },
+    {
+      "address": "0x44d1c0",
+      "name": "C_don_ocas::GetBoundPoints2D",
+      "owner": "C_don_ocas",
+      "signature_from_tracker": "C_don_ocas::GetBoundPoints2D((std::vector_9S_vector2_Q23std21allocator_9S_vector2__ &, I3D_frame *))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 79.52380952380952,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44d1c0__c-don-ocas-getboundpoints2d.json",
+      "tracker_sha256": "d65d9eef76e7ffd6f67060e6685331d9fe0c859a9e14171a3ba0d0c522bc6b5d",
+      "implementation_file": "projects/Game/src/actors/C_don_ocas.cpp",
+      "function_annotation_line": 324,
+      "binary_first_24_bytes_not_a_signature": "83 ec 14 56 8b 74 24 20 57 f6 86 ac 00 00 00 20 75 07 8b ce e8 57 2a 1c"
+    },
+    {
+      "address": "0x44d410",
+      "name": "C_traffic_generator::C_traffic_generator",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::C_traffic_generator((void))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 72.72727272727273,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44d410__c-traffic-generator-c-traffic-generator.json",
+      "tracker_sha256": "656e2f1582645e0f984fe20d128416c572342e0ea4dfa1a0621986cfe7b44b02",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "56 8b f1 e8 08 89 fb ff 33 c0 ba 00 00 48 42 b9 00 00 c8 42 89 46 7c 89"
+    },
+    {
+      "address": "0x44d4a0",
+      "name": "C_traffic_generator::~C_traffic_generator",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::~C_traffic_generator((void))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44d4a0__c-traffic-generator-c-traffic-generator.json",
+      "tracker_sha256": "dcc8d48bc6597fbe7df1f6493795e80d47637444f7b0ea49f4d1918d3fca4783",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "56 8b f1 57 8b be 9c 00 00 00 c7 06 a0 3f 62 00 85 ff 74 17 8b 86 98 00"
+    },
+    {
+      "address": "0x44d510",
+      "name": "C_traffic_generator::DuplicateFrom",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::DuplicateFrom((C_actor *))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44d510__c-traffic-generator-duplicatefrom.json",
+      "tracker_sha256": "ef0fde5d086c54dc977994d4ac33a89517b69f54d091900004a26c2de3831e87",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "55 8b 6c 24 08 56 57 55 8b f1 e8 11 dc 05 00 8a 45 70 8b be 9c 00 00 00"
+    },
+    {
+      "address": "0x44d820",
+      "name": "C_traffic_generator::LoadData",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::LoadData((C_chunk *))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 92.263056092843,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44d820__c-traffic-generator-loaddata.json",
+      "tracker_sha256": "8d8ed67eb313e81609fec9f6ec058b27422d506d69f44d30a4cd33836ef071dc",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "83 ec 0c 53 55 56 8b 74 24 1c 57 8b f9 8a 46 10 84 c0 74 5a 8a 46 18 84"
+    },
+    {
+      "address": "0x44de00",
+      "name": "C_traffic_generator::SaveGameGetSize",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::SaveGameGetSize((void))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44de00__c-traffic-generator-savegamegetsize.json",
+      "tracker_sha256": "c580969f651dfc1b46a8d67f05df72889bb14b45b8128562f7ecea196662df71",
+      "implementation_file": "projects/Game/src/actors/C_traffic_generator.cpp",
+      "function_annotation_line": 975,
+      "binary_first_24_bytes_not_a_signature": "56 8b f1 e8 68 89 fb ff 8b 8e 80 00 00 00 83 c0 0a 5e 8d 14 49 c1 e2 04"
+    },
+    {
+      "address": "0x44de20",
+      "name": "C_traffic_generator::SaveGameSave",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::SaveGameSave((void **))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44de20__c-traffic-generator-savegamesave.json",
+      "tracker_sha256": "1b9d23062f3f90502c732e30f7896dfd4144365b4e2eff365cdd969267958322",
+      "implementation_file": "projects/Game/src/actors/C_traffic_generator.cpp",
+      "function_annotation_line": 982,
+      "binary_first_24_bytes_not_a_signature": "83 ec 08 56 57 8b 7c 24 14 8b f1 57 e8 3f 8a fb ff 84 c0 75 08 5f 5e 83"
+    },
+    {
+      "address": "0x44e500",
+      "name": "C_traffic_generator::GameInit",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::GameInit((void))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44e500__c-traffic-generator-gameinit.json",
+      "tracker_sha256": "26a8651fb0307134c1df21672dba0480f6465bf99473ea539ce81bd4c175c077",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "64 a1 00 00 00 00 6a ff 68 6b e1 61 00 50 64 89 25 00 00 00 00 83 ec 08"
+    },
+    {
+      "address": "0x44e7eb",
+      "name": "C_traffic_generator::GameDone",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::GameDone((void))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 94.87179487179486,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44e7eb__c-traffic-generator-gamedone.json",
+      "tracker_sha256": "3289fed7e2916175259d3638dc0162cc59d765a5494df63d594199dcdeb95d2e",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "e8 09 72 fb ff 56 8b f1 57 33 ff 8b 86 84 00 00 00 85 c0 7e 1f 53 33 db"
+    },
+    {
+      "address": "0x44e870",
+      "name": "traffic_element_scream_frame_cb",
+      "owner": "C_traffic_element",
+      "signature_from_tracker": "void __fastcall traffic_element_scream_frame_cb(I3D_frame*)",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44e870__traffic-element-scream-frame-cb.json",
+      "tracker_sha256": "fa162673e68b841395d4b2fb49b46b19ad1944897ece27b29e92a651cbfe0281",
+      "implementation_file": "projects/Game/src/ai/C_traffic_element.cpp",
+      "function_annotation_line": 381,
+      "binary_first_24_bytes_not_a_signature": "e8 bb 1f 00 00 85 c0 74 07 8b c8 e9 d0 af 00 00 c3 63 00 01 5d 64 89 0d"
+    },
+    {
+      "address": "0x44e890",
+      "name": "C_traffic_generator::PlayerHoMaVytaseneho",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::PlayerHoMaVytaseneho((void))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44e890__c-traffic-generator-playerhomavytaseneho.json",
+      "tracker_sha256": "3a3391cfc2bf4d5fe53525f9a6ac75076ff9e92be07791f599fc612f0c17a4da",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "a1 8c 78 63 00 83 ec 0c 8b 48 24 53 56 57 8b 99 e4 00 00 00 85 db 0f 84"
+    },
+    {
+      "address": "0x44e960",
+      "name": "C_traffic_generator::SetVisible",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::SetVisible((bool))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44e960__c-traffic-generator-setvisible.json",
+      "tracker_sha256": "345703c64264de99a1e7e104ea1b70120e82e25b43b3b23a38f4553c7481c042",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "a0 30 d7 63 00 53 8b d9 56 3a c3 74 41 8b 0d 68 d7 63 00 88 1d 30 d7 63"
+    },
+    {
+      "address": "0x44e9c0",
+      "name": "C_traffic_generator::IsPossibleCollElem",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::IsPossibleCollElem((C_traffic_element *))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 33.89830508474576,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44e9c0__c-traffic-generator-ispossiblecollelem.json",
+      "tracker_sha256": "857aa26d3cecc9caa9b5936f15bf9aa15661b27c02f680ef0e4f224a6c55d4e6",
+      "implementation_file": "projects/Game/src/actors/C_traffic_generator.cpp",
+      "function_annotation_line": 345,
+      "binary_first_24_bytes_not_a_signature": "83 ec 34 53 8b d9 8b 0d 68 d7 63 00 55 d9 43 10 d9 5c 24 18 d9 43 14 d8"
+    },
+    {
+      "address": "0x44ebe0",
+      "name": "C_traffic_generator::AddElement",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::AddElement((C_traffic_element *))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 97.82608695652173,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44ebe0__c-traffic-generator-addelement.json",
+      "tracker_sha256": "856a29d245117db054508d02e92be15b524fccd31c9a5b2984b81250adaef5af",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "6a ff 68 8b e1 61 00 64 a1 00 00 00 00 50 64 89 25 00 00 00 00 83 ec 0c"
+    },
+    {
+      "address": "0x44ed00",
+      "name": "C_traffic_generator::DelElement",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::DelElement((C_traffic_element *))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44ed00__c-traffic-generator-delelement.json",
+      "tracker_sha256": "6a7a255015d24433d0061be75c812f59323c9d0922d5ab337325b508f1e34a49",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "56 8b 35 68 d7 63 00 85 f6 57 0f 84 8e 00 00 00 8b 15 6c d7 63 00 8b c2"
+    },
+    {
+      "address": "0x44edb0",
+      "name": "C_traffic_generator::AI",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::AI((unsigned int))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 73.7254901960784,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44edb0__c-traffic-generator-ai.json",
+      "tracker_sha256": "d400d25ab3942def0d6332d780d0bf6d2ae50e565b8e7b99751d8b13309292fa",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "a0 30 d7 63 00 56 84 c0 8b f1 0f 84 a1 01 00 00 8a 46 78 55 84 c0 57 0f"
+    },
+    {
+      "address": "0x44ef70",
+      "name": "C_traffic_generator::TickElements",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::TickElements((unsigned int))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44ef70__c-traffic-generator-tickelements.json",
+      "tracker_sha256": "141ba6b8b19ddc59b872a5ed9ef09a30bb8ed5e5bdbea7e6f87ca10c10e823c6",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "a0 30 d7 63 00 83 ec 0c 84 c0 57 8b f9 0f 84 f9 00 00 00 a1 38 d7 63 00"
+    },
+    {
+      "address": "0x44f090",
+      "name": "C_traffic_generator::IsCarHasOcas",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::IsCarHasOcas((C_car *))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44f090__c-traffic-generator-iscarhasocas.json",
+      "tracker_sha256": "ca055b9a2f2af43cb26fbee0e6943e52489d56e214689d374f65ac9a40d61162",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "53 56 8b 35 68 d7 63 00 85 f6 74 34 8b 15 6c d7 63 00 2b d6 c1 fa 02 74"
+    },
+    {
+      "address": "0x44f0e0",
+      "name": "C_traffic_generator::TryGoToAssHole",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::TryGoToAssHole((void))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 27.87068004459309,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44f0e0__c-traffic-generator-trygotoasshole.json",
+      "tracker_sha256": "20f584c5a4f64625449197ef692d38cf4449d448ae2d47ab453b5bd2cc54a68d",
+      "implementation_file": "projects/Game/src/actors/C_traffic_generator.cpp",
+      "function_annotation_line": 1484,
+      "binary_first_24_bytes_not_a_signature": "a0 30 d7 63 00 83 ec 68 84 c0 53 55 56 57 0f 84 38 06 00 00 e8 47 94 06"
+    },
+    {
+      "address": "0x44f740",
+      "name": "C_traffic_generator::PlayerInTaxi",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::PlayerInTaxi((C_car *))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44f740__c-traffic-generator-playerintaxi.json",
+      "tracker_sha256": "666be31740bfa9000c16c51f43daaafbff9d6fdf937d2cb832c07294bde803c5",
+      "implementation_file": "projects/Game/src/actors/C_traffic_generator.cpp",
+      "function_annotation_line": 533,
+      "binary_first_24_bytes_not_a_signature": "83 ec 24 c6 05 29 d7 63 00 00 85 c9 56 57 74 77 c7 44 24 08 a8 26 63 00"
+    },
+    {
+      "address": "0x44f7d0",
+      "name": "C_traffic_generator::GeneratePassengerForTaxi",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::GeneratePassengerForTaxi((void))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 49.504950495049506,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44f7d0__c-traffic-generator-generatepassengerfortaxi.json",
+      "tracker_sha256": "8eeb161e56a99163caf2111118be9b6027de85c4acb7d821c282c8a3356af5a9",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "83 ec 34 b9 04 00 00 00 53 55 56 57 e8 6f 8c fb ff 8b c8 c1 e1 06 03 c8"
+    },
+    {
+      "address": "0x44fcf0",
+      "name": "C_traffic_generator::EnableTaxiDriver",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::EnableTaxiDriver((bool))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44fcf0__c-traffic-generator-enabletaxidriver.json",
+      "tracker_sha256": "4c017e763a49dc9f0c8ab80c350955a7d815d8ac6cfa9a336733222c615460ab",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "53 8a d9 84 db 75 0e a0 2a d7 63 00 84 c0 74 05 e8 0b 00 00 00 88 1d 2a"
+    },
+    {
+      "address": "0x44fd10",
+      "name": "C_traffic_generator::ZrusVsechnyMavajici",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::ZrusVsechnyMavajici((void))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44fd10__c-traffic-generator-zrusvsechnymavajici.json",
+      "tracker_sha256": "7288e48ccb8f4a1b4abceff4501df17b6378b9a5e2d2de317d9a4ef3b218fa32",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "a1 68 d7 63 00 56 85 c0 74 2a 8b 35 6c d7 63 00 2b f0 c1 fe 02 74 1d 8b"
+    },
+    {
+      "address": "0x44fd50",
+      "name": "C_traffic_generator::ClearElements",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::ClearElements((void))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44fd50__c-traffic-generator-clearelements.json",
+      "tracker_sha256": "0437531bdf006227fc9a5f7a4733d850229963b0559405e1444b64030ee038bf",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "a1 6c d7 63 00 8b 0d 68 d7 63 00 8b d0 56 3b c2 74 0e 8b 30 83 c0 04 89"
+    },
+    {
+      "address": "0x44fde0",
+      "name": "C_traffic_generator::FizlosNamakatDoAkce",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::FizlosNamakatDoAkce((C_human *, unsigned int, std::vector_P7C_actor_Q23std20allocator_P7C_actor__ &, bool, float, bool))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 47.96,
+      "tracker_file": "tools/revtrack/targets/Game/functions/44fde0__c-traffic-generator-fizlosnamakatdoakce.json",
+      "tracker_sha256": "9c787ccd08b02acff47f389526cbe328ce5d01415777d64d31c1b01bd838c5a8",
+      "implementation_file": "projects/Game/src/actors/C_traffic_generator.cpp",
+      "function_annotation_line": 1369,
+      "binary_first_24_bytes_not_a_signature": "6a ff 68 ab e1 61 00 64 a1 00 00 00 00 50 64 89 25 00 00 00 00 83 ec 54"
+    },
+    {
+      "address": "0x450450",
+      "name": "C_traffic_generator::Explosion",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::Explosion((S_vector &, float, float))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 54.26695842450766,
+      "tracker_file": "tools/revtrack/targets/Game/functions/450450__c-traffic-generator-explosion.json",
+      "tracker_sha256": "86bbcdf6326fe22f2ec8d5f959a39a46faa885e08cd8f3d09411edd8ce66b595",
+      "implementation_file": "projects/Game/src/actors/C_traffic_generator.cpp",
+      "function_annotation_line": 594,
+      "binary_first_24_bytes_not_a_signature": "a0 30 d7 63 00 83 ec 3c 84 c0 55 57 8b f9 0f 84 08 03 00 00 d9 44 24 48"
+    },
+    {
+      "address": "0x450780",
+      "name": "C_traffic_generator::Fire",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::Fire((S_vector &, float, float))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/450780__c-traffic-generator-fire.json",
+      "tracker_sha256": "4dceca674e50a2af0a66801cc624f598a88cf658fe9ed10584f49915c8376955",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "a0 30 d7 63 00 83 ec 0c 84 c0 56 57 8b f9 0f 84 91 00 00 00 8b 0d 68 d7"
+    },
+    {
+      "address": "0x450830",
+      "name": "C_traffic_generator::GetElemFromFrame",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::GetElemFromFrame((I3D_frame *))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/450830__c-traffic-generator-getelemfromframe.json",
+      "tracker_sha256": "574fe60460b669048aeec18972af7080cae9372d3f83e650bb344ecc8aa6a727",
+      "implementation_file": "projects/Game/src/actors/C_traffic_generator.cpp",
+      "function_annotation_line": 668,
+      "binary_first_24_bytes_not_a_signature": "8b 15 68 d7 63 00 56 85 d2 74 1a a1 6c d7 63 00 2b c2 c1 f8 02 74 0e 8b"
+    },
+    {
+      "address": "0x450860",
+      "name": "C_traffic_generator::FreeDynCollElements",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::FreeDynCollElements((void))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/450860__c-traffic-generator-freedyncollelements.json",
+      "tracker_sha256": "3bd4114b764e4662813c9115f1f041fcbc30b68f6ff17d46c6c7e74b1e55ac7b",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "a1 68 d7 63 00 56 85 c0 74 27 8b 35 6c d7 63 00 2b f0 c1 fe 02 74 1a 8b"
+    },
+    {
+      "address": "0x4508a0",
+      "name": "C_traffic_generator::GetNearElementDist2",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::GetNearElementDist2((S_vector &))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/4508a0__c-traffic-generator-getnearelementdist2.json",
+      "tracker_sha256": "ac6c68e28a5e434c47d38206d1e9a782d0ec45a383903f7bc316f53f90d61012",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "51 d9 05 48 40 62 00 56 8b 35 68 d7 63 00 85 f6 74 5e 8b 15 6c d7 63 00"
+    },
+    {
+      "address": "0x450920",
+      "name": "C_traffic_generator::IsNearElementBefore",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::IsNearElementBefore((C_traffic_element *))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/450920__c-traffic-generator-isnearelementbefore.json",
+      "tracker_sha256": "96835d595de019e9240c25207a159bdcd5846a789b75f75bb0c636a148f7d747",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "83 ec 18 d9 41 1c d8 0d fc 32 62 00 d9 41 24 d8 0d fc 32 62 00 d9 c9 d8"
+    },
+    {
+      "address": "0x4509d0",
+      "name": "C_traffic_generator::NewPanic@0x4509d0",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::NewPanic((S_vector &))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/4509d0__c-traffic-generator-newpanic-0x4509d0.json",
+      "tracker_sha256": "db2a525772c69208adb29480a5d0239a781419d2d8ceec03c73e9f73da9870e3",
+      "implementation_file": "projects/Game/src/actors/C_traffic_generator.cpp",
+      "function_annotation_line": 737,
+      "binary_first_24_bytes_not_a_signature": "8b 01 56 a3 40 d7 63 00 8b 51 04 89 15 44 d7 63 00 8b 41 08 a3 48 d7 63"
+    },
+    {
+      "address": "0x450a30",
+      "name": "C_traffic_generator::NewPanic@0x450a30",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::NewPanic((I3D_frame *))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/450a30__c-traffic-generator-newpanic-0x450a30.json",
+      "tracker_sha256": "d0264cb93b65bef62c7a177e12465354bfe9fcc5dd5fbca3a1a9950e6844d1db",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "56 e8 fa fd ff ff 8b f0 85 f6 74 1b 8b ce e8 5d 22 00 00 8a 46 0c 84 c0"
+    },
+    {
+      "address": "0x450a60",
+      "name": "C_traffic_generator::RailwayInStation",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::RailwayInStation((C_railway *, std::vector_6rentry_Q23std18allocator_6rentry__ &))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 42.675159235668794,
+      "tracker_file": "tools/revtrack/targets/Game/functions/450a60__c-traffic-generator-railwayinstation.json",
+      "tracker_sha256": "0378a3815449dc69ab881658df75a382122dca9f0c52f1baf8297d00b8b589c5",
+      "implementation_file": "projects/Game/src/actors/C_traffic_generator.cpp",
+      "function_annotation_line": 763,
+      "binary_first_24_bytes_not_a_signature": "83 ec 48 89 4c 24 14 8b 4a 04 85 c9 89 54 24 04 0f 84 80 04 00 00 8b 42"
+    },
+    {
+      "address": "0x450f00",
+      "name": "C_traffic_generator::AddFreePerson",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::AddFreePerson((I3D_model *, C_actor *, bool))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 76.59574468085107,
+      "tracker_file": "tools/revtrack/targets/Game/functions/450f00__c-traffic-generator-addfreeperson.json",
+      "tracker_sha256": "ac3dd49aa71e4171db388e98c7bc034c12714ffc01ae225f340d1496063a0483",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "6a ff 68 cb e1 61 00 64 a1 00 00 00 00 50 64 89 25 00 00 00 00 51 56 57"
+    },
+    {
+      "address": "0x450f80",
+      "name": "C_traffic_generator::AddFreePersonFromCar",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::AddFreePersonFromCar((I3D_model *, C_actor *, S_vector &, S_vector &))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 97.5,
+      "tracker_file": "tools/revtrack/targets/Game/functions/450f80__c-traffic-generator-addfreepersonfromcar.json",
+      "tracker_sha256": "b719d4230c6cda380f6f359f309a0ce398d74bdc9348f15c035af1a2165370d3",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "6a ff 68 eb e1 61 00 64 a1 00 00 00 00 50 64 89 25 00 00 00 00 83 ec 10"
+    },
+    {
+      "address": "0x4510b0",
+      "name": "C_traffic_generator::ElementNewScream",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::ElementNewScream((int, int, S_vector &, float, float, float, float))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 68.32298136645963,
+      "tracker_file": "tools/revtrack/targets/Game/functions/4510b0__c-traffic-generator-elementnewscream.json",
+      "tracker_sha256": "eef18be4f81c10ff5260fa93af5508d3f3dcbb0d6ed064558ce191623ad375a7",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "a0 28 d7 63 00 83 ec 1c 84 c0 53 56 57 8b f2 8b d9 0f 84 cc 01 00 00 a1"
+    },
+    {
+      "address": "0x4512a0",
+      "name": "C_traffic_generator::VyfunOdTeMasiny",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "C_traffic_generator::VyfunOdTeMasiny((C_car *))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/4512a0__c-traffic-generator-vyfunodtemasiny.json",
+      "tracker_sha256": "64e8b1bf45680fd3e4a4d64b16042094569d42a2170fcc248ab8ebe0c51c1d9c",
+      "implementation_file": "projects/Game/src/actors/C_traffic_generator.cpp",
+      "function_annotation_line": 847,
+      "binary_first_24_bytes_not_a_signature": "53 56 57 8b f9 33 db 3b fb 0f 84 de 00 00 00 8b 0d 68 d7 63 00 3b cb 0f"
+    },
+    {
+      "address": "0x4513a0",
+      "name": "C_traffic_element::C_traffic_element",
+      "owner": "C_traffic_element",
+      "signature_from_tracker": "C_traffic_element::C_traffic_element((void))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/4513a0__c-traffic-element-c-traffic-element.json",
+      "tracker_sha256": "448abd4db328b6d479d127ebb6715c983366376ae73c7daea82e79179717f6a7",
+      "implementation_file": "projects/Game/src/ai/C_traffic_element.cpp",
+      "function_annotation_line": 390,
+      "binary_first_24_bytes_not_a_signature": "8b d1 56 57 b9 12 00 00 00 33 c0 8d ba c4 00 00 00 f3 ab 8d b2 e4 01 00"
+    },
+    {
+      "address": "0x451400",
+      "name": "C_traffic_element::ObejdiTuPicovinu",
+      "owner": "C_traffic_element",
+      "signature_from_tracker": "C_traffic_element::ObejdiTuPicovinu((C_actor *, I3D_frame *))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 50.78,
+      "tracker_file": "tools/revtrack/targets/Game/functions/451400__c-traffic-element-obejditupicovinu.json",
+      "tracker_sha256": "b1f64f337b8a58c39714e182d6b968e35a203ca3f8bc1919a997588299e167f2",
+      "implementation_file": "projects/Game/src/ai/C_traffic_element.cpp",
+      "function_annotation_line": 402,
+      "binary_first_24_bytes_not_a_signature": "83 ec 64 53 56 8b f1 83 be b0 00 00 00 ff 7e 21 8b 86 b8 01 00 00 85 c0"
+    },
+    {
+      "address": "0x451860",
+      "name": "C_traffic_element::SetNewNode",
+      "owner": "C_traffic_element",
+      "signature_from_tracker": "C_traffic_element::SetNewNode((void))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 47.84313725490196,
+      "tracker_file": "tools/revtrack/targets/Game/functions/451860__c-traffic-element-setnewnode.json",
+      "tracker_sha256": "7c7af58e7c4d97f7b70c5d60e909a939337a38945cbde281dd8f9e96ba9fc1a5",
+      "implementation_file": "projects/Game/src/ai/C_traffic_element.cpp",
+      "function_annotation_line": 513,
+      "binary_first_24_bytes_not_a_signature": "83 ec 3c 53 56 8b f1 57 8b 86 b0 00 00 00 83 f8 ff 0f 8e 91 02 00 00 48"
+    },
+    {
+      "address": "0x451ff0",
+      "name": "C_traffic_element::MavaNaTaxi",
+      "owner": "C_traffic_element",
+      "signature_from_tracker": "C_traffic_element::MavaNaTaxi((unsigned int))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 58.23095823095823,
+      "tracker_file": "tools/revtrack/targets/Game/functions/451ff0__c-traffic-element-mavanataxi.json",
+      "tracker_sha256": "dc8b91df0fb6cb5228f98009406b55441869cfefc95462f2f8170e70fdfe7cd2",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "6a ff 68 1b e2 61 00 64 a1 00 00 00 00 50 64 89 25 00 00 00 00 81 ec 98"
+    },
+    {
+      "address": "0x452ca0",
+      "name": "C_traffic_element::EndMavaniNaTaxi",
+      "owner": "C_traffic_element",
+      "signature_from_tracker": "C_traffic_element::EndMavaniNaTaxi((void))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/452ca0__c-traffic-element-endmavaninataxi.json",
+      "tracker_sha256": "65fa854ccd87012a732c78a5f8c7b3fe42376fc1d6937f68f8d9e3647fc8d17f",
+      "implementation_file": "projects/Game/src/ai/C_traffic_element.cpp",
+      "function_annotation_line": 975,
+      "binary_first_24_bytes_not_a_signature": "56 8b f1 8b 4e 08 66 81 b9 0e 01 00 00 a9 dc 75 0a 68 00 00 80 40 e8 95"
+    },
+    {
+      "address": "0x452cd0",
+      "name": "C_traffic_element::Tick",
+      "owner": "C_traffic_element",
+      "signature_from_tracker": "C_traffic_element::Tick((unsigned int))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 39.11705685618729,
+      "tracker_file": "tools/revtrack/targets/Game/functions/452cd0__c-traffic-element-tick.json",
+      "tracker_sha256": "392e226158f53d856b1aea7445c67c4ecef4160f5a187b26b9fded0b44dda022",
+      "implementation_file": "projects/Game/src/ai/C_traffic_element.cpp",
+      "function_annotation_line": 985,
+      "binary_first_24_bytes_not_a_signature": "81 ec 0c 01 00 00 53 55 8b e9 56 57 bf 00 00 80 3f d9 45 54 d8 1d 34 37"
+    },
+    {
+      "address": "0x4564f0",
+      "name": "C_traffic_element::UpdateModel",
+      "owner": "C_traffic_element",
+      "signature_from_tracker": "C_traffic_element::UpdateModel((void))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 95.47738693467336,
+      "tracker_file": "tools/revtrack/targets/Game/functions/4564f0__c-traffic-element-updatemodel.json",
+      "tracker_sha256": "483579cc66d11765b0d02318dda5a691ab60ed1938a1c23b83b1d8de4790a6cd",
+      "implementation_file": "projects/Game/src/ai/C_traffic_element.cpp",
+      "function_annotation_line": 2171,
+      "binary_first_24_bytes_not_a_signature": "83 ec 4c 55 8b e9 56 8b 45 40 8a 88 ac 00 00 00 84 c9 78 31 8d 4d 10 8d"
+    },
+    {
+      "address": "0x456630",
+      "name": "C_traffic_element::SetModel",
+      "owner": "C_traffic_element",
+      "signature_from_tracker": "C_traffic_element::SetModel((I3D_model *))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 68.73,
+      "tracker_file": "tools/revtrack/targets/Game/functions/456630__c-traffic-element-setmodel.json",
+      "tracker_sha256": "73afe6325dca714dae8b1c2172541cfba6f80781bd80cf4fe2b26130ea8fbf27",
+      "implementation_file": "projects/Game/src/ai/C_traffic_element.cpp",
+      "function_annotation_line": 2194,
+      "binary_first_24_bytes_not_a_signature": "83 ec 4c 55 8b e9 8b 45 40 85 c0 74 09 32 c0 5d 83 c4 4c c2 04 00 8b 44"
+    },
+    {
+      "address": "0x456a40",
+      "name": "C_traffic_element::CreateModel",
+      "owner": "C_traffic_element",
+      "signature_from_tracker": "C_traffic_element::CreateModel((char *, C_traffic_generator *))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 68.21,
+      "tracker_file": "tools/revtrack/targets/Game/functions/456a40__c-traffic-element-createmodel.json",
+      "tracker_sha256": "1312654edd13636a87e388e51d4551d095a1483806f3179e087fb51ac3e57545",
+      "implementation_file": "projects/Game/src/ai/C_traffic_element.cpp",
+      "function_annotation_line": 2300,
+      "binary_first_24_bytes_not_a_signature": "83 ec 4c 55 56 8b 74 24 58 57 8b 7c 24 60 8b e9 56 c6 45 0c 00 89 7d 04"
+    },
+    {
+      "address": "0x456ea0",
+      "name": "C_traffic_element::SetAlpha",
+      "owner": "C_traffic_element",
+      "signature_from_tracker": "C_traffic_element::SetAlpha((float))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/456ea0__c-traffic-element-setalpha.json",
+      "tracker_sha256": "d060ac9e6c39ea2d17975087aa8319a4c2781137dd5e2a778e018ae00569c874",
+      "implementation_file": "projects/Game/src/ai/C_traffic_element.cpp",
+      "function_annotation_line": 2414,
+      "binary_first_24_bytes_not_a_signature": "8b 81 b8 00 00 00 85 c0 74 0e 8b 54 24 04 8b 08 52 50 ff 91 84 00 00 00"
+    },
+    {
+      "address": "0x456ec0",
+      "name": "C_traffic_element::DestroyModel",
+      "owner": "C_traffic_element",
+      "signature_from_tracker": "C_traffic_element::DestroyModel((void))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/456ec0__c-traffic-element-destroymodel.json",
+      "tracker_sha256": "bbfcc89e141efb78702190ee1ede39c54c53163155a523d9509a976911ce856e",
+      "implementation_file": "projects/Game/src/ai/C_traffic_element.cpp",
+      "function_annotation_line": 2421,
+      "binary_first_24_bytes_not_a_signature": "56 8b f1 8b 46 40 85 c0 0f 84 a8 00 00 00 53 57 8b 78 08 85 ff 74 06 c7"
+    },
+    {
+      "address": "0x456fa0",
+      "name": "C_traffic_element::ActivateFree",
+      "owner": "C_traffic_element",
+      "signature_from_tracker": "C_traffic_element::ActivateFree((bool, bool))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 64.3417611159547,
+      "tracker_file": "tools/revtrack/targets/Game/functions/456fa0__c-traffic-element-activatefree.json",
+      "tracker_sha256": "bec36f93c9bf6e7d3d20b654b9371efd3d3847b2fd7bcf5170f2faf48e8ec1a8",
+      "implementation_file": "projects/Game/src/ai/C_traffic_element.cpp",
+      "function_annotation_line": 2464,
+      "binary_first_24_bytes_not_a_signature": "83 ec 3c 53 55 56 8b f1 57 8b 7e 40 85 ff 75 0c 5f 5e 5d 32 c0 5b 83 c4"
+    },
+    {
+      "address": "0x4577f0",
+      "name": "C_traffic_element::Activate",
+      "owner": "C_traffic_element",
+      "signature_from_tracker": "C_traffic_element::Activate((bool, float, float))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 56.11325611325612,
+      "tracker_file": "tools/revtrack/targets/Game/functions/4577f0__c-traffic-element-activate.json",
+      "tracker_sha256": "2194b6735cd7cbd8b056a500d35353816d5187196f5d4f7f7bbe41e070bb59f7",
+      "implementation_file": "projects/Game/src/ai/C_traffic_element.cpp",
+      "function_annotation_line": 2628,
+      "binary_first_24_bytes_not_a_signature": "81 ec 14 01 00 00 53 55 56 8b f1 57 66 c7 86 f4 01 00 00 01 00 e8 66 0c"
+    },
+    {
+      "address": "0x4587c0",
+      "name": "C_traffic_element::Deactivate",
+      "owner": "C_traffic_element",
+      "signature_from_tracker": "C_traffic_element::Deactivate((void))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/4587c0__c-traffic-element-deactivate.json",
+      "tracker_sha256": "176bf4b91bb9c0f204deb86d3bb89643bfedd0f0496bcefb80ed2271f9c0f782",
+      "implementation_file": "projects/Game/src/ai/C_traffic_element.cpp",
+      "function_annotation_line": 2963,
+      "binary_first_24_bytes_not_a_signature": "53 56 8b f1 33 db 53 8b 46 40 88 5e 0c 50 8b 08 ff 51 68 8b 46 40 53 50"
+    },
+    {
+      "address": "0x4588d0",
+      "name": "C_traffic_element::Hit",
+      "owner": "C_traffic_element",
+      "signature_from_tracker": "C_traffic_element::Hit((E_hit_type, S_vector const &, unsigned int, C_actor *, float))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 57.91159513097603,
+      "tracker_file": "tools/revtrack/targets/Game/functions/4588d0__c-traffic-element-hit.json",
+      "tracker_sha256": "114363d30b78d541dc556af62daa855b5aeffe06c4fe18b1995871f5f9fec735",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "83 ec 30 53 55 56 8b f1 57 d9 86 5c 01 00 00 d8 1d 30 32 62 00 df e0 f6"
+    },
+    {
+      "address": "0x459450",
+      "name": "C_traffic_element::SetAnim",
+      "owner": "C_traffic_element",
+      "signature_from_tracker": "void C_traffic_element::SetAnim()",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/459450__c-traffic-element-setanim.json",
+      "tracker_sha256": "7e9cd450eaba1b61c172208daaf7bbbff34b644b1c8ebd52b181efdaa0b09872",
+      "implementation_file": "projects/Game/src/ai/C_traffic_element.cpp",
+      "function_annotation_line": 3367,
+      "binary_first_24_bytes_not_a_signature": "83 ec 74 53 56 8b f1 57 8b 46 08 85 c0 0f 84 ce 01 00 00 8b 86 64 01 00"
+    },
+    {
+      "address": "0x459650",
+      "name": "C_traffic_element::SetPanic",
+      "owner": "C_traffic_element",
+      "signature_from_tracker": "C_traffic_element::SetPanic((void))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 85.71,
+      "tracker_file": "tools/revtrack/targets/Game/functions/459650__c-traffic-element-setpanic.json",
+      "tracker_sha256": "499c8bc84676cdd7f4542d3c8b3ab910d01de075573542dde63b7fa0071f8caa",
+      "implementation_file": "projects/Game/src/ai/C_traffic_element.cpp",
+      "function_annotation_line": 3452,
+      "binary_first_24_bytes_not_a_signature": "83 ec 24 56 8b f1 57 8b 86 b8 01 00 00 85 c0 0f 85 37 01 00 00 8a 86 5a"
+    },
+    {
+      "address": "0x4597b0",
+      "name": "C_traffic_element::SetMegaPanic",
+      "owner": "C_traffic_element",
+      "signature_from_tracker": "C_traffic_element::SetMegaPanic((int))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/4597b0__c-traffic-element-setmegapanic.json",
+      "tracker_sha256": "023f5db9bc834b3315819ff140ef51822473ae7bf9cd143811b624a3683bd8d9",
+      "implementation_file": "projects/Game/src/ai/C_traffic_element.cpp",
+      "function_annotation_line": 3495,
+      "binary_first_24_bytes_not_a_signature": "56 8b f1 80 3e 00 0f 85 89 00 00 00 d9 86 5c 01 00 00 d8 1d bc 34 62 00"
+    },
+    {
+      "address": "0x459850",
+      "name": "C_traffic_element::Karle_hoj",
+      "owner": "C_traffic_element",
+      "signature_from_tracker": "C_traffic_element::Karle_hoj((void))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/459850__c-traffic-element-karle-hoj.json",
+      "tracker_sha256": "15d599bbeb61a02891402d3cb450a7c1d924e556cbb62a7ede2a9d86658c0828",
+      "implementation_file": "projects/Game/src/ai/C_traffic_element.cpp",
+      "function_annotation_line": 3526,
+      "binary_first_24_bytes_not_a_signature": "56 8b f1 68 9a 99 99 3e 68 cd cc cc 3e 8a 86 fd 01 00 00 68 00 00 70 41"
+    },
+    {
+      "address": "0x4598d0",
+      "name": "C_traffic_element::PlayerNaMneMluvi",
+      "owner": "C_traffic_element",
+      "signature_from_tracker": "C_traffic_element::PlayerNaMneMluvi((void))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 96.19,
+      "tracker_file": "tools/revtrack/targets/Game/functions/4598d0__c-traffic-element-playernamnemluvi.json",
+      "tracker_sha256": "432e17cc0ef29e5d0fb46ae22dcea34a3eccd62754b605f3fecbc4e92d53b3a8",
+      "implementation_file": "projects/Game/src/ai/C_traffic_element.cpp",
+      "function_annotation_line": 3548,
+      "binary_first_24_bytes_not_a_signature": "83 ec 18 53 56 8b f1 57 8a 86 fc 01 00 00 84 c0 0f 84 5e 01 00 00 8a 86"
+    },
+    {
+      "address": "0x459a50",
+      "name": "C_traffic_element::DropUmbrella",
+      "owner": "C_traffic_element",
+      "signature_from_tracker": "C_traffic_element::DropUmbrella((void))",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/459a50__c-traffic-element-dropumbrella.json",
+      "tracker_sha256": "8fd78d670eb8a72a8b0af25fcf254b9d158347c04d62b6ad32493b1c4adbab6b",
+      "implementation_file": "projects/Game/src/ai/C_traffic_element.cpp",
+      "function_annotation_line": 3597,
+      "binary_first_24_bytes_not_a_signature": "64 a1 00 00 00 00 6a ff 68 3b e2 61 00 50 64 89 25 00 00 00 00 83 ec 24"
+    },
+    {
+      "address": "0x459b90",
+      "name": "C_traffic_element::CreateMafianos",
+      "owner": "C_traffic_element",
+      "signature_from_tracker": "C_traffic_element::CreateMafianos((E_hit_type, S_vector const &, unsigned int, C_actor *, float))",
+      "tracker_status": "AUDITED",
+      "tracker_match_pct": 96.91,
+      "tracker_file": "tools/revtrack/targets/Game/functions/459b90__c-traffic-element-createmafianos.json",
+      "tracker_sha256": "36cf15efaec8bae6e7d5051b550118846886ffb03654a27265b2da0cde65bc7c",
+      "implementation_file": "",
+      "function_annotation_line": null,
+      "binary_first_24_bytes_not_a_signature": "64 a1 00 00 00 00 6a ff 68 5b e2 61 00 50 a1 d8 7e 64 00 64 89 25 00 00"
+    },
+    {
+      "address": "0x47b780",
+      "name": "C_traffic_generator::SetScreamsEnabled",
+      "owner": "C_traffic_generator",
+      "signature_from_tracker": "static void __fastcall C_traffic_generator::SetScreamsEnabled(bool enabled)",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/47b780__set-g-byte63d728.json",
+      "tracker_sha256": "9e7bf7e1784c68594d792822cec510f124da33acaf9ab7038dff44ecf70e25fc",
+      "implementation_file": "projects/Game/src/actors/C_traffic_generator.h",
+      "function_annotation_line": 111,
+      "binary_first_24_bytes_not_a_signature": "88 0d 28 d7 63 00 c3 90 90 90 90 90 90 90 90 90 8b 41 70 c3 90 90 90 90"
+    },
+    {
+      "address": "0x4b8540",
+      "name": "C_traffic_generator::GetElements",
+      "tracker_name": "get_gvec_63D834_base",
+      "owner": "C_game",
+      "signature_from_tracker": "get_gvec_63D834_base",
+      "tracker_status": "BYTE_MATCHED",
+      "tracker_match_pct": 100.0,
+      "tracker_file": "tools/revtrack/targets/Game/functions/4b8540__get-gvec-63d834-base.json",
+      "tracker_sha256": "79ced1024cf2c68f72c3ca8f32de173040c9f9f49d29569922e655b1b4704744",
+      "implementation_file": "projects/Game/src/core/C_game.cpp",
+      "function_annotation_line": 9450,
+      "binary_first_24_bytes_not_a_signature": "b8 34 d8 63 00 c3 e8 fe a4 f4 ff 64 01 00 00 c3 a1 48 d8 63 00 83 ec 24"
+    }
+  ],
+  "declarations_requiring_alias_verification": [
+    {
+      "name": "C_traffic_generator::DetachMesh",
+      "note": "Declared in generator header; source notes empty folded callback at C_actor::Death 0x4aabe0. Not a distinct hook target."
+    },
+    {
+      "name": "C_traffic_element::~C_traffic_element",
+      "note": "Source notes empty destructor folded onto C_actor::Death 0x4aabe0. Do not globally detour shared body."
+    }
+  ],
+  "inline_helpers_not_independent_hook_targets": [
+    "C_game::SetActiveTrafficP",
+    "C_traffic_element::FinishCurrentAnimation",
+    "C_traffic_element::ResolveRootMotion",
+    "C_traffic_element::RefreshHeadFrame",
+    "C_traffic_element::UpdateNeckTracking",
+    "C_traffic_element::RunAliveAI"
+  ]
+}
