@@ -255,6 +255,10 @@ declare class Vehicle extends Entity {
     setOpacity(opacity: number): boolean;
     /** Repairs native damage and deformation without resetting position or seats. Loose debris remains. */
     repair(): boolean;
+    /** Opaque durable condition snapshot, or empty before full native reports. */
+    saveState(): string;
+    /** Restore into a fresh, empty spawn of the same model. */
+    restoreState(snapshot: string): boolean;
     setSeatCount(count: number): boolean;
     /** Script metadata only; use setMechanicalDamage for native damage. */
     setDamage(health: number, damageFlags: number, detachedParts: number): boolean;

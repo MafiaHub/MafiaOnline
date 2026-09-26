@@ -19,3 +19,7 @@ if(MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 4)
     target_include_directories(Mafia1OnlineWineFpuTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../client/src")
     target_compile_options(Mafia1OnlineWineFpuTests PRIVATE /fp:strict)
 endif()
+
+add_executable(Mafia1OnlineCarSnapshotTests car_snapshot_tests.cpp)
+target_include_directories(Mafia1OnlineCarSnapshotTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+target_link_libraries(Mafia1OnlineCarSnapshotTests PRIVATE Framework)

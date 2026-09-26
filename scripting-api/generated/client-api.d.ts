@@ -295,7 +295,7 @@ declare global {
   }
 
   /**
-   * A streamed Mafia 1 player, local or remote. Every value is the server state this client last received; a handle stops resolving once the player leaves.
+   * A streamed Mafia 1 player, local or remote. Properties read replicated state; getWorldPosition reads the live native pose. A handle stops resolving once the player leaves.
    */
   class Player {
     /**
@@ -362,10 +362,20 @@ declare global {
     getVehicle(): Vehicle | null;
 
     /**
+     * Reads the live native world position, including seated motion. Local players use the current simulation pose; remote players use their rendered pose. Null while the native actor is absent.
+     */
+    getWorldPosition(): { x: number; y: number; z: number } | null;
+
+    /**
      * Returns the seat the player occupies.
      * @returns The seat index (0 is the driver), or -1 on foot.
      */
     getSeat(): number;
+
+    /**
+     * Reads live native world position and full quaternion in the same convention as server entity transforms. Null while the native actor is absent.
+     */
+    getWorldTransform(): { position: { x: number; y: number; z: number }; rotation: { w: number; x: number; y: number; z: number } } | null;
   }
 
   interface Player extends BasePlayer {}
@@ -430,6 +440,11 @@ declare global {
      * @returns The vehicle ID and model.
      */
     toString(): string;
+
+    /**
+     * Reads live native world position and full quaternion, including pitch and roll, in the same convention as Vehicle.spawn. Null while the native actor is absent.
+     */
+    getWorldTransform(): { position: { x: number; y: number; z: number }; rotation: { w: number; x: number; y: number; z: number } } | null;
 
     /**
      * Returns the player in a seat.
@@ -1031,6 +1046,16 @@ declare global {
      * @param solid Native collision on this client; defaults to false.
      */
     createHuman(model: string, position: Vector3 | { x: number; y: number; z: number }, direction?: Vector3 | { x: number; y: number; z: number }, solid?: boolean): number | null;
+
+    /**
+     * Plays a local model animation. Omit filename or pass null to restart its embedded animation (including sipka.i3d). Loop defaults to false; owned models only.
+     */
+    playModelAnimation(handle: number, filename?: string | null, loop?: boolean): boolean;
+
+    /**
+     * Pauses the owned model's animation at its current pose.
+     */
+    stopModelAnimation(handle: number): boolean;
 
     /**
      * Plays a stock .i3d clip on a local human; loop defaults to false. Returns false for a missing animation or expired handle.

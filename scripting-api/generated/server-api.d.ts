@@ -1419,6 +1419,16 @@ declare global {
     setOpacity(opacity: number): boolean;
 
     /**
+     * Returns an opaque versioned JSON snapshot of all replicated durable condition, including native parts and mesh deformation. Empty until complete native reports arrive. Excludes pose, velocity and occupants.
+     */
+    saveState(): string;
+
+    /**
+     * Restores a saved condition into a fresh unoccupied vehicle of the same model before its first native damage report. Rejects invalid data without mutation.
+     */
+    restoreState(snapshot: string): boolean;
+
+    /**
      * Repairs native engine, gearbox, body, fuel tank, lights, attached wheels and deform meshes without resetting position or seats. Fires vehicleRepair.
      * @returns False for a terminal vehicle. Loose debris actors remain until their own lifetime ends.
      */

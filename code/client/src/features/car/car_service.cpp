@@ -1029,24 +1029,22 @@ namespace Mafia1Online::Features::Car {
             return;
         }
         auto *car = world.NativeObjects().Resolve(native->second.handle);
-        if (!car || native->second.radarColor == state->radarColor) {
+        if (!car) {
             return;
         }
+        const auto *local      = static_cast<const SDK::Seat::NativeHuman *>(static_cast<const void *>(SDK::Player::CurrentPlayer()));
+        const bool localDriver = local && local->usedActorEnter == static_cast<const SDK::Player::NativeActor *>(car) && local->seatId == 0;
+        const uint32_t color   = state->radarColor != 0 ? state->radarColor : localDriver ? 0xFFFFFFFFu : 0u;
+        if (native->second.radarColor == color)
+            return;
         auto &indicators = SDK::UI::NativeIndicators::Get();
-        if (state->radarColor != 0) {
-            indicators.RadarAddCar(car, state->radarColor);
+        if (color != 0) {
+            indicators.RadarAddCar(car, color);
         }
         else {
-            // Retail lists the local driver's own car in white; keep it.
-            const auto *local = static_cast<const SDK::Seat::NativeHuman *>(static_cast<const void *>(SDK::Player::CurrentPlayer()));
-            if (local && local->usedActorEnter == static_cast<const SDK::Player::NativeActor *>(car) && local->seatId == 0) {
-                indicators.RadarAddCar(car, 0xFFFFFFFF);
-            }
-            else {
-                indicators.RadarRemoveCar(car);
-            }
+            indicators.RadarRemoveCar(car);
         }
-        native->second.radarColor = state->radarColor;
+        native->second.radarColor = color;
     }
 
     uint32_t CarService::SirenLights(uint32_t lightState, bool sirenOn) {

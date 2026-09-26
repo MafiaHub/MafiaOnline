@@ -16,8 +16,8 @@ namespace Mafia1Online::Shared::Entities {
 } // namespace Mafia1Online::Shared::Entities
 
 namespace Mafia1Online::Scripting {
-    // A streamed player's replica; every getter reads the server state this
-    // client last received.
+    // A streamed player's replica. Properties read replicated state;
+    // getWorldPosition/getWorldTransform read the live native frame instead.
     class Player: public Framework::Scripting::Builtins::Player {
       public:
         explicit Player(uint64_t networkId);

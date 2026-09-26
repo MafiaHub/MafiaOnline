@@ -72,6 +72,8 @@ namespace Mafia1Online::Scripting {
         bool SetMechanicalDamage(double engineHealth, double gearboxHealth, double bodyDamage, double fuelTankHealth);
         bool SetOpacity(double opacity);
         bool Repair();
+        std::string SaveState() const;
+        bool RestoreState(const std::string &snapshot);
         bool SetTerminalState(uint32_t state);
         bool Explode();
         std::string ToString() const override;

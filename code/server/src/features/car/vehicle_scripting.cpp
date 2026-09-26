@@ -382,6 +382,13 @@ namespace Mafia1Online::Scripting {
         return accepted;
     }
 
+    std::string Vehicle::SaveState() const {
+        return GetServer().Cars().SaveState(_id);
+    }
+    bool Vehicle::RestoreState(const std::string &snapshot) {
+        return GetServer().Cars().RestoreState(_id, snapshot);
+    }
+
     bool Vehicle::Repair() {
         auto &server = GetServer();
         if (!server.Cars().Repair(_id)) {
@@ -583,6 +590,9 @@ namespace Mafia1Online::Scripting {
         cls.function("setOpacity", &Vehicle::SetOpacity,
             docs("boolean", {param("opacity", "number", false, "Visual opacity from 0 transparent to 1 opaque.")},
                 "Changes the car model's opacity on every client. Fires vehicleOpacityChange.", "False for a terminal vehicle or a value outside 0 to 1."));
+        cls.function("saveState", &Vehicle::SaveState,
+            docs("string", {}, "Returns an opaque versioned JSON snapshot of all replicated durable condition, including native parts and mesh deformation. Empty until complete native reports arrive. Excludes pose, velocity and occupants."));
+        cls.function("restoreState", &Vehicle::RestoreState, docs("boolean", {param("snapshot", "string")}, "Restores a saved condition into a fresh unoccupied vehicle of the same model before its first native damage report. Rejects invalid data without mutation."));
         cls.function("repair", &Vehicle::Repair,
             docs("boolean", {}, "Repairs native engine, gearbox, body, fuel tank, lights, attached wheels and deform meshes without resetting position or seats. Fires vehicleRepair.",
                 "False for a terminal vehicle. Loose debris actors remain until their own lifetime ends."));

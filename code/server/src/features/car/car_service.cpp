@@ -1,4 +1,5 @@
 #include "car_service.h"
+#include "shared/features/car/car_snapshot.h"
 
 #include "shared/features/car/car_engine_state.h"
 #include "shared/features/car/car_damage_state.h"
@@ -597,6 +598,78 @@ namespace Mafia1Online::Features::Car {
             return false;
         }
         car->opacity = opacity;
+        return true;
+    }
+
+    std::string CarService::SaveState(uint64_t networkId) const {
+        const auto *car = Find(networkId);
+        const auto mesh = _mesh.find(networkId);
+        if (!car || car->terminalState != Shared::Entities::CarEntity::TerminalState::Active || !car->nativeDamageValid || !car->dynamicsValid || mesh == _mesh.end() || !mesh->second.pending.empty() || (!mesh->second.hasSequence && car->meshRevision == 0))
+            return {};
+        Shared::Car::Snapshot snapshot;
+        snapshot.model            = car->model;
+        snapshot.fuel             = car->fuel;
+        snapshot.fuelTankCapacity = car->fuelTankCapacity;
+        snapshot.health           = car->health;
+        snapshot.opacity          = car->opacity;
+        snapshot.damageFlags      = car->damageFlags;
+        snapshot.detachedParts    = car->detachedParts;
+        snapshot.radarColor       = car->radarColor;
+        snapshot.lightState       = car->lightState;
+        snapshot.seatCount        = car->seatCount;
+        snapshot.engineOn         = car->engineOn;
+        snapshot.sirenOn          = car->sirenOn;
+        snapshot.hornOn           = car->hornOn;
+        snapshot.speedLimited     = car->speedLimited;
+        snapshot.gear             = car->gear;
+        snapshot.maximumGear      = car->maximumGear;
+        snapshot.steeringInput    = car->steeringInput;
+        snapshot.doorTargets      = car->doorTargets;
+        snapshot.damage           = car->nativeDamage;
+        snapshot.mesh             = mesh->second.checkpoint;
+        return snapshot.Encode();
+    }
+
+    bool CarService::RestoreState(uint64_t networkId, const std::string &text) {
+        auto *car = Find(networkId);
+        Shared::Car::Snapshot snapshot;
+        // Restore only into a fresh, empty spawn of the same model. Existing
+        // native meshes need a repair first; this API deliberately avoids that.
+        if (!car || car->nativeDamageValid || car->terminalState != Shared::Entities::CarEntity::TerminalState::Active
+            || std::any_of(car->occupantIds.begin(), car->occupantIds.end(),
+                [](auto id) {
+                    return id != 0;
+                })
+            || !Shared::Car::Snapshot::Decode(text, snapshot) || snapshot.model != car->model)
+            return false;
+        car->fuel             = snapshot.fuel;
+        car->fuelTankCapacity = snapshot.fuelTankCapacity;
+        car->health           = snapshot.health;
+        car->opacity          = snapshot.opacity;
+        car->damageFlags      = snapshot.damageFlags;
+        car->detachedParts    = snapshot.detachedParts;
+        car->radarColor       = snapshot.radarColor;
+        car->lightState       = snapshot.lightState;
+        car->seatCount        = snapshot.seatCount;
+        car->engineOn         = snapshot.engineOn;
+        car->sirenOn          = snapshot.sirenOn;
+        car->hornOn           = snapshot.hornOn;
+        car->speedLimited     = snapshot.speedLimited;
+        car->gear             = snapshot.gear;
+        car->maximumGear      = snapshot.maximumGear;
+        car->steeringInput    = snapshot.steeringInput;
+        car->doorTargets      = snapshot.doorTargets;
+        car->dynamicsValid    = true;
+        ++car->dynamicsCommandRevision;
+        ++car->engineRevision;
+        car->nativeDamage      = snapshot.damage;
+        car->nativeDamageValid = true;
+        ++car->nativeDamageRevision;
+        _authoredDamageRevision[networkId] = car->nativeDamageRevision;
+        auto &mesh                         = _mesh[networkId];
+        mesh                               = {};
+        mesh.checkpoint                    = std::move(snapshot.mesh);
+        ++car->meshRevision;
         return true;
     }
 

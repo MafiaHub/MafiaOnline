@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <numbers>
@@ -56,6 +57,7 @@ namespace Mafia1Online::Scripting {
             std::string owner;
             SDK::Player::NativeActor *actor = nullptr;
             bool solid = false;
+            bool animated                   = false;
         };
         std::unordered_map<uint32_t, LocalFrame> gFrames;
         // RemoveTemporaryActor defers destruction until the native game tick.
@@ -587,6 +589,37 @@ namespace Mafia1Online::Scripting {
             const uint32_t id = CreateHumanFrame(model, position, direction, solid, Owner(info.GetIsolate()));
             info.GetReturnValue().Set(id ? v8::Integer::NewFromUnsigned(info.GetIsolate(), id).As<v8::Value>() : v8::Null(info.GetIsolate()).As<v8::Value>());
         }
+        void JS_PlayModelAnimation(const v8::FunctionCallbackInfo<v8::Value> &info) {
+            uint32_t id = 0;
+            if (info.Length() < 1 || info.Length() > 3 || !ReadId(info[0], id) || (info.Length() > 1 && !info[1]->IsNullOrUndefined() && !info[1]->IsString()) || (info.Length() > 2 && !info[2]->IsBoolean())) {
+                Args::Throw(info.GetIsolate(), "Scene.playModelAnimation(handle, filename?, loop?) expects a model, optional animation filename and boolean");
+                return;
+            }
+            const auto filename = info.Length() > 1 && info[1]->IsString() ? v8pp::from_v8<std::string>(info.GetIsolate(), info[1]) : std::string();
+            if (!filename.empty() && !AnimationNameValid(filename)) {
+                Args::Throw(info.GetIsolate(), "Animation must be a bare .i3d filename of at most 59 bytes");
+                return;
+            }
+            auto *entry       = Resolve(id, Owner(info.GetIsolate()));
+            const bool played = entry && !entry->actor && entry->frame->FrameType() == 9 && SDK::Scene::ModelPlayAnimation(entry->frame, filename.empty() ? nullptr : filename.c_str(), info.Length() > 2 && info[2]->BooleanValue(info.GetIsolate()));
+            if (played)
+                entry->animated = true;
+            info.GetReturnValue().Set(played);
+        }
+        void JS_StopModelAnimation(const v8::FunctionCallbackInfo<v8::Value> &info) {
+            uint32_t id = 0;
+            if (info.Length() != 1 || !ReadId(info[0], id)) {
+                Args::Throw(info.GetIsolate(), "Scene.stopModelAnimation(handle) expects a model handle");
+                return;
+            }
+            auto *entry      = Resolve(id, Owner(info.GetIsolate()));
+            const bool valid = entry && !entry->actor && entry->frame->FrameType() == 9;
+            if (valid) {
+                SDK::Scene::ModelStopAnimation(entry->frame);
+                entry->animated = false;
+            }
+            info.GetReturnValue().Set(valid);
+        }
         void JS_PlayHumanAnimation(const v8::FunctionCallbackInfo<v8::Value> &info) {
             uint32_t id;
             if (info.Length() < 2 || info.Length() > 3 || !ReadId(info[0], id) || !info[1]->IsString() ||
@@ -1106,6 +1139,14 @@ namespace Mafia1Online::Scripting {
     void BeginDrawFrame() {
         gDrawCommands.clear();
         gPreviewCommands.clear();
+        const auto now       = std::chrono::steady_clock::now();
+        static auto previous = now;
+        const int elapsed    = static_cast<int>(std::clamp<int64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(now - previous).count(), 0, 100));
+        previous             = now;
+        for (auto &[id, entry] : gFrames) {
+            if (entry.animated)
+                entry.frame->Tick(elapsed);
+        }
     }
 
     void RenderPreviewCommands() {
@@ -1275,6 +1316,10 @@ namespace Mafia1Online::Scripting {
         scene.function("getFrame", &JS_GetFrame, docs("Frame | null", {param("handle", "number")}, "Wraps an existing owned numeric local frame handle in the common Frame interface."));
         scene.function("createHuman", &JS_CreateHuman, docs("number | null", {param("model", "string"), param("position", "Vector3 | { x: number; y: number; z: number }"), param("direction", "Vector3 | { x: number; y: number; z: number }", true), param("solid", "boolean", true, "Native collision on this client; defaults to false.")},
             "Creates a stationary local C_entity with a validated stock human model. Native animation still ticks. Up to 24 local humans; no network replication or server-side interaction."));
+        scene.function("playModelAnimation", &JS_PlayModelAnimation,
+            docs("boolean", {param("handle", "number"), param("filename", "string | null", true), param("loop", "boolean", true)},
+                "Plays a local model animation. Omit filename or pass null to restart its embedded animation (including sipka.i3d). Loop defaults to false; owned models only."));
+        scene.function("stopModelAnimation", &JS_StopModelAnimation, docs("boolean", {param("handle", "number")}, "Pauses the owned model's animation at its current pose."));
         scene.function("playHumanAnimation", &JS_PlayHumanAnimation, docs("boolean", {param("handle", "number"), param("filename", "string"), param("loop", "boolean", true)},
             "Plays a stock .i3d clip on a local human; loop defaults to false. Returns false for a missing animation or expired handle."));
         scene.function("setHumanIdle", &JS_SetHumanIdle, docs("boolean", {param("handle", "number")}, "Stops a local human clip and restores the stock idle animation."));

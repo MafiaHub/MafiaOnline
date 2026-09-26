@@ -20,7 +20,8 @@ namespace Mafia1Online::SDK::Scene {
         void(__stdcall *setWorldPosition)(NativeFrame *, const Player::Vector3 *);
         void *_unused08;
         void(__stdcall *setDirection)(NativeFrame *, const Player::Vector3 *, float);
-        void *_unused10[2];
+        void *_unused10;
+        void(__stdcall *tick)(NativeFrame *, int);
         void(__stdcall *update)(NativeFrame *);
         void *_unused1c[2];
         void(__stdcall *setOn)(NativeFrame *, bool);
@@ -32,6 +33,7 @@ namespace Mafia1Online::SDK::Scene {
     static_assert(offsetof(NativeFrameVTable, setWorldPosition) == 0x04);
     static_assert(offsetof(NativeFrameVTable, setDirection) == 0x0c);
     static_assert(offsetof(NativeFrameVTable, update) == 0x18);
+    static_assert(offsetof(NativeFrameVTable, tick) == 0x14);
     static_assert(offsetof(NativeFrameVTable, setOn) == 0x24);
     static_assert(offsetof(NativeFrameVTable, setName) == 0x28);
     static_assert(offsetof(NativeFrameVTable, linkTo) == 0x2c);
@@ -197,6 +199,9 @@ namespace Mafia1Online::SDK::Scene {
         }
         void Update() {
             vtable->update(this);
+        }
+        void Tick(int milliseconds) {
+            vtable->tick(this, milliseconds);
         }
         void SetOn(bool on) {
             vtable->setOn(this, on);
@@ -456,5 +461,55 @@ namespace Mafia1Online::SDK::Scene {
 
     inline NativeModelCache *GetModelCache() {
         return reinterpret_cast<NativeModelCache *>(0x647dd0);
+    }
+
+    struct NativeAnimationSet {
+        struct VTable {
+            int(__stdcall *release)(NativeAnimationSet *);
+        } *vtable;
+        void Release() {
+            vtable->release(this);
+        }
+    };
+
+    // Retail LS3DF model vtable 0x1009c160: SetAnimation +0x60,
+    // GetAnimationSet +0x64, StopAnimation +0x68, SetAnimTime +0x78.
+    struct NativeModelVTable {
+        NativeFrameVTable frame;
+        void *_unused3c[9];
+        int(__stdcall *setAnimation)(NativeFrame *, NativeAnimationSet *, uint32_t, float, uint32_t);
+        NativeAnimationSet *(__stdcall *getAnimationSet)(NativeFrame *, uint32_t);
+        void(__stdcall *stopAnimation)(NativeFrame *, uint32_t);
+        void *_unused6c[3];
+        int(__stdcall *setAnimTime)(NativeFrame *, uint32_t, int);
+    };
+    static_assert(offsetof(NativeModelVTable, setAnimation) == 0x60);
+    static_assert(offsetof(NativeModelVTable, setAnimTime) == 0x78);
+
+    inline bool ModelPlayAnimation(NativeFrame *model, const char *filename, bool loop) {
+        auto *vtable                  = reinterpret_cast<NativeModelVTable *>(model->vtable);
+        NativeAnimationSet *animation = nullptr;
+        if (filename) {
+            // C_I3D_cache<I3D_animation_set>::Create returns an owned reference.
+            using Create = int(__thiscall *)(void *, const char *, NativeAnimationSet **, void *, void *);
+            if (reinterpret_cast<Create>(0x4104f0)(reinterpret_cast<void *>(0x647d80), filename, &animation, nullptr, nullptr) < 0 || !animation)
+                return false;
+        }
+        else {
+            // Model loading also loads Models/<name>.5ds (e.g. sipka).
+            animation = vtable->getAnimationSet(model, 0);
+            if (!animation)
+                return false;
+        }
+        const bool played = vtable->setAnimation(model, animation, 0, 1.0f, loop ? 2u : 0u) >= 0;
+        if (filename)
+            animation->Release();
+        if (played)
+            vtable->setAnimTime(model, 0, 0);
+        return played;
+    }
+
+    inline void ModelStopAnimation(NativeFrame *model) {
+        reinterpret_cast<NativeModelVTable *>(model->vtable)->stopAnimation(model, 0);
     }
 } // namespace Mafia1Online::SDK::Scene

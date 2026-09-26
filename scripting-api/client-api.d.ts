@@ -62,6 +62,10 @@ declare class Player extends Entity {
     /** Generation of the current life; it increases on every spawn. */
     readonly spawnGeneration: number;
     /** Returns the streamed vehicle the player sits in, or null on foot. */
+    /** Live native world position, without the replicated-state delay. */
+    /** Live native pose using the server entity quaternion convention; null while absent. */
+    getWorldTransform(): { position: PositionLike; rotation: RotationLike } | null;
+    getWorldPosition(): { x: number; y: number; z: number } | null;
     getVehicle(): Vehicle | null;
     /** Returns the seat index (0 is the driver), or -1 on foot. */
     getSeat(): number;
@@ -98,6 +102,9 @@ interface ClientPickupSnapshot {
 
 /** A streamed server vehicle. Every value is the server state this client last received. */
 declare class Vehicle extends Entity {
+    /** Live native pose using the server entity quaternion convention; null while absent. */
+    getWorldTransform(): { position: PositionLike; rotation: RotationLike } | null;
+
     /** Creates a handle for a streamed vehicle; throws when the ID does not resolve to a vehicle. */
     constructor(id: number);
     /** Native model file, such as "fordtl00.i3d". */
@@ -371,6 +378,9 @@ declare const Scene: {
     /** Creates a local stationary C_entity and returns its live Frame handle. */
     createHumanFrame(model: string, position: PositionLike, direction?: PositionLike, solid?: boolean): SceneFrame | null;
     /** Plays a stock .i3d clip on a local human. Set loop for an ambient repeat. */
+    /** Plays an embedded model clip when filename is omitted/null, or an Anims clip by filename. */
+    playModelAnimation(handle: number, filename?: string | null, loop?: boolean): boolean;
+    stopModelAnimation(handle: number): boolean;
     playHumanAnimation(handle: number, filename: string, loop?: boolean): boolean;
     /** Restores a local human's stock breathing/idle animation. */
     setHumanIdle(handle: number): boolean;

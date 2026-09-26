@@ -60,6 +60,8 @@ namespace Mafia1Online::Features::Car {
         bool SetRadarColor(uint64_t networkId, uint32_t argb);
         bool SetOpacity(uint64_t networkId, float opacity);
         bool Repair(uint64_t networkId);
+        std::string SaveState(uint64_t networkId) const;
+        bool RestoreState(uint64_t networkId, const std::string &snapshot);
         bool SetDamage(uint64_t networkId, float health, uint32_t damageFlags, uint32_t detachedParts);
         bool SetMechanicalDamage(uint64_t networkId, float engineHealth, float gearboxHealth, float bodyDamage, int32_t fuelTankHealth);
         bool SetTerminalState(uint64_t networkId, Shared::Entities::CarEntity::TerminalState state);

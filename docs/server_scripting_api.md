@@ -586,3 +586,19 @@ are defined by your resources.
   minutes; scripts create their own with `Pickup.create`.
 - **Mission changes** remove every vehicle, pickup and sound and clear frame
   overrides; weather and city music carry over.
+
+### Durable vehicle condition
+
+`vehicle.saveState(): string` returns a versioned opaque JSON snapshot of the
+vehicle's replicated durable condition. It includes full native damage, part
+flags and deformation checkpoints as well as fuel and persistent presentation
+state. Empty means the car is terminal, missing, or still awaiting complete native
+reports. Store the string intact alongside `vehicle.model`.
+
+`vehicle.restoreState(snapshot): boolean` applies it to a fresh, empty spawn of the
+same model **before its first native damage report**. Spawn and restore in the same
+server callback. Validation occurs before any mutation. Replication then makes the
+controller apply the authoritative condition and deformation before reporting its
+own state. Position/rotation come from `Vehicle.spawn`; velocity, pedals, occupants
+and loose debris actors are not persisted. This API does not serialize unreplicated
+native fields or arbitrary script state bags.

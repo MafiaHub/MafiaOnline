@@ -1,6 +1,9 @@
 #include "player_scripting.h"
 
+#include "features/world/world_service.h"
 #include "script_runtime.h"
+#include <mafia1/sdk/player/native_actor.h>
+#include <mafia1/sdk/scene/native_scene.h>
 
 #include "shared/features/car/car_entity.h"
 #include "shared/features/player/player_entity.h"
@@ -9,6 +12,7 @@
 #include <core_modules.h>
 #include <networking/replication/replication_manager.h>
 
+#include <glm/gtc/quaternion.hpp>
 #include <v8pp/convert.hpp>
 #include <v8pp/module.hpp>
 
@@ -42,6 +46,65 @@ namespace Mafia1Online::Scripting {
                 });
             }
             return found;
+        }
+
+        void JS_PlayerGetWorldPosition(const v8::FunctionCallbackInfo<v8::Value> &info) {
+            auto *self         = v8pp::class_<Player>::unwrap_object(info.GetIsolate(), info.This());
+            auto &world        = GetWorld();
+            const auto *player = self ? self->ResolvePlayer() : nullptr;
+            if (!player || !player->spawned || player->missionGeneration != world.LoadedMissionGeneration()) {
+                info.GetReturnValue().SetNull();
+                return;
+            }
+            auto &registry = world.NativeObjects();
+            auto *actor    = static_cast<SDK::Player::NativeActor *>(registry.Resolve(registry.FindByNetwork(self->GetId())));
+            auto *frame    = actor ? actor->Frame() : nullptr;
+            if (!frame) {
+                info.GetReturnValue().SetNull();
+                return;
+            }
+            const auto position = frame->WorldPosition();
+            info.GetReturnValue().Set(Args::Position(info.GetIsolate(), {position.x, position.y, position.z}));
+        }
+
+        v8::Local<v8::Value> NativeWorldTransform(v8::Isolate *isolate, uint64_t id) {
+            auto &world = GetWorld();
+            if (!world.IsReady())
+                return v8::Null(isolate);
+            auto &registry = world.NativeObjects();
+            auto *actor    = static_cast<SDK::Player::NativeActor *>(registry.Resolve(registry.FindByNetwork(id)));
+            auto *frame    = actor ? actor->Frame() : nullptr;
+            if (!frame)
+                return v8::Null(isolate);
+            const auto position     = frame->WorldPosition();
+            const auto basis        = frame->GetWorldBasis();
+            const glm::vec3 forward = glm::normalize(glm::vec3(basis.forward.x, basis.forward.y, basis.forward.z));
+            const glm::vec3 right   = glm::normalize(glm::cross(glm::vec3(basis.up.x, basis.up.y, basis.up.z), forward));
+            const glm::vec3 up      = glm::normalize(glm::cross(forward, right));
+            // Match the full quaternion used by native car replication and Vehicle.spawn.
+            const auto q  = glm::normalize(glm::quat_cast(glm::mat3(right, up, forward)));
+            auto context  = isolate->GetCurrentContext();
+            auto rotation = v8::Object::New(isolate);
+            rotation->Set(context, v8pp::to_v8(isolate, "w"), v8pp::to_v8(isolate, q.w)).Check();
+            rotation->Set(context, v8pp::to_v8(isolate, "x"), v8pp::to_v8(isolate, q.x)).Check();
+            rotation->Set(context, v8pp::to_v8(isolate, "y"), v8pp::to_v8(isolate, q.y)).Check();
+            rotation->Set(context, v8pp::to_v8(isolate, "z"), v8pp::to_v8(isolate, q.z)).Check();
+            auto result = v8::Object::New(isolate);
+            result->Set(context, v8pp::to_v8(isolate, "position"), Args::Position(isolate, {position.x, position.y, position.z})).Check();
+            result->Set(context, v8pp::to_v8(isolate, "rotation"), rotation).Check();
+            return result;
+        }
+
+        void JS_PlayerGetWorldTransform(const v8::FunctionCallbackInfo<v8::Value> &info) {
+            auto *self         = v8pp::class_<Player>::unwrap_object(info.GetIsolate(), info.This());
+            const auto *player = self ? self->ResolvePlayer() : nullptr;
+            info.GetReturnValue().Set(player && player->spawned && player->missionGeneration == GetWorld().LoadedMissionGeneration() ? NativeWorldTransform(info.GetIsolate(), self->GetId()) : v8::Null(info.GetIsolate()).As<v8::Value>());
+        }
+
+        void JS_VehicleGetWorldTransform(const v8::FunctionCallbackInfo<v8::Value> &info) {
+            auto *self      = v8pp::class_<Vehicle>::unwrap_object(info.GetIsolate(), info.This());
+            const auto *car = self ? self->ResolveCar() : nullptr;
+            info.GetReturnValue().Set(car && car->missionGeneration == GetWorld().LoadedMissionGeneration() ? NativeWorldTransform(info.GetIsolate(), self->GetId()) : v8::Null(info.GetIsolate()).As<v8::Value>());
         }
 
         void JS_PlayerGetVehicle(const v8::FunctionCallbackInfo<v8::Value> &info) {
@@ -204,8 +267,7 @@ namespace Mafia1Online::Scripting {
             return *_class;
         }
         Framework::Scripting::Builtins::Player::GetClass(isolate);
-        _class = std::make_unique<v8pp::class_<Player>>(isolate, ClientCatalog(), "Player",
-            "A streamed Mafia 1 player, local or remote. Every value is the server state this client last received; a handle stops resolving once the player leaves.");
+        _class    = std::make_unique<v8pp::class_<Player>>(isolate, ClientCatalog(), "Player", "A streamed Mafia 1 player, local or remote. Properties read replicated state; getWorldPosition reads the live native pose. A handle stops resolving once the player leaves.");
         auto &cls = *_class;
         cls.auto_wrap_objects(true);
         cls.inherit<Framework::Scripting::Builtins::Player>();
@@ -221,7 +283,12 @@ namespace Mafia1Online::Scripting {
         cls.property("missionGeneration", &Player::GetMissionGeneration, property_docs("number", "Mission generation of the current life."));
         cls.property("spawnGeneration", &Player::GetSpawnGeneration, property_docs("number", "Generation of the current life; it increases on every spawn."));
         cls.prototype_function("getVehicle", &JS_PlayerGetVehicle, docs("Vehicle | null", {}, "Returns the streamed vehicle the player sits in.", "The vehicle, or null on foot."));
+        cls.prototype_function("getWorldPosition", &JS_PlayerGetWorldPosition,
+            docs("{ x: number; y: number; z: number } | null", {}, "Reads the live native world position, including seated motion. Local players use the current simulation pose; remote players use their rendered pose. Null while the native actor is absent."));
         cls.prototype_function("getSeat", &JS_PlayerGetSeat, docs("number", {}, "Returns the seat the player occupies.", "The seat index (0 is the driver), or -1 on foot."));
+        cls.prototype_function("getWorldTransform", &JS_PlayerGetWorldTransform,
+            docs("{ position: { x: number; y: number; z: number }; rotation: { w: number; x: number; y: number; z: number } } | null", {},
+                "Reads live native world position and full quaternion in the same convention as server entity transforms. Null while the native actor is absent."));
         return cls;
     }
 
@@ -303,6 +370,9 @@ namespace Mafia1Online::Scripting {
         cls.property("opacity", &Vehicle::GetOpacity, property_docs("number", "Server-authored model opacity, 0 transparent and 1 opaque."));
         cls.property("gear", &Vehicle::GetGear, property_docs("number", "Current gear; 0 is neutral."));
         cls.property("seatCount", &Vehicle::GetSeatCount, property_docs("number", "Number of seats."));
+        cls.prototype_function("getWorldTransform", &JS_VehicleGetWorldTransform,
+            docs("{ position: { x: number; y: number; z: number }; rotation: { w: number; x: number; y: number; z: number } } | null", {},
+                "Reads live native world position and full quaternion, including pitch and roll, in the same convention as Vehicle.spawn. Null while the native actor is absent."));
         cls.prototype_function("getOccupant", &JS_VehicleGetOccupant,
             docs("Player | null", {param("seat", "number", false, "Seat index; 0 is the driver.")}, "Returns the player in a seat.", "The player, or null for an empty seat."));
         cls.prototype_function("getOccupants", &JS_VehicleGetOccupants, docs("Player[]", {}, "Lists the seated players.", "Every streamed occupant in seat order."));

@@ -97,6 +97,8 @@ empty or default values.
 - `id`, `virtualWorld`, `position`, `rotation`, `state`: from `Entity`.
 - `isNametagVisible()`, `isNametagHealthVisible()`,
   `getNametagText()`, `getNametagColor()`: replicated nametag settings.
+- `getWorldPosition(): { x, y, z } | null` — Current native frame position. For the local player this follows live simulation, including seated motion; for remote players it follows the rendered pose. Use this for local proximity checks and attached visuals. Null while the native actor is absent. `position` continues to expose replicated state.
+- `Player.getWorldTransform()` and `Vehicle.getWorldTransform()` — Live native `{ position: { x, y, z }, rotation: { w, x, y, z } }`, or null while the actor is absent. Rotation uses the same world quaternion convention as server entity transforms and `Vehicle.spawn`, including vehicle pitch and roll. Use this for position recording; replicated `position`/`rotation` remain unchanged. Available since 1.2.0.
 - `getVehicle(): Vehicle | null` — The vehicle the player sits in.
 - `getSeat(): number` — Seat index (0 is the driver), or -1 on foot.
 - `LocalPlayer: Player | null` — Global; null until the server created the
@@ -516,3 +518,21 @@ These run whether or not a resource has client scripts.
   its mission generation no longer matches, or before the mission closes.
   `Sound.play` is a one-shot the game releases itself. A wave the client does
   not have is logged once and skipped.
+
+### Model animation
+
+`Scene.playModelAnimation(handle, filename?, loop?)` plays a stock animation on
+an owned local model. Omit the filename or pass `null` to restart its embedded
+model animation; for example:
+
+```js
+const arrow = Scene.createModelFrame("sipka.i3d");
+if (arrow) Scene.playModelAnimation(arrow.id, null, true);
+```
+
+An explicit filename selects a bare `.i3d` clip from the game's animation cache.
+`Scene.stopModelAnimation(handle)` pauses at the current pose. Model animation
+advances on client updates and is released with the frame on resource stop or
+mission unload. Borrowed world frames, dummies and human actors are rejected;
+humans use `Scene.playHumanAnimation`. These are local visuals: server scripts
+replicate entrance definitions and clients play their decorative animation locally.
