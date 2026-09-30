@@ -1,5 +1,8 @@
 #include "application.h"
 
+#include <mafia1/sdk/input/native_input.h>
+#include <algorithm>
+
 #include "shared/register_entities.h"
 
 #include "features/car/car_hooks.h"
@@ -98,7 +101,16 @@ namespace Mafia1Online::Core {
             ExitProcess(1);
         }
         _gameplayMenus.Install(_world, _webUi);
-        _chat.SetInputFilter([this](void *input) { _gameplayMenus.FilterInput(input); });
+        _chat.SetInputFilter([this](void *input) {
+            if (_input->IsInputLocked()) {
+                for (bool pressedOnly : {false, true}) {
+                    float *state = nullptr;
+                    const int count = SDK::Input::GetState(input, &state, pressedOnly);
+                    if (count > 0) std::fill_n(state, count, 0.0f);
+                }
+            }
+            _gameplayMenus.FilterInput(input);
+        });
         _pickups.SetChoiceFilter([this](SDK::World::NativeItemVector &items) { return _gameplayMenus.FilterNearObjects(items); });
         _seats.SetUseFilter([this](const void *human) { return _gameplayMenus.AllowsNativeUse(human); });
         if (!_doors.Install()) {
@@ -159,13 +171,13 @@ namespace Mafia1Online::Core {
         while (auto line = _chat.TakeOutgoing()) {
             SubmitChatLine(*line);
         }
-        while (auto key = _chat.TakeGameKey()) {
-            // DIK_K: retail has no player siren control.
-            if (*key == 0x25) {
+        _input->SetReady(_world.IsReady());
+        _input->Update();
+        if (IsLocalInputAvailable()) {
+            if (_input->IsKeyPressed('K')) {
                 (void)_cars.ToggleSiren(_world);
             }
-            // DIK_F10: compare the two observer car sync modes. F9 tunes the radio.
-            else if (*key == 0x44) {
+            if (_input->IsKeyPressed(FW_KEY_F10)) {
                 const char *mode = _cars.ToggleSyncMode() ? "Car sync: predicted physics" : "Car sync: interpolated";
                 _chat.OnMessage("", mode, 0xE0C080FF);
                 _webUi.OnChatMessage("", mode, 0xE0C080FF);
@@ -250,6 +262,9 @@ namespace Mafia1Online::Core {
     }
 
     void Application::OnConnectionClosed() {
+        _input->SetReady(false);
+        _input->SetInputLocked(false);
+        _input->Update();
         _gameplayMenus.Reset();
         _mods.Reset();
         _autoEnterPending = false;

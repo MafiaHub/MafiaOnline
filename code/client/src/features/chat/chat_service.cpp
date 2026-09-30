@@ -200,7 +200,6 @@ namespace Mafia1Online::Features::Chat {
         CloseInput();
         _messages.clear();
         _outgoing.clear();
-        _gameKeys.clear();
         _lastScanCode      = 0;
         _swallowedScanCode = 0;
     }
@@ -250,15 +249,6 @@ namespace Mafia1Online::Features::Chat {
         std::string line = std::move(_outgoing.front());
         _outgoing.pop_front();
         return line;
-    }
-
-    std::optional<uint32_t> ChatService::TakeGameKey() {
-        if (_gameKeys.empty()) {
-            return std::nullopt;
-        }
-        const uint32_t key = _gameKeys.front();
-        _gameKeys.pop_front();
-        return key;
     }
 
     bool ChatService::ShouldConsumeNativeKey(uint32_t scanCode) const {
@@ -312,9 +302,6 @@ namespace Mafia1Online::Features::Chat {
             }
             else if (scanCode == kDikSlash) {
                 OpenInput("/");
-            }
-            else if (_missionReady && _gameKeys.size() < 16) {
-                _gameKeys.push_back(scanCode);
             }
             return;
         }

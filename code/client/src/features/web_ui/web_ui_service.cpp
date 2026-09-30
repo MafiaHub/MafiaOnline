@@ -14,6 +14,7 @@
 #include "shared/version.h"
 
 #include <core_modules.h>
+#include <input/input.h>
 #include <graphics/backend/d3d8.h>
 #include <gui/manager.h>
 #include <logging/logger.h>
@@ -41,7 +42,6 @@ namespace Mafia1Online::Features::WebUi {
         // the extended flag, which DirectInput folds into bit 7 instead.
         constexpr uint32_t kDikEscape  = 0x01;
         // Tab is the retail city map; the player list is held F1 instead.
-        constexpr uint32_t kDikF1      = 0x3b;
         constexpr uint32_t kDikT       = 0x14;
         constexpr uint32_t kDikSlash   = 0x35;
         constexpr uint32_t kKeyEnter    = 0x01c;
@@ -587,7 +587,7 @@ namespace Mafia1Online::Features::WebUi {
             _chatOpen  = false;
             _pauseOpen = false;
         }
-        const bool scoreboard = _screen == Screen::Game && !_captured && Native::TestKey(static_cast<uint8_t>(kDikF1));
+        const bool scoreboard = _screen == Screen::Game && !_captured && Framework::CoreModules::GetInput() && Framework::CoreModules::GetInput()->IsKeyDown(FW_KEY_F1);
         if (scoreboard != _scoreboardShown) {
             _scoreboardShown = scoreboard;
             if (scoreboard) {
