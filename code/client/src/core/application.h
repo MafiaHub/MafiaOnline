@@ -1,11 +1,13 @@
 #pragma once
 
 #include <integrations/client/instance.h>
+#include <memory>
 
 #include "features/car/car_service.h"
 #include "features/camera/camera_follow_service.h"
 #include "features/car/debris_service.h"
 #include "features/chat/chat_service.h"
+#include "features/input/input_service.h"
 #include "features/nametag/nametag_service.h"
 #include "features/pickup/pickup_service.h"
 #include "features/combat/combat_service.h"
@@ -26,6 +28,10 @@
 namespace Mafia1Online::Core {
     class Application final: public Framework::Integrations::Client::Instance {
       public:
+        Framework::Input::IInput *GetBaseInput() const override { return _input.get(); }
+        bool IsLocalInputAvailable() const override {
+            return _world.IsReady() && !_chat.IsInputSuppressed() && !_webUi.HidesKeyboard() && !_input->IsInputLocked() && Framework::Integrations::Client::Instance::IsLocalInputAvailable();
+        }
         void PostInit() override;
         void PostUpdate() override;
         void PreShutdown() override;
@@ -73,6 +79,7 @@ namespace Mafia1Online::Core {
         }
 
       private:
+        std::unique_ptr<Mafia1Online::Features::Input::InputService> _input = std::make_unique<Mafia1Online::Features::Input::InputService>();
         void SubmitChatLine(const std::string &line);
         Features::Mod::ModService _mods;
         std::string _assetError;

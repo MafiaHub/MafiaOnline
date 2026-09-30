@@ -1,3 +1,6 @@
 # MafiaHub Framework commit this project is built against.
 # Check out this commit and place this repository at code/projects/mafia1online.
-81b8633b90b53f2ab756f0877f9f099fd68a961b
+
+# Shared native input and unified IInput queries (Framework PR #292).
+# Draft dependency pin: replace with the merged commit before release.
+689c27139ba8e0123e33cfb54f869d27f15c7001

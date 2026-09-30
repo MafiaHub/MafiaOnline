@@ -20,9 +20,6 @@ namespace Mafia1Online::Features::Chat {
         // Color is the wire format 0xRRGGBBAA, 0 for the default.
         void OnMessage(const std::string &author, const std::string &text, uint32_t color);
         std::optional<std::string> TakeOutgoing();
-        // A fresh gameplay key press (DirectInput scan code) that chat did not
-        // take, drained on the update thread.
-        std::optional<uint32_t> TakeGameKey();
         // Drawn every scene frame before the chat, e.g. nametags.
         void SetOverlay(std::function<void()> overlay) {
             _overlay = std::move(overlay);
@@ -100,6 +97,5 @@ namespace Mafia1Online::Features::Chat {
         std::function<bool()> _inputCapture;
         bool _nativeChatEnabled = true;
         std::function<void(void *)> _inputFilter;
-        std::deque<uint32_t> _gameKeys;
     };
 } // namespace Mafia1Online::Features::Chat
