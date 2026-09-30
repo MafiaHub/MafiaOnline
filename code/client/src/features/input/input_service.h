@@ -12,29 +12,20 @@ namespace Mafia1Online::Features::Input {
         void SetReady(bool ready) {
             _ready = ready;
         }
-        bool ProvidesPhysicalKeyState() const override {
-            return true;
-        }
-        bool IsStateStale() const override {
-            return !_ready;
-        }
-        Framework::Input::KeyCodeSpace GetKeyCodeSpace() const override {
-            return Framework::Input::KeyCodeSpace::PhysicalPosition;
-        }
-        uint32_t MapKey(uint32_t key) const override;
+        bool IsAvailable() const override;
         bool IsKeyDown(int key) const override;
         bool IsKeyUp(int key) const override {
-            return key >= 0 && key < 256 && !IsKeyDown(key);
+            return key >= 0 && key < 256 && IsAvailable() && !IsKeyDown(key);
         }
         bool IsKeyPressed(int key) const override {
-            return _keys.IsPressed(key);
+            return IsAvailable() && _keys.IsPressed(key);
         }
         bool IsKeyReleased(int key) const override {
-            return _keys.IsReleased(key);
+            return IsAvailable() && _keys.IsReleased(key);
         }
         bool IsMouseButtonDown(int button) const override;
         bool IsMouseButtonUp(int button) const override {
-            return button >= 0 && button < 3 && !IsMouseButtonDown(button);
+            return button >= 0 && button < 3 && IsAvailable() && !IsMouseButtonDown(button);
         }
         bool IsMouseButtonPressed(int button) const override;
         bool IsMouseButtonReleased(int button) const override;
@@ -56,6 +47,7 @@ namespace Mafia1Online::Features::Input {
         }
 
       private:
+        bool ReadKeyDown(int key) const;
         Framework::Input::KeySnapshot _keys;
         bool _ready  = false;
         bool _locked = false;

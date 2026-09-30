@@ -2,61 +2,57 @@
 
 #include "features/web_ui/web_ui_hooks.h"
 
-#include <input/physical_key_state.h>
+#include <input/detail/win32_keys.h>
 #include <mafia1/sdk/graphics/native_graph.h>
 
 namespace Mafia1Online::Features::Input {
     namespace {
-        constexpr int kMouseKeys[] {VK_LBUTTON, VK_RBUTTON, VK_MBUTTON};
+        constexpr int kMouseKeys[] {FW_KEY_LBUTTON, FW_KEY_RBUTTON, FW_KEY_MBUTTON};
     }
 
     void InputService::Update() {
         _keys.Update(
             [this](int key) {
-                return IsKeyDown(key);
+                return ReadKeyDown(key);
             },
-            _ready && Framework::Input::PhysicalKeyState::IsForeground());
+            IsAvailable());
     }
 
-    uint32_t InputService::MapKey(uint32_t key) const {
-        // DirectInput folds an E0 prefix into bit 7. Pause is E1 and has its
-        // own DIK code; NumLock shares its PC scan position, not its DIK code.
-        if (key == VK_PAUSE)
-            return 0xC5;
-        if (key == VK_NUMLOCK)
-            return 0x45;
-        const UINT scan = Framework::Input::PhysicalKeys::ToScanCode(key);
-        return (scan & 0xFFU) | ((scan & 0xFF00U) != 0 ? 0x80U : 0U);
+    bool InputService::IsAvailable() const {
+        return _ready && Framework::Input::detail::IsForeground();
     }
 
     bool InputService::IsKeyDown(int key) const {
-        if (!_ready || key < 0 || key > 255 || !Framework::Input::PhysicalKeyState::IsForeground())
-            return false;
+        return key >= 0 && key < 256 && IsAvailable() && ReadKeyDown(key);
+    }
+
+    bool InputService::ReadKeyDown(int key) const {
         switch (key) {
-        case VK_LBUTTON: return IsMouseButtonDown(0);
-        case VK_RBUTTON: return IsMouseButtonDown(1);
-        case VK_MBUTTON: return IsMouseButtonDown(2);
-        case VK_XBUTTON1:
-        case VK_XBUTTON2: return false;
-        case VK_SHIFT: return IsKeyDown(VK_LSHIFT) || IsKeyDown(VK_RSHIFT);
-        case VK_CONTROL: return IsKeyDown(VK_LCONTROL) || IsKeyDown(VK_RCONTROL);
-        case VK_MENU: return IsKeyDown(VK_LMENU) || IsKeyDown(VK_RMENU);
+        case FW_KEY_LBUTTON:
+        case FW_KEY_RBUTTON:
+        case FW_KEY_MBUTTON: {
+            const int button = key == FW_KEY_LBUTTON ? 0 : key == FW_KEY_RBUTTON ? 1 : 2;
+            return (Mafia1Online::Features::WebUi::Native::MouseButtons() & (1U << button)) != 0;
+        }
+        case FW_KEY_XBUTTON1:
+        case FW_KEY_XBUTTON2: return false;
+        case FW_KEY_SHIFT: return ReadKeyDown(FW_KEY_LSHIFT) || ReadKeyDown(FW_KEY_RSHIFT);
+        case FW_KEY_CONTROL: return ReadKeyDown(FW_KEY_LCONTROL) || ReadKeyDown(FW_KEY_RCONTROL);
+        case FW_KEY_MENU: return ReadKeyDown(FW_KEY_LMENU) || ReadKeyDown(FW_KEY_RMENU);
         default: break;
         }
-        const uint32_t scan = MapKey(static_cast<uint32_t>(key));
+        const UINT scan = Framework::Input::PhysicalKeys::ToDirectInputCode(static_cast<UINT>(key));
         return scan != 0 && Mafia1Online::Features::WebUi::Native::TestKey(static_cast<uint8_t>(scan));
     }
 
     bool InputService::IsMouseButtonDown(int button) const {
-        if (!_ready || button < 0 || button >= 3 || !Framework::Input::PhysicalKeyState::IsForeground())
-            return false;
-        return (Mafia1Online::Features::WebUi::Native::MouseButtons() & (1U << button)) != 0;
+        return button >= 0 && button < 3 && IsKeyDown(kMouseKeys[button]);
     }
     bool InputService::IsMouseButtonPressed(int button) const {
-        return button >= 0 && button < 3 && _keys.IsPressed(kMouseKeys[button]);
+        return button >= 0 && button < 3 && IsKeyPressed(kMouseKeys[button]);
     }
     bool InputService::IsMouseButtonReleased(int button) const {
-        return button >= 0 && button < 3 && _keys.IsReleased(kMouseKeys[button]);
+        return button >= 0 && button < 3 && IsKeyReleased(kMouseKeys[button]);
     }
 
     void InputService::GetMousePosition(int &x, int &y) const {
