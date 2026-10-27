@@ -174,6 +174,9 @@ namespace Mafia1Online::Features::WebUi {
             return false;
         }
         _view->LockToOrigin(url);
+        // The multiplayer menu, pause screen and chat stay above every resource
+        // view; only the cursor layer is higher.
+        _view->SetZIndex(std::numeric_limits<int>::max() - 1);
         _view->Display(false);
 
         // One noninteractive cursor layer shared by the shell and every
@@ -731,8 +734,11 @@ namespace Mafia1Online::Features::WebUi {
         }
     }
 
+    // While the built-in page captures input (main menu, pause, chat, gameplay
+    // menu) it sits above every resource view, so it owns focus, keys, mouse
+    // and display until it closes; the resource view keeps its own state.
     Framework::GUI::View *WebUiService::FocusedResourceView() const {
-        if (!_instance) {
+        if (!_instance || _captured) {
             return nullptr;
         }
         auto *manager = _instance->GetWebManager();
