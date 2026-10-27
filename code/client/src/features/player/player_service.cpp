@@ -1,5 +1,7 @@
 #include "player_service.h"
 
+#include "features/simulation/simulation_config.h"
+
 #include "features/seat/seat_service.h"
 #include "features/world/world_service.h"
 
@@ -100,6 +102,9 @@ namespace Mafia1Online::Features::Player {
                 controlled = player;
             }
         });
+        // A player sees others once spawned; the simulation host, which never
+        // spawns, sees every spawned player.
+        const bool observing = Simulation::IsHost() || (controlled && controlled->spawned);
         std::unordered_set<uint64_t> seen;
         replication->ForEach<Shared::Entities::PlayerEntity>([&](Shared::Entities::PlayerEntity *player) {
             if (player->missionGeneration != world.LoadedMissionGeneration()) {
@@ -109,7 +114,7 @@ namespace Mafia1Online::Features::Player {
                 return;
             }
             const uint64_t id = player->GetNetworkID();
-            if (!controlled || !controlled->spawned || !player->spawned) {
+            if (!observing || !player->spawned) {
                 QueueRemoval(world, id);
                 return;
             }
@@ -468,10 +473,14 @@ namespace Mafia1Online::Features::Player {
         if (!state) {
             return std::nullopt;
         }
+        return ClassifyLocomotion(*state);
+    }
+
+    PlayerService::RemoteAnimation PlayerService::ClassifyLocomotion(int16_t state) {
         using Animation = SDK::Player::LocomotionAnimation;
         // The upper bits select the weapon/crouch variant, which each human
         // applies from its own replicated state (Do_Jump masks the same way).
-        const auto base = static_cast<int16_t>(*state & 0x1ff);
+        const auto base = static_cast<int16_t>(state & 0x1ff);
         switch (base) {
         case static_cast<int16_t>(Animation::Idle):
         case static_cast<int16_t>(Animation::RunForward):

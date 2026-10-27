@@ -2,7 +2,9 @@
 
 #include "pickup_service.h"
 
+#include "core/application.h"
 #include "features/combat/combat_service.h"
+#include "features/simulation/simulation_config.h"
 #include "features/world/world_service.h"
 #include "shared/features/pickup/pickup_request.h"
 #include "shared/features/pickup/weapon_pickup_entity.h"
@@ -85,6 +87,11 @@ namespace Mafia1Online::Features::Pickup {
     }
 
     void PickupService::OnNativeDrop(SDK::Player::NativeHuman &human, const SDK::World::NativeItemVector &items) {
+        // The simulation host's NPCs drop through the server's record of them.
+        if (Simulation::IsHost()) {
+            static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->Npcs().OnNativeDrop(human, items);
+            return;
+        }
         if (!_combat || &human.Actor() != SDK::Player::CurrentPlayer() || !items.begin) {
             return;
         }

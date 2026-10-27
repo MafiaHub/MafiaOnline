@@ -30,6 +30,7 @@ namespace Mafia1Online::Features::World {
         bool gNativeMissionLoading                     = false;
         uint32_t gSuppressedActors                     = 0;
         uint32_t gLoadedDoors                          = 0;
+        uint32_t gLoadedGenerators                     = 0;
         using MenuExecute                              = uint32_t(__fastcall *)(void *, bool, bool);
         MenuExecute gMenuExecuteOriginal               = nullptr;
         using MissionProgram                           = void(__thiscall *)(void *);
@@ -74,7 +75,7 @@ namespace Mafia1Online::Features::World {
                     ++gSuppressedActors;
                     return nullptr;
                 }
-                ++gLoadedDoors;
+                ++(type == 6 ? gLoadedDoors : gLoadedGenerators);
             }
             return gCreateActorOriginal(mission, type);
         }
@@ -273,9 +274,10 @@ namespace Mafia1Online::Features::World {
         if (loading) {
             gSuppressedActors = 0;
             gLoadedDoors      = 0;
+            gLoadedGenerators = 0;
         }
         else {
-            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Suppressed {} mission-file actor spawns; kept {} doors", gSuppressedActors, gLoadedDoors);
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Suppressed {} mission-file actor spawns; kept {} doors and {} pedestrian generators", gSuppressedActors, gLoadedDoors, gLoadedGenerators);
         }
     }
 

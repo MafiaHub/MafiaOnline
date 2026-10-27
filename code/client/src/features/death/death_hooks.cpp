@@ -4,6 +4,7 @@
 
 #include "core/application.h"
 #include "features/script/visual_scripting.h"
+#include "features/simulation/simulation_config.h"
 #include "shared/features/combat/hit_report.h"
 
 #include <MinHook.h>
@@ -57,8 +58,27 @@ namespace Mafia1Online::Features::Death {
             if (IsSolidLocalHuman(*human)) {
                 return true;
             }
+            auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
+            const bool host   = Features::Simulation::IsHost();
             if (gAuthoritativeDepth != 0 || !gService || !gService->Protect(human->Actor())) {
-                return gHitOriginal(human, type, direction, position, normal, damage, attacker, bodyPart, frame);
+                if (!host || !application->Npcs().Owns(&human->Actor())) {
+                    return gHitOriginal(human, type, direction, position, normal, damage, attacker, bodyPart, frame);
+                }
+                // A player aims at, or drives into, a replica that trails the
+                // host's NPC, so the player's own client detects the hit
+                // and the server validates it (ApplyAuthoritativeHit). The
+                // replayed shot, swing or car of that player here only plays.
+                if (gAuthoritativeDepth == 0 && attacker && application->World().NativeObjects().FindByNative(attacker).networkId != 0) {
+                    return true;
+                }
+                const float before = human->Health();
+                const bool result  = gHitOriginal(human, type, direction, position, normal, damage, attacker, bodyPart, frame);
+                application->Npcs().OnHit(application->World(), *human, type, direction, damage, attacker, bodyPart, before);
+                return result;
+            }
+            if (host) {
+                application->Npcs().OnHitPlayer(application->World(), *human, type, direction, damage, attacker, bodyPart);
+                return true;
             }
             gService->OnSuppressedHit(*human, type, direction, position, attacker, bodyPart);
             // TickShoot treats a skeleton hit as consumed even when Hit returns
@@ -229,6 +249,17 @@ namespace Mafia1Online::Features::Death {
         gAuthoritativeAnimation = animationId;
         const bool accepted     = gHitOriginal(&human, seated ? NativeHitType::Generic : NativeHitType::Direct, direction, position, normal, 10000.0f, nullptr, 5, nullptr);
         gAuthoritativeAnimation = 0;
+        --gAuthoritativeDepth;
+        return accepted;
+    }
+
+    bool ApplyAuthoritativeHit(NativeHuman &human, NativeHitType type, const Vector3 &direction, const Vector3 &position, float damage, NativeActor *attacker, uint32_t bodyPart) {
+        if (!gHitOriginal) {
+            return false;
+        }
+        const Vector3 normal {-direction.x, -direction.y, -direction.z};
+        ++gAuthoritativeDepth;
+        const bool accepted = HitHook(&human, nullptr, type, direction, position, normal, damage, attacker, bodyPart, nullptr);
         --gAuthoritativeDepth;
         return accepted;
     }

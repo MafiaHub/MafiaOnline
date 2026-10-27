@@ -27,6 +27,15 @@ namespace Mafia1Online::Features::World {
 namespace Mafia1Online::Features::Player {
     class PlayerService final {
       public:
+        struct RemoteAnimation {
+            int16_t state;
+            // Played once when the replicated state changes to it.
+            bool oneShot;
+        };
+        // The animation a human replica plays for a replicated native
+        // locomotion state (C_human m_iAnimState).
+        static RemoteAnimation ClassifyLocomotion(int16_t state);
+
         void RegisterRPC();
         void Update(World::WorldService &world);
         // After a native Do_Climb started for the local player, from the
@@ -61,11 +70,6 @@ namespace Mafia1Online::Features::Player {
             bool local                     = false;
             bool removalQueued             = false;
             int16_t lastAnimation          = 0;
-        };
-        struct RemoteAnimation {
-            int16_t state;
-            // Played once when the replicated state changes to it.
-            bool oneShot;
         };
         std::optional<RemoteAnimation> RemoteLocomotion(const RemoteStream &stream) const;
 

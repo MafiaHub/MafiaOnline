@@ -6,7 +6,10 @@
 #include "features/car/debris_service.h"
 #include "features/combat/combat_service.h"
 #include "features/pickup/pickup_service.h"
+#include "features/npc/npc_service.h"
+#include "features/pedestrian/pedestrian_service.h"
 #include "features/player/player_service.h"
+#include "features/simulation/simulation_service.h"
 #include "features/world/mission_readiness.h"
 #include "features/world/world_script_service.h"
 #include "features/mod/mod_service.h"
@@ -68,6 +71,14 @@ namespace Mafia1Online::Core {
             return _cars;
         }
 
+        Features::Pedestrian::PedestrianService &Pedestrians() {
+            return _pedestrians;
+        }
+
+        Features::Npc::NpcService &Npcs() {
+            return _npcs;
+        }
+
         Features::Pickup::PickupService &Pickups() {
             return _pickups;
         }
@@ -83,6 +94,10 @@ namespace Mafia1Online::Core {
             return _worldScript;
         }
 
+        Features::Simulation::SimulationService &Simulation() {
+            return _simulation;
+        }
+
       private:
         Features::Mod::ModService _mods;
         std::string _mission;
@@ -94,6 +109,9 @@ namespace Mafia1Online::Core {
         Features::Combat::CombatService _combat;
         Features::World::MissionReadiness _missionReadiness;
         Features::World::WorldScriptService _worldScript;
+        Features::Simulation::SimulationService _simulation;
+        Features::Pedestrian::PedestrianService _pedestrians;
+        Features::Npc::NpcService _npcs;
         std::unordered_set<uint64_t> _reportedCarLoadFailures;
         // Clients whose native car creation failed, per car. None of them can
         // simulate that car.

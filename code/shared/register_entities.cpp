@@ -2,9 +2,12 @@
 
 #include "features/car/car_entity.h"
 #include "features/door/door_entity.h"
+#include "features/npc/npc_entity.h"
+#include "features/pedestrian/pedestrian_entity.h"
 #include "features/car/car_debris_entity.h"
 #include "features/pickup/weapon_pickup_entity.h"
 #include "features/player/player_entity.h"
+#include "features/simulation/simulator_entity.h"
 #include "features/sound/sound_entity.h"
 #include "features/world/mission_entity.h"
 #include "features/world/world_state_entity.h"
@@ -22,5 +25,8 @@ namespace Mafia1Online::Shared::Entities {
         registry.Register<WorldStateEntity>(WorldStateEntity::kTypeName);
         registry.Register<DoorEntity>(DoorEntity::kTypeName);
         registry.Register<SoundEntity>(SoundEntity::kTypeName);
+        registry.Register<SimulatorEntity>(SimulatorEntity::kTypeName);
+        registry.Register<PedestrianEntity>(PedestrianEntity::kTypeName);
+        registry.Register<NpcEntity>(NpcEntity::kTypeName);
     }
 } // namespace Mafia1Online::Shared::Entities

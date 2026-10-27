@@ -33,7 +33,7 @@ int main(int argc, char **argv) {
     if (KeepMissionActorGeometry(4) || KeepMissionActorGeometry(8) || KeepMissionActorGeometry(27) || !KeepMissionActorGeometry(6) || !KeepMissionActorGeometry(20))
         return 5;
     for (uint32_t typeId = 0; typeId <= 35; ++typeId) {
-        if (LoadMissionActor(typeId) != (typeId == 6))
+        if (LoadMissionActor(typeId) != (typeId == 6 || typeId == 18))
             return 7;
     }
     if (argc == 2) {

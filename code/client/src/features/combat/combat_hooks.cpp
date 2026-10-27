@@ -2,9 +2,13 @@
 
 #include "combat_hooks.h"
 
+#include "core/application.h"
+#include "features/simulation/simulation_config.h"
+
 #include "combat_service.h"
 
 #include <MinHook.h>
+#include <core_modules.h>
 #include <mafia1/sdk/combat/native_grenade.h>
 #include <mafia1/sdk/core/game.h>
 #include <mafia1/sdk/core/mission.h>
@@ -196,9 +200,16 @@ namespace Mafia1Online::Features::Combat {
             return gGrenadeDestructorOriginal(grenade, flags);
         }
 
+        Npc::NpcHost &HostNpcs() {
+            return static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->Npcs();
+        }
+
         void __fastcall ShootingHook(NativeHuman *human, void *) {
             const float before = human->ShotCount();
-            const bool captureLocal = gReplayDepth == 0 && gService && human->Actor().IsPlayer();
+            // On the simulation host its NPCs' shots are captured like
+            // the local player's and sent for players to replay.
+            const bool npc = gReplayDepth == 0 && gService && Simulation::IsHost() && HostNpcs().Owns(&human->Actor());
+            const bool captureLocal = gReplayDepth == 0 && gService && (human->Actor().IsPlayer() || npc);
             NativeHuman *previousHuman = gCapturingHuman;
             NativeShotData previousShot = gLocalShot;
             if (captureLocal) {
@@ -207,7 +218,12 @@ namespace Mafia1Online::Features::Combat {
             }
             gShootingOriginal(human);
             if (captureLocal && gLocalShot.captured && human->ShotCount() > before) {
-                gService->OnNativeShot(*human, gLocalShot);
+                if (npc) {
+                    HostNpcs().OnShot(*human, gLocalShot);
+                }
+                else {
+                    gService->OnNativeShot(*human, gLocalShot);
+                }
             }
             if (captureLocal) {
                 gCapturingHuman = previousHuman;
@@ -223,7 +239,12 @@ namespace Mafia1Online::Features::Combat {
                 const auto before = game->ShootRecords().size();
                 gScatterIndex = 0;
                 gScatterReplayRemaining = event.pelletCount > 1 ? event.pelletCount * 2 : 0;
-                const bool queued = gNewShootOriginal(game, actor, source, trajectory, 0.0f, particleEffectId, frame, event.pelletCount);
+                // Player damage is the server's (CombatService), so a replayed
+                // bullet carries none. On the simulation host it carries the
+                // native weapon damage: the host decides what it does to the
+                // walkers it runs, and network humans there stay protected.
+                const float replayDamage = Simulation::IsHost() ? damage : 0.0f;
+                const bool queued = gNewShootOriginal(game, actor, source, trajectory, replayDamage, particleEffectId, frame, event.pelletCount);
                 const auto records = game->ShootRecords();
                 gReplayProjectileQueued = queued && gScatterReplayRemaining == 0 && records.size() == before + event.pelletCount;
                 gScatterReplayRemaining = 0;

@@ -5,6 +5,10 @@
 
 #include "features/car/car_service.h"
 #include "features/camera/camera_follow_service.h"
+#include "features/npc/npc_host.h"
+#include "features/npc/npc_replicas.h"
+#include "features/pedestrian/pedestrian_replicas.h"
+#include "features/pedestrian/pedestrian_service.h"
 #include "features/car/debris_service.h"
 #include "features/chat/chat_service.h"
 #include "features/nametag/nametag_service.h"
@@ -71,6 +75,18 @@ namespace Mafia1Online::Core {
             return _players;
         }
 
+        Features::Pedestrian::PedestrianReplicaService &PedestrianReplicas() {
+            return _pedestrianReplicas;
+        }
+
+        Features::Npc::NpcHost &Npcs() {
+            return _npcs;
+        }
+
+        Features::Npc::NpcReplicaService &NpcReplicas() {
+            return _npcReplicas;
+        }
+
         Features::Hud::HudService &Hud() {
             return _hud;
         }
@@ -81,6 +97,9 @@ namespace Mafia1Online::Core {
 
       private:
         void SubmitChatLine(const std::string &line);
+        // Chat, web UI and gameplay menus; absent on the simulation host.
+        void UpdatePlayerInterface();
+        void ConnectFromConfiguration();
         std::unique_ptr<Framework::Input::PollingInput> _input = std::make_unique<Framework::Input::PollingInput>();
         Features::Mod::ModService _mods;
         std::string _assetError;
@@ -89,6 +108,10 @@ namespace Mafia1Online::Core {
         Features::Player::PlayerService _players;
         Features::Car::CarService _cars;
         Features::Camera::CameraFollowService _cameraFollow;
+        Features::Pedestrian::PedestrianService _pedestrians;
+        Features::Pedestrian::PedestrianReplicaService _pedestrianReplicas;
+        Features::Npc::NpcHost _npcs;
+        Features::Npc::NpcReplicaService _npcReplicas;
         Features::Car::DebrisService _debris;
         Features::Seat::SeatService _seats;
         Features::Combat::CombatService _combat;

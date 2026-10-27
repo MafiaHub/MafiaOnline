@@ -21,7 +21,11 @@ namespace Mafia1Online::Features::Player {
         void __fastcall ActorDestructorHook(void *actor, void *) {
             auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
             application->Debris().OnNativeDestroyed(application->World(), actor);
+            application->Npcs().OnNativeDestroyed(actor);
             auto *frame       = application->Players().OnNativeDestroyed(application->World(), actor);
+            if (auto *npcFrame = application->NpcReplicas().OnNativeDestroyed(application->World(), actor)) {
+                frame = npcFrame;
+            }
             if (auto *localHumanFrame = Scripting::OnLocalHumanDestroyed(actor)) {
                 frame = localHumanFrame;
             }

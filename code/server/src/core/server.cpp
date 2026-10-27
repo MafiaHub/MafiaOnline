@@ -13,6 +13,8 @@
 #include "shared/features/car/seat_action.h"
 #include "shared/features/chat/text_policy.h"
 #include "shared/features/door/door_intent.h"
+#include "shared/features/npc/npc_entity.h"
+#include "shared/features/pedestrian/pedestrian_entity.h"
 #include "shared/features/player/player_entity.h"
 #include "shared/features/world/mission_catalog.h"
 #include "shared/features/world/mission_entity.h"
@@ -20,6 +22,8 @@
 
 #include "features/car/vehicle_scripting.h"
 #include "features/door/door_scripting.h"
+#include "features/npc/npc_scripting.h"
+#include "features/pedestrian/pedestrian_scripting.h"
 #include "features/pickup/pickup_scripting.h"
 #include "features/player/player_scripting.h"
 #include "features/script/script_events.h"
@@ -55,6 +59,8 @@ namespace Mafia1Online::Core {
         Framework::Scripting::Builtins::RegisterHandleTransfer<Scripting::Door>("mafia1online.Door");
         Framework::Scripting::Builtins::RegisterHandleTransfer<Scripting::Pickup>("mafia1online.Pickup");
         Framework::Scripting::Builtins::RegisterHandleTransfer<Scripting::Sound>("mafia1online.Sound");
+        Framework::Scripting::Builtins::RegisterHandleTransfer<Scripting::Pedestrian>("mafia1online.Pedestrian");
+        Framework::Scripting::Builtins::RegisterHandleTransfer<Scripting::Npc>("mafia1online.Npc");
         if (auto *scripting = GetScriptingModule(); scripting != nullptr && scripting->GetEngine() != nullptr) {
             scripting->GetEngine()->AddRuntimeDisposingListener([](v8::Isolate *isolate) {
                 Scripting::Player::UnregisterIsolate(isolate);
@@ -62,9 +68,21 @@ namespace Mafia1Online::Core {
                 Scripting::Door::UnregisterIsolate(isolate);
                 Scripting::Pickup::UnregisterIsolate(isolate);
                 Scripting::Sound::UnregisterIsolate(isolate);
+                Scripting::Pedestrian::UnregisterIsolate(isolate);
+                Scripting::Npc::UnregisterIsolate(isolate);
             });
         }
         _mission                               = GetModConfig().Get<std::string>("mission");
+        _simulation.Init(GetModConfig().Get<std::string>("simulationToken"));
+        _pedestrians.RegisterRPC(_simulation, _players, _cars);
+        _pedestrians.SetEvents({
+            [this](Shared::Entities::PedestrianEntity &walker) { Features::Script::EmitPedestrianEvent(*this, "pedestrianSpawn", walker); },
+            [this](Shared::Entities::PedestrianEntity &walker) { Features::Script::EmitPedestrianEvent(*this, "pedestrianRetire", walker); },
+            [this](Shared::Entities::PedestrianEntity &walker, uint64_t attackerId, int32_t hitType, float damage, float before, float after) {
+                Features::Script::EmitPedestrianDamage(*this, walker, attackerId, hitType, damage, before, after);
+            },
+            [this](Shared::Entities::PedestrianEntity &walker, uint64_t killerId) { Features::Script::EmitPedestrianDeath(*this, walker, killerId); },
+        });
         if (!Shared::World::IsStockMission(_mission) && !_mods.HasMission(_mission)) throw std::runtime_error("Mission is neither stock nor present in mods/: " + _mission);
         if (!GetNetworkingEngine()->GetNetworkServer()->SetSessionConfig(nlohmann::json({{"mission", _mission}, {"mods", _mods.Manifest()}}).dump())) throw std::runtime_error("Server mod manifest exceeds the session handshake limit");
         _missionState                          = Framework::CoreModules::GetReplication()->CreateEntity<Shared::Entities::MissionEntity>();
@@ -84,12 +102,27 @@ namespace Mafia1Online::Core {
             }
         });
         _combat.RegisterRPC(_players, _cars);
+        _npcs.RegisterRPC(_simulation, _players, _combat);
+        _npcs.SetEvents({
+            [this](Shared::Entities::NpcEntity &npc) { Features::Script::EmitNpcEvent(*this, "npcSpawn", npc); },
+            [this](Shared::Entities::NpcEntity &npc) { Features::Script::EmitNpcEvent(*this, "npcRetire", npc); },
+            [this](Shared::Entities::NpcEntity &npc, uint64_t attackerId, int32_t hitType, float damage, float before, float after) {
+                Features::Script::EmitNpcDamage(*this, npc, attackerId, hitType, damage, before, after);
+            },
+            [this](Shared::Entities::NpcEntity &npc, uint64_t killerId) { Features::Script::EmitNpcDeath(*this, npc, killerId); },
+        });
         _pickups.RegisterRPC(_players, _combat, _cars);
         _combat.SetDropCallback([this](uint64_t playerId, uint8_t weaponId, uint16_t loaded, uint16_t reserve, const glm::vec3 &position, float yaw) {
             return _pickups.Create(weaponId, position, yaw, loaded, reserve, MissionGeneration(), std::chrono::seconds(120));
         });
         _combat.SetDroppedCallback([this](uint64_t pickupId, uint64_t playerId) {
             Features::Script::EmitPickupEvent(*this, "weaponDropped", pickupId, playerId);
+        });
+        _npcs.SetDrops({
+            [this](uint8_t weaponId, uint16_t loaded, uint16_t reserve, const glm::vec3 &position, float yaw) {
+                return _pickups.Create(weaponId, position, yaw, loaded, reserve, MissionGeneration(), Features::Npc::NpcService::kDropLifetime);
+            },
+            [this](uint64_t pickupId, uint64_t npcId) { Features::Script::EmitPickupEvent(*this, "weaponDropped", pickupId, npcId); },
         });
         _pickups.SetTakenCallback([this](uint64_t pickupId, uint64_t playerId, uint8_t) {
             Features::Script::EmitPickupEvent(*this, "pickupTaken", pickupId, playerId);
@@ -345,10 +378,15 @@ namespace Mafia1Online::Core {
             }
         });
         _missionReadiness.SetGeneration(_missionState->generation);
+        _pedestrians.SetMissionGeneration(_missionState->generation);
+        _npcs.SetMissionGeneration(_missionState->generation);
         Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->info("Configured Mafia 1 mission: {}", _mission);
     }
 
     void Server::PostUpdate() {
+        _simulation.Update();
+        _pedestrians.Update();
+        _npcs.Update();
         _mods.Update();
         _players.Update();
         _combat.Update();
@@ -454,10 +492,21 @@ namespace Mafia1Online::Core {
         _combat.ResetForMission();
         _worldScript.Shutdown();
         _players.Reset();
+        _pedestrians.Clear();
+        _npcs.Clear();
+        _simulation.Reset();
         _missionState = nullptr;
     }
 
     void Server::OnPlayerConnect(const Framework::Integrations::Server::PlayerConnectionData &info) {
+        if (_simulation.TryAttach(info.guid)) {
+            // Not a player: no avatar, car control or vote in missionReady.
+            _missionReadiness.OnConnect(info.guid, false);
+            if (_simulation.Host() == info.guid) {
+                _pedestrians.OnHostAttached();
+            }
+            return;
+        }
         _allReadyNotified = false;
         _missionReadiness.OnConnect(info.guid);
         _players.OnConnect(info);
@@ -465,11 +514,17 @@ namespace Mafia1Online::Core {
         _debris.AssignUncontrolled(static_cast<uint64_t>(info.guid));
         if (auto *player = _players.FindByGuid(info.guid)) {
             _combat.OnPlayerConnect(player->GetNetworkID());
+            _npcs.OnPlayerConnect(info.guid);
             Features::Script::EmitPlayerEvent(*this, "playerConnect", player->GetNetworkID());
         }
     }
 
     void Server::OnPlayerDisconnect(MafiaNet::PeerGuid guid) {
+        if (_simulation.IsSimulator(guid)) {
+            _simulation.OnDisconnect(guid);
+            _missionReadiness.OnDisconnect(guid);
+            return;
+        }
         uint64_t replacementGuid = 0;
         _players.ForEach([&](Shared::Entities::PlayerEntity *candidate) {
             const auto candidateGuid = _players.GuidForNetworkId(candidate->GetNetworkID());
@@ -564,6 +619,8 @@ namespace Mafia1Online::Core {
         _missionState->mission = _mission;
         ++_missionState->generation;
         _missionReadiness.SetGeneration(_missionState->generation);
+        _pedestrians.SetMissionGeneration(_missionState->generation);
+        _npcs.SetMissionGeneration(_missionState->generation);
         _allReadyNotified = false;
         _reportedCarLoadFailures.clear();
         _debris.ResetForMission();

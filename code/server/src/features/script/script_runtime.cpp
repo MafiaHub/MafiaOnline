@@ -2,6 +2,8 @@
 
 #include "core/server.h"
 #include "features/car/vehicle_scripting.h"
+#include "features/npc/npc_scripting.h"
+#include "features/pedestrian/pedestrian_scripting.h"
 #include "features/pickup/pickup_scripting.h"
 #include "features/player/player_scripting.h"
 
@@ -139,6 +141,32 @@ namespace Mafia1Online::Scripting {
         }
         Pickup::GetClass(isolate);
         return v8pp::class_<Pickup>::create_object(isolate, networkId);
+    }
+
+    v8::Local<v8::Value> WrapPedestrian(v8::Isolate *isolate, uint64_t networkId) {
+        if (networkId == 0 || !GetServer().Pedestrians().Find(networkId)) {
+            return v8::Null(isolate);
+        }
+        Pedestrian::GetClass(isolate);
+        return v8pp::class_<Pedestrian>::create_object(isolate, networkId);
+    }
+
+    v8::Local<v8::Value> WrapNpc(v8::Isolate *isolate, uint64_t networkId) {
+        if (networkId == 0 || !GetServer().Npcs().Find(networkId)) {
+            return v8::Null(isolate);
+        }
+        Npc::GetClass(isolate);
+        return v8pp::class_<Npc>::create_object(isolate, networkId);
+    }
+
+    v8::Local<v8::Value> WrapAttacker(v8::Isolate *isolate, uint64_t networkId) {
+        if (GetServer().Players().FindByNetworkId(networkId)) {
+            return WrapPlayer(isolate, networkId);
+        }
+        if (GetServer().Npcs().Find(networkId)) {
+            return WrapNpc(isolate, networkId);
+        }
+        return WrapVehicle(isolate, networkId);
     }
 
     v8::Local<v8::Object> PlainVector(v8::Isolate *isolate, v8::Local<v8::Context> context, const glm::vec3 &value) {

@@ -10,6 +10,7 @@
 
 #include <mafianet/peer_interface.h>
 #include <glm/vec3.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -95,10 +96,36 @@ namespace Mafia1Online::Features::Combat {
             _actionCallback = std::move(callback);
         }
         const Shared::Combat::State *GetState(uint64_t networkId) const;
+        // Server NPCs players can hit, such as the simulation host's
+        // NPCs. A player's validated hit on one goes to hit() with the
+        // NPC's native Hit damage before its body part scale; hitType is 0
+        // bullet, 1 melee knockdown or 4 car impact (from the car's id).
+        struct NpcTarget {
+            glm::vec3 position {0.0f};
+            glm::quat rotation {1.0f, 0.0f, 0.0f, 0.0f};
+            float health = 0.0f;
+            uint64_t missionGeneration = 0;
+            uint64_t spawnGeneration = 0;
+            bool alive = false;
+        };
+        struct NpcTargets {
+            std::function<std::optional<NpcTarget>(uint64_t)> find;
+            std::function<void(uint64_t npcId, uint64_t attackerId, uint8_t hitType, uint8_t bodyPart, float damage, const glm::vec3 &direction, const glm::vec3 &position,
+                               uint8_t weaponId)> hit;
+        };
+        void SetNpcTargets(NpcTargets targets) {
+            _npcTargets = std::move(targets);
+        }
         // Script world effects, damaging players from their server positions
         // with the retail explosion falloff and fire tick.
         void ApplyExplosion(uint64_t sourceId, uint64_t missionGeneration, const glm::vec3 &position, float radius, float damage);
         void StartFire(uint64_t sourceId, uint64_t missionGeneration, const glm::vec3 &position, std::chrono::milliseconds life, float radius, float damage);
+        // A hit the simulation host's NPC landed on a player's replica, with
+        // the native Hit damage before the body part scale. A bullet (hit
+        // type 0) is scaled like a player's shot; bodyPart 0 means through
+        // the car the target sits in. A melee knockdown (1) applies as given.
+        void ApplyNpcHit(uint64_t sourceId, uint64_t targetId, uint64_t missionGeneration, uint64_t targetSpawnGeneration, uint8_t hitType, uint8_t bodyPart, float damage,
+                         const glm::vec3 &direction, uint8_t weaponId);
 
       private:
         struct Session {
@@ -135,8 +162,23 @@ namespace Mafia1Online::Features::Combat {
 
         void OnIntent(const Shared::Combat::Intent &intent, MafiaNet::PeerGuid sender);
         void OnHitReport(const Shared::Combat::HitReport &report, MafiaNet::PeerGuid sender);
-        void OnMeleeHit(const Shared::Combat::HitReport &report, Shared::Entities::PlayerEntity &attacker,
-                        Shared::Entities::PlayerEntity &target, Session &session);
+        struct HitTarget {
+            glm::vec3 position;
+            glm::quat rotation;
+            float health;
+            bool seated;
+        };
+        struct ValidatedHit {
+            uint8_t weaponId;
+            // Before the body part scale.
+            float damage;
+        };
+        // A reported bullet or melee impact against the shooter's accepted
+        // action; marks it used and returns the weapon and its damage.
+        std::optional<ValidatedHit> ValidateBullet(const Shared::Combat::HitReport &report, Session &session, const HitTarget &target);
+        std::optional<ValidatedHit> ValidateMelee(const Shared::Combat::HitReport &report, const Shared::Entities::PlayerEntity &attacker, Session &session, const HitTarget &target);
+        void OnNpcHitReport(const Shared::Combat::HitReport &report, Shared::Entities::PlayerEntity &shooter, Session &session);
+        void ApplyNpcVehicleImpact(const Shared::Combat::VehicleImpact &report, MafiaNet::PeerGuid sender, std::chrono::steady_clock::time_point receivedAt);
         void PublishDamage(const Shared::Combat::HitReport &report, float damage, uint8_t hitType, std::optional<uint8_t> weaponId);
         void OnFatalFallReport(const Shared::Combat::FatalFallReport &report, MafiaNet::PeerGuid sender);
         void OnDetonationReport(const Shared::Combat::DetonationReport &report, MafiaNet::PeerGuid sender);
@@ -183,6 +225,7 @@ namespace Mafia1Online::Features::Combat {
 
         Player::PlayerService *_players = nullptr;
         Car::CarService *_cars = nullptr;
+        NpcTargets _npcTargets;
         std::unordered_map<uint64_t, Session> _sessions;
         std::map<std::pair<uint64_t, uint64_t>, std::chrono::steady_clock::time_point> _vehicleImpacts;
         std::function<void(uint64_t, uint64_t, std::optional<uint8_t>, DamageCause, float, float, uint16_t)> _transitionCallback;

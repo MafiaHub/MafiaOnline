@@ -4,6 +4,7 @@
 #include "features/world/world_service.h"
 #include "shared/features/combat/fatal_fall_report.h"
 #include "shared/features/combat/hit_report.h"
+#include "shared/features/npc/npc_entity.h"
 #include "shared/features/player/player_entity.h"
 
 #include <core_modules.h>
@@ -89,10 +90,10 @@ namespace Mafia1Online::Features::Death {
                 ++it;
             }
         }
-        replication->ForEach<Shared::Entities::PlayerEntity>([&](Shared::Entities::PlayerEntity *player) {
-            const uint64_t networkId = player->GetNetworkID();
+        // Players and simulation host NPCs die the same way.
+        const auto applyDeath = [&](uint64_t networkId, uint64_t spawnGeneration) {
             const auto *state        = combat.GetState(networkId);
-            if (!state || !state->spawned || state->missionGeneration != world.LoadedMissionGeneration() || state->spawnGeneration != player->spawnGeneration) {
+            if (!state || !state->spawned || state->missionGeneration != world.LoadedMissionGeneration() || state->spawnGeneration != spawnGeneration) {
                 _applied.erase(networkId);
                 return;
             }
@@ -124,6 +125,10 @@ namespace Mafia1Online::Features::Death {
             else {
                 _applied[networkId] = applied;
             }
+        };
+        replication->ForEach<Shared::Entities::PlayerEntity>([&](Shared::Entities::PlayerEntity *player) { applyDeath(player->GetNetworkID(), player->spawnGeneration); });
+        replication->ForEach<Shared::Entities::NpcEntity>([&](Shared::Entities::NpcEntity *npc) {
+            applyDeath(npc->GetNetworkID(), Shared::Entities::NpcEntity::kSpawnGeneration);
         });
     }
 

@@ -2,9 +2,12 @@
 
 #include "system_init_hooks.h"
 
+#include "features/simulation/simulation_config.h"
+
 #include <MinHook.h>
 #include <mafia1/sdk/core/game_setup.h>
 #include <mafia1/sdk/core/system.h>
+#include <mafia1/sdk/graphics/native_graph.h>
 
 #include <atomic>
 
@@ -21,6 +24,7 @@ namespace Mafia1Online::Features::Display {
             int32_t height;
             uint8_t fullscreen;
             uint8_t suspendInactive;
+            uint8_t soundDisabled;
         };
 
         InitSystem gInitSystemOriginal = nullptr;
@@ -34,6 +38,7 @@ namespace Mafia1Online::Features::Display {
             setup.height = gOriginalSettings.height;
             setup.fullscreen = gOriginalSettings.fullscreen;
             setup.suspendInactive = gOriginalSettings.suspendInactive;
+            setup.soundDisabled = gOriginalSettings.soundDisabled;
             gTemporarySettingsActive.store(false, std::memory_order_release);
         }
 
@@ -48,15 +53,22 @@ namespace Mafia1Online::Features::Display {
 
         bool __fastcall InitSystemHook(HINSTANCE instance, bool *profileSelectionClosed) {
             auto &setup = SDK::Core::InitSettings();
-            gOriginalSettings = {setup.width, setup.height, setup.fullscreen, setup.suspendInactive};
+            gOriginalSettings = {setup.width, setup.height, setup.fullscreen, setup.suspendInactive, setup.soundDisabled};
 
             setup.width = kWindowWidth;
             setup.height = kWindowHeight;
             setup.fullscreen = 0;
             setup.suspendInactive = 0;
+            // InitSystem creates no ISND driver while this is set (0x5bfa32).
+            if (Simulation::IsHost()) {
+                setup.soundDisabled = 1;
+            }
             gTemporarySettingsActive.store(true, std::memory_order_release);
 
             const bool initialized = gInitSystemOriginal(instance, profileSelectionClosed);
+            if (initialized && Simulation::GetConfig().render == Simulation::RenderMode::Headless) {
+                ShowWindow(static_cast<HWND>(SDK::Graphics::GetGraph()->MainWindow()), SW_HIDE);
+            }
 
             RestoreOriginalSettings();
             return initialized;

@@ -128,7 +128,7 @@ declare global {
     /**
      * Dispatched after a fatal health decrease, following playerDamage. The killer is null when no connected attacker owns the damage; info.weaponId identifies the validated weapon when known. Death never respawns a player by itself; call Player.respawn.
      */
-    playerDeath: [victim: Player, killer: Player | null, info: PlayerHealthInfo];
+    playerDeath: [victim: Player, killer: Player | Npc | null, info: PlayerHealthInfo];
 
     /**
      * Dispatched after an accepted health increase.
@@ -196,14 +196,54 @@ declare global {
     playerWeaponDrop: [player: Player, info: WeaponActionInfo];
 
     /**
-     * Dispatched when a drop or a death leaves a weapon pickup in the world.
+     * Dispatched when a drop or a death leaves a weapon pickup in the world; a dead npc's weapon names the npc.
      */
-    weaponDropped: [pickup: Pickup | null, player: Player | null, info: PickupEventInfo];
+    weaponDropped: [pickup: Pickup | null, player: Player | Npc | null, info: PickupEventInfo];
 
     /**
      * Dispatched after the server moved a pickup into a player's inventory. The pickup handle is null when nothing is left on the ground.
      */
     pickupTaken: [pickup: Pickup | null, player: Player | null, info: PickupEventInfo];
+
+    /**
+     * Dispatched when the simulation host starts a pedestrian near a player.
+     */
+    pedestrianSpawn: [pedestrian: Pedestrian];
+
+    /**
+     * Dispatched just before a pedestrian leaves the world: far from every player, a corpse past its lifetime, Pedestrian.remove or setEnabled(false). A mission change removes every pedestrian without this event.
+     */
+    pedestrianRetire: [pedestrian: Pedestrian];
+
+    /**
+     * Dispatched after the simulation host applied a hit.
+     */
+    pedestrianDamage: [pedestrian: Pedestrian, info: PedestrianDamageInfo];
+
+    /**
+     * Dispatched once when a pedestrian dies; killer is the last attacker.
+     */
+    pedestrianDeath: [pedestrian: Pedestrian, killer: Player | Vehicle | null];
+
+    /**
+     * Dispatched when the simulation host starts running an armed human, such as a gangster pedestrian someone hit that draws its weapon.
+     */
+    npcSpawn: [npc: Npc];
+
+    /**
+     * Dispatched just before an NPC leaves the world: no player within 150 units, Npc.remove or the host leaving. A mission change removes every NPC without this event.
+     */
+    npcRetire: [npc: Npc];
+
+    /**
+     * Dispatched after the simulation host applied a hit.
+     */
+    npcDamage: [npc: Npc, info: NpcDamageInfo];
+
+    /**
+     * Dispatched once when an NPC dies; killer is the last attacker. The weapon in its hand drops as a pickup, as retail Do_WeaponDrop does (weaponDropped).
+     */
+    npcDeath: [npc: Npc, killer: Player | Npc | Vehicle | null];
 
     /**
      * Dispatched after Vehicle.spawn created a vehicle.
@@ -309,6 +349,11 @@ declare global {
      * Dispatched when one key of an entity's state changes: on the server when a script writes it, on a client when the write arrives. `value` is undefined when the key was removed and `previous` is undefined when it held nothing before, so a stored null stays distinguishable from an absent key. The entity is whatever the game's WrapScriptEntity answers, and the base Entity handle by default.
      */
     entityStateChange: [entity: Entity, key: string, value: any, previous: any];
+
+    /**
+     * Dispatched when a player asks to join, before the connection exists: they hold no player slot, are not counted as online, and are sent nothing -- no resource list, no download, no body. The request waits until every handler has returned and every Promise a handler returned has settled, then it is let in if a player slot is free (otherwise it is refused as full). `connection.reject()` turns it away instead, and so does a handler that throws or rejects, or handlers that have not settled within the server's admission timeout (30 seconds by default, restarted by every `connection.update()`). With no handler at all, every request is let in at once.
+     */
+    playerConnecting: [connection: PendingConnection];
   }
 
   /** Names of native events available in this scripting environment. */
@@ -349,9 +394,9 @@ declare global {
    */
   interface PlayerHealthInfo {
     /**
-     * Player the damage is attributed to, or null when the source is absent or has disconnected.
+     * Player or simulation host NPC the damage is attributed to, or null when the source is absent or has disconnected.
      */
-    attacker: Player | null;
+    attacker: Player | Npc | null;
 
     /**
      * Validated weapon used for this damage: 0 is fists, 5 is a Molotov, 15 is a grenade; null for script, fall, vehicle or unknown damage. Remains known if the attacker disconnects after throwing.
@@ -477,6 +522,66 @@ declare global {
      * Where the pickup lies, or null once it is gone.
      */
     position: { x: number; y: number; z: number } | null;
+  }
+
+  /**
+   * A hit the simulation host applied to a pedestrian.
+   */
+  interface PedestrianDamageInfo {
+    /**
+     * The player or car that hit it, when there was one.
+     */
+    attacker: Player | Vehicle | null;
+
+    /**
+     * Retail hit type: 0 bullet, 1 hard knockdown, 2 melee, 3 explosion, 5 car impact.
+     */
+    hitType: number;
+
+    /**
+     * Damage of the hit.
+     */
+    damage: number;
+
+    /**
+     * Health before the hit.
+     */
+    healthBefore: number;
+
+    /**
+     * Health after the hit; 0 or less means it died.
+     */
+    healthAfter: number;
+  }
+
+  /**
+   * A hit the simulation host applied to an NPC.
+   */
+  interface NpcDamageInfo {
+    /**
+     * Who hit it, when known.
+     */
+    attacker: Player | Npc | Vehicle | null;
+
+    /**
+     * Retail C_human hit type: 0 bullet, 1 hard knockdown, 2 melee, 3 explosion, 8 car impact.
+     */
+    hitType: number;
+
+    /**
+     * Damage of the hit before the body part scale.
+     */
+    damage: number;
+
+    /**
+     * Health before the hit.
+     */
+    healthBefore: number;
+
+    /**
+     * Health after the hit; 0 or less means it died.
+     */
+    healthAfter: number;
   }
 
   /**
@@ -1496,6 +1601,210 @@ declare global {
   interface Vehicle extends Entity {}
 
   /**
+   * A walker of the city's pedestrian traffic. The simulation host runs it with the retail AI around every player; it is a new pedestrian each time it walks again.
+   */
+  class Pedestrian {
+    /**
+     * Creates a handle for an existing pedestrian.
+     * @param id Network entity identifier.
+     */
+    constructor(id: number);
+
+    /**
+     * Retail .i3d model filename.
+     */
+    readonly model: string;
+
+    /**
+     * Position the simulation host last reported.
+     */
+    readonly position: Vector3;
+
+    /**
+     * Facing in radians.
+     */
+    readonly heading: number;
+
+    /**
+     * False once it died; the corpse stays until it retires.
+     */
+    readonly alive: boolean;
+
+    /**
+     * Whether it holds a rain umbrella; a hit drops it.
+     */
+    readonly umbrella: boolean;
+
+    /**
+     * Retail traffic animation id; 6 is its walk.
+     */
+    readonly animation: number;
+
+    /**
+     * Retail walk style, 0 to 4.
+     */
+    readonly walkStyle: number;
+
+    /**
+     * Formats this pedestrian for logging.
+     * @returns The pedestrian ID and model.
+     */
+    toString(): string;
+
+    /**
+     * Asks the simulation host to retire it now; pedestrianRetire follows.
+     * @returns False when it no longer exists or no host is attached.
+     */
+    remove(): boolean;
+
+    /**
+     * Lists every pedestrian.
+     * @returns The current pedestrians.
+     */
+    static getAll(): Pedestrian[];
+
+    /**
+     * Lists the pedestrians within radius of position.
+     * @param position Center; three numbers are accepted too.
+     * @param radius Distance in units.
+     * @returns The pedestrians in range.
+     */
+    static getInRange(position: Vector3 | { x: number; y: number; z: number }, radius: number): Pedestrian[];
+
+    /**
+     * Counts the pedestrians.
+     * @returns The number of pedestrians.
+     */
+    static getCount(): number;
+
+    /**
+     * Turns pedestrian traffic on or off; off retires every pedestrian at once.
+     * @returns False when the value was rejected.
+     */
+    static setEnabled(enabled: boolean): boolean;
+
+    /**
+     * Whether pedestrian traffic runs.
+     * @returns The current setting.
+     */
+    static isEnabled(): boolean;
+
+    /**
+     * Scales how many pedestrians walk around players; existing ones retire naturally.
+     * @param density 0 to 1 of the retail count around each group of players.
+     * @returns False when the value was rejected.
+     */
+    static setDensity(density: number): boolean;
+
+    /**
+     * The pedestrian density.
+     * @returns 0 to 1.
+     */
+    static getDensity(): number;
+
+    /**
+     * Sets how long a dead pedestrian stays. Defaults to 30000.
+     * @param milliseconds 0 to 3600000; 0 keeps a corpse until every player is far from it, as in single player.
+     * @returns False when the value was rejected.
+     */
+    static setCorpseLifetime(milliseconds: number): boolean;
+
+    /**
+     * How long a dead pedestrian stays, in milliseconds.
+     * @returns The current setting.
+     */
+    static getCorpseLifetime(): number;
+  }
+
+  interface Pedestrian extends Entity {}
+
+  /**
+   * An armed human the simulation host runs with the retail AI, such as a gangster pedestrian someone hit that draws a Thompson and fights back.
+   */
+  class Npc {
+    /**
+     * Creates a handle for an existing NPC.
+     * @param id Network entity identifier.
+     */
+    constructor(id: number);
+
+    /**
+     * What it is: "gangster".
+     */
+    readonly kind: string;
+
+    /**
+     * Retail .i3d model filename.
+     */
+    readonly model: string;
+
+    /**
+     * Position the simulation host last reported.
+     */
+    readonly position: Vector3;
+
+    /**
+     * Facing in radians.
+     */
+    readonly heading: number;
+
+    /**
+     * False once it died; the corpse stays until it retires.
+     */
+    readonly alive: boolean;
+
+    /**
+     * Health the simulation host last reported; a gangster starts at 200.
+     */
+    readonly health: number;
+
+    /**
+     * Retail item id of the weapon in hand, 0 for none; 10 is the Thompson.
+     */
+    readonly weapon: number;
+
+    /**
+     * Formats this NPC for logging.
+     * @returns The NPC ID, kind and model.
+     */
+    toString(): string;
+
+    /**
+     * Returns the selected weapon and the held weapons the server records for it.
+     * @returns The inventory, or null when it no longer exists.
+     */
+    getInventory(): Inventory | null;
+
+    /**
+     * Asks the simulation host to retire it now; npcRetire follows.
+     * @returns False when it no longer exists or no host is attached.
+     */
+    remove(): boolean;
+
+    /**
+     * Lists every NPC.
+     * @returns The current NPCs.
+     */
+    static getAll(): Npc[];
+
+    /**
+     * Lists the NPCs within radius of position.
+     * @param position Center; three numbers are accepted too.
+     * @param radius Distance in units.
+     * @returns The NPCs in range.
+     */
+    static getInRange(position: Vector3 | { x: number; y: number; z: number }, radius: number): Npc[];
+
+    /**
+     * Counts the NPCs.
+     * @returns The number of NPCs.
+     */
+    static getCount(): number;
+  }
+
+  interface Npc extends Entity {}
+
+  /**
    * A server-owned weapon in the world: a script pickup, a dropped weapon or a dead player's weapon. The use key asks the server, which checks reach, life and inventory.
    */
   class Pickup {
@@ -1913,6 +2222,34 @@ declare global {
      */
     createFire(position: Vector3 | { x: number; y: number; z: number }, options?: { duration?: number; radius?: number; damage?: number }): void;
   };
+
+  /**
+   * Node.js timer handle returned by setTimeout and setInterval.
+   */
+  interface Timeout {
+    /**
+     * Keeps the event loop alive while this timer is pending.
+     * @returns This timer.
+     */
+    ref(): Timeout;
+
+    /**
+     * Lets the event loop exit while this timer is still pending.
+     * @returns This timer.
+     */
+    unref(): Timeout;
+
+    /**
+     * Whether this timer keeps the event loop alive.
+     */
+    hasRef(): boolean;
+
+    /**
+     * Restarts this timer's countdown from now, with its original delay.
+     * @returns This timer.
+     */
+    refresh(): Timeout;
+  }
 
   /**
    * Mutable two-dimensional vector exposed as the global Vector2.
@@ -2666,7 +3003,7 @@ declare global {
      * @param args Arguments delivered to every matching handler.
      * @returns Promise rejected with an AggregateError when one or more handlers fail.
      */
-    emit(eventName: string, args?: unknown[]): Promise<void>;
+    emit(eventName: string, args: unknown[]): Promise<void>;
 
     /**
      * Invokes matching handlers belonging only to one resource.
@@ -2675,7 +3012,7 @@ declare global {
      * @param args Arguments delivered to matching handlers owned by the destination.
      * @returns Promise rejected when one or more destination handlers fail.
      */
-    emitTo(resourceName: string, eventName: string, args?: unknown[]): Promise<void>;
+    emitTo(resourceName: string, eventName: string, args: unknown[]): Promise<void>;
 
     /**
      * Registers a handler in the calling resource's private local-event namespace.
@@ -2690,7 +3027,7 @@ declare global {
      * @param args Arguments delivered only to handlers owned by the calling resource.
      * @returns Promise rejected when one or more local handlers fail.
      */
-    emitLocal(eventName: string, args?: unknown[]): Promise<void>;
+    emitLocal(eventName: string, args: unknown[]): Promise<void>;
 
     /**
      * Counts persistent and one-shot shared handlers across resources.
@@ -2698,6 +3035,13 @@ declare global {
      * @returns Number of matching handlers.
      */
     listenerCount(eventName: string): number;
+
+    /**
+     * Broadcasts a named event to every connected client's shared Events handlers.
+     * @param eventName Client shared-event name.
+     * @param payload Optional string payload sent verbatim; other values are JSON-serialized.
+     */
+    emitAllClients(eventName: string, payload?: unknown): void;
 
     /**
      * Registers a persistent server handler for events originating from clients; this namespace is isolated from native events.
@@ -2720,13 +3064,6 @@ declare global {
      * @param handler Resource-owned callback invoked with the emitted arguments.
      */
     offClient(eventName: string, handler: EventHandler): void;
-
-    /**
-     * Broadcasts a named event to every connected client's shared Events handlers.
-     * @param eventName Client shared-event name.
-     * @param payload Optional string payload sent verbatim; other values are JSON-serialized.
-     */
-    emitAllClients(eventName: string, payload?: unknown): void;
   };
 
   /**
@@ -2799,31 +3136,31 @@ declare global {
      * Writes an informational log entry prefixed with the current resource name.
      * @param values Values formatted and joined with spaces.
      */
-    log(values?: unknown[]): void;
+    log(values: unknown[]): void;
 
     /**
      * Alias of console.log for informational output.
      * @param values Values formatted and joined with spaces.
      */
-    info(values?: unknown[]): void;
+    info(values: unknown[]): void;
 
     /**
      * Writes a warning log entry prefixed with the current resource name.
      * @param values Values formatted and joined with spaces.
      */
-    warn(values?: unknown[]): void;
+    warn(values: unknown[]): void;
 
     /**
      * Writes an error log entry prefixed with the current resource name.
      * @param values Values formatted and joined with spaces.
      */
-    error(values?: unknown[]): void;
+    error(values: unknown[]): void;
 
     /**
      * Writes a debug log entry prefixed with the current resource name.
      * @param values Values formatted and joined with spaces.
      */
-    debug(values?: unknown[]): void;
+    debug(values: unknown[]): void;
   };
 
   /**
@@ -2839,6 +3176,16 @@ declare global {
      * True in the authoritative server scripting runtime.
      */
     readonly isServer: boolean;
+
+    /**
+     * Local Framework release version.
+     */
+    readonly frameworkVersion: string;
+
+    /**
+     * Local mod version from InstanceOptions.modVersion; empty when unset.
+     */
+    readonly modVersion: string;
   };
 
   /**
@@ -2878,9 +3225,9 @@ declare global {
     getRange(): number;
 
     /**
-     * Overrides how far one player's voice carries, for whisper and shout modes.
+     * Overrides how far one player's voice carries, whichever voice tier they chose.
      * @param player Player whose voice carries the given distance.
-     * @param range Audibility radius in world units; values <= 0 return them to the server-wide range.
+     * @param range Audibility radius in world units; values <= 0 return them to the radius of their voice tier.
      */
     setPlayerRange(player: Entity, range: number): void;
 
@@ -2890,6 +3237,34 @@ declare global {
      * @returns Radius in world units.
      */
     getPlayerRange(player: Entity): number;
+
+    /**
+     * Sets how far a voice tier carries. Players switch tier themselves; whisper starts at 3, shout at 25, and normal carries the server-wide range. Set a tier to 0 to make it carry the server-wide range, which takes it away. Connected clients are told.
+     * @param tier Voice tier: 0 whisper, 1 normal, 2 shout.
+     * @param range Audibility radius in world units; values <= 0 make the tier carry the server-wide range.
+     */
+    setTierRange(tier: number, range: number): void;
+
+    /**
+     * Reads how far a voice tier carries, with the server-wide range already resolved.
+     * @param tier Voice tier: 0 whisper, 1 normal, 2 shout.
+     * @returns Radius in world units.
+     */
+    getTierRange(tier: number): number;
+
+    /**
+     * Puts a player on a voice tier, as if they had switched to it. Their own indicator follows, and the playerVoiceTierChange event is not raised.
+     * @param player Player to move.
+     * @param tier Voice tier: 0 whisper, 1 normal, 2 shout.
+     */
+    setPlayerTier(player: Entity, tier: number): void;
+
+    /**
+     * Reads the voice tier a player is on. A player switching tier raises the playerVoiceTierChange event with the player and the new tier.
+     * @param player Player to query.
+     * @returns 0 whisper, 1 normal, 2 shout.
+     */
+    getPlayerTier(player: Entity): number;
 
     /**
      * Server-wide mute: a muted player's voice reaches nobody.
@@ -2949,6 +3324,69 @@ declare global {
      */
     isPlayerTalking(player: Entity): boolean;
   };
+
+  /**
+   * A player asking to join, handed to `playerConnecting`. Every identifier is reported by the player's own client and is not verified by the server.
+   */
+  interface PendingConnection {
+    /**
+     * The name the player asked to join under.
+     */
+    readonly nickname: string;
+
+    /**
+     * Steam identifier the client reported, or an empty string when it had none.
+     */
+    readonly steamId: string;
+
+    /**
+     * Epic Games account identifier the client reported, or an empty string when it had none.
+     */
+    readonly epicId: string;
+
+    /**
+     * Discord identifier the client reported, or an empty string when it had none.
+     */
+    readonly discordId: string;
+
+    /**
+     * Discord username the client reported, or an empty string when it had none.
+     */
+    readonly discordName: string;
+
+    /**
+     * Framework hardware identifier the client reported, or an empty string when it had none.
+     */
+    readonly hardwareId: string;
+
+    /**
+     * The string the client was launched with, as the `ticket` of its launch link, or an empty string. The framework passes it through untouched; checking it -- against a one-time join ticket your own launcher or website issued, typically -- is the script's job.
+     */
+    readonly ticket: string;
+
+    /**
+     * The remote address the connection comes from, without its port.
+     */
+    readonly ip: string;
+
+    /**
+     * Turns the player away before they receive anything. Takes effect on the next server tick, whatever other handlers are still doing. Does nothing once the connection is decided or the player has left.
+     * @param reason Shown to the player as written, up to 512 bytes. Omitted, they read that the server refused the connection.
+     */
+    reject(reason?: string): void;
+
+    /**
+     * Shows the waiting player a line of status and restarts the admission timeout, so a queue that keeps updating its players is never timed out. Does nothing once the connection is decided or the player has left.
+     * @param message One line for the player's connecting screen, up to 256 bytes: 'Checking the whitelist', 'You are 4th in the queue'.
+     */
+    update(message: string): void;
+
+    /**
+     * Checks whether this connection is still waiting on a decision.
+     * @returns False once it was let in or turned away, or the player gave up and left; a queue drops such entries.
+     */
+    isPending(): boolean;
+  }
 
   /**
    * Base handle for a live replicated network entity.
@@ -3075,9 +3513,19 @@ declare global {
     readonly steamId: string;
 
     /**
+     * Epic Games account identifier the client reported, not verified by the server, or an empty string when unavailable.
+     */
+    readonly epicId: string;
+
+    /**
      * Authenticated Discord identifier, or an empty string when unavailable.
      */
     readonly discordId: string;
+
+    /**
+     * Discord username the client reported, not verified by the server, or an empty string when unavailable.
+     */
+    readonly discordName: string;
 
     /**
      * Framework hardware identifier, or an empty string when unavailable.
@@ -3157,7 +3605,7 @@ declare global {
 
     /**
      * Overrides the text drawn on this player's nametag.
-     * @param text Text to show instead of the player's name; empty or omitted restores the name.
+     * @param text Text to show instead of the player's name, cut to 64 bytes; empty or omitted restores the name.
      */
     setNametagText(text?: string): void;
 

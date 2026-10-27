@@ -4,6 +4,8 @@
 
 #include "core/server.h"
 #include "features/car/vehicle_scripting.h"
+#include "features/npc/npc_scripting.h"
+#include "features/pedestrian/pedestrian_scripting.h"
 #include "features/combat/combat_service.h"
 #include "features/combat/weapon_scripting.h"
 #include "features/door/door_scripting.h"
@@ -71,6 +73,8 @@ namespace Mafia1Online::Features::Script {
         Framework::Scripting::Builtins::Entity::Register(isolate, global);
         Scripting::Player::Register(isolate, global);
         Scripting::Vehicle::Register(isolate, global);
+        Scripting::Pedestrian::Register(isolate, global);
+        Scripting::Npc::Register(isolate, global);
         Scripting::Pickup::Register(isolate, global);
         Scripting::Door::Register(isolate, global);
         Scripting::Weapon::Register(isolate, global);
@@ -222,6 +226,54 @@ namespace Mafia1Online::Features::Script {
         });
     }
 
+    void EmitPedestrianEvent(Core::Server &, const char *name, Shared::Entities::PedestrianEntity &walker) {
+        EmitEvent(name, [&](v8::Isolate *isolate, v8::Local<v8::Context>, EventArguments &arguments) { arguments.push_back(WrapPedestrian(isolate, walker.GetNetworkID())); });
+    }
+
+    void EmitPedestrianDamage(Core::Server &, Shared::Entities::PedestrianEntity &walker, uint64_t attackerId, int32_t hitType, float damage, float healthBefore, float healthAfter) {
+        EmitEvent("pedestrianDamage", [&](v8::Isolate *isolate, v8::Local<v8::Context> context, EventArguments &arguments) {
+            auto info = v8::Object::New(isolate);
+            SetField(isolate, context, info, "attacker", WrapAttacker(isolate, attackerId));
+            SetField(isolate, context, info, "hitType", v8::Int32::New(isolate, hitType));
+            SetField(isolate, context, info, "damage", v8::Number::New(isolate, damage));
+            SetField(isolate, context, info, "healthBefore", v8::Number::New(isolate, healthBefore));
+            SetField(isolate, context, info, "healthAfter", v8::Number::New(isolate, healthAfter));
+            arguments.push_back(WrapPedestrian(isolate, walker.GetNetworkID()));
+            arguments.push_back(info);
+        });
+    }
+
+    void EmitPedestrianDeath(Core::Server &, Shared::Entities::PedestrianEntity &walker, uint64_t killerId) {
+        EmitEvent("pedestrianDeath", [&](v8::Isolate *isolate, v8::Local<v8::Context>, EventArguments &arguments) {
+            arguments.push_back(WrapPedestrian(isolate, walker.GetNetworkID()));
+            arguments.push_back(WrapAttacker(isolate, killerId));
+        });
+    }
+
+    void EmitNpcEvent(Core::Server &, const char *name, Shared::Entities::NpcEntity &npc) {
+        EmitEvent(name, [&](v8::Isolate *isolate, v8::Local<v8::Context>, EventArguments &arguments) { arguments.push_back(WrapNpc(isolate, npc.GetNetworkID())); });
+    }
+
+    void EmitNpcDamage(Core::Server &, Shared::Entities::NpcEntity &npc, uint64_t attackerId, int32_t hitType, float damage, float healthBefore, float healthAfter) {
+        EmitEvent("npcDamage", [&](v8::Isolate *isolate, v8::Local<v8::Context> context, EventArguments &arguments) {
+            auto info = v8::Object::New(isolate);
+            SetField(isolate, context, info, "attacker", WrapAttacker(isolate, attackerId));
+            SetField(isolate, context, info, "hitType", v8::Int32::New(isolate, hitType));
+            SetField(isolate, context, info, "damage", v8::Number::New(isolate, damage));
+            SetField(isolate, context, info, "healthBefore", v8::Number::New(isolate, healthBefore));
+            SetField(isolate, context, info, "healthAfter", v8::Number::New(isolate, healthAfter));
+            arguments.push_back(WrapNpc(isolate, npc.GetNetworkID()));
+            arguments.push_back(info);
+        });
+    }
+
+    void EmitNpcDeath(Core::Server &, Shared::Entities::NpcEntity &npc, uint64_t killerId) {
+        EmitEvent("npcDeath", [&](v8::Isolate *isolate, v8::Local<v8::Context>, EventArguments &arguments) {
+            arguments.push_back(WrapNpc(isolate, npc.GetNetworkID()));
+            arguments.push_back(WrapAttacker(isolate, killerId));
+        });
+    }
+
     void EmitCarHitEvent(Core::Server &, const Shared::Car::HitReport &hit, float damage) {
         EmitEvent("vehicleHit", [&](v8::Isolate *isolate, v8::Local<v8::Context> context, EventArguments &arguments) {
             auto info = v8::Object::New(isolate);
@@ -245,7 +297,8 @@ namespace Mafia1Online::Features::Script {
             SetField(isolate, context, info, "weaponId", v8::Uint32::New(isolate, weaponId));
             SetField(isolate, context, info, "position", position ? PlainVector(isolate, context, *position).As<v8::Value>() : v8::Null(isolate).As<v8::Value>());
             arguments.push_back(WrapPickup(isolate, pickupId));
-            arguments.push_back(WrapPlayer(isolate, playerId));
+            // A dead simulation host NPC drops its weapon too.
+            arguments.push_back(server.Npcs().Find(playerId) ? WrapNpc(isolate, playerId) : WrapPlayer(isolate, playerId));
             arguments.push_back(info);
         });
     }
@@ -275,10 +328,14 @@ namespace Mafia1Online::Features::Script {
         }
         const uint64_t missionGeneration = player->missionGeneration;
         const uint64_t spawnGeneration   = player->spawnGeneration;
+        // A simulation host NPC's hits name it; other sources a player.
+        const auto attacker = [&](v8::Isolate *isolate) {
+            return server.Npcs().Find(sourceId) ? WrapNpc(isolate, sourceId) : WrapPlayer(isolate, sourceId);
+        };
         const auto emit                  = [&](const char *name, bool withKiller) {
             EmitEvent(name, [&](v8::Isolate *isolate, v8::Local<v8::Context> context, EventArguments &arguments) {
                 auto info = v8::Object::New(isolate);
-                SetField(isolate, context, info, "attacker", WrapPlayer(isolate, sourceId));
+                SetField(isolate, context, info, "attacker", attacker(isolate));
                 SetField(isolate, context, info, "weaponId", weaponId ? v8::Uint32::New(isolate, *weaponId).As<v8::Value>() : v8::Null(isolate).As<v8::Value>());
                 SetField(isolate, context, info, "cause", v8pp::to_v8(isolate, DamageCauseName(cause)));
                 SetField(isolate, context, info, "oldHealth", Number(isolate, oldHealth));
@@ -289,7 +346,7 @@ namespace Mafia1Online::Features::Script {
                 SetField(isolate, context, info, "spawnGeneration", Number(isolate, static_cast<double>(spawnGeneration)));
                 arguments.push_back(WrapPlayer(isolate, playerId));
                 if (withKiller) {
-                    arguments.push_back(WrapPlayer(isolate, sourceId));
+                    arguments.push_back(attacker(isolate));
                 }
                 arguments.push_back(info);
             });

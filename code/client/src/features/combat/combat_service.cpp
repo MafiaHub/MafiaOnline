@@ -1,6 +1,9 @@
 #include "combat_service.h"
 
+#include "features/simulation/simulation_config.h"
+
 #include "combat_hooks.h"
+#include "combat_life.h"
 #include "shared/features/combat/detonation.h"
 #include "features/world/world_service.h"
 #include "shared/features/player/player_entity.h"
@@ -107,8 +110,8 @@ namespace Mafia1Online::Features::Combat {
             return;
         }
         for (const auto &[networkId, state] : _states) {
-            auto *player = replication->GetEntity<Shared::Entities::PlayerEntity>(networkId);
-            if (!player || !player->spawned || !state.spawned || player->missionGeneration != state.missionGeneration || player->spawnGeneration != state.spawnGeneration) {
+            const auto life = FindCombatLife(*replication, networkId);
+            if (!life || !life->spawned || !state.spawned || life->missionGeneration != state.missionGeneration || life->spawnGeneration != state.spawnGeneration) {
                 continue;
             }
             const auto handle = world.NativeObjects().FindByNetwork(networkId);
@@ -508,12 +511,12 @@ namespace Mafia1Online::Features::Combat {
                 it = _events.erase(it);
                 continue;
             }
-            auto *player = replication->GetEntity<Shared::Entities::PlayerEntity>(event.networkId);
-            if (!player || player->missionGeneration < event.missionGeneration || (player->missionGeneration == event.missionGeneration && player->spawnGeneration < event.spawnGeneration)) {
+            const auto life = FindCombatLife(*replication, event.networkId);
+            if (!life || life->missionGeneration < event.missionGeneration || (life->missionGeneration == event.missionGeneration && life->spawnGeneration < event.spawnGeneration)) {
                 ++it;
                 continue;
             }
-            if (player->missionGeneration != event.missionGeneration || player->spawnGeneration != event.spawnGeneration) {
+            if (life->missionGeneration != event.missionGeneration || life->spawnGeneration != event.spawnGeneration) {
                 it = _events.erase(it);
                 continue;
             }
@@ -633,6 +636,10 @@ namespace Mafia1Online::Features::Combat {
                 human->SetShootTarget({position.x + 100.0f * event.directionX, position.y + 100.0f * event.directionY, position.z + 100.0f * event.directionZ});
             }
             const auto shotResult = fire ? ReplayNativeShot(*human, event) : NativeShotReplayResult::Deferred;
+            if (fire && Simulation::IsHost()) {
+                Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->debug("Simulation host replayed shot of {}: {}", event.networkId,
+                    shotResult == NativeShotReplayResult::Played ? "played" : shotResult == NativeShotReplayResult::Rejected ? "rejected" : "deferred");
+            }
             const bool replayed = fire ? shotResult != NativeShotReplayResult::Deferred : human->ReplayReload();
             const auto &selectedAmmo = state->ammo[state->selectedWeapon];
             human->ApplySelectedWeapon(state->selectedWeapon, selectedAmmo.loaded, selectedAmmo.reserve);

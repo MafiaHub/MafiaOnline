@@ -23,6 +23,8 @@ namespace Mafia1Online::Shared::Combat {
     struct Event;
 }
 namespace Mafia1Online::Shared::Entities {
+    class PedestrianEntity;
+    class NpcEntity;
     class CarEntity;
     class CarDebrisEntity;
     class PlayerEntity;
@@ -46,6 +48,12 @@ namespace Mafia1Online::Features::Script {
     // name(vehicle); vehicleDamage adds the native damage snapshot and
     // vehicleTerminal the terminal state.
     void EmitCarEvent(Core::Server &server, const char *name, Shared::Entities::CarEntity &car);
+    void EmitPedestrianEvent(Core::Server &server, const char *name, Shared::Entities::PedestrianEntity &walker);
+    void EmitPedestrianDamage(Core::Server &server, Shared::Entities::PedestrianEntity &walker, uint64_t attackerId, int32_t hitType, float damage, float healthBefore, float healthAfter);
+    void EmitPedestrianDeath(Core::Server &server, Shared::Entities::PedestrianEntity &walker, uint64_t killerId);
+    void EmitNpcEvent(Core::Server &server, const char *name, Shared::Entities::NpcEntity &npc);
+    void EmitNpcDamage(Core::Server &server, Shared::Entities::NpcEntity &npc, uint64_t attackerId, int32_t hitType, float damage, float healthBefore, float healthAfter);
+    void EmitNpcDeath(Core::Server &server, Shared::Entities::NpcEntity &npc, uint64_t killerId);
     void EmitCarHitEvent(Core::Server &server, const Shared::Car::HitReport &hit, float damage);
     void EmitPickupEvent(Core::Server &server, const char *name, uint64_t pickupId, uint64_t playerId);
     void EmitCarDebrisEvent(Core::Server &server, const char *name, Shared::Entities::CarDebrisEntity &debris);

@@ -6,6 +6,7 @@
 #include "shared/features/car/car_entity.h"
 #include "shared/features/car/car_hit_report.h"
 #include "shared/features/combat/vehicle_impact.h"
+#include "shared/features/npc/npc_entity.h"
 #include "shared/features/player/player_entity.h"
 
 #include <MinHook.h>
@@ -267,12 +268,17 @@ namespace Mafia1Online::Features::Car {
             }
             auto *replication = Framework::CoreModules::GetReplication();
             const auto *carState = replication->GetEntity<Shared::Entities::CarEntity>(carHandle.networkId);
-            const auto *targetState = replication->GetEntity<Shared::Entities::PlayerEntity>(targetHandle.networkId);
-            if (!carState || !targetState || carState->missionGeneration != world.LoadedMissionGeneration() ||
-                targetState->missionGeneration != world.LoadedMissionGeneration()) {
+            // A simulation host NPC is a network human too.
+            const auto *player = replication->GetEntity<Shared::Entities::PlayerEntity>(targetHandle.networkId);
+            const auto *npc = player ? nullptr : replication->GetEntity<Shared::Entities::NpcEntity>(targetHandle.networkId);
+            const uint64_t targetMission = player ? player->missionGeneration : npc ? npc->missionGeneration : 0;
+            const bool targetAlive = player ? player->alive : npc && npc->alive;
+            const uint64_t targetSpawn = player ? player->spawnGeneration : Shared::Entities::NpcEntity::kSpawnGeneration;
+            if (!carState || (!player && !npc) || carState->missionGeneration != world.LoadedMissionGeneration() ||
+                targetMission != world.LoadedMissionGeneration()) {
                 return gCollisionFilterBodyOriginal(car, collision, position, normal);
             }
-            if (carState->simulationControllerGuid == static_cast<uint64_t>(replication->GetMyGUID()) && targetState->alive) {
+            if (carState->simulationControllerGuid == static_cast<uint64_t>(replication->GetMyGUID()) && targetAlive) {
                 const auto velocity = car->Vehicle().LinearVelocity();
                 const float speed = std::hypot(velocity.x, velocity.y, velocity.z);
                 if (!std::isfinite(speed) || speed < 3.0f) {
@@ -305,7 +311,7 @@ namespace Mafia1Online::Features::Car {
                     report.carId = carHandle.networkId;
                     report.targetId = targetHandle.networkId;
                     report.missionGeneration = world.LoadedMissionGeneration();
-                    report.targetSpawnGeneration = targetState->spawnGeneration;
+                    report.targetSpawnGeneration = targetSpawn;
                     report.contactX = position.x;
                     report.contactY = position.y;
                     report.contactZ = position.z;

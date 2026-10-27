@@ -1,6 +1,7 @@
 #include "application.h"
 
 #include "shared/register_entities.h"
+#include "shared/features/simulation/simulation_ticket.h"
 
 #include "features/car/car_hooks.h"
 #include "features/car/debris_hooks.h"
@@ -10,6 +11,8 @@
 #include "features/player/player_hooks.h"
 #include "features/quick_join/quick_join.h"
 #include "features/seat/seat_hooks.h"
+#include "features/simulation/debug_overlay.h"
+#include "features/simulation/simulation_config.h"
 #include "features/startup_video/startup_video_hooks.h"
 #include "features/script/door_scripting.h"
 #include "features/script/pickup_scripting.h"
@@ -32,6 +35,10 @@ namespace Mafia1Online::Core {
         if (!_mods.Install()) throw std::runtime_error("Could not hook rw_data.dll file loading");
         Shared::Entities::RegisterEntities();
         _cars.RegisterRPC();
+        _pedestrians.RegisterRPC();
+        if (Features::Simulation::IsHost()) {
+            _npcs.RegisterRPC(_world);
+        }
         _combat.RegisterRPC();
         _death.RegisterRPC();
         _seats.RegisterRPC();
@@ -78,11 +85,26 @@ namespace Mafia1Online::Core {
             Features::World::UninstallWorldHooks();
             ExitProcess(1);
         }
+        if (Features::Simulation::IsHost() && !Features::Simulation::InstallDebugOverlay()) {
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->critical("Could not install the simulation host overlay");
+            ExitProcess(1);
+        }
+        if (!_pedestrians.Install()) {
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->critical("Could not install pedestrian traffic hooks");
+            ExitProcess(1);
+        }
+        if (Features::Simulation::IsHost() && !_npcs.Install()) {
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->critical("Could not install NPC hooks");
+            ExitProcess(1);
+        }
         if (!_cameraFollow.InstallTickHook()) {
             Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->critical("Could not install native camera tick hook");
             ExitProcess(1);
         }
-        if (!_chat.Install()) {
+        // The simulation host has no screen for players: no chat, HUD, web UI
+        // or gameplay menus.
+        const bool host = Features::Simulation::IsHost();
+        if (!host && !_chat.Install()) {
             Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->critical("Could not install native chat and HUD hooks");
             Features::Death::UninstallDeathHooks();
             Features::Combat::UninstallCombatHooks();
@@ -92,24 +114,32 @@ namespace Mafia1Online::Core {
             Features::World::UninstallWorldHooks();
             ExitProcess(1);
         }
-        _chat.SetOverlay([this] { _nametags.Render(_world); Scripting::RenderDrawCommands(); });
-        // Optional: without CEF, quick join and the native chat stay in charge.
-        if (!_webUi.Install(*this, _chat, _projectPath)) {
-            Features::Menu::SetNativeControlsSuppressed(false);
+        if (!host) {
+            _chat.SetOverlay([this] { _nametags.Render(_world); Scripting::RenderDrawCommands(); });
+            // Optional: without CEF, quick join and the native chat stay in charge.
+            if (!_webUi.Install(*this, _chat, _projectPath)) {
+                Features::Menu::SetNativeControlsSuppressed(false);
+            }
         }
         if (!_pickups.Install(_world, _combat)) {
             Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->critical("Could not install native pickup hooks");
             ExitProcess(1);
         }
-        _gameplayMenus.Install(_world, _webUi);
-        _chat.SetInputFilter([this](void *input) { _gameplayMenus.FilterInput(input); });
-        _pickups.SetChoiceFilter([this](SDK::World::NativeItemVector &items) { return _gameplayMenus.FilterNearObjects(items); });
-        _seats.SetUseFilter([this](const void *human) { return _gameplayMenus.AllowsNativeUse(human); });
+        if (!host) {
+            _gameplayMenus.Install(_world, _webUi);
+            _chat.SetInputFilter([this](void *input) { _gameplayMenus.FilterInput(input); });
+            _pickups.SetChoiceFilter([this](SDK::World::NativeItemVector &items) { return _gameplayMenus.FilterNearObjects(items); });
+            _seats.SetUseFilter([this](const void *human) { return _gameplayMenus.AllowsNativeUse(human); });
+        }
         if (!_doors.Install()) {
             Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->critical("Could not install native door hooks");
             ExitProcess(1);
         }
         _world.SetMissionClosingCallback([this] {
+            _pedestrianReplicas.Reset(_world);
+            _pedestrians.Reset();
+            _npcReplicas.Reset(_world);
+            _npcs.Reset();
             _gameplayMenus.Reset();
             _script.OnMissionClosing();
             _pickups.OnMissionClosing();
@@ -142,8 +172,15 @@ namespace Mafia1Online::Core {
             _debris.Reset(_world);
         }
         _players.Update(_world);
+        _pedestrians.Update(_world);
+        _pedestrianReplicas.Update(_world);
+        if (Features::Simulation::IsHost()) {
+            _npcs.Update(_world);
+        }
+        _npcReplicas.Update(_world);
         _cars.Update(_world);
-        if (_world.IsReady() && !SDK::UI::NativeIndicators::Get().MapEnabled()) {
+        const bool host = Features::Simulation::IsHost();
+        if (!host && _world.IsReady() && !SDK::UI::NativeIndicators::Get().MapEnabled()) {
             // Held TAB shows the city map; retail enables it only from the
             // ENABLEMAP mission script, and C_game::Done disables it again.
             SDK::UI::NativeIndicators::Get().MapEnable(true);
@@ -152,13 +189,23 @@ namespace Mafia1Online::Core {
         _pickups.Update(_world);
         _doors.Update(_world);
         _seats.Update(_world);
-        _cameraFollow.Update(_world);
+        if (!host) _cameraFollow.Update(_world);
         _death.Update(_world, _combat);
         _combat.Update(_world);
         _environment.Update(_world);
-        _sounds.Update(_world);
-        _hud.Update(_world);
-        _script.Update(_world);
+        if (!host) {
+            _sounds.Update(_world);
+            _hud.Update(_world);
+            _script.Update(_world);
+        }
+        UpdatePlayerInterface();
+        ConnectFromConfiguration();
+    }
+
+    void Application::UpdatePlayerInterface() {
+        if (Features::Simulation::IsHost()) {
+            return;
+        }
         const auto *localState = _combat.GetLocalState(_world);
         _chat.Update(_world.IsReady(), localState && localState->spawned ? std::optional<float>(localState->health) : std::nullopt);
         while (auto line = _chat.TakeOutgoing()) {
@@ -181,10 +228,17 @@ namespace Mafia1Online::Core {
         while (auto line = _webUi.TakeOutgoing()) {
             SubmitChatLine(*line);
         }
+    }
+
+    void Application::ConnectFromConfiguration() {
         const auto &quickJoin = Features::QuickJoin::GetConfig();
         if (quickJoin.enabled && !_quickJoinConnectIssued && GetConnectionPhase() == ConnectionPhase::Disconnected) {
             _quickJoinConnectIssued = true;
-            SetCurrentState({quickJoin.host, quickJoin.port, quickJoin.nickname, quickJoin.password});
+            Framework::Integrations::Client::CurrentState state {quickJoin.host, quickJoin.port, quickJoin.nickname, quickJoin.password};
+            if (Features::Simulation::IsHost()) {
+                state.ticket = Shared::Simulation::MakeTicket(Features::Simulation::GetConfig().token);
+            }
+            SetCurrentState(std::move(state));
             if (const auto result = ConnectToServer(quickJoin.host, quickJoin.port, quickJoin.password); !result) {
                 Features::Menu::SetStatus(result.GetError().message);
             }
@@ -228,6 +282,15 @@ namespace Mafia1Online::Core {
         _mods.Shutdown();
         _cameraFollow.Reset();
         _cameraFollow.UninstallTickHook();
+        _pedestrianReplicas.Reset(_world);
+        _pedestrians.Uninstall();
+        _npcReplicas.Reset(_world);
+        if (Features::Simulation::IsHost()) {
+            _npcs.Uninstall();
+        }
+        if (Features::Simulation::IsHost()) {
+            Features::Simulation::UninstallDebugOverlay();
+        }
         _script.Reset();
         _sounds.Reset();
         _hud.Reset();
@@ -255,6 +318,10 @@ namespace Mafia1Online::Core {
     }
 
     void Application::OnConnectionClosed() {
+        _pedestrianReplicas.Reset(_world);
+        _pedestrians.Reset();
+        _npcReplicas.Reset(_world);
+        _npcs.Reset();
         _gameplayMenus.Reset();
         _mods.Reset();
         _autoEnterPending = false;

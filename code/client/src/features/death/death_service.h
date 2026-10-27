@@ -64,4 +64,8 @@ namespace Mafia1Online::Features::Death {
     void UninstallDeathHooks();
     bool ReplayAuthoritativeDeath(SDK::Player::NativeHuman &human, uint16_t animationId);
     bool ReplayAuthoritativeDamage(SDK::Player::NativeHuman &human, const Shared::Combat::DamageEvent &event);
+    // A server-validated hit applied through the retail C_human::Hit with its
+    // real damage and attacker; the Hit hook does not suppress it.
+    bool ApplyAuthoritativeHit(SDK::Player::NativeHuman &human, SDK::Player::NativeHitType type, const SDK::Player::Vector3 &direction, const SDK::Player::Vector3 &position, float damage,
+                               SDK::Player::NativeActor *attacker, uint32_t bodyPart);
 } // namespace Mafia1Online::Features::Death

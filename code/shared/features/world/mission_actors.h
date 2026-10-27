@@ -74,8 +74,10 @@ namespace Mafia1Online::Shared::World {
     }
 
     // Doors need their native actors for interaction and multiplayer door sync.
+    // Pedestrian generators (18) build their walker pools at GameInit; the
+    // simulation host runs them and players keep them idle for replicas.
     inline bool LoadMissionActor(uint32_t type) {
-        return type == 6;
+        return type == 6 || type == 18;
     }
 
     // Retain scenery even when its actor behaviour is suppressed. Doors retain

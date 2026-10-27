@@ -133,7 +133,7 @@ namespace Mafia1Online::Scripting {
         events.add_property("playerDespawn", "[player: Player]", "Dispatched after Player.despawn ended the current life.");
 
         auto &health = catalog.data_type("PlayerHealthInfo", "An accepted change of a player's server health.");
-        health.add_property("attacker", "Player | null", "Player the damage is attributed to, or null when the source is absent or has disconnected.");
+        health.add_property("attacker", "Player | Npc | null", "Player or simulation host NPC the damage is attributed to, or null when the source is absent or has disconnected.");
         health.add_property("weaponId", "number | null", "Validated weapon used for this damage: 0 is fists, 5 is a Molotov, 15 is a grenade; null for script, fall, vehicle or unknown damage. Remains known if the attacker disconnects after throwing.");
         health.add_property("cause", "\"script\" | \"firearm\" | \"melee\" | \"explosion\" | \"fire\" | \"fall\" | \"drowning\" | \"vehicle\"", "Server damage path that changed health. Explosions and fires can have a weaponId when they came from a thrown weapon.");
         health.add_property("oldHealth", "number", "Health before the change.");
@@ -143,7 +143,7 @@ namespace Mafia1Online::Scripting {
         health.add_property("missionGeneration", "number", "Mission generation of the affected life.");
         health.add_property("spawnGeneration", "number", "Spawn generation of the affected life.");
         events.add_property("playerDamage", "[victim: Player, info: PlayerHealthInfo]", "Dispatched after an accepted health decrease.");
-        events.add_property("playerDeath", "[victim: Player, killer: Player | null, info: PlayerHealthInfo]",
+        events.add_property("playerDeath", "[victim: Player, killer: Player | Npc | null, info: PlayerHealthInfo]",
             "Dispatched after a fatal health decrease, following playerDamage. The killer is null when no connected attacker owns the damage; info.weaponId identifies the validated weapon when known. Death never respawns a player by itself; call Player.respawn.");
         events.add_property("playerHealthChange", "[player: Player, info: PlayerHealthInfo]", "Dispatched after an accepted health increase.");
 
@@ -169,9 +169,31 @@ namespace Mafia1Online::Scripting {
         pickup.add_property("pickupId", "number", "Network ID of the pickup, which may no longer exist.");
         pickup.add_property("weaponId", "number", "Weapon of the pickup.");
         pickup.add_property("position", "{ x: number; y: number; z: number } | null", "Where the pickup lies, or null once it is gone.");
-        events.add_property("weaponDropped", "[pickup: Pickup | null, player: Player | null, info: PickupEventInfo]", "Dispatched when a drop or a death leaves a weapon pickup in the world.");
+        events.add_property("weaponDropped", "[pickup: Pickup | null, player: Player | Npc | null, info: PickupEventInfo]",
+            "Dispatched when a drop or a death leaves a weapon pickup in the world; a dead npc's weapon names the npc.");
         events.add_property("pickupTaken", "[pickup: Pickup | null, player: Player | null, info: PickupEventInfo]", "Dispatched after the server moved a pickup into a player's inventory. The pickup handle is null when nothing is left on the ground.");
 
+        events.add_property("pedestrianSpawn", "[pedestrian: Pedestrian]", "Dispatched when the simulation host starts a pedestrian near a player.");
+        events.add_property("pedestrianRetire", "[pedestrian: Pedestrian]", "Dispatched just before a pedestrian leaves the world: far from every player, a corpse past its lifetime, Pedestrian.remove or setEnabled(false). A mission change removes every pedestrian without this event.");
+        auto &pedestrianDamage = catalog.data_type("PedestrianDamageInfo", "A hit the simulation host applied to a pedestrian.");
+        pedestrianDamage.add_property("attacker", "Player | Vehicle | null", "The player or car that hit it, when there was one.");
+        pedestrianDamage.add_property("hitType", "number", "Retail hit type: 0 bullet, 1 hard knockdown, 2 melee, 3 explosion, 5 car impact.");
+        pedestrianDamage.add_property("damage", "number", "Damage of the hit.");
+        pedestrianDamage.add_property("healthBefore", "number", "Health before the hit.");
+        pedestrianDamage.add_property("healthAfter", "number", "Health after the hit; 0 or less means it died.");
+        events.add_property("pedestrianDamage", "[pedestrian: Pedestrian, info: PedestrianDamageInfo]", "Dispatched after the simulation host applied a hit.");
+        events.add_property("pedestrianDeath", "[pedestrian: Pedestrian, killer: Player | Vehicle | null]", "Dispatched once when a pedestrian dies; killer is the last attacker.");
+        events.add_property("npcSpawn", "[npc: Npc]", "Dispatched when the simulation host starts running an armed human, such as a gangster pedestrian someone hit that draws its weapon.");
+        events.add_property("npcRetire", "[npc: Npc]", "Dispatched just before an NPC leaves the world: no player within 150 units, Npc.remove or the host leaving. A mission change removes every NPC without this event.");
+        auto &npcDamage = catalog.data_type("NpcDamageInfo", "A hit the simulation host applied to an NPC.");
+        npcDamage.add_property("attacker", "Player | Npc | Vehicle | null", "Who hit it, when known.");
+        npcDamage.add_property("hitType", "number", "Retail C_human hit type: 0 bullet, 1 hard knockdown, 2 melee, 3 explosion, 8 car impact.");
+        npcDamage.add_property("damage", "number", "Damage of the hit before the body part scale.");
+        npcDamage.add_property("healthBefore", "number", "Health before the hit.");
+        npcDamage.add_property("healthAfter", "number", "Health after the hit; 0 or less means it died.");
+        events.add_property("npcDamage", "[npc: Npc, info: NpcDamageInfo]", "Dispatched after the simulation host applied a hit.");
+        events.add_property("npcDeath", "[npc: Npc, killer: Player | Npc | Vehicle | null]",
+            "Dispatched once when an NPC dies; killer is the last attacker. The weapon in its hand drops as a pickup, as retail Do_WeaponDrop does (weaponDropped).");
         events.add_property("vehicleSpawn", "[vehicle: Vehicle]", "Dispatched after Vehicle.spawn created a vehicle.");
         events.add_property("vehicleDestroy", "[vehicle: Vehicle]", "Dispatched immediately before Vehicle.destroy removes the vehicle. A mission change removes every vehicle without this event.");
         for (const char *name : {"vehicleEngineChange", "vehicleFuelChange", "vehicleLightsChange", "vehicleHornChange", "vehicleSirenChange", "vehicleGearChange", "vehicleDamageState"}) {
