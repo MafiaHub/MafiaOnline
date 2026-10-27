@@ -28,6 +28,7 @@
 namespace Mafia1Online::Core {
     using Framework::Integrations::Client::ConnectionPhase;
     void Application::PostInit() {
+        _input->SetWindow(static_cast<HWND>(SDK::Graphics::GetGraph()->MainWindow()));
         if (!_mods.Install()) throw std::runtime_error("Could not hook rw_data.dll file loading");
         Shared::Entities::RegisterEntities();
         _cars.RegisterRPC();
@@ -123,6 +124,7 @@ namespace Mafia1Online::Core {
     }
 
     void Application::PostUpdate() {
+        _input->Update();
         _mods.Update();
         if (auto prepared = _mods.TakeCompleted()) {
             _assetError = prepared->error;

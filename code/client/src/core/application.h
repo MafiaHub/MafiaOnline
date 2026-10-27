@@ -1,5 +1,6 @@
 #pragma once
 
+#include <input/polling_input.h>
 #include <integrations/client/instance.h>
 
 #include "features/car/car_service.h"
@@ -35,6 +36,12 @@ namespace Mafia1Online::Core {
         void OnChatMessageReceived(const Framework::Networking::RPC::ChatMessage &message) override;
         void ModuleRegister(Framework::Scripting::Engine *engine) override;
         void PostScriptInit() override;
+
+        // Scripted Key.bind dispatch reads this source; LS3D's own input device
+        // is not exposed to the Framework, so keys are polled from Win32.
+        Framework::Input::IInput *GetBaseInput() const override {
+            return _input.get();
+        }
 
         // The directory the launcher loaded the client from; set before Init.
         void SetProjectPath(std::string projectPath) {
@@ -74,6 +81,7 @@ namespace Mafia1Online::Core {
 
       private:
         void SubmitChatLine(const std::string &line);
+        std::unique_ptr<Framework::Input::PollingInput> _input = std::make_unique<Framework::Input::PollingInput>();
         Features::Mod::ModService _mods;
         std::string _assetError;
         bool _autoEnterPending = false;
