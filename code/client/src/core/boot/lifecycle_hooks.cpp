@@ -8,6 +8,7 @@
 #include "features/display/system_init_hooks.h"
 #include <mafia1/sdk/core/mission.h>
 #include <mafia1/sdk/core/system.h>
+#include <mafia1/sdk/graphics/native_graph.h>
 
 #include <MinHook.h>
 
@@ -30,6 +31,14 @@ namespace Mafia1Online::Core::Boot {
         }
 
         void __cdecl CloseSystemHook() {
+            // Quitting runs CEF's and the engine's teardown for a few seconds
+            // with nothing left to draw. Hide the window first so the quit is
+            // immediate for the player; IGraph owns it until the original
+            // releases the graphics driver. The graph is absent when
+            // initialization failed before creating it.
+            if (auto *graph = SDK::Graphics::GetGraph()) {
+                ShowWindow(static_cast<HWND>(graph->MainWindow()), SW_HIDE);
+            }
             gApplicationModule->OnShutdown();
             MH_DisableHook(reinterpret_cast<void *>(SDK::Core::Mission::kTick));
             MH_DisableHook(reinterpret_cast<void *>(SDK::Core::System::kClose));
