@@ -87,8 +87,11 @@ client build runs that script and copies the result to `bin/ui`. When CEF or
 the page is unavailable, or with `MAFIA1ONLINE_NATIVE_UI=1`, the retail main
 menu keeps only Exit, quick join connects, and the native HUD chat is used. See
 [`docs/ui.md`](docs/ui.md).
-The launcher does not write `steam_appid.txt` or a persistent launcher config;
-the client places its asset cache next to the mod rather than in AppData.
+The launcher does not write `steam_appid.txt`. Without Steam, or without Mafia
+in its Steam library, it asks for `Game.exe` once and keeps that choice in
+`Mafia1Online_launcher.json` beside itself; it writes nothing when
+`MAFIA1ONLINE_GAME_ROOT` is set. The client places its asset cache next to
+the mod rather than in AppData.
 On an unhandled launcher or game exception, the launcher writes a `.dmp` file
 under its `logs` folder and records the path in `Mafia1Online.log`. Keep the
 matching `Mafia1OnlineLauncher.pdb` and `Mafia1OnlineClient.pdb` from the same

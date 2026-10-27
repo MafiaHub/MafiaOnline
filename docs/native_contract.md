@@ -12,6 +12,17 @@ The x86 launcher is linked at `0x400000` with a `.fwgame` reservation larger
 than the retail image, so the Framework PE loader maps the game's absolute
 addresses at their original values.
 
+The launcher resolves the image's `kernel32!CreateMutexA` import to its own
+stub. `MafiaEntryPoint` pushes `"Mafia Launcher Super Mutex Shit"` at
+`0x5bebfb` (`68 48 7B 63 00`), calls `CreateMutexA` at `0x5bec16`
+(`FF 15 50 30 62 00`), discards the handle by calling `GetLastError` at
+`0x5bec1c`, and at `0x5bec22` (`3D B7 00 00 00 0F 84 85 08 00 00`) jumps to
+`0x5bf4b2` on `ERROR_ALREADY_EXISTS`, which unwinds and returns 0 without
+initializing anything. For that exact name the stub creates an unnamed mutex
+and clears the last error, so several local clients can run; every other
+name reaches `CreateMutexA` unchanged. Only the game image's imports pass
+through the resolver, and the mutex lives until process exit as in retail.
+
 ## In-process display setup
 
 The retail setup is a packed `S_game_setup` of size `0x3f` at `0x647ee4`.

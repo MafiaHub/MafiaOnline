@@ -7,8 +7,10 @@
 #include <utils/minidump.h>
 
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -23,11 +25,6 @@ namespace {
         return result;
     }
 
-    bool ContainsGameExecutable(const std::filesystem::path &folder) {
-        std::error_code error;
-        return std::filesystem::is_regular_file(folder / L"Game.exe", error);
-    }
-
     bool ValidateGameExecutable(const std::wstring &path) {
         const auto actual = Framework::Utils::Crypto::Sha256FileHex(std::filesystem::path(path));
         if (Framework::Utils::Crypto::ConstantTimeEquals(actual, Mafia1Online::SDK::RetailImage::kSha256)) {
@@ -37,6 +34,21 @@ namespace {
         const std::wstring message = actual.empty() ? L"Could not read the selected Game.exe." : L"This Game.exe build is unsupported. Mafia1Online currently requires SHA-256 303eb95e...3f298.";
         MessageBoxW(nullptr, message.c_str(), L"Mafia1Online", MB_ICONERROR);
         return false;
+    }
+
+    // MafiaEntryPoint creates this mutex at 0x5bec16 and returns without
+    // starting when GetLastError reports ERROR_ALREADY_EXISTS, so a second
+    // local client would never open. The handle is discarded; nothing else
+    // opens the name. See docs/native_contract.md.
+    constexpr char kSingleInstanceMutex[] = "Mafia Launcher Super Mutex Shit";
+
+    HANDLE WINAPI CreateMutexA_Stub(LPSECURITY_ATTRIBUTES attributes, BOOL initialOwner, LPCSTR name) {
+        if (name == nullptr || std::strcmp(name, kSingleInstanceMutex) != 0) {
+            return CreateMutexA(attributes, initialOwner, name);
+        }
+        HANDLE mutex = CreateMutexA(attributes, initialOwner, nullptr);
+        SetLastError(ERROR_SUCCESS);
+        return mutex;
     }
 } // namespace
 
@@ -56,30 +68,14 @@ int main() {
     }
 
     Framework::Launcher::ProjectConfiguration config;
-    config.destinationDllName          = L"Mafia1OnlineClient.dll";
-    config.executableName              = L"Game.exe";
-    config.name                        = "Mafia1Online";
-    config.platform                    = Framework::Launcher::ProjectPlatform::STEAM;
-    config.launchType                  = Framework::Launcher::ProjectLaunchType::PE_LOADING;
-    config.steamAppId                  = Mafia1Online::SDK::RetailImage::kSteamAppId;
-    config.useAlternativeWorkDir       = true;
-    config.alternativeWorkDir          = L"Mafia";
-    config.allowManualGamePathFallback = true;
-    config.promptTitle                 = "Select a Mafia Game.exe";
-    config.promptFilter                = "Game.exe";
-    config.promptFilterName            = "Game.exe";
-    config.disablePersistentConfig     = true;
-    config.writeSteamAppIdFile         = false;
-    config.promptSelectionFunctor = [&config](std::wstring gameRoot) {
-        const std::filesystem::path root(gameRoot);
-        if (ContainsGameExecutable(root / L"Mafia")) {
-            config.useAlternativeWorkDir = true;
-        }
-        else if (ContainsGameExecutable(root)) {
-            config.useAlternativeWorkDir = false;
-        }
-        return gameRoot;
-    };
+    config.destinationDllName      = L"Mafia1OnlineClient.dll";
+    config.executableName          = L"Game.exe";
+    config.name                    = "Mafia1Online";
+    config.launchType              = Framework::Launcher::ProjectLaunchType::PE_LOADING;
+    // Steam nests the game in a Mafia folder; a flat copy keeps Game.exe at the root, which
+    // the launcher falls back to when the nested layout is missing.
+    config.useAlternativeWorkDir   = true;
+    config.alternativeWorkDir      = L"Mafia";
 
     // A direct path supports copies outside Steam, including flat installs.
     // The executable hash is still validated before it is loaded.
@@ -87,15 +83,28 @@ int main() {
     if (gameRootLength > 1) {
         std::wstring gameRoot(gameRootLength, L'\0');
         gameRoot.resize(GetEnvironmentVariableW(L"MAFIA1ONLINE_GAME_ROOT", gameRoot.data(), gameRootLength));
-        config.platform         = Framework::Launcher::ProjectPlatform::CLASSIC;
-        config.classicGamePath  = std::move(gameRoot);
-        config.promptForGameExe = false;
-        if (!ContainsGameExecutable(std::filesystem::path(config.classicGamePath) / L"Mafia") && ContainsGameExecutable(config.classicGamePath)) {
-            config.useAlternativeWorkDir = false;
-        }
+        config.classicGamePath         = std::move(gameRoot);
+        // A stored pick would override the requested copy.
+        config.disablePersistentConfig = true;
+        config.platforms               = {std::make_shared<Framework::Launcher::Platforms::Classic>(Framework::Launcher::Platforms::Classic::Options {.prompt = false})};
+    }
+    else {
+        // Without Steam, or without Mafia in its library, the player selects Game.exe once; the
+        // pick is kept in Mafia1Online_launcher.json beside the launcher and wins on later runs.
+        Framework::Launcher::Platforms::Classic::Options manual;
+        manual.title      = "Select a Mafia Game.exe";
+        manual.filter     = "Game.exe";
+        manual.filterName = "Game.exe";
+        config.platforms  = {
+            std::make_shared<Framework::Launcher::Platforms::Steam>(Framework::Launcher::Platforms::Steam::Options {.appId = Mafia1Online::SDK::RetailImage::kSteamAppId, .writeAppIdFile = false}),
+            std::make_shared<Framework::Launcher::Platforms::Classic>(std::move(manual)),
+        };
     }
     Framework::Launcher::Project project(config);
     project.SetGameExecutableValidator(ValidateGameExecutable);
+    project.SetFunctionResolver([](HMODULE, const char *name) -> LPVOID {
+        return std::strcmp(name, "CreateMutexA") == 0 ? reinterpret_cast<LPVOID>(&CreateMutexA_Stub) : nullptr;
+    });
     SetUnhandledExceptionFilter(StopAfterCrash);
 
     // CEF helpers outlive a faulted browser process unless the OS owns their
