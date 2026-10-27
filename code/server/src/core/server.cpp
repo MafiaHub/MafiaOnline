@@ -18,12 +18,18 @@
 #include "shared/features/world/mission_entity.h"
 #include "shared/register_entities.h"
 
+#include "features/car/vehicle_scripting.h"
+#include "features/door/door_scripting.h"
+#include "features/pickup/pickup_scripting.h"
+#include "features/player/player_scripting.h"
 #include "features/script/script_events.h"
 #include "features/script/script_runtime.h"
+#include "features/world/world_scripting.h"
 
 #include <core_modules.h>
 #include <logging/logger.h>
 #include <networking/network_peer.h>
+#include <scripting/builtins/builtins.h>
 
 #include <glm/geometric.hpp>
 
@@ -41,6 +47,23 @@ namespace Mafia1Online::Core {
 
     void Server::PostInit() {
         Shared::Entities::RegisterEntities();
+        // Every resource runs in an isolate of its own. Handles cross into it as
+        // themselves, named apart from the framework's own Entity and Player,
+        // and the bindings' classes go with the isolate.
+        Framework::Scripting::Builtins::RegisterHandleTransfer<Scripting::Player>("mafia1online.Player");
+        Framework::Scripting::Builtins::RegisterHandleTransfer<Scripting::Vehicle>("mafia1online.Vehicle");
+        Framework::Scripting::Builtins::RegisterHandleTransfer<Scripting::Door>("mafia1online.Door");
+        Framework::Scripting::Builtins::RegisterHandleTransfer<Scripting::Pickup>("mafia1online.Pickup");
+        Framework::Scripting::Builtins::RegisterHandleTransfer<Scripting::Sound>("mafia1online.Sound");
+        if (auto *scripting = GetScriptingModule(); scripting != nullptr && scripting->GetEngine() != nullptr) {
+            scripting->GetEngine()->AddRuntimeDisposingListener([](v8::Isolate *isolate) {
+                Scripting::Player::UnregisterIsolate(isolate);
+                Scripting::Vehicle::UnregisterIsolate(isolate);
+                Scripting::Door::UnregisterIsolate(isolate);
+                Scripting::Pickup::UnregisterIsolate(isolate);
+                Scripting::Sound::UnregisterIsolate(isolate);
+            });
+        }
         _mission                               = GetModConfig().Get<std::string>("mission");
         if (!Shared::World::IsStockMission(_mission) && !_mods.HasMission(_mission)) throw std::runtime_error("Mission is neither stock nor present in mods/: " + _mission);
         if (!GetNetworkingEngine()->GetNetworkServer()->SetSessionConfig(nlohmann::json({{"mission", _mission}, {"mods", _mods.Manifest()}}).dump())) throw std::runtime_error("Server mod manifest exceeds the session handshake limit");

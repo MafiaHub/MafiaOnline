@@ -11,7 +11,7 @@
 #include <sstream>
 
 namespace Mafia1Online::Scripting {
-    std::unique_ptr<v8pp::class_<Pickup>> Pickup::_class;
+    std::unordered_map<v8::Isolate *, std::unique_ptr<v8pp::class_<Pickup>>> Pickup::_classes;
 
     namespace {
         // Pickup.create(weaponId, position, heading?, loaded?, reserve?, lifetimeMs?)
@@ -83,7 +83,12 @@ namespace Mafia1Online::Scripting {
         return stream.str();
     }
 
+    void Pickup::UnregisterIsolate(v8::Isolate *isolate) {
+        _classes.erase(isolate);
+    }
+
     v8pp::class_<Pickup> &Pickup::GetClass(v8::Isolate *isolate) {
+        auto &_class = _classes[isolate];
         if (_class) {
             return *_class;
         }

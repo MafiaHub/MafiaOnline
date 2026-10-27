@@ -11,6 +11,9 @@
 #include "features/quick_join/quick_join.h"
 #include "features/seat/seat_hooks.h"
 #include "features/startup_video/startup_video_hooks.h"
+#include "features/script/door_scripting.h"
+#include "features/script/pickup_scripting.h"
+#include "features/script/player_scripting.h"
 #include "features/script/script_runtime.h"
 #include "features/script/visual_scripting.h"
 #include "features/world/world_hooks.h"
@@ -306,6 +309,13 @@ namespace Mafia1Online::Core {
     void Application::PostScriptInit() {
         if (_visualResourceCleanupRegistered) return;
         Scripting::RegisterVisualResourceCleanup(*GetScriptingModule()->GetResourceManager());
+        // Every resource runs in an isolate of its own; the bindings' classes go with it.
+        GetScriptingModule()->GetEngine()->AddRuntimeDisposingListener([](v8::Isolate *isolate) {
+            Scripting::Player::UnregisterIsolate(isolate);
+            Scripting::Vehicle::UnregisterIsolate(isolate);
+            Scripting::Door::UnregisterIsolate(isolate);
+            Scripting::Pickup::UnregisterIsolate(isolate);
+        });
         _visualResourceCleanupRegistered = true;
     }
 

@@ -444,7 +444,7 @@ namespace Mafia1Online::Scripting {
         }
     } // namespace
 
-    std::unique_ptr<v8pp::class_<Sound>> Sound::_class;
+    std::unordered_map<v8::Isolate *, std::unique_ptr<v8pp::class_<Sound>>> Sound::_classes;
 
     SoundEntity *Sound::ResolveSound() const {
         return Service().FindSound(_id);
@@ -497,7 +497,12 @@ namespace Mafia1Online::Scripting {
         return sound ? "Sound(" + std::to_string(_id) + ", " + sound->wave + ")" : "Sound(" + std::to_string(_id) + ", destroyed)";
     }
 
+    void Sound::UnregisterIsolate(v8::Isolate *isolate) {
+        _classes.erase(isolate);
+    }
+
     v8pp::class_<Sound> &Sound::GetClass(v8::Isolate *isolate) {
+        auto &_class = _classes[isolate];
         if (_class) {
             return *_class;
         }

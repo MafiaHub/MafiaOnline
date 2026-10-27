@@ -26,7 +26,7 @@
 #include <vector>
 
 namespace Mafia1Online::Scripting {
-    std::unique_ptr<v8pp::class_<Player>> Player::_class;
+    std::unordered_map<v8::Isolate *, std::unique_ptr<v8pp::class_<Player>>> Player::_classes;
 
     namespace {
         using Framework::Networking::Replication::NametagComponent;
@@ -706,7 +706,12 @@ namespace Mafia1Online::Scripting {
         return stream.str();
     }
 
+    void Player::UnregisterIsolate(v8::Isolate *isolate) {
+        _classes.erase(isolate);
+    }
+
     v8pp::class_<Player> &Player::GetClass(v8::Isolate *isolate) {
+        auto &_class = _classes[isolate];
         if (_class) {
             return *_class;
         }

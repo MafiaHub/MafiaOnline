@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <unordered_map>
 #include <string>
 
 namespace Mafia1Online::Scripting {
@@ -86,8 +87,10 @@ namespace Mafia1Online::Scripting {
 
         static void Register(v8::Isolate *isolate, v8::Local<v8::Object> global);
         static v8pp::class_<Vehicle> &GetClass(v8::Isolate *isolate);
+        // Classes belong to the runtime (isolate) that built them; drop them when it goes.
+        static void UnregisterIsolate(v8::Isolate *isolate);
 
       private:
-        static std::unique_ptr<v8pp::class_<Vehicle>> _class;
+        static std::unordered_map<v8::Isolate *, std::unique_ptr<v8pp::class_<Vehicle>>> _classes;
     };
 } // namespace Mafia1Online::Scripting

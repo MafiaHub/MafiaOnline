@@ -15,7 +15,7 @@
 #include <sstream>
 
 namespace Mafia1Online::Scripting {
-    std::unique_ptr<v8pp::class_<Vehicle>> Vehicle::_class;
+    std::unordered_map<v8::Isolate *, std::unique_ptr<v8pp::class_<Vehicle>>> Vehicle::_classes;
 
     namespace {
         using CarEntity = Shared::Entities::CarEntity;
@@ -511,7 +511,12 @@ namespace Mafia1Online::Scripting {
         return result;
     }
 
+    void Vehicle::UnregisterIsolate(v8::Isolate *isolate) {
+        _classes.erase(isolate);
+    }
+
     v8pp::class_<Vehicle> &Vehicle::GetClass(v8::Isolate *isolate) {
+        auto &_class = _classes[isolate];
         if (_class) {
             return *_class;
         }
