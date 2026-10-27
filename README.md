@@ -172,6 +172,15 @@ example `127.0.0.1` server address only reaches a server on the same machine.
 
 ## Two-client local test
 
+On Windows, `tools/run_two_clients.ahk` (AutoHotkey v2) starts the server
+unless one is already running, then two quick-join clients as `Player1` and
+`Player2` with their windows side by side. It writes its configs under
+`builds/runtime`, uses `server.json` from the project root when present and
+otherwise a copy of `config/server.example.json`, and finds the game through
+Steam or `MAFIA1ONLINE_GAME_ROOT`. Both clients use Mafia profile 0, so create
+one in the original game first. `--no-server` skips the server and `--close`
+closes every client and the server.
+
 On this Linux/Hyprland test machine, `tools/run_two_clients.sh` launches two
 isolated Wine clients and places their 1024 by 768 windows side by side on
 `DP-1` workspace `8`. It uses only repository-local writable paths under
