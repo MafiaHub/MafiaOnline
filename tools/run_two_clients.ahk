@@ -1,5 +1,7 @@
 #Requires AutoHotkey v2.0
 #Warn
+; --close must work while another run still shows a dialog.
+#SingleInstance Off
 
 ; Windows two-client harness: starts the server (unless one is already running),
 ; then two quick-join clients side by side as Player1 and Player2.
@@ -8,6 +10,10 @@
 ;     tools\run_two_clients.ahk --no-server  two clients against a running server
 ;     tools\run_two_clients.ahk --close      close every client and the server
 ;     tools\run_two_clients.ahk --validate   parse and exit without launching
+;     tools\run_two_clients.ahk --simulation[=full|wireframe|headless]
+;                                             also start the simulation host
+;     tools\run_two_clients.ahk --players=N  start N player clients (0-2, default 2)
+;     tools\run_two_clients.ahk --pool-scale=N  pedestrian pool scale of the host (1-16, default 16)
 ;
 ; Build first: builds\build.bat Mafia1OnlineServer 64, Mafia1OnlineClient 32 and
 ; Mafia1OnlineLauncher 32. The game comes from Steam discovery, or from
@@ -16,7 +22,9 @@
 ;
 ; Everything this script writes stays under builds\runtime. The server uses
 ; server.json from the project root when present, else a copy of
-; config\server.example.json.
+; config\server.example.json. With --simulation it uses a generated
+; builds\runtime\config\server-simulation.json carrying a fresh
+; simulationToken, which the simulation host's config repeats.
 
 SetTitleMatchMode 2
 
@@ -56,6 +64,28 @@ if ProcessExist("Mafia1OnlineLauncher.exe") {
 DirCreate RuntimeDir "\config"
 DirCreate RuntimeDir "\logs"
 
+SimulationMode := ArgValue("--simulation", "wireframe")
+SimulationToken := ""
+PoolArg := ArgValue("--pool-scale", "16")
+PoolScale := PoolArg = "" ? 16 : Integer(PoolArg)
+PlayerArg := ArgValue("--players", "2")
+PlayerCount := PlayerArg = "" ? 2 : Integer(PlayerArg)
+if (PlayerCount < 0 || PlayerCount > 2) {
+    MsgBox "--players must be 0, 1 or 2.", "Mafia1Online", "Iconx"
+    ExitApp 1
+}
+if SimulationMode != "" {
+    if !(SimulationMode = "full" || SimulationMode = "wireframe" || SimulationMode = "headless") {
+        MsgBox "--simulation must be full, wireframe or headless.", "Mafia1Online", "Iconx"
+        ExitApp 1
+    }
+    if HasArg("--no-server") || ProcessExist("Mafia1OnlineServer.exe") {
+        MsgBox "--simulation starts its own server with a fresh token. Close the running server first.", "Mafia1Online", "Iconx"
+        ExitApp 1
+    }
+    SimulationToken := RandomToken()
+}
+
 if !HasArg("--no-server") {
     StartServer()
 }
@@ -69,18 +99,25 @@ FirstX := Max(0, (A_ScreenWidth - LayoutWidth) // 2)
 SecondX := LayoutWidth <= A_ScreenWidth ? FirstX + WindowWidth + Gap : Max(0, A_ScreenWidth - WindowWidth)
 WindowY := Max(0, (A_ScreenHeight - WindowHeight) // 2)
 
-pid1 := LaunchClient(1, FirstX)
-if !pid1 {
-    ExitApp 1
+started := []
+if SimulationMode != "" {
+    simulationPid := LaunchSimulation(SimulationMode)
+    if !simulationPid {
+        ExitApp 1
+    }
+    started.Push(simulationPid)
 }
-pid2 := LaunchClient(2, SecondX)
-if !pid2 {
-    ExitApp 1
+loop PlayerCount {
+    processId := LaunchClient(A_Index, A_Index = 1 ? FirstX : SecondX)
+    if !processId {
+        ExitApp 1
+    }
+    started.Push(processId)
 }
 
-; Both up: verify neither died while booting.
+; All up: verify none died while booting.
 Sleep 5000
-for processId in [pid1, pid2] {
+for processId in started {
     if !ProcessExist(processId) {
         MsgBox "Client (pid " processId ") exited during startup. See " ClientBin "\logs.", "Mafia1Online", "Iconx"
         ExitApp 1
@@ -97,8 +134,15 @@ StartServer() {
         MsgBox "Missing " ServerExe "`n`nBuild it with: builds\build.bat Mafia1OnlineServer 64`nor pass --no-server.", "Mafia1Online", "Iconx"
         ExitApp 1
     }
+    global SimulationToken
     config := ProjectDir "\server.json"
-    if !FileExist(config) {
+    if SimulationToken != "" {
+        config := RuntimeDir "\config\server-simulation.json"
+        handle := FileOpen(config, "w", "UTF-8-RAW")
+        handle.Write('{"password":"","mod":{"mission":"freeride","simulationToken":"' SimulationToken '"}}')
+        handle.Close()
+    }
+    else if !FileExist(config) {
         config := RuntimeDir "\config\server.json"
         FileCopy ProjectDir "\config\server.example.json", config, true
     }
@@ -144,6 +188,47 @@ LaunchClient(index, x) {
     WinSetTitle "Mafia1Online - Player" index, game
     PlaceWindow(game, x, WindowY)
     return clientPid
+}
+
+; Launch the simulation host: a client whose config enables the simulation
+; role with the server's token. Headless hosts never show a window, so only
+; the process is checked. Returns the launcher PID (0 on failure).
+LaunchSimulation(mode) {
+    global LauncherExe, ClientBin, RuntimeDir, ServerHost, ServerPort, SimulationToken, PoolScale
+    config := RuntimeDir "\config\client-simulation.json"
+    handle := FileOpen(config, "w", "UTF-8-RAW")
+    handle.Write('{"quickJoin":{"enabled":true,"nickname":"Simulation","host":"' ServerHost '","port":' ServerPort ',"password":"","profileIndex":0},'
+        . '"simulation":{"enabled":true,"token":"' SimulationToken '","render":"' mode '","tickHz":30,"pedestrianPoolScale":' PoolScale '}}')
+    handle.Close()
+
+    EnvSet "MAFIA1ONLINE_CLIENT_CONFIG", config
+    Run Format('"{}"', LauncherExe), ClientBin, , &hostPid
+    EnvSet "MAFIA1ONLINE_CLIENT_CONFIG"
+    if mode = "headless" {
+        Sleep 3000
+        if !ProcessExist(hostPid) {
+            MsgBox "The simulation host exited during startup. See " ClientBin "\logs.", "Mafia1Online", "Iconx"
+            return 0
+        }
+        return hostPid
+    }
+    game := WaitForGameWindow(hostPid, 120000)
+    if !game {
+        MsgBox "Timed out waiting for the simulation host window.", "Mafia1Online", "Iconx"
+        if ProcessExist(hostPid) {
+            ProcessClose hostPid
+        }
+        return 0
+    }
+    return hostPid
+}
+
+RandomToken() {
+    token := ""
+    loop 32 {
+        token .= Format("{:x}", Random(0, 15))
+    }
+    return token
 }
 
 ; The largest visible top-level window of the process: CEF and the IME keep
@@ -210,6 +295,20 @@ CloseAll() {
             Sleep 100
         }
     }
+}
+
+; "--name=value" gives value, "--name" alone gives defaultValue, absent gives "".
+ArgValue(name, defaultValue) {
+    global Args
+    for arg in Args {
+        if (arg = name) {
+            return defaultValue
+        }
+        if (SubStr(arg, 1, StrLen(name) + 1) = name "=") {
+            return SubStr(arg, StrLen(name) + 2)
+        }
+    }
+    return ""
 }
 
 HasArg(name) {
