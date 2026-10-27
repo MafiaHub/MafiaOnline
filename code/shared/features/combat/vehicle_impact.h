@@ -8,7 +8,7 @@ namespace Mafia1Online::Shared::Combat {
     // The car simulation owner observed a body contact with a remote player.
     // The server calculates damage from its own car speed and checks both poses.
     struct VehicleImpact {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::VehicleImpact");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::VehicleImpact");
 
         uint64_t carId = 0;
         uint64_t targetId = 0;

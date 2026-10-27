@@ -59,7 +59,7 @@ namespace Mafia1Online::Shared::Combat {
     // A complete, versioned state replaces all earlier states for this life.
     // Reliable delivery also repairs a missed action or a late join.
     struct State {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CombatState");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CombatState");
 
         uint64_t networkId         = 0;
         uint64_t missionGeneration = 0;
@@ -110,7 +110,7 @@ namespace Mafia1Online::Shared::Combat {
     // Only the controller may submit an action. The server checks the life,
     // inventory, cadence and ammunition before publishing a result.
     struct Intent {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CombatIntent");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CombatIntent");
 
         uint64_t networkId             = 0;
         uint64_t missionGeneration     = 0;
@@ -214,7 +214,7 @@ namespace Mafia1Online::Shared::Combat {
     // Discrete actions are ordered with states, and include the server's own
     // revision so clients can drop events from an obsolete life.
     struct Event {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CombatEvent");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CombatEvent");
 
         uint64_t networkId         = 0;
         uint64_t missionGeneration = 0;

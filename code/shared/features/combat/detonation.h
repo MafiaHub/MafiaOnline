@@ -9,7 +9,7 @@ namespace Mafia1Online::Shared::Combat {
     // off. The server checks it against the accepted throw and applies the
     // retail damage from its own player positions.
     struct DetonationReport {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CombatDetonationReport");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CombatDetonationReport");
 
         uint64_t networkId         = 0;
         uint64_t missionGeneration = 0;
@@ -33,7 +33,7 @@ namespace Mafia1Online::Shared::Combat {
     // Server decision. Other clients replace their display copy with the
     // native explosion or fire here. visualOnly marks an expired throw.
     struct Detonation {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CombatDetonation");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CombatDetonation");
 
         uint64_t throwerNetworkId  = 0;
         uint64_t missionGeneration = 0;

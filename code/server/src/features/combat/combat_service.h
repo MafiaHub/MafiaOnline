@@ -8,7 +8,7 @@
 #include "shared/features/combat/vehicle_impact.h"
 #include "shared/features/car/car_hit_report.h"
 
-#include <mafianet/peerinterface.h>
+#include <mafianet/peer_interface.h>
 #include <glm/vec3.hpp>
 
 #include <chrono>

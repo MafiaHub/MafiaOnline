@@ -8,7 +8,7 @@ namespace Mafia1Online::Shared::Pickup {
     // The local player pressed use on a replicated pickup. The server checks
     // reach, life and inventory before moving the weapon into it.
     struct PickupRequest {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::PickupRequest");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::PickupRequest");
 
         uint64_t pickupId          = 0;
         uint64_t networkId         = 0;

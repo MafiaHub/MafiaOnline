@@ -8,7 +8,7 @@ namespace Mafia1Online::Shared::Car {
     // A local shoot record's impact on a network car. The server consumes the
     // matching accepted Fire pellet before forwarding an authoritative hit.
     struct HitReport {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarHitReport");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarHitReport");
 
         uint64_t carId = 0;
         uint64_t missionGeneration = 0;
@@ -58,7 +58,7 @@ namespace Mafia1Online::Shared::Car {
     };
 
     struct AuthoritativeHit {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarAuthoritativeHit");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarAuthoritativeHit");
 
         uint64_t carId = 0;
         uint64_t missionGeneration = 0;

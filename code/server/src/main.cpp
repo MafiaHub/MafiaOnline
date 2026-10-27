@@ -19,6 +19,9 @@ int main(int argc, char **argv) {
     opts.gameName        = "Mafia 1";
     opts.gameVersion     = "1.2";
     opts.enableSignals   = true;
+#ifdef MAFIA1ONLINE_RPC_IDENTIFIER_SALT
+    opts.rpcIdentifierSalt = MAFIA1ONLINE_RPC_IDENTIFIER_SALT;
+#endif
     opts.modConfigSchema = {
         {"mission", Framework::Utils::ConfigFieldType::String, "", true, true, {}, "Stock or detected server mod mission directory name", true},
     };

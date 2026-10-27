@@ -19,7 +19,10 @@ namespace Mafia1Online::Core {
             opts.gameVersion    = "1.2";
             opts.modSlug        = "mafia1online";
             opts.modVersion     = Mafia1Online::Version::rel;
-            opts.assetCacheRoot = _projectPath + "\\cache";
+            opts.cacheRoot      = _projectPath + "\\cache";
+#ifdef MAFIA1ONLINE_RPC_IDENTIFIER_SALT
+            opts.rpcIdentifierSalt = MAFIA1ONLINE_RPC_IDENTIFIER_SALT;
+#endif
 
             // Borrow the engine's Direct3D 8 device for web views; ImGui has no D3D8 path.
             opts.useRenderer                  = true;

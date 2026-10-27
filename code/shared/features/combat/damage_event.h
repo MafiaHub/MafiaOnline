@@ -8,7 +8,7 @@ namespace Mafia1Online::Shared::Combat {
     // Server-accepted impact. The matching/recent State is the durable truth;
     // this event only drives a one-shot native reaction on live recipients.
     struct DamageEvent {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CombatDamageEvent");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CombatDamageEvent");
 
         uint64_t targetNetworkId       = 0;
         uint64_t missionGeneration     = 0;

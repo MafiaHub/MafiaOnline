@@ -7,7 +7,7 @@
 
 namespace Mafia1Online::Shared::Car {
     struct Movement {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarMovement");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarMovement");
         static constexpr uint32_t kReplicatedLightMask = 0x00000001 | 0x00000002 | 0x00000080 | 0x00000100 | 0x00000800 |
                                                          0x00001000 | 0x00008000 | 0x00010000;
 

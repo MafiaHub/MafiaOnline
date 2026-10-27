@@ -8,7 +8,7 @@ namespace Mafia1Online::Shared::Player {
     // Sent by the controlling client only to observers currently following it.
     // Pitch is a fraction of pi; yaw is radians around the vertical axis.
     struct CameraView {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::PlayerCameraView");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::PlayerCameraView");
 
         uint64_t networkId = 0;
         uint64_t missionGeneration = 0;

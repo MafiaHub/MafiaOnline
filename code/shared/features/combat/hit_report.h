@@ -8,7 +8,7 @@ namespace Mafia1Online::Shared::Combat {
     // A native bullet collision report. The server uses its own weapon rule,
     // life state and player positions; client damage is never authoritative.
     struct HitReport {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CombatHitReport");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CombatHitReport");
         // C_car::Hit forwards an occupant hit with its own zero flags as the
         // body part; retail HitInCar ignores it. Seated targets report this.
         static constexpr uint8_t kInCarBodyPart = 7;
