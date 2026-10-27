@@ -9,3 +9,7 @@ __pycache__/
 *.pyc
 /mods/*.zip
 /mods/.cache/
+
+# Build trees, logs and the Framework SDK cache; only the build script is tracked.
+/builds/*
+!/builds/build.bat

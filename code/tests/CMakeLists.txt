@@ -9,7 +9,7 @@ target_include_directories(Mafia1OnlineMeshCheckpointTests PRIVATE "${CMAKE_CURR
 
 add_executable(Mafia1OnlineModAssetTests mod_asset_tests.cpp ../client/src/features/mod/mod_service.cpp)
 target_include_directories(Mafia1OnlineModAssetTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/.." "${CMAKE_CURRENT_SOURCE_DIR}/../client/src")
-target_link_libraries(Mafia1OnlineModAssetTests PRIVATE Framework)
+target_link_libraries(Mafia1OnlineModAssetTests PRIVATE Framework::Framework)
 
 if(MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 4)
     add_executable(Mafia1OnlineWineFpuTests
@@ -22,7 +22,7 @@ endif()
 
 add_executable(Mafia1OnlineCarSnapshotTests car_snapshot_tests.cpp)
 target_include_directories(Mafia1OnlineCarSnapshotTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
-target_link_libraries(Mafia1OnlineCarSnapshotTests PRIVATE Framework)
+target_link_libraries(Mafia1OnlineCarSnapshotTests PRIVATE Framework::Framework)
 
 add_executable(Mafia1OnlineMissionActorTests mission_actor_tests.cpp)
 target_include_directories(Mafia1OnlineMissionActorTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")

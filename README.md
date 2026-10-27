@@ -1,9 +1,14 @@
 # Mafia1Online
 
-This repository is checked out inside the [MafiaHub Framework](https://github.com/MafiaHub/Framework)
-at `code/projects/mafia1online`. Use the Framework commit recorded in
-[`FRAMEWORK_PIN`](FRAMEWORK_PIN) to reproduce a build. The Framework CMake
-project discovers this folder automatically.
+Mafia1Online is a top-level CMake project that brings in the
+[MafiaHub Framework](https://github.com/MafiaHub/Framework) through
+[`cmake/FrameworkBootstrap.cmake`](cmake/FrameworkBootstrap.cmake). It needs
+the Framework's D3D8 renderer, launcher and asset streamer support, which is
+not in a Framework release yet, so it builds the Framework from source: the
+commit recorded in [`FRAMEWORK_PIN`](FRAMEWORK_PIN). Check this repository out
+at `code/projects/<name>` inside that Framework tree and `builds/build.bat`
+picks the enclosing checkout up. [`cmake/FrameworkPin.cmake`](cmake/FrameworkPin.cmake)
+names the SDK release to switch to once that support ships in one.
 
 This project targets the 32 bit Mafia `Game.exe` identified by SHA-256
 `303eb95ee2de3433511ce0cb518921dcb96b62b0f64ebfcc436723ff5083f298`.
@@ -119,14 +124,17 @@ game before launching the mod. Omitting `client.json` or setting `enabled` to
 
 ## Build
 
-From the Framework root, use the canonical wrapper:
+From this project's root, use its build wrapper. Build trees go to
+`builds/build-32` and `builds/build-64`:
 
-```sh
-bash builds/build.bat Mafia1OnlineLauncher 32
-bash builds/build.bat Mafia1OnlineClient 32
-bash builds/build.bat Mafia1OnlineServer 64
-bash builds/build.bat Mafia1OnlineServer linux64
+```bat
+builds\build.bat Mafia1OnlineLauncher 32
+builds\build.bat Mafia1OnlineClient 32
+builds\build.bat Mafia1OnlineServer 64
 ```
+
+`FW_SOURCE_DIR=<Framework checkout>` or `FW_SDK_ROOT=<installed SDK>` in the
+environment overrides where the Framework comes from.
 
 The client and launcher build only for Windows x86; the server builds for
 Windows x64 or Linux x64. For server configuration, copy
@@ -150,8 +158,7 @@ detection and the prepared Freeride Extended example.
 ## Client ZIP
 
 After building the 32-bit launcher and client, run
-`python3 code/projects/mafia1online/tools/package_client.py` from the Framework
-root. It creates `builds/releases/Mafia1OnlineClient-<VERSION>-windows-x86.zip`.
+`python3 tools/package_client.py`. It creates `builds/releases/Mafia1OnlineClient-<VERSION>-windows-x86.zip`.
 The archive contains the launcher, client, runtime DLLs, CEF resources, UI,
 license notices and a sample configuration. It excludes logs, caches, tests,
 debug symbols, local settings and the original game. Extract it to a writable
