@@ -154,6 +154,13 @@ namespace Mafia1Online::SDK::Core::Game {
         void SetPlayerForInitialization(Player::NativeActor *actor) {
             _player = actor;
         }
+        // Only C_game::m_pPlayer, for a retail call that compares an actor
+        // with it; the camera and human pointers stay. Returns the previous.
+        Player::NativeActor *ExchangePlayer(Player::NativeActor *actor) {
+            auto *previous = _player;
+            _player = actor;
+            return previous;
+        }
         void FocusPlayer(Player::NativeActor *actor) {
             // C_game::SetHuman performs the retail human/camera handoff.
             using Call = void(__thiscall *)(NativeGame *, Player::NativeActor *);
@@ -186,7 +193,11 @@ namespace Mafia1Online::SDK::Core::Game {
         int32_t _semaphoreStateZ;
         std::byte _unused1a4[0x1d4 - 0x1a4];
         NativeShootQueue _shootRecords;
-        std::byte _unused1e4[0x28f4];
+        std::byte _unused1e4[0x2a0c - 0x1e4];
+        // C_game::m_fPlayerSpeed, the local player's speed in m/s. Traffic
+        // element Activate (0x457820) widens its spawn ring with it.
+        float _playerSpeed;
+        std::byte _unused2a10[0x2ad8 - 0x2a10];
         bool _playerDeathTriggered;
         std::byte _unused2ad9[0x2b0c - 0x2ad9];
         uint32_t _gameTime;
@@ -203,6 +214,7 @@ namespace Mafia1Online::SDK::Core::Game {
     static_assert(offsetof(NativeGame, _player) == 0xe4);
     static_assert(offsetof(NativeGame, _human) == 0xe8);
     static_assert(offsetof(NativeGame, _shootRecords) == 0x1d4);
+    static_assert(offsetof(NativeGame, _playerSpeed) == 0x2a0c);
     static_assert(offsetof(NativeGame, _playerDeathTriggered) == 0x2ad8);
     static_assert(offsetof(NativeGame, _semaphoreTime) == 0x194);
     static_assert(offsetof(NativeGame, _semaphorePeriod) == 0x198);

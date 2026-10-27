@@ -199,6 +199,9 @@ namespace Mafia1Online::SDK::Player {
         [[nodiscard]] const NativeGameItem &SelectedItem() const {
             return _inventory.Selected();
         }
+        [[nodiscard]] const NativeInventory &Inventory() const {
+            return _inventory;
+        }
         [[nodiscard]] uint32_t InventoryMask() const {
             return _inventory.ItemMask();
         }

@@ -30,6 +30,17 @@ namespace Mafia1Online::SDK::Core::Mission {
             using Call = Player::NativeActor *(__thiscall *)(const NativeMission *, const char *);
             return reinterpret_cast<Call>(kFindActorByName)(this, name);
         }
+        // Mission render stamp (+0x64), compared with each model's stamp to
+        // tell whether it was drawn this pass.
+        [[nodiscard]] uint32_t RenderStamp() const {
+            return *reinterpret_cast<const uint32_t *>(reinterpret_cast<const std::byte *>(this) + 0x64);
+        }
+        template <typename Fn>
+        void ForEachActor(Fn &&fn) const {
+            for (auto **actor = _actorsBegin; actor != _actorsEnd; ++actor) {
+                fn(*actor);
+            }
+        }
         void ResetEvents() {
             _currentEvent = 0;
             _previousEvent = 0;
@@ -39,13 +50,20 @@ namespace Mafia1Online::SDK::Core::Mission {
         SDK::Scene::NativeScene *_scene;
         std::byte _unused14[0x10];
         Game::NativeGame *_game;
-        std::byte _unused28[0x48];
+        std::byte _unused28[0x10];
+        // C_mission's actor vector; C_game::Tick's inlined generator
+        // selection walks it (0x5a598b-0x5a59b1).
+        Player::NativeActor **_actorsBegin;
+        Player::NativeActor **_actorsEnd;
+        std::byte _unused40[0x30];
         int _currentEvent;
         int _previousEvent;
     };
     static_assert(sizeof(NativeMission) == 0x78);
     static_assert(offsetof(NativeMission, _scene) == 0x10);
     static_assert(offsetof(NativeMission, _game) == 0x24);
+    static_assert(offsetof(NativeMission, _actorsBegin) == 0x38);
+    static_assert(offsetof(NativeMission, _actorsEnd) == 0x3c);
     static_assert(offsetof(NativeMission, _currentEvent) == 0x70);
     static_assert(offsetof(NativeMission, _previousEvent) == 0x74);
 
