@@ -2,9 +2,11 @@
 
 #include "system_init_hooks.h"
 
+#include "features/compat/ls3df_index_leak.h"
 #include "features/simulation/simulation_config.h"
 
 #include <MinHook.h>
+#include <logging/logger.h>
 #include <mafia1/sdk/core/game_setup.h>
 #include <mafia1/sdk/core/system.h>
 #include <mafia1/sdk/graphics/native_graph.h>
@@ -66,6 +68,10 @@ namespace Mafia1Online::Features::Display {
             gTemporarySettingsActive.store(true, std::memory_order_release);
 
             const bool initialized = gInitSystemOriginal(instance, profileSelectionClosed);
+            // InitSystem loads LS3DF.dll; no mission has drawn a shadow yet.
+            if (initialized && !Compat::InstallLs3dfIndexLeakFix()) {
+                Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->error("Could not install the LS3DF index buffer leak fix; exit may crash");
+            }
             if (initialized && Simulation::GetConfig().render == Simulation::RenderMode::Headless) {
                 ShowWindow(static_cast<HWND>(SDK::Graphics::GetGraph()->MainWindow()), SW_HIDE);
             }
