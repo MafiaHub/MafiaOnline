@@ -67,10 +67,23 @@ namespace Mafia1Online::Features::Car {
         bool SetTerminalState(uint64_t networkId, Shared::Entities::CarEntity::TerminalState state);
         bool SetSeatCount(uint64_t networkId, uint8_t count);
         bool RecordSeatOutcome(uint64_t networkId, uint8_t seat, uint64_t playerId, uint64_t playerGeneration, Shared::Entities::CarEntity::SeatResult result);
+        // reM Do_ClimbInCarLR: an occupant climbs to the free paired seat
+        // on the other side; players replay it as SeatResult::Moved.
+        bool MoveSeat(uint64_t networkId, uint8_t seat, uint64_t playerId, uint64_t playerGeneration);
         struct SeatLocation { uint64_t carId; uint8_t seat; };
         std::optional<SeatLocation> SeatForPlayer(uint64_t playerId, uint64_t playerGeneration) const;
+        // A simulation host NPC threw the occupant out (Npc::Kick): the seat
+        // is freed now, and the event has every client replay the throw with
+        // the NPC's replica as the thief.
+        std::optional<Shared::Car::SeatEvent> ApplyNpcThrowOut(uint64_t npcId, const glm::vec3 &npcPosition, uint64_t carId, uint8_t seat, uint64_t victimId,
+                                                               uint64_t victimGeneration, uint64_t missionGeneration);
         std::optional<Shared::Car::SeatEvent> ApplySeatIntent(const Shared::Car::SeatIntent &intent, Shared::Entities::PlayerEntity &player, uint64_t missionGeneration);
         void ClearOccupant(uint64_t playerId, uint64_t playerGeneration);
+        // Every SeatEvent the server sends takes the next of these; clients
+        // drop one that is not newer than the last they saw.
+        uint64_t NextSeatEventSequence() {
+            return ++_seatEventSequence;
+        }
         // The occupant an accepted StealBegin just evicted, once.
         struct Eviction { uint64_t playerId; uint64_t playerGeneration; };
         std::optional<Eviction> TakeEviction();

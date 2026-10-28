@@ -55,6 +55,9 @@ namespace Mafia1Online::Scripting {
         double GetNativeDamageRevision() const;
         double GetMeshRevision() const;
         uint32_t GetSeatCount() const;
+        bool GetTraffic() const;
+        std::string GetTrafficKind() const;
+        bool GetHostDriven() const;
         uint32_t GetTerminalState() const;
         double GetMissionGeneration() const;
         double GetEngineRevision() const;

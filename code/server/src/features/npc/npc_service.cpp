@@ -3,9 +3,11 @@
 #include "features/combat/combat_service.h"
 #include "features/player/player_service.h"
 #include "features/simulation/simulation_service.h"
+#include "shared/features/car/car_entity.h"
 #include "shared/features/combat/damage_event.h"
 #include "shared/features/npc/npc_entity.h"
 #include "shared/features/npc/npc_report.h"
+#include "shared/features/player/player_entity.h"
 
 #include <core_modules.h>
 #include <logging/logger.h>
@@ -105,6 +107,15 @@ namespace Mafia1Online::Features::Npc {
             entity->model = spawned.model;
             entity->missionGeneration = spawned.missionGeneration;
             entity->kind = spawned.kind;
+            entity->sourcePedestrianId = spawned.walkerKey && _walkerId ? _walkerId(spawned.walkerKey) : 0;
+            if (const auto *car = spawned.kind == Shared::Entities::NpcKind::Driver && spawned.carId
+                                      ? Framework::CoreModules::GetReplication()->GetEntity<Shared::Entities::CarEntity>(spawned.carId)
+                                      : nullptr;
+                car && car->missionGeneration == spawned.missionGeneration) {
+                entity->thrownFromCarId = spawned.carId;
+                // The host reports the driver right after Do_ThrowCocotFromCar.
+                entity->thrownAt = std::chrono::steady_clock::now();
+            }
             entity->alive = spawned.health > 0.0f;
             entity->streaming.range = kStreamRange;
             entity->SetVirtualWorld(MafiaNet::VIRTUAL_WORLD_GLOBAL);
@@ -288,6 +299,56 @@ namespace Mafia1Online::Features::Npc {
             _combat->ApplyNpcHit(npc->state.networkId, hit.targetNetworkId, hit.missionGeneration, hit.targetSpawnGeneration, hit.hitType, hit.bodyPart, hit.damage,
                                  glm::vec3(hit.directionX, hit.directionY, hit.directionZ), npc->state.selectedWeapon);
         });
+        network->RegisterRPC<Shared::Npc::CarHit>([this](const Shared::Npc::CarHit &hit, MafiaNet::Packet *packet) {
+            if (!FromHost(MafiaNet::ToPeerGuid(packet->guid), hit.missionGeneration) || !_carHit || !std::isfinite(hit.damage) || hit.damage <= 0.0f ||
+                !Finite(hit.directionX, hit.directionY, hit.directionZ) || !Finite(hit.hitX, hit.hitY, hit.hitZ) || !Finite(hit.normalX, hit.normalY, hit.normalZ) ||
+                !Finite(hit.localHitX, hit.localHitY, hit.localHitZ) || !Finite(hit.localDirectionX, hit.localDirectionY, hit.localDirectionZ)) {
+                return;
+            }
+            auto *npc = FindKey(hit.key);
+            if (!npc || !npc->state.alive) {
+                return;
+            }
+            _carHit(npc->state.networkId, hit);
+        });
+        network->RegisterRPC<Shared::Npc::Kick>([this](const Shared::Npc::Kick &kick, MafiaNet::Packet *packet) {
+            if (!FromHost(MafiaNet::ToPeerGuid(packet->guid), kick.missionGeneration) || !_kick) {
+                return;
+            }
+            auto *npc = FindKey(kick.key);
+            if (!npc || !npc->state.alive) {
+                return;
+            }
+            _kick(npc->state.networkId, npc->entity->position, kick);
+        });
+        network->RegisterRPC<Shared::Npc::Seat>([this](const Shared::Npc::Seat &seat, MafiaNet::Packet *packet) {
+            if (!FromHost(MafiaNet::ToPeerGuid(packet->guid), seat.missionGeneration) || !_seat) {
+                return;
+            }
+            // A corpse may stay seated; only a live NPC takes a new seat.
+            auto *npc = FindKey(seat.key);
+            if (!npc || (!npc->state.alive && seat.seat != Shared::Npc::Seat::kNoSeat)) {
+                return;
+            }
+            _seat(npc->state.networkId, seat);
+        });
+        network->RegisterRPC<Shared::Npc::Caught>([this](const Shared::Npc::Caught &caught, MafiaNet::Packet *packet) {
+            if (!FromHost(MafiaNet::ToPeerGuid(packet->guid), caught.missionGeneration) ||
+                (caught.outcome != Shared::Npc::Caught::Outcome::Arrest && caught.outcome != Shared::Npc::Caught::Outcome::Fine)) {
+                return;
+            }
+            auto *npc = FindKey(caught.key);
+            auto *player = _players->FindByNetworkId(caught.targetNetworkId);
+            if (!npc || !npc->state.alive || npc->entity->kind != Shared::Entities::NpcKind::Police || !player || !player->spawned || !player->alive ||
+                player->missionGeneration != _missionGeneration || player->spawnGeneration != caught.targetSpawnGeneration) {
+                return;
+            }
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->info("Police NPC {} {} player {}", npc->state.networkId,
+                                                                       caught.outcome == Shared::Npc::Caught::Outcome::Fine ? "fined" : "arrested", caught.targetNetworkId);
+            if (_events.caught) {
+                _events.caught(*npc->entity, caught.targetNetworkId, caught.outcome == Shared::Npc::Caught::Outcome::Fine);
+            }
+        });
         network->RegisterRPC<Shared::Npc::Damaged>([this](const Shared::Npc::Damaged &damaged, MafiaNet::Packet *packet) {
             if (!FromHost(MafiaNet::ToPeerGuid(packet->guid), damaged.missionGeneration) || !std::isfinite(damaged.damage) || !std::isfinite(damaged.healthBefore) ||
                 !std::isfinite(damaged.healthAfter) || !Finite(damaged.directionX, damaged.directionY, damaged.directionZ)) {
@@ -323,6 +384,8 @@ namespace Mafia1Online::Features::Npc {
             event.directionX = damaged.directionX;
             event.directionY = damaged.directionY;
             event.directionZ = damaged.directionZ;
+            // The host reports the car of a car impact as the attacker.
+            event.sourceCarId = event.hitType == 4 ? damaged.attackerId : 0;
             Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(event, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered, MafiaNet::ToGuid(*_simulation->Host()));
         });
         network->RegisterRPC<Shared::Npc::Retired>([this](const Shared::Npc::Retired &retired, MafiaNet::Packet *packet) {

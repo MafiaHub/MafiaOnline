@@ -2,15 +2,20 @@
 
 #include <integrations/server/instance.h>
 
+#include "features/bridge/bridge_service.h"
 #include "features/car/car_service.h"
 #include "features/car/debris_service.h"
 #include "features/combat/combat_service.h"
 #include "features/pickup/pickup_service.h"
 #include "features/npc/npc_service.h"
+#include "features/npc/police_service.h"
 #include "features/pedestrian/pedestrian_service.h"
 #include "features/player/player_service.h"
+#include "features/railway/railway_service.h"
 #include "features/simulation/simulation_service.h"
+#include "features/traffic/traffic_service.h"
 #include "features/world/mission_readiness.h"
+#include "features/world/props_service.h"
 #include "features/world/world_script_service.h"
 #include "features/mod/mod_service.h"
 
@@ -34,6 +39,9 @@ namespace Mafia1Online::Core {
         void PostInit() override;
         void PostUpdate() override;
         void UpdateCarControllers();
+        // Hands an accepted bullet impact to the car's simulation controller
+        // and the vehicleHit script event.
+        void SendCarHit(const Shared::Car::HitReport &report, float damage);
         bool AllowChat(uint64_t senderNetworkId);
         void PreShutdown() override;
         void OnPlayerConnect(const Framework::Integrations::Server::PlayerConnectionData &info) override;
@@ -78,6 +86,9 @@ namespace Mafia1Online::Core {
         Features::Npc::NpcService &Npcs() {
             return _npcs;
         }
+        Features::Npc::PoliceService &Police() {
+            return _police;
+        }
 
         Features::Pickup::PickupService &Pickups() {
             return _pickups;
@@ -98,7 +109,23 @@ namespace Mafia1Online::Core {
             return _simulation;
         }
 
+        Features::Traffic::TrafficService &Traffic() {
+            return _traffic;
+        }
+        Features::Railway::RailwayService &Railways() {
+            return _railways;
+        }
+        Features::Bridge::BridgeService &Bridges() {
+            return _bridges;
+        }
+        Features::World::PropsService &Props() {
+            return _props;
+        }
+
       private:
+        // A player, or the simulation host, that has loaded the mission.
+        bool CarPeer(MafiaNet::PeerGuid sender) const;
+
         Features::Mod::ModService _mods;
         std::string _mission;
         Shared::Entities::MissionEntity *_missionState = nullptr;
@@ -112,6 +139,11 @@ namespace Mafia1Online::Core {
         Features::Simulation::SimulationService _simulation;
         Features::Pedestrian::PedestrianService _pedestrians;
         Features::Npc::NpcService _npcs;
+        Features::Npc::PoliceService _police;
+        Features::Traffic::TrafficService _traffic;
+        Features::Railway::RailwayService _railways;
+        Features::Bridge::BridgeService _bridges;
+        Features::World::PropsService _props;
         std::unordered_set<uint64_t> _reportedCarLoadFailures;
         // Clients whose native car creation failed, per car. None of them can
         // simulate that car.

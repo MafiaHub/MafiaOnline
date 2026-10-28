@@ -5,6 +5,7 @@
 #include "shared/features/car/car_damage_state.h"
 #include "shared/features/car/car_movement.h"
 #include "shared/features/car/car_mesh_checkpoint.h"
+#include "shared/features/npc/npc_entity.h"
 #include "shared/features/player/player_entity.h"
 
 #include <core_modules.h>
@@ -134,7 +135,9 @@ namespace Mafia1Online::Features::Car {
         }
         const auto now      = std::chrono::steady_clock::now();
         const float elapsed = state.hasSequence ? std::clamp(std::chrono::duration<float>(now - state.lastMovement).count(), 0.0f, 3.0f) : 0.0f;
-        const float allowed = state.hasSequence ? 3.0f + 100.0f * elapsed : 10.0f;
+        // A host-driven car was spawned at the pose the host reported; its
+        // native physics kept going until the host adopted the network car.
+        const float allowed = state.hasSequence ? 3.0f + 100.0f * elapsed : car->hostDriven ? 60.0f : 10.0f;
         if (glm::distance(position, car->position) > allowed) {
             return false;
         }
@@ -880,6 +883,27 @@ namespace Mafia1Online::Features::Car {
         return true;
     }
 
+    bool CarService::MoveSeat(uint64_t networkId, uint8_t seat, uint64_t playerId, uint64_t playerGeneration) {
+        auto *car = Find(networkId);
+        // reM Do_ClimbInCarLR transfers native ownership before the climb
+        // animation. Move the durable seat in one server update.
+        const uint8_t from = static_cast<uint8_t>(seat ^ 1);
+        if (!car || car->terminalState != Shared::Entities::CarEntity::TerminalState::Active || seat >= car->seatCount ||
+            seat >= Shared::Entities::CarEntity::kMaxSeats || from >= car->seatCount || playerId == 0 ||
+            car->occupantIds[from] != playerId || car->occupantGenerations[from] != playerGeneration || car->occupantIds[seat] != 0) {
+            return false;
+        }
+        car->occupantIds[from] = 0;
+        car->occupantGenerations[from] = 0;
+        car->occupantIds[seat] = playerId;
+        car->occupantGenerations[seat] = playerGeneration;
+        car->seatActorId = playerId;
+        car->seatIndex = seat;
+        car->seatResult = Shared::Entities::CarEntity::SeatResult::Moved;
+        ++car->seatSequence;
+        return true;
+    }
+
     std::optional<CarService::SeatLocation> CarService::SeatForPlayer(uint64_t playerId, uint64_t playerGeneration) const {
         for (uint64_t id : _ids) {
             if (const auto *car = Find(id)) {
@@ -895,6 +919,27 @@ namespace Mafia1Online::Features::Car {
 
     std::optional<CarService::Eviction> CarService::TakeEviction() {
         return std::exchange(_lastEviction, std::nullopt);
+    }
+
+    std::optional<Shared::Car::SeatEvent> CarService::ApplyNpcThrowOut(uint64_t npcId, const glm::vec3 &npcPosition, uint64_t carId, uint8_t seat, uint64_t victimId,
+                                                                       uint64_t victimGeneration, uint64_t missionGeneration) {
+        auto *car = Find(carId);
+        // KICK_DRIVER throws from beside the seat (GetPlacementFromTCK1).
+        if (!car || car->terminalState != Shared::Entities::CarEntity::TerminalState::Active || car->missionGeneration != missionGeneration ||
+            seat >= car->seatCount || seat >= Shared::Entities::CarEntity::kMaxSeats || victimId == 0 || car->occupantIds[seat] != victimId ||
+            car->occupantGenerations[seat] != victimGeneration || glm::distance(npcPosition, car->position) > 12.0f ||
+            !RecordSeatOutcome(carId, seat, victimId, victimGeneration, Shared::Entities::CarEntity::SeatResult::Exited)) {
+            return std::nullopt;
+        }
+        Shared::Car::SeatEvent event;
+        event.carId = carId;
+        event.playerId = npcId;
+        event.spawnGeneration = Shared::Entities::NpcEntity::kSpawnGeneration;
+        event.missionGeneration = missionGeneration;
+        event.seat = seat;
+        event.action = Shared::Car::SeatAction::StealBegin;
+        event.serverSequence = ++_seatEventSequence;
+        return event;
     }
 
     std::optional<Shared::Car::SeatEvent> CarService::ApplySeatIntent(const Shared::Car::SeatIntent &intent, Shared::Entities::PlayerEntity &player, uint64_t missionGeneration) {
@@ -920,22 +965,9 @@ namespace Mafia1Online::Features::Car {
             return std::nullopt;
         }
         if (intent.action == Action::Move) {
-            // reM Do_ClimbInCarLR transfers native ownership before the
-            // climb animation. Move the durable seat in one server update.
-            const uint8_t from = static_cast<uint8_t>(intent.seat ^ 1);
-            if (from >= car->seatCount || car->occupantIds[from] != intent.playerId ||
-                car->occupantGenerations[from] != intent.spawnGeneration || car->occupantIds[intent.seat] != 0 ||
-                (intent.seat & ~1u) != (from & ~1u)) {
+            if (!MoveSeat(intent.carId, intent.seat, intent.playerId, intent.spawnGeneration)) {
                 return std::nullopt;
             }
-            car->occupantIds[from] = 0;
-            car->occupantGenerations[from] = 0;
-            car->occupantIds[intent.seat] = intent.playerId;
-            car->occupantGenerations[intent.seat] = intent.spawnGeneration;
-            car->seatActorId = intent.playerId;
-            car->seatIndex = intent.seat;
-            car->seatResult = Result::Moved;
-            ++car->seatSequence;
         } else if (intent.action == Action::EnterBegin) {
             if (car->occupantIds[intent.seat] != 0 || SeatForPlayer(intent.playerId, intent.spawnGeneration)) {
                 return std::nullopt;

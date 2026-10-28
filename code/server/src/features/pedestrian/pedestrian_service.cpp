@@ -246,6 +246,11 @@ namespace Mafia1Online::Features::Pedestrian {
         return true;
     }
 
+    uint64_t PedestrianService::NetworkIdOfKey(uint32_t key) const {
+        const auto walker = _walkers.find(key);
+        return walker == _walkers.end() ? 0 : walker->second.entity->GetNetworkID();
+    }
+
     Shared::Entities::PedestrianEntity *PedestrianService::Find(uint64_t networkId) const {
         const auto key = _keyByNetworkId.find(networkId);
         if (key == _keyByNetworkId.end()) {

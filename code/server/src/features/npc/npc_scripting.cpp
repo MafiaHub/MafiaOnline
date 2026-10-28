@@ -55,6 +55,16 @@ namespace Mafia1Online::Scripting {
             auto *self = v8pp::class_<Npc>::unwrap_object(info.GetIsolate(), info.This());
             info.GetReturnValue().Set(self ? self->GetInventory(info.GetIsolate()) : v8::Null(info.GetIsolate()).As<v8::Value>());
         }
+
+        // The car a stolen traffic car's driver was thrown out of, if it is
+        // still a vehicle of this mission.
+        void JS_NpcGetThrownFromVehicle(const v8::FunctionCallbackInfo<v8::Value> &info) {
+            auto *isolate = info.GetIsolate();
+            auto *self = v8pp::class_<Npc>::unwrap_object(isolate, info.This());
+            const auto *npc = self ? self->ResolveNpc() : nullptr;
+            const uint64_t carId = npc ? npc->thrownFromCarId : 0;
+            info.GetReturnValue().Set(carId && GetServer().Cars().Find(carId) ? WrapVehicle(isolate, carId) : v8::Null(isolate).As<v8::Value>());
+        }
     } // namespace
 
     Shared::Entities::NpcEntity *Npc::ResolveNpc() const {
@@ -135,7 +145,7 @@ namespace Mafia1Online::Scripting {
         cls.inherit<Framework::Scripting::Builtins::Entity>();
         cls.ctor<uint64_t>(docs("void", {param("id", "number", false, "Network entity identifier.")}, "Creates a handle for an existing NPC."));
         cls.function("toString", &Npc::ToString, docs("string", {}, "Formats this NPC for logging.", "The NPC ID, kind and model."));
-        cls.property("kind", &Npc::GetKind, property_docs("string", "What it is: \"gangster\"."));
+        cls.property("kind", &Npc::GetKind, property_docs("string", "What it is: \"gangster\", \"police\" or \"driver\" (a traffic driver thrown out of its car)."));
         cls.property("model", &Npc::GetModel, property_docs("string", "Retail .i3d model filename."));
         cls.property("position", &Npc::GetNpcPosition, property_docs("Vector3", "Position the simulation host last reported."));
         cls.property("heading", &Npc::GetHeading, property_docs("number", "Facing in radians."));
@@ -144,6 +154,9 @@ namespace Mafia1Online::Scripting {
         cls.property("weapon", &Npc::GetWeapon, property_docs("number", "Retail item id of the weapon in hand, 0 for none; 10 is the Thompson."));
         cls.prototype_function("getInventory", &JS_NpcGetInventory,
             docs("Inventory | null", {}, "Returns the selected weapon and the held weapons the server records for it.", "The inventory, or null when it no longer exists."));
+        cls.prototype_function("getThrownFromVehicle", &JS_NpcGetThrownFromVehicle,
+            docs("Vehicle | null", {}, "Returns the car a driver NPC was thrown out of when a player stole it.",
+                "The vehicle, or null for another kind of NPC or once that car is gone."));
         cls.function("remove", &Npc::Remove, docs("boolean", {}, "Asks the simulation host to retire it now; npcRetire follows.", "False when it no longer exists or no host is attached."));
         return cls;
     }

@@ -238,6 +238,19 @@ namespace Mafia1Online::Scripting {
     MAFIA1ONLINE_CAR_FIELD(double, GetNativeDamageRevision, car->nativeDamageRevision, 0.0)
     MAFIA1ONLINE_CAR_FIELD(double, GetMeshRevision, car->meshRevision, 0.0)
     MAFIA1ONLINE_CAR_FIELD(uint32_t, GetSeatCount, car->seatCount, 0u)
+    MAFIA1ONLINE_CAR_FIELD(bool, GetTraffic, car->trafficKey != 0, false)
+    MAFIA1ONLINE_CAR_FIELD(bool, GetHostDriven, car->hostDriven, false)
+
+    std::string Vehicle::GetTrafficKind() const {
+        const auto *car = ResolveCar();
+        switch (car ? car->trafficKind : CarEntity::TrafficKind::None) {
+        case CarEntity::TrafficKind::Civil: return "civil";
+        case CarEntity::TrafficKind::Police: return "police";
+        case CarEntity::TrafficKind::Mafia: return "mafia";
+        case CarEntity::TrafficKind::None: break;
+        }
+        return "none";
+    }
     MAFIA1ONLINE_CAR_FIELD(uint32_t, GetTerminalState, car->terminalState, 0u)
     MAFIA1ONLINE_CAR_FIELD(double, GetMissionGeneration, car->missionGeneration, 0.0)
     MAFIA1ONLINE_CAR_FIELD(double, GetEngineRevision, car->engineRevision, 0.0)
@@ -425,6 +438,7 @@ namespace Mafia1Online::Scripting {
         if (changed) {
             if (state == static_cast<uint32_t>(CarEntity::TerminalState::Exploded)) {
                 server.Debris().NoteExploded(_id);
+                server.Combat().ApplyCarExplosion(car->missionGeneration, car->position);
             }
             if (auto *committed = ResolveCar()) {
                 Features::Script::EmitCarEvent(server, "vehicleTerminal", *committed);
@@ -564,6 +578,12 @@ namespace Mafia1Online::Scripting {
         cls.property("nativeDamageRevision", &Vehicle::GetNativeDamageRevision, property_docs("number", "Revision of the native damage snapshot."));
         cls.property("meshRevision", &Vehicle::GetMeshRevision, property_docs("number", "Revision of the accepted deformation checkpoint."));
         cls.property("seatCount", &Vehicle::GetSeatCount, property_docs("number", "Number of seats, 1 to 8."));
+        cls.property("traffic", &Vehicle::GetTraffic,
+            property_docs("boolean", "True for a car of the city's traffic the simulation host spawned, also after a player took it (vehicleTrafficTaken)."));
+        cls.property("trafficKind", &Vehicle::GetTrafficKind,
+            property_docs("\"none\" | \"civil\" | \"police\" | \"mafia\"", "What kind of traffic car it is; none for a script car."));
+        cls.property("hostDriven", &Vehicle::GetHostDriven,
+            property_docs("boolean", "True while the simulation host drives it: its traffic driver or an NPC crew sits in it. Players only steal it or take a seat nobody holds."));
         cls.property("terminalState", &Vehicle::GetTerminalState, property_docs("number", "0 active, 1 exploded, 2 native water contact, 3 fall volume or native invalid fall."));
         cls.property("missionGeneration", &Vehicle::GetMissionGeneration, property_docs("number", "Mission generation the vehicle belongs to."));
         cls.property("engineRevision", &Vehicle::GetEngineRevision, property_docs("number", "Revision of the engine state."));

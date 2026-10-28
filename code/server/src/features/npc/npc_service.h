@@ -14,6 +14,11 @@
 namespace Mafia1Online::Shared::Entities {
     class NpcEntity;
 }
+namespace Mafia1Online::Shared::Npc {
+    struct CarHit;
+    struct Kick;
+    struct Seat;
+}
 
 namespace Mafia1Online::Features::Simulation {
     class SimulationService;
@@ -47,6 +52,9 @@ namespace Mafia1Online::Features::Npc {
             std::function<void(Shared::Entities::NpcEntity &)> retire;
             std::function<void(Shared::Entities::NpcEntity &, uint64_t attackerId, int32_t hitType, float damage, float healthBefore, float healthAfter)> damage;
             std::function<void(Shared::Entities::NpcEntity &, uint64_t killerId)> death;
+            // A police officer arrested (or, fine, fined) a player. The host
+            // never ends the game for it.
+            std::function<void(Shared::Entities::NpcEntity &, uint64_t playerId, bool fine)> caught;
         };
         // drop(weaponId, loaded, reserve, position, yaw) creates a world
         // pickup and returns its id or 0; dropped(pickupId, npcId) follows.
@@ -61,6 +69,22 @@ namespace Mafia1Online::Features::Npc {
         }
         void SetDrops(Drops drops) {
             _drops = std::move(drops);
+        }
+        // walkerId(key): network id of the host's reported walker, or 0.
+        void SetWalkerLookup(std::function<uint64_t(uint32_t)> walkerId) {
+            _walkerId = std::move(walkerId);
+        }
+        // kick(npcId, position, kick): it threw a player out of a car seat.
+        void SetKick(std::function<void(uint64_t, const glm::vec3 &, const Shared::Npc::Kick &)> kick) {
+            _kick = std::move(kick);
+        }
+        // seat(npcId, seat): it sat down in or left a car the host drives.
+        void SetSeat(std::function<void(uint64_t, const Shared::Npc::Seat &)> seat) {
+            _seat = std::move(seat);
+        }
+        // carHit(npcId, hit): one of its bullets hit a player's car body.
+        void SetCarHit(std::function<void(uint64_t, const Shared::Npc::CarHit &)> carHit) {
+            _carHit = std::move(carHit);
         }
         void SetMissionGeneration(uint64_t generation);
         void Update();
@@ -102,6 +126,10 @@ namespace Mafia1Online::Features::Npc {
         uint64_t _missionGeneration = 0;
         Events _events;
         Drops _drops;
+        std::function<void(uint64_t, const Shared::Npc::CarHit &)> _carHit;
+        std::function<uint64_t(uint32_t)> _walkerId;
+        std::function<void(uint64_t, const glm::vec3 &, const Shared::Npc::Kick &)> _kick;
+        std::function<void(uint64_t, const Shared::Npc::Seat &)> _seat;
         std::unordered_map<uint32_t, Record> _npcs;
         std::unordered_map<uint64_t, uint32_t> _keyByNetworkId;
     };

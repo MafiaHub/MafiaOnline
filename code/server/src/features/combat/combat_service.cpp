@@ -1046,6 +1046,7 @@ namespace Mafia1Online::Features::Combat {
         event.directionX = car->velocity.x;
         event.directionY = car->velocity.y;
         event.directionZ = car->velocity.z;
+        event.sourceCarId = report.carId;
         Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(event);
     }
 
@@ -1079,6 +1080,47 @@ namespace Mafia1Online::Features::Combat {
         // NPC's native Hit as HIT_TYPE_SNIPER on the torso.
         const float damage = (*impactSpeed - 2.5f) * 4.2f;
         _npcTargets.hit(report.targetId, report.carId, 4, 5, damage, car->velocity, contact, 0);
+    }
+
+    bool CombatService::ApplyRailwayHit(uint64_t targetId, uint64_t missionGeneration, uint64_t targetSpawnGeneration, float damage, const glm::vec3 &direction) {
+        auto *target = _players->FindByNetworkId(targetId);
+        if (!target || !target->spawned || !target->alive || target->missionGeneration != missionGeneration || target->spawnGeneration != targetSpawnGeneration ||
+            _cars->SeatForPlayer(targetId, targetSpawnGeneration).has_value() || !std::isfinite(damage) || damage <= 0.0f || !std::isfinite(direction.x) ||
+            !std::isfinite(direction.y) || !std::isfinite(direction.z)) {
+            return false;
+        }
+        // C_railway::Collide sweeps every frame; one contact is one hit.
+        const auto key = std::make_pair(uint64_t {0}, targetId);
+        const auto now = Clock::now();
+        if (const auto previous = _vehicleImpacts.find(key); previous != _vehicleImpacts.end() && now - previous->second < std::chrono::milliseconds(500)) {
+            return false;
+        }
+        if (_vehicleImpacts.size() >= 1024) {
+            _vehicleImpacts.clear();
+        }
+        _vehicleImpacts[key] = now;
+        if (!SetHealth(targetId, target->health - damage, 0, std::nullopt, DamageCause::Railway)) {
+            return false;
+        }
+        auto *victim = FindCurrent(targetId);
+        if (!victim) {
+            return true;
+        }
+        Shared::Combat::DamageEvent event;
+        event.targetNetworkId = targetId;
+        event.missionGeneration = missionGeneration;
+        event.targetSpawnGeneration = targetSpawnGeneration;
+        event.targetRevision = victim->state.revision;
+        event.bodyPart = 5;
+        // HIT_TYPE_MELEE_STRIKE knocks the human down; clients replay a
+        // knockdown (1).
+        event.hitType = 1;
+        event.damage = damage;
+        event.directionX = direction.x;
+        event.directionY = direction.y;
+        event.directionZ = direction.z;
+        Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(event);
+        return true;
     }
 
     void CombatService::PublishDamage(const Shared::Combat::HitReport &report, float damage, uint8_t hitType, std::optional<uint8_t> weaponId) {

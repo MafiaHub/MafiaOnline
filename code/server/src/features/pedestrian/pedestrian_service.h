@@ -79,6 +79,8 @@ namespace Mafia1Online::Features::Pedestrian {
         // Asks the host to retire the walker now; pedestrianRetire follows.
         bool Remove(uint64_t networkId);
         Shared::Entities::PedestrianEntity *Find(uint64_t networkId) const;
+        // Network id of the walker the host reported with this key, or 0.
+        uint64_t NetworkIdOfKey(uint32_t key) const;
         void ForEach(const std::function<void(Shared::Entities::PedestrianEntity &)> &visit) const;
 
         size_t Count() const {

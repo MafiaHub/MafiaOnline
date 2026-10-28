@@ -5,12 +5,15 @@
 #include "core/server.h"
 #include "features/car/vehicle_scripting.h"
 #include "features/npc/npc_scripting.h"
+#include "features/npc/police_scripting.h"
 #include "features/pedestrian/pedestrian_scripting.h"
 #include "features/combat/combat_service.h"
 #include "features/combat/weapon_scripting.h"
 #include "features/door/door_scripting.h"
 #include "features/pickup/pickup_scripting.h"
 #include "features/player/player_scripting.h"
+#include "features/bridge/bridge_scripting.h"
+#include "features/railway/railway_scripting.h"
 #include "features/world/world_scripting.h"
 #include "shared/features/car/car_debris_entity.h"
 #include "shared/features/car/car_entity.h"
@@ -47,6 +50,7 @@ namespace Mafia1Online::Features::Script {
             case Combat::DamageCause::Fall: return "fall";
             case Combat::DamageCause::Drowning: return "drowning";
             case Combat::DamageCause::Vehicle: return "vehicle";
+            case Combat::DamageCause::Railway: return "railway";
             }
             return "unknown";
         }
@@ -75,6 +79,9 @@ namespace Mafia1Online::Features::Script {
         Scripting::Vehicle::Register(isolate, global);
         Scripting::Pedestrian::Register(isolate, global);
         Scripting::Npc::Register(isolate, global);
+        Scripting::Police::Register(isolate, global);
+        Scripting::Railway::Register(isolate, global);
+        Scripting::Bridge::Register(isolate, global);
         Scripting::Pickup::Register(isolate, global);
         Scripting::Door::Register(isolate, global);
         Scripting::Weapon::Register(isolate, global);
@@ -274,10 +281,83 @@ namespace Mafia1Online::Features::Script {
         });
     }
 
-    void EmitCarHitEvent(Core::Server &, const Shared::Car::HitReport &hit, float damage) {
+    void EmitPlayerCrime(Core::Server &, uint64_t playerId, uint16_t crime) {
+        const char *name = Scripting::PoliceCrimeName(crime);
+        if (!name) {
+            return;
+        }
+        EmitEvent("playerCrime", [&](v8::Isolate *isolate, v8::Local<v8::Context> context, EventArguments &arguments) {
+            auto info = v8::Object::New(isolate);
+            SetField(isolate, context, info, "crime", v8pp::to_v8(isolate, name));
+            arguments.push_back(WrapPlayer(isolate, playerId));
+            arguments.push_back(info);
+        });
+    }
+
+    void EmitPlayerWanted(Core::Server &, uint64_t playerId, uint8_t level, uint8_t previous) {
+        EmitEvent("playerWantedChange", [&](v8::Isolate *isolate, v8::Local<v8::Context> context, EventArguments &arguments) {
+            auto info = v8::Object::New(isolate);
+            SetField(isolate, context, info, "level", v8::Uint32::New(isolate, level));
+            SetField(isolate, context, info, "previous", v8::Uint32::New(isolate, previous));
+            arguments.push_back(WrapPlayer(isolate, playerId));
+            arguments.push_back(info);
+        });
+    }
+
+    void EmitPlayerArrest(Core::Server &, uint64_t playerId, Shared::Entities::NpcEntity &officer, bool fine) {
+        EmitEvent("playerArrest", [&](v8::Isolate *isolate, v8::Local<v8::Context> context, EventArguments &arguments) {
+            auto info = v8::Object::New(isolate);
+            SetField(isolate, context, info, "kind", v8pp::to_v8(isolate, fine ? "fine" : "arrest"));
+            arguments.push_back(WrapPlayer(isolate, playerId));
+            arguments.push_back(WrapNpc(isolate, officer.GetNetworkID()));
+            arguments.push_back(info);
+        });
+    }
+
+    void EmitTrafficTaken(Core::Server &, uint64_t carId, uint64_t playerId, bool stolen) {
+        EmitEvent("vehicleTrafficTaken", [&](v8::Isolate *isolate, v8::Local<v8::Context> context, EventArguments &arguments) {
+            auto info = v8::Object::New(isolate);
+            SetField(isolate, context, info, "stolen", v8::Boolean::New(isolate, stolen));
+            arguments.push_back(WrapVehicle(isolate, carId));
+            arguments.push_back(WrapPlayer(isolate, playerId));
+            arguments.push_back(info);
+        });
+    }
+
+    void EmitTrafficStealRefused(Core::Server &, uint64_t carId, uint64_t playerId) {
+        EmitEvent("vehicleStealRefused", [&](v8::Isolate *isolate, v8::Local<v8::Context>, EventArguments &arguments) {
+            arguments.push_back(WrapVehicle(isolate, carId));
+            arguments.push_back(WrapPlayer(isolate, playerId));
+        });
+    }
+
+    void EmitPlayerThrownOut(Core::Server &, uint64_t playerId, uint64_t carId, uint8_t seat, uint64_t npcId) {
+        EmitEvent("playerThrownOut", [&](v8::Isolate *isolate, v8::Local<v8::Context> context, EventArguments &arguments) {
+            auto info = v8::Object::New(isolate);
+            SetField(isolate, context, info, "seat", v8::Uint32::New(isolate, seat));
+            SetField(isolate, context, info, "by", WrapNpc(isolate, npcId));
+            arguments.push_back(WrapPlayer(isolate, playerId));
+            arguments.push_back(WrapVehicle(isolate, carId));
+            arguments.push_back(info);
+        });
+    }
+
+    void EmitRailwayHit(Core::Server &server, uint64_t playerId, uint8_t index, float damage) {
+        EmitEvent("railwayHitPlayer", [&](v8::Isolate *isolate, v8::Local<v8::Context> context, EventArguments &arguments) {
+            auto info = v8::Object::New(isolate);
+            const auto *railway = server.Railways().Find(index);
+            SetField(isolate, context, info, "railway", railway ? Scripting::RailwayInfo(isolate, context, *railway) : v8::Null(isolate).As<v8::Value>());
+            SetField(isolate, context, info, "damage", Number(isolate, damage));
+            arguments.push_back(WrapPlayer(isolate, playerId));
+            arguments.push_back(info);
+        });
+    }
+
+    void EmitCarHitEvent(Core::Server &server, const Shared::Car::HitReport &hit, float damage) {
         EmitEvent("vehicleHit", [&](v8::Isolate *isolate, v8::Local<v8::Context> context, EventArguments &arguments) {
             auto info = v8::Object::New(isolate);
-            SetField(isolate, context, info, "shooter", WrapPlayer(isolate, hit.shooterId));
+            // A simulation host NPC shoots cars too.
+            SetField(isolate, context, info, "shooter", server.Npcs().Find(hit.shooterId) ? WrapNpc(isolate, hit.shooterId) : WrapPlayer(isolate, hit.shooterId));
             SetField(isolate, context, info, "damage", Number(isolate, damage));
             SetField(isolate, context, info, "position", PlainVector(isolate, context, {hit.hitX, hit.hitY, hit.hitZ}));
             SetField(isolate, context, info, "shotSequence", v8::Uint32::New(isolate, hit.shotSequence));

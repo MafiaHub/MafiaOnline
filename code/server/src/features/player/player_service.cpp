@@ -8,6 +8,7 @@
 #include "shared/features/player/player_camera_view.h"
 #include "shared/features/player/player_movement.h"
 #include "shared/features/player/player_native_pose.h"
+#include "shared/features/railway/railway_report.h"
 
 #include <core_modules.h>
 #include <logging/logger.h>
@@ -200,6 +201,7 @@ namespace Mafia1Online::Features::Player {
         player->health            = 100.0f;
         player->spawned           = true;
         player->alive             = true;
+        player->railway           = Shared::Railway::kNoRailway;
         if (auto it = _sessions.find(GuidForNetworkId(networkId)); it != _sessions.end()) {
             it->second.hasSequence  = false;
             it->second.lastMovement = {};
@@ -222,6 +224,7 @@ namespace Mafia1Online::Features::Player {
         player->spawned  = false;
         player->alive    = false;
         player->velocity = glm::vec3(0.0f);
+        player->railway  = Shared::Railway::kNoRailway;
         return true;
     }
 
@@ -285,6 +288,7 @@ namespace Mafia1Online::Features::Player {
             player->spawned           = false;
             player->alive             = false;
             player->velocity          = glm::vec3(0.0f);
+            player->railway           = Shared::Railway::kNoRailway;
         }
     }
 
@@ -371,6 +375,13 @@ namespace Mafia1Online::Features::Player {
             return;
         }
         const auto now = std::chrono::steady_clock::now();
+        // Aboard a railway: a wagon is about 15 units long; a seat never
+        // holds both a car and a railway, and the railway the host reported
+        // must be at the player.
+        const glm::vec3 railwayLocal(movement.railwayX, movement.railwayY, movement.railwayZ);
+        const bool riding = movement.railway < Shared::Railway::kMaxRailways && movement.railwayPart <= Shared::Railway::kMaxWagons && !SeatedCar(*player) &&
+                            std::isfinite(railwayLocal.x) && std::isfinite(railwayLocal.y) && std::isfinite(railwayLocal.z) && glm::length(railwayLocal) < 20.0f &&
+                            std::isfinite(movement.railwayYaw) && _railwayNear && _railwayNear(movement.railway, position);
         if (const auto *car = SeatedCar(*player)) {
             // A seated human moves with the car, which can outrun the on-foot
             // bound and be teleported by scripts. Bound it to the car instead;
@@ -381,6 +392,13 @@ namespace Mafia1Online::Features::Player {
             const float elapsed = session.hasSequence ? std::chrono::duration<float>(now - session.lastMovement).count() : 0.0f;
             player->velocity    = elapsed > 0.001f ? (position - player->position) / elapsed : glm::vec3(0.0f);
             // Driving downhill is not a fall.
+            session.recentHeights.clear();
+        }
+        else if (riding) {
+            // Carried by the railway, which outruns the on-foot bound; the
+            // metro's ramp down from its raised track is not a fall either.
+            const float elapsed = session.hasSequence ? std::chrono::duration<float>(now - session.lastMovement).count() : 0.0f;
+            player->velocity    = elapsed > 0.001f ? (position - player->position) / elapsed : glm::vec3(0.0f);
             session.recentHeights.clear();
         }
         else if (session.hasSequence) {
@@ -398,6 +416,10 @@ namespace Mafia1Online::Features::Player {
         player->position     = position;
         player->rotation     = glm::angleAxis(movement.yaw, glm::vec3(0.0f, 1.0f, 0.0f));
         player->locomotion   = movement.locomotion;
+        player->railway      = riding ? movement.railway : Shared::Railway::kNoRailway;
+        player->railwayPart  = riding ? movement.railwayPart : 0;
+        player->railwayLocal = riding ? railwayLocal : glm::vec3(0.0f);
+        player->railwayYaw   = riding ? movement.railwayYaw : 0.0f;
         session.lastSequence = movement.sequence;
         session.hasSequence  = true;
         session.lastMovement = now;

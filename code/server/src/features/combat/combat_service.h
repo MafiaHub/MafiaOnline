@@ -34,7 +34,7 @@ namespace Mafia1Online::Shared::Entities {
 }
 
 namespace Mafia1Online::Features::Combat {
-    enum class DamageCause : uint8_t { Script, Firearm, Melee, Explosion, Fire, Fall, Drowning, Vehicle };
+    enum class DamageCause : uint8_t { Script, Firearm, Melee, Explosion, Fire, Fall, Drowning, Vehicle, Railway };
 
     class CombatService final {
       public:
@@ -119,6 +119,12 @@ namespace Mafia1Online::Features::Combat {
         // Script world effects, damaging players from their server positions
         // with the retail explosion falloff and fire tick.
         void ApplyExplosion(uint64_t sourceId, uint64_t missionGeneration, const glm::vec3 &position, float radius, float damage);
+        // A car the server just committed as exploded: C_car::CarExplosion
+        // (0x421d60) passes radius 10 and damage 200 to NewExplosion. Every
+        // client replays it natively, where players' own hits are suppressed.
+        void ApplyCarExplosion(uint64_t missionGeneration, const glm::vec3 &position) {
+            ApplyExplosion(0, missionGeneration, position, 10.0f, 200.0f);
+        }
         void StartFire(uint64_t sourceId, uint64_t missionGeneration, const glm::vec3 &position, std::chrono::milliseconds life, float radius, float damage);
         // A hit the simulation host's NPC landed on a player's replica, with
         // the native Hit damage before the body part scale. A bullet (hit
@@ -126,6 +132,10 @@ namespace Mafia1Online::Features::Combat {
         // the car the target sits in. A melee knockdown (1) applies as given.
         void ApplyNpcHit(uint64_t sourceId, uint64_t targetId, uint64_t missionGeneration, uint64_t targetSpawnGeneration, uint8_t hitType, uint8_t bodyPart, float damage,
                          const glm::vec3 &direction, uint8_t weaponId);
+        // A tram or metro train of the simulation host ran into a player on
+        // foot there; damage is C_human::Collision's (|v| - 2.5) * 4.2.
+        // Returns whether the hit was applied.
+        bool ApplyRailwayHit(uint64_t targetId, uint64_t missionGeneration, uint64_t targetSpawnGeneration, float damage, const glm::vec3 &direction);
 
       private:
         struct Session {

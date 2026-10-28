@@ -16,6 +16,10 @@ namespace Mafia1Online::Features::Simulation {
     // it holds no avatar, readiness vote or car control.
     class SimulationService final {
       public:
+        // Covers the whole Lost Heaven map from the viewer's origin; the
+        // interest grid clamps the query to its world bounds.
+        static constexpr float kViewerRange = 20000.0f;
+
         // An empty token disables the simulation host.
         void Init(std::string token);
         // True when guid joined with a simulation ticket. The host is attached

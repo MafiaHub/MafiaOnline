@@ -60,6 +60,9 @@ namespace Mafia1Online::Features::Simulation {
         // Streamed to the host alone; every other entity the host needs is
         // always visible or owned by it.
         _viewer->streaming.targetGUID = guid;
+        // The host drives traffic near every player, so it must receive the
+        // range-streamed cars it controls wherever they are on the map.
+        _viewer->streaming.range = kViewerRange;
         _viewer->SetVirtualWorld(MafiaNet::VIRTUAL_WORLD_GLOBAL);
         replication->SetViewer(guid, _viewer);
         _host = guid;

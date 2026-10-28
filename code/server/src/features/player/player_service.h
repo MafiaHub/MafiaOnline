@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <unordered_map>
 #include <utility>
 
@@ -48,6 +49,11 @@ namespace Mafia1Online::Features::Player {
         MafiaNet::PeerGuid GuidForNetworkId(uint64_t networkId) const;
         bool SuggestedSpawnPosition(uint64_t networkId, glm::vec3 &position) const;
         bool HasRecentFatalFall(uint64_t networkId) const;
+        // Whether a position is aboard-close to a railway the host reported
+        // (RailwayService::IsNear): a rider's claim is taken only then.
+        void SetRailwayCheck(std::function<bool(uint8_t, const glm::vec3 &)> check) {
+            _railwayNear = std::move(check);
+        }
         template <typename Callback>
         void ForEach(Callback &&callback) const {
             for (const auto &[guid, session] : _sessions) {
@@ -65,6 +71,7 @@ namespace Mafia1Online::Features::Player {
 
       private:
         std::string UniqueNickname(std::string_view requested, uint64_t networkId) const;
+        std::function<bool(uint8_t, const glm::vec3 &)> _railwayNear;
         struct Session {
             uint64_t networkId    = 0;
             uint32_t lastSequence = 0;

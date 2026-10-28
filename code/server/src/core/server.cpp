@@ -14,6 +14,7 @@
 #include "shared/features/chat/text_policy.h"
 #include "shared/features/door/door_intent.h"
 #include "shared/features/npc/npc_entity.h"
+#include "shared/features/npc/npc_report.h"
 #include "shared/features/pedestrian/pedestrian_entity.h"
 #include "shared/features/player/player_entity.h"
 #include "shared/features/world/mission_catalog.h"
@@ -28,6 +29,7 @@
 #include "features/player/player_scripting.h"
 #include "features/script/script_events.h"
 #include "features/script/script_runtime.h"
+#include "shared/features/traffic/traffic_report.h"
 #include "features/world/world_scripting.h"
 
 #include <core_modules.h>
@@ -105,11 +107,15 @@ namespace Mafia1Online::Core {
         _npcs.RegisterRPC(_simulation, _players, _combat);
         _npcs.SetEvents({
             [this](Shared::Entities::NpcEntity &npc) { Features::Script::EmitNpcEvent(*this, "npcSpawn", npc); },
-            [this](Shared::Entities::NpcEntity &npc) { Features::Script::EmitNpcEvent(*this, "npcRetire", npc); },
+            [this](Shared::Entities::NpcEntity &npc) {
+                _traffic.OnNpcGone(npc.GetNetworkID());
+                Features::Script::EmitNpcEvent(*this, "npcRetire", npc);
+            },
             [this](Shared::Entities::NpcEntity &npc, uint64_t attackerId, int32_t hitType, float damage, float before, float after) {
                 Features::Script::EmitNpcDamage(*this, npc, attackerId, hitType, damage, before, after);
             },
             [this](Shared::Entities::NpcEntity &npc, uint64_t killerId) { Features::Script::EmitNpcDeath(*this, npc, killerId); },
+            [this](Shared::Entities::NpcEntity &officer, uint64_t playerId, bool fine) { Features::Script::EmitPlayerArrest(*this, playerId, officer, fine); },
         });
         _pickups.RegisterRPC(_players, _combat, _cars);
         _combat.SetDropCallback([this](uint64_t playerId, uint8_t weaponId, uint16_t loaded, uint16_t reserve, const glm::vec3 &position, float yaw) {
@@ -123,6 +129,76 @@ namespace Mafia1Online::Core {
                 return _pickups.Create(weaponId, position, yaw, loaded, reserve, MissionGeneration(), Features::Npc::NpcService::kDropLifetime);
             },
             [this](uint64_t pickupId, uint64_t npcId) { Features::Script::EmitPickupEvent(*this, "weaponDropped", pickupId, npcId); },
+        });
+        // Seat outcomes stay the server's: the host only reports the native
+        // throw, and players replay it as they replay a player's steal.
+        _npcs.SetKick([this](uint64_t npcId, const glm::vec3 &position, const Shared::Npc::Kick &kick) {
+            if (auto event = _cars.ApplyNpcThrowOut(npcId, position, kick.carId, kick.seat, kick.victimNetworkId, kick.victimSpawnGeneration, MissionGeneration())) {
+                Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(*event);
+                auto exit = *event;
+                exit.playerId = kick.victimNetworkId;
+                exit.spawnGeneration = kick.victimSpawnGeneration;
+                exit.action = Shared::Car::SeatAction::Exit;
+                Features::Script::EmitSeatEvent(*this, exit);
+                Features::Script::EmitPlayerThrownOut(*this, kick.victimNetworkId, kick.carId, kick.seat, npcId);
+            }
+        });
+        _police.RegisterRPC(_simulation, _players);
+        _traffic.RegisterRPC(_simulation, _players, _cars);
+        _traffic.SetEvents({
+            [this](uint64_t carId, uint64_t playerId, bool stolen) { Features::Script::EmitTrafficTaken(*this, carId, playerId, stolen); },
+            [this](uint64_t carId, uint64_t playerId) { Features::Script::EmitTrafficStealRefused(*this, carId, playerId); },
+        });
+        _railways.RegisterRPC(_simulation, _players, _combat);
+        _players.SetRailwayCheck([this](uint8_t index, const glm::vec3 &position) { return _railways.IsNear(index, position); });
+        _bridges.RegisterRPC(_simulation, _players);
+        _props.RegisterRPC(_simulation, _players);
+        _railways.SetHitCallback([this](uint64_t playerId, uint8_t index, float damage) { Features::Script::EmitRailwayHit(*this, playerId, index, damage); });
+        // Host NPCs take and leave seats of the cars the host drives; players
+        // replay an animated change as they replay a player's.
+        _npcs.SetSeat([this](uint64_t npcId, const Shared::Npc::Seat &seat) {
+            Shared::Car::SeatEvent event;
+            if (_traffic.ApplyNpcSeat(npcId, seat, event)) {
+                Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(event);
+            }
+        });
+        _police.SetEvents({
+            [this](uint64_t playerId, uint16_t crime) { Features::Script::EmitPlayerCrime(*this, playerId, crime); },
+            [this](uint64_t playerId, uint8_t level, uint8_t previous) { Features::Script::EmitPlayerWanted(*this, playerId, level, previous); },
+        });
+        _npcs.SetWalkerLookup([this](uint32_t key) { return _pedestrians.NetworkIdOfKey(key); });
+        // The host is trusted with its NPCs' shots, as with their hits on
+        // players; the car must still be a live car of this mission.
+        _npcs.SetCarHit([this](uint64_t npcId, const Shared::Npc::CarHit &npcHit) {
+            const auto *car = _cars.Find(npcHit.carId);
+            const glm::vec3 localHit(npcHit.localHitX, npcHit.localHitY, npcHit.localHitZ);
+            const glm::vec3 localDirection(npcHit.localDirectionX, npcHit.localDirectionY, npcHit.localDirectionZ);
+            if (!car || car->missionGeneration != MissionGeneration() || car->simulationControllerGuid == 0 ||
+                car->terminalState != Shared::Entities::CarEntity::TerminalState::Active || glm::length(localHit) > 15.0f ||
+                glm::length(localDirection) < 0.8f || glm::length(localDirection) > 1.2f) {
+                return;
+            }
+            Shared::Car::HitReport report;
+            report.carId = npcHit.carId;
+            report.missionGeneration = npcHit.missionGeneration;
+            report.shooterId = npcId;
+            report.shooterSpawnGeneration = Shared::Entities::NpcEntity::kSpawnGeneration;
+            report.directionX = npcHit.directionX;
+            report.directionY = npcHit.directionY;
+            report.directionZ = npcHit.directionZ;
+            report.hitX = npcHit.hitX;
+            report.hitY = npcHit.hitY;
+            report.hitZ = npcHit.hitZ;
+            report.normalX = npcHit.normalX;
+            report.normalY = npcHit.normalY;
+            report.normalZ = npcHit.normalZ;
+            report.localHitX = npcHit.localHitX;
+            report.localHitY = npcHit.localHitY;
+            report.localHitZ = npcHit.localHitZ;
+            report.localDirectionX = npcHit.localDirectionX;
+            report.localDirectionY = npcHit.localDirectionY;
+            report.localDirectionZ = npcHit.localDirectionZ;
+            SendCarHit(report, npcHit.damage);
         });
         _pickups.SetTakenCallback([this](uint64_t pickupId, uint64_t playerId, uint8_t) {
             Features::Script::EmitPickupEvent(*this, "pickupTaken", pickupId, playerId);
@@ -167,7 +243,7 @@ namespace Mafia1Online::Core {
         });
         Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Car::Movement>([this](const Shared::Car::Movement &movement, MafiaNet::Packet *packet) {
             const auto sender = MafiaNet::ToPeerGuid(packet->guid);
-            if (_players.FindByGuid(sender) && _missionReadiness.IsReady(sender) && movement.missionGeneration == MissionGeneration()) {
+            if (CarPeer(sender) && movement.missionGeneration == MissionGeneration()) {
                 auto *car = _cars.Find(movement.networkId);
                 const int32_t oldGear = car ? car->gear : 0;
                 const uint32_t oldLights = car ? car->lightState : 0;
@@ -194,7 +270,7 @@ namespace Mafia1Online::Core {
         });
         Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Car::EngineState>([this](const Shared::Car::EngineState &state, MafiaNet::Packet *packet) {
             const auto sender = MafiaNet::ToPeerGuid(packet->guid);
-            if (_players.FindByGuid(sender) && _missionReadiness.IsReady(sender) && state.missionGeneration == MissionGeneration()) {
+            if (CarPeer(sender) && state.missionGeneration == MissionGeneration()) {
                 auto *car        = _cars.Find(state.networkId);
                 const bool oldOn = car && car->engineOn;
                 if (_cars.ApplyEngineState(state, static_cast<uint64_t>(sender)) && car && oldOn != car->engineOn) {
@@ -204,7 +280,7 @@ namespace Mafia1Online::Core {
         });
         Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Car::DamageReport>([this](const Shared::Car::DamageReport &report, MafiaNet::Packet *packet) {
             const auto sender = MafiaNet::ToPeerGuid(packet->guid);
-            if (_players.FindByGuid(sender) && _missionReadiness.IsReady(sender) && report.missionGeneration == MissionGeneration() &&
+            if (CarPeer(sender) && report.missionGeneration == MissionGeneration() &&
                 _cars.ApplyDamageReport(report, static_cast<uint64_t>(sender))) {
                 if (auto *car = _cars.Find(report.networkId)) {
                     Features::Script::EmitCarEvent(*this, "vehicleDamage", *car);
@@ -213,7 +289,7 @@ namespace Mafia1Online::Core {
         });
         Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Car::DebrisSpawnReport>([this](const Shared::Car::DebrisSpawnReport &report, MafiaNet::Packet *packet) {
             const auto sender = MafiaNet::ToPeerGuid(packet->guid);
-            if (_players.FindByGuid(sender) && _missionReadiness.IsReady(sender) &&
+            if (CarPeer(sender) &&
                 report.missionGeneration == MissionGeneration()) {
                 if (auto *debris = _debris.ApplySpawn(report, static_cast<uint64_t>(sender), MissionGeneration(), _cars)) {
                     Features::Script::EmitCarDebrisEvent(*this, "vehiclePartDetached", *debris);
@@ -222,14 +298,14 @@ namespace Mafia1Online::Core {
         });
         Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Car::DebrisMovement>([this](const Shared::Car::DebrisMovement &movement, MafiaNet::Packet *packet) {
             const auto sender = MafiaNet::ToPeerGuid(packet->guid);
-            if (_players.FindByGuid(sender) && _missionReadiness.IsReady(sender) &&
+            if (CarPeer(sender) &&
                 movement.missionGeneration == MissionGeneration()) {
                 _debris.ApplyMovement(movement, static_cast<uint64_t>(sender));
             }
         });
         Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Car::DebrisGone>([this](const Shared::Car::DebrisGone &gone, MafiaNet::Packet *packet) {
             const auto sender = MafiaNet::ToPeerGuid(packet->guid);
-            if (_players.FindByGuid(sender) && _missionReadiness.IsReady(sender) &&
+            if (CarPeer(sender) &&
                 gone.missionGeneration == MissionGeneration()) {
                 _debris.ApplyGone(gone, static_cast<uint64_t>(sender));
             }
@@ -249,33 +325,11 @@ namespace Mafia1Online::Core {
                 !_combat.ConsumeCarImpact(report, sender)) {
                 return;
             }
-            Shared::Car::AuthoritativeHit hit;
-            hit.carId = report.carId;
-            hit.missionGeneration = report.missionGeneration;
-            hit.controllerGuid = car->simulationControllerGuid;
-            hit.serverSequence = ++_carHitSequence;
-            hit.damage = evidence->damage;
-            hit.directionX = report.directionX;
-            hit.directionY = report.directionY;
-            hit.directionZ = report.directionZ;
-            hit.hitX = report.hitX;
-            hit.hitY = report.hitY;
-            hit.hitZ = report.hitZ;
-            hit.normalX = report.normalX;
-            hit.normalY = report.normalY;
-            hit.normalZ = report.normalZ;
-            hit.localHitX = report.localHitX;
-            hit.localHitY = report.localHitY;
-            hit.localHitZ = report.localHitZ;
-            hit.localDirectionX = report.localDirectionX;
-            hit.localDirectionY = report.localDirectionY;
-            hit.localDirectionZ = report.localDirectionZ;
-            Framework::CoreModules::GetNetworkPeer()->SendRPC(hit, MafiaNet::ToGuid(static_cast<MafiaNet::PeerGuid>(hit.controllerGuid)));
-            Features::Script::EmitCarHitEvent(*this, report, hit.damage);
+            SendCarHit(report, evidence->damage);
         });
         Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Car::MeshReportChunk>([this](const Shared::Car::MeshReportChunk &chunk, MafiaNet::Packet *packet) {
             const auto sender = MafiaNet::ToPeerGuid(packet->guid);
-            if (_players.FindByGuid(sender) && _missionReadiness.IsReady(sender) &&
+            if (CarPeer(sender) &&
                 chunk.missionGeneration == MissionGeneration() &&
                 _cars.ApplyMeshReportChunk(chunk, static_cast<uint64_t>(sender))) {
                 if (auto *car = _cars.Find(chunk.networkId)) {
@@ -285,7 +339,7 @@ namespace Mafia1Online::Core {
         });
         Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Car::MeshCheckpointRequest>([this](const Shared::Car::MeshCheckpointRequest &request, MafiaNet::Packet *packet) {
             const auto sender = MafiaNet::ToPeerGuid(packet->guid);
-            if (_players.FindByGuid(sender) && _missionReadiness.IsReady(sender) &&
+            if (CarPeer(sender) &&
                 request.missionGeneration == MissionGeneration()) {
                 _cars.SendMeshCheckpoint(request.networkId, static_cast<uint64_t>(sender));
             }
@@ -296,7 +350,7 @@ namespace Mafia1Online::Core {
         const auto applyTerminal = [this](uint64_t networkId, uint64_t missionGeneration, MafiaNet::PeerGuid sender,
                                           Shared::Entities::CarEntity::TerminalState terminal) {
             auto *car = _cars.Find(networkId);
-            if (!_players.FindByGuid(sender) || !_missionReadiness.IsReady(sender) || !car || car->missionGeneration != MissionGeneration() || missionGeneration != car->missionGeneration || car->simulationControllerGuid != static_cast<uint64_t>(sender)
+            if (!CarPeer(sender) || !car || car->missionGeneration != MissionGeneration() || missionGeneration != car->missionGeneration || car->simulationControllerGuid != static_cast<uint64_t>(sender)
                 || car->terminalState != Shared::Entities::CarEntity::TerminalState::Active) {
                 return;
             }
@@ -319,6 +373,7 @@ namespace Mafia1Online::Core {
             if (_cars.SetTerminalState(networkId, terminal)) {
                 if (terminal == Shared::Entities::CarEntity::TerminalState::Exploded) {
                     _debris.NoteExploded(networkId);
+                    _combat.ApplyCarExplosion(car->missionGeneration, car->position);
                 }
                 // Water and fall handlers can inspect the seats before combat
                 // clears them. A handler may destroy the car immediately.
@@ -358,9 +413,26 @@ namespace Mafia1Online::Core {
             if (!player || !_missionReadiness.IsReady(sender)) {
                 return;
             }
+            // A car the simulation host drives is a player's only after a
+            // takeover, done once the seat intent itself is accepted; nobody
+            // else sits in it.
+            const auto gate = _traffic.CheckSeatIntent(intent, *player);
+            if (gate == Features::Traffic::TrafficService::SeatGate::Reject) {
+                return;
+            }
             if (auto event = _cars.ApplySeatIntent(intent, *player, MissionGeneration())) {
+                if (gate == Features::Traffic::TrafficService::SeatGate::Takeover) {
+                    _traffic.CompleteTakeover(intent.carId, *player);
+                }
+                const bool npcThrown = gate == Features::Traffic::TrafficService::SeatGate::NpcThrow;
+                if (npcThrown) {
+                    _traffic.OnNpcThrown(intent.carId, intent.seat);
+                }
+                // Every client, the host included, replays the throw; the
+                // host's replay throws its own NPC out natively.
                 Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(*event);
-                if (const auto evicted = _cars.TakeEviction()) {
+                // An NPC is no player: no vehiclePlayerExited for it.
+                if (const auto evicted = _cars.TakeEviction(); evicted && !npcThrown) {
                     // Scripts see the thrown occupant leave before the steal.
                     auto exit            = *event;
                     exit.playerId        = evicted->playerId;
@@ -380,6 +452,11 @@ namespace Mafia1Online::Core {
         _missionReadiness.SetGeneration(_missionState->generation);
         _pedestrians.SetMissionGeneration(_missionState->generation);
         _npcs.SetMissionGeneration(_missionState->generation);
+        _police.SetMissionGeneration(_missionState->generation);
+        _traffic.SetMissionGeneration(_missionState->generation);
+        _railways.SetMissionGeneration(_missionState->generation);
+        _bridges.SetMissionGeneration(_missionState->generation);
+        _props.SetMissionGeneration(_missionState->generation);
         Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->info("Configured Mafia 1 mission: {}", _mission);
     }
 
@@ -387,6 +464,8 @@ namespace Mafia1Online::Core {
         _simulation.Update();
         _pedestrians.Update();
         _npcs.Update();
+        _police.Update();
+        _traffic.Update();
         _mods.Update();
         _players.Update();
         _combat.Update();
@@ -404,6 +483,34 @@ namespace Mafia1Online::Core {
                 Features::Script::EmitMissionEvent(*this, "missionReady");
             }
         }
+    }
+
+    void Server::SendCarHit(const Shared::Car::HitReport &report, float damage) {
+        const auto *car = _cars.Find(report.carId);
+        Shared::Car::AuthoritativeHit hit;
+        hit.carId = report.carId;
+        hit.missionGeneration = report.missionGeneration;
+        hit.controllerGuid = car->simulationControllerGuid;
+        hit.serverSequence = ++_carHitSequence;
+        hit.shooterId = report.shooterId;
+        hit.damage = damage;
+        hit.directionX = report.directionX;
+        hit.directionY = report.directionY;
+        hit.directionZ = report.directionZ;
+        hit.hitX = report.hitX;
+        hit.hitY = report.hitY;
+        hit.hitZ = report.hitZ;
+        hit.normalX = report.normalX;
+        hit.normalY = report.normalY;
+        hit.normalZ = report.normalZ;
+        hit.localHitX = report.localHitX;
+        hit.localHitY = report.localHitY;
+        hit.localHitZ = report.localHitZ;
+        hit.localDirectionX = report.localDirectionX;
+        hit.localDirectionY = report.localDirectionY;
+        hit.localDirectionZ = report.localDirectionZ;
+        Framework::CoreModules::GetNetworkPeer()->SendRPC(hit, MafiaNet::ToGuid(static_cast<MafiaNet::PeerGuid>(hit.controllerGuid)));
+        Features::Script::EmitCarHitEvent(*this, report, hit.damage);
     }
 
     void Server::UpdateCarControllers() {
@@ -429,7 +536,8 @@ namespace Mafia1Online::Core {
         };
         _cars.ForEach([&](Shared::Entities::CarEntity *car) {
             const uint64_t carId = car->GetNetworkID();
-            if (car->missionGeneration != MissionGeneration() || car->terminalState != Shared::Entities::CarEntity::TerminalState::Active) {
+            // The simulation host keeps the cars it drives until a takeover.
+            if (car->missionGeneration != MissionGeneration() || car->terminalState != Shared::Entities::CarEntity::TerminalState::Active || car->hostDriven) {
                 return;
             }
             uint64_t occupantGuid = 0;
@@ -494,6 +602,7 @@ namespace Mafia1Online::Core {
         _players.Reset();
         _pedestrians.Clear();
         _npcs.Clear();
+        _traffic.Clear();
         _simulation.Reset();
         _missionState = nullptr;
     }
@@ -621,6 +730,11 @@ namespace Mafia1Online::Core {
         _missionReadiness.SetGeneration(_missionState->generation);
         _pedestrians.SetMissionGeneration(_missionState->generation);
         _npcs.SetMissionGeneration(_missionState->generation);
+        _police.SetMissionGeneration(_missionState->generation);
+        _traffic.SetMissionGeneration(_missionState->generation);
+        _railways.SetMissionGeneration(_missionState->generation);
+        _bridges.SetMissionGeneration(_missionState->generation);
+        _props.SetMissionGeneration(_missionState->generation);
         _allReadyNotified = false;
         _reportedCarLoadFailures.clear();
         _debris.ResetForMission();
@@ -632,6 +746,12 @@ namespace Mafia1Online::Core {
         Features::Script::EmitMissionEvent(*this, "missionChange");
         Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->info("Requested Mafia 1 mission '{}' (generation {})", _mission, _missionState->generation);
         return true;
+    }
+
+    bool Server::CarPeer(MafiaNet::PeerGuid sender) const {
+        // The simulation host is the controller of the cars it drives and
+        // observes every other car, as a player does.
+        return (_players.FindByGuid(sender) || _simulation.Host() == sender) && _missionReadiness.IsReady(sender);
     }
 
     uint64_t Server::MissionGeneration() const {
