@@ -30,7 +30,7 @@ Events.on("playerCommand", (player, command) => {
 });
 ```
 
-See [the sample gamemode](../resources/sample-gamemode/server/main.js) for
+See [the Free Ride gamemode](../resources/freeride/server/main.js) for
 mission loading, vehicle commands, respawning, and server to client events.
 
 ## API map
@@ -524,17 +524,16 @@ Events.emitServer("shop:buy", { itemId: 6 });
 Use `Events.emitAllClients("shop:stock", { itemId: 6, remaining: 3 })`
 when every client should receive an update. Client requests are untrusted;
 the server handler must validate the sender and payload before changing state.
-The sample gamemode demonstrates both directions in
-[`server/main.js`](../resources/sample-gamemode/server/main.js) and
-[`client/main.js`](../resources/sample-gamemode/client/main.js).
+The Free Ride gamemode demonstrates both directions throughout, for example
+in [`server/races.js`](../resources/freeride/server/races.js) and
+[`client/hud.js`](../resources/freeride/client/hud.js).
 
-The [visual pickup demo](../resources/sample-gamemode/server/visual_pickups.js)
-shows a server-owned collectible drawn entirely by
-[client script](../resources/sample-gamemode/client/visual_pickups.js): the
-server publishes its position and active state, and validates mission
-generation, life, and distance before awarding ammo. Client-local models and
-labels cannot grant a reward on their own. Use `Pickup.create` instead when
-the item should be a native weapon pickup with the game's use interaction.
+Its [world events](../resources/freeride/server/world_events.js) show a
+server-owned objective drawn entirely by
+[client script](../resources/freeride/client/markers.js): the server
+publishes the supply crate's position and checks each player's distance
+itself before it creates native `Pickup.create` weapons and pays the finder.
+Client-local models and labels cannot grant a reward on their own.
 
 The table lists native server event arguments. `Events.onClient` event names
 are defined by your resources.
@@ -758,7 +757,7 @@ are defined by your resources.
   client that hit them and stay down until the mission changes. Each player has
   at most 256 breaks standing until a repair, and everyone together 2048 (the
   stock freeride scene has 1,044 breakables). Nothing repairs itself: call
-  `World.repairProps()` (the sample gamemode does it every few minutes and lets
+  `World.repairProps()` (the Free Ride gamemode does it every few minutes and lets
   anyone call it once a minute). A mission change starts whole.
 
 ### Durable vehicle condition

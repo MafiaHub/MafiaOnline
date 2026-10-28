@@ -37,7 +37,7 @@ scene, actors and referenced assets are valid. Select a detected mission with:
 
 `World.changeMission("my_city")` also accepts detected names. The server and
 client both validate mission availability. Custom mission names are limited to
-63 characters. The sample gamemode's clock switches only between the two stock
+63 characters. The Free Ride gamemode's clock switches only between the two stock
 Free Ride maps; it preserves a configured custom mission.
 
 ## Joining and caching

@@ -22,7 +22,7 @@ resource ships them by listing them in its `package.json`:
 `<resource>.fwpak`, streamed to the client on connect and mounted at
 `/resources/<name>`; `serverScripts` never leave the server. Extra
 non-script files (UI pages, images) go in `files` (globs allowed). A folder
-name has no meaning of its own. `resources/sample-gamemode` is the example.
+name has no meaning of its own. `resources/freeride` is the example.
 
 The server owns the world. Client scripts read replicated state and drive
 presentation only this player sees: the HUD, the fade, the camera swing and
@@ -207,7 +207,7 @@ mission unload do so automatically. Up to eight previews may exist per client.
 `Scene.getCarCatalog()` returns `{ id, name, model }` entries from the loaded
 game's patched stock car database. `name` is the retail display name and
 `model` is its default-color `.i3d` file. It returns an empty list before the
-native database initializes. The [sample car picker](../resources/sample-gamemode/client/car_picker.js)
+native database initializes. The [Free Ride car picker](../resources/freeride/client/car_picker.js)
 uses these entries for `/car`; its server validates the chosen stock ID before
 spawning. A web view's DOM rectangle must be converted from CSS pixels to
 backbuffer pixels, using `Web.getScreenSize()` and the page's dimensions.
@@ -225,12 +225,11 @@ Events.on("render", () => {
 });
 ```
 
-The [sample client pickup script](../resources/sample-gamemode/client/visual_pickups.js)
-uses this API to bob and rotate a model and label. Its matching
-[server script](../resources/sample-gamemode/server/visual_pickups.js) owns
-the pickup definition, validates the player's mission, life, and distance,
-then grants the item. This is separate from the engine's replicated weapon
-`Pickup` class.
+The [Free Ride marker script](../resources/freeride/client/markers.js)
+uses this API to bob and rotate a crate model, draw beacons and label
+checkpoints. Its [server events](../resources/freeride/server/world_events.js)
+own each marker, validate the player's mission, life, and distance, then
+grant the reward.
 
 For example:
 
@@ -311,7 +310,7 @@ score, and compass on every mission change, so restore them from
   `Hud.setScoreVisible(visible)` shows or hides the counter without changing
   its value; `Hud.isScoreVisible()` reads that state. `Hud.hideScore()` is a
   shortcut for hiding it. The getters return `null` before a mission loads.
-- The sample gamemode uses the counter for money. Call
+- The Free Ride gamemode uses the counter for money. Call
   `Hud.setScore(LocalPlayer.money)` after `missionReady`, then refresh it as the
   replicated balance changes. Native Free Ride scripts can write this counter
   locally; `LocalPlayer.money` remains the server-owned balance.
@@ -353,7 +352,7 @@ directory or its archives, such as `"00_dog.wav"`.
   or the mission closes (at most 32 loops). A missing file returns null and is
   logged once.
 
-The [sample car radio](../resources/sample-gamemode/client/radio.js) uses a
+The [Free Ride car radio](../resources/freeride/client/radio.js) uses a
 resource-owned `Web` audio view for a live internet stream. The stream starts
 when this client enters a car and stops on exit. The HTML page handles a lost
 connection by retrying the same station. The directory page is not an audio

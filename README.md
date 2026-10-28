@@ -46,24 +46,25 @@ call `World.getMission()`, `World.getMissionGeneration()` and `World.isReady()`.
 Connected players have server-owned replicas with nickname, health, life and
 mission generations, and timestamped transforms. The client currently binds
 the stock local player after the native mission loads and sends its pose to
-the server. A separate native pose report lets the sample resource choose a
+the server. A separate native pose report lets the gamemode choose a
 matching initial spawn. Server scripts control spawn, respawn, despawn and
-health through `Players`, and car replicas through `Cars`. A sample resource
-under `resources/sample-gamemode` spawns ready players. `/car` opens a catalog
-with native model previews and seats the player in the chosen car. `/car
-<stock-car.i3d>` can spawn a model directly, and `/model [stock-human.i3d]`
-changes the player model. In a loaded mission, press T to open the
+health through `Players`, and car replicas through `Cars`. The default
+gamemode, [Free Ride](docs/freeride.md) under `resources/freeride`, spawns
+ready players. `/car` opens a catalog with native model previews and seats
+the player in the chosen car. In a loaded mission, press T to open the
 native chat input, Enter to send and Escape to cancel. Incoming chat uses the
 game's own HUD console; the stock lives display receives the local player's
 authoritative health. Run the server with this project directory as its
-working directory so it discovers that resource.
+working directory so it discovers that resource and keeps its player records
+under `data/freeride`.
 The server resource API, including vehicle seat, engine, damage, death and
 mission callbacks, is documented in
 [`docs/server_scripting_api.md`](docs/server_scripting_api.md).
 The [Mafia Online Docs](https://github.com/MafiaHub/MafiaOnlineDocs) repository
 builds the generated API reference alongside the authored guides.
-The [sample Free Ride guide](docs/sample_freeride.md) covers the day/night
-missions, character selector, shops, weather, car radio, and synchronized doors.
+The [Free Ride guide](docs/freeride.md) covers the multiplayer street races,
+bounties, private duels, crews, city events, shops, persistent careers, the
+day/night missions and weather, the car radio and synchronized doors.
 
 [LHRP — Lost Heaven Roleplay](gamemodes/real-life/README.md) is a separate,
 minimal TypeScript gamemode with a cinematic city login, Preact/StyleX UI,
