@@ -121,7 +121,7 @@ The client also reads the selected mission's `scene2.bin` through the normal,
 mod-aware `rw_data` exports. A bounded chunk parser reads only actor records
 (root `0x4c53`, actors `0xae20`, actor `0xae21`, type `0xae22`, frame name
 `0xae23`). It hides authored actor models before collision/game initialization,
-so parked cars, humans, weapons, physical props, aircraft and rail models do
+so parked cars, humans, weapons, aircraft and rail models do
 not survive as visible, unregistered shells. Static geometry used by generic
 props, doors, villa objects, bridge decks, turnouts, pumps and clocks remains;
 only doors retain their mission actor behaviours. Malformed actor metadata
@@ -136,11 +136,59 @@ traffic-car and police generation. Rail-generator and railway AI hooks skip
 native AI in every server mission. Mission rail generators are never created;
 if a runtime actor creates a pool, normal GameInit/GameDone still own it.
 
+### World props
+
+Breakable scene models (phone booths `PHbox01`, the hydrant `dopravni9B`
+whose crash model has the `;X1H;` piece, bins `popel01`/`kos01`, barrels)
+have collision primitives of material 41. `SpawnCrashActorFromFrame`
+(`0x431710`, `__fastcall`, `ret 8`) turns the model off, flags its subtree's
+primitives `0x20`, appends it to `C_game::m_ObjectsToDeactivate` (`+0x10`) and
+builds its pieces through `CreateCrashActors` (`0x430c50`, `ret 0x20`).
+`PropsService` hooks both: it records the primitives a break switched off,
+reports scene models by frame name together with the struck frame's name and
+replays remote breaks on that frame, because `ParseCrashConfigFromFrameName`
+(`0x431a00`) reads the crash settings from the struck frame's properties
+(`+0xc`; a model's own from its last visual child); a late joiner's breaks
+skip `CreateCrashActors`. Replayed pieces lose `CRASH_FLAG_EXPLODE` (`0x20`)
+and `CRASH_FLAG_START_FIRE` (`0x8`, `m_uCrashFlags` `+0x38c`): `C_crash_obj::AI`
+(`0x431be0`) would call `NewExplosion`/`NewFire` with damage on every client.
+Of the stock crash models only `xpumpa 2_c1` (`;M1000N22X1EF;`, three fuel
+pumps in freeride) and `barel_exp_c1` carry them, and the pump piece goes off
+on its first tick (`CreateActor` `0x4311d0` takes 2 off its health 1); a replay
+shows that blast and fire without damage. A repair turns the breakables back
+on, clears those flags, drops the `C_crash_obj` pieces as their AI would, then
+calls `DelAllHydrants` (`0x5b9ef0`), `LoadTelephones` (`0x5b6e00`) and
+`LoadSemaphores` (`0x5add10`). `DelSemaphore` (`0x5b6d50`), which
+`SpawnCrashActorFromFrame` calls with the model, matches `S_semaphore`'s first
+field, which the loader callback (`0x5ad900`) never writes, so whether it
+drops a light is undefined; reloading makes the repair independent of that.
+The stock freeride `scene2.bin` places 1,044 crash-model breakables (369
+`popel01`, 242 `dopravni9B`, 156 `kos01`, 127 `PHbox01`, 143 barrels, three
+fuel pumps and four cans); its `cache.bin` places one `xbarel 1` and 154 traffic signs
+(`dopravni1B`-`8B`). City cache instances (`off<n>seg<n>`) are left to retail,
+and the signs never reach `SpawnCrashActorFromFrame`: a car
+(`Collision_Filter_Body` `0x426d7e`) or shot (`TickShoot` `0x5aa76e`) breaks
+one through `HandleSignalMarkCrash` (`0x5b7be0`), which calls
+`CreateCrashActors` itself, sets the primitive's `0x20` flag and closes the
+cache placement (`0x402cf0`). They stay down on that client alone until the
+mission changes.
+
+Every client loads the type 35 `C_box_new` props; `GameInit` (`0x567650`) and
+`GameDone` (`0x567720`) number them, and a pose is placed the way
+`C_PhThing::MoveCount` (`0x45ddb0`) and `Update` (`0x45a7a0`) place one, then
+left asleep the way `FindActors` (`0x45a560`) leaves a new piece: `INACTIVE`,
+or `ACTIVE` past both sleep limits while actors stand on it. A prop counts as
+at rest when `C_PhThing::AI` (`0x45a690`) would skip it (`m_fLowMotionTimeSeconds`
+`+0x32c` past `+0x330`, or `m_iStationaryTimeMs` `+0x9c` past 4000) or it is
+`INACTIVE`; `Update` puts one to sleep without zeroing its velocity.
+`C_box_new::Collision` (`0x567c80`) and `Hit` (`0x567ca0`), the vtable
+`0x6254f0` slots that wake a prop, are hooked to note who did it.
+
 ### Drawbridges and city traffic lights
 
-Mission-authored bridge actors are suppressed and the authored bridge geometry
-stays visible and stationary. The bridge GameInit hook remains for any runtime
-bridge: native initialization closes it, then `ShutDown(true)` prevents opening.
+Every client loads the mission's bridge actors (type 20). The simulation host
+runs them natively; players replay its phases, leaf angles and steamers
+(`BridgeService`, see the NPC multiplayer audit). Nothing shuts them down.
 
 reM `C_game::Tick` advances `m_uSemaphoreTime` through ten 3000 ms phases;
 `m_iSemaphoreStateZ` starts five phases after `m_iSemaphoreStateX`.
@@ -727,7 +775,9 @@ requesting an explosion each tick after its burn timer until it becomes dead,
 so the per-car client stream deduplicates these requests. The server verifies
 mission generation, controller GUID and active terminal state, commits the
 `Exploded` state and lethal damage to recorded occupants, then clears seats.
-Clients call the original exactly once when they observe the new terminal
+It also deals the blast `CarExplosion` passes to `NewExplosion` (radius 10,
+damage 200, `0x421eed`/`0x421ef6`) to players on foot with the retail falloff,
+since every client suppresses native hits on players. Clients call the original exactly once when they observe the new terminal
 sequence. This includes the controller, so it does not receive two explosions.
 A late join creates its native car first and then applies the terminal state;
 native wreckage creation remains game-owned. Native explosion side effects
