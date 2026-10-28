@@ -2,8 +2,7 @@
 // Members standing on an unheld or rival corner with no other crew around
 // take it over in a minute; a held corner pays every online member of its
 // crew. Ownership persists between sessions.
-const fs = require("node:fs");
-const path = require("node:path");
+const store = require("./lib/store.js");
 const roads = require("./lib/roads.js");
 const maps = require("./lib/maps.js");
 const profiles = require("./lib/profiles.js");
@@ -12,7 +11,6 @@ const commands = require("./lib/commands.js");
 const {toast, card, markersAll, markers, feed, text, COLORS} = require("./lib/notify.js");
 const {MAIN_WORLD, flatDistance, playable, formatMoney, onStart, onStop} = require("./lib/util.js");
 
-const FILE = path.join(profiles.DATA_DIR, "turf.json");
 const TURF_COUNT = 8;
 const RADIUS = 45;
 const CAPTURE_MS = 60_000;
@@ -49,12 +47,8 @@ let timer = null;
 let lastIncome = 0;
 
 function load() {
-    try {
-        const stored = JSON.parse(fs.readFileSync(FILE, "utf8"));
-        owners = stored.version === 1 ? {freeride: stored.owners ?? {}} : stored.owners ?? {};
-    } catch (error) {
-        if (error.code !== "ENOENT") console.error(`[freeride] Could not read ${FILE}: ${error.message}`);
-    }
+    const stored = store.load("turf");
+    if (stored) owners = stored.version === 1 ? {freeride: stored.owners ?? {}} : stored.owners ?? {};
 }
 
 function useMap() {
@@ -67,13 +61,7 @@ function useMap() {
 function save() {
     if (!turfMap) return;
     owners[turfMap] = Object.fromEntries(turfs.map((turf) => [turf.id, turf.owner]));
-    try {
-        fs.mkdirSync(profiles.DATA_DIR, {recursive: true});
-        fs.writeFileSync(`${FILE}.tmp`, JSON.stringify({version: 2, owners}, null, 1));
-        fs.renameSync(`${FILE}.tmp`, FILE);
-    } catch (error) {
-        console.error(`[freeride] Could not save turf: ${error.message}`);
-    }
+    store.save("turf", {version: 2, owners});
 }
 
 function items() {

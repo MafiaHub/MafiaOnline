@@ -2,14 +2,12 @@
 // Free Ride has no accounts, so a record belongs to a nickname on one machine.
 // Public values travel in each player's replicated state bag, which the
 // scoreboard and the world labels on every client read.
-const fs = require("node:fs");
-const path = require("node:path");
+const store = require("./store.js");
 const {toast, feed, name, text, COLORS} = require("./notify.js");
 const {emit, onStop} = require("./util.js");
 
-const DATA_DIR = path.join(process.cwd(), "data", "freeride");
-const FILE = path.join(DATA_DIR, "profiles.json");
-const SAVE_DELAY_MS = 10_000;
+// Changed records are written in one transaction this long after a change.
+const SAVE_DELAY_MS = 2000;
 const STARTING_CASH = 800;
 const PLAYTIME_XP_EVERY_MS = 5 * 60_000;
 const PLAYTIME_XP = 25;
@@ -21,33 +19,31 @@ const RANKS = [
 
 const records = new Map();
 const sessions = new Map();
+const dirty = new Set();
 let saveTimer = null;
 
 function load() {
-    try {
-        const stored = JSON.parse(fs.readFileSync(FILE, "utf8"));
-        for (const [key, record] of Object.entries(stored.players ?? {})) records.set(key, record);
-        console.log(`[freeride] Loaded ${records.size} player records`);
-    } catch (error) {
-        if (error.code !== "ENOENT") console.error(`[freeride] Could not read ${FILE}: ${error.message}`);
-    }
+    for (const [key, record] of store.loadPlayers()) records.set(key, record);
+    console.log(`[freeride] Loaded ${records.size} player records`);
 }
 
 function writeNow() {
     if (saveTimer !== null) clearTimeout(saveTimer);
     saveTimer = null;
-    try {
-        fs.mkdirSync(DATA_DIR, {recursive: true});
-        const temporary = `${FILE}.tmp`;
-        fs.writeFileSync(temporary, JSON.stringify({version: 1, players: Object.fromEntries(records)}, null, 1));
-        fs.renameSync(temporary, FILE);
-    } catch (error) {
-        console.error(`[freeride] Could not save player records: ${error.message}`);
-    }
+    store.savePlayers([...dirty].filter((key) => records.has(key)).map((key) => [key, records.get(key)]));
+    dirty.clear();
 }
 
 function saveSoon() {
     if (saveTimer === null) saveTimer = setTimeout(writeNow, SAVE_DELAY_MS);
+}
+
+// Marks a connected player's record for the next write.
+function changed(player) {
+    const session = sessions.get(player.id);
+    if (!session) return;
+    dirty.add(session.key);
+    saveSoon();
 }
 
 function keyFor(player) {
@@ -132,7 +128,7 @@ function attach(player) {
     sessions.set(player.id, {key, lastPlaytimeAt: Date.now()});
     player.setMoney(Math.max(0, Math.min(1_000_000_000, Math.round(record.money))));
     publish(player);
-    saveSoon();
+    changed(player);
     return {record, returning};
 }
 
@@ -142,6 +138,7 @@ function detach(player) {
     if (session && record) {
         record.playMs += Date.now() - session.lastPlaytimeAt;
         record.lastSeen = Date.now();
+        dirty.add(session.key);
     }
     sessions.delete(player.id);
     writeNow();
@@ -155,7 +152,7 @@ function addXp(player, amount, reason) {
     const after = levelFor(record.xp);
     emit(player, "fr:xp", {amount: Math.round(amount), reason: reason ?? ""});
     publish(player);
-    saveSoon();
+    changed(player);
     if (after > before) {
         const rank = rankFor(after);
         const promoted = rank !== rankFor(before);
@@ -171,14 +168,14 @@ function bump(player, field, amount = 1) {
     const record = get(player);
     if (!record || !["number", "undefined"].includes(typeof record[field])) return;
     record[field] = (record[field] ?? 0) + amount;
-    saveSoon();
+    changed(player);
 }
 
 function setField(player, field, value) {
     const record = get(player);
     if (!record) return;
     record[field] = value;
-    saveSoon();
+    changed(player);
 }
 
 function leaderboard(field, count = 8) {
@@ -196,6 +193,7 @@ function tickPlaytime() {
         if (now - session.lastPlaytimeAt >= PLAYTIME_XP_EVERY_MS) {
             record.playMs += now - session.lastPlaytimeAt;
             session.lastPlaytimeAt = now;
+            changed(player);
             if (player.spawned) addXp(player, PLAYTIME_XP, "Time on the streets");
         }
     }
@@ -206,7 +204,7 @@ Events.on("playerMoneyChange", (player, _old, money) => {
     if (!record) return;
     record.money = money;
     emit(player, "fr:profile", {...progress(record), money});
-    saveSoon();
+    changed(player);
 });
 
 const playtimeTimer = setInterval(tickPlaytime, 30_000);
@@ -215,7 +213,10 @@ onStop(() => {
     for (const player of World.getPlayers()) {
         const session = sessions.get(player.id);
         const record = get(player);
-        if (session && record) record.playMs += Date.now() - session.lastPlaytimeAt;
+        if (session && record) {
+            record.playMs += Date.now() - session.lastPlaytimeAt;
+            dirty.add(session.key);
+        }
     }
     writeNow();
 });
@@ -226,4 +227,4 @@ Events.on("playerSpawn", publish);
 load();
 
 module.exports = {get, keyOf, keysNamed, attach, save: writeNow, detach, publish, setPublic, addXp, bump, setField, progress, leaderboard,
-    levelFor, rankFor, STARTING_CASH, DATA_DIR};
+    levelFor, rankFor, STARTING_CASH};

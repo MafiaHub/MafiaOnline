@@ -1,8 +1,7 @@
 // Crews: a tag, a colour and a private radio. Members wear the tag on their
 // nametag and car marker, see each other across the city and talk on /c.
 // Crews persist between sessions; membership follows the nickname.
-const fs = require("node:fs");
-const path = require("node:path");
+const store = require("./lib/store.js");
 const profiles = require("./lib/profiles.js");
 const invites = require("./lib/invites.js");
 const menu = require("./lib/menu.js");
@@ -11,7 +10,6 @@ const nametag = require("./lib/nametag.js");
 const {toast, feed, name, text, COLORS} = require("./lib/notify.js");
 const {findPlayer, onStart} = require("./lib/util.js");
 
-const FILE = path.join(profiles.DATA_DIR, "crews.json");
 const MAX_MEMBERS = 8;
 const MAX_CREWS = 50;
 // No red: a red nametag means a bounty.
@@ -24,21 +22,11 @@ function key(nickname) {
 }
 
 function load() {
-    try {
-        crews = JSON.parse(fs.readFileSync(FILE, "utf8")).crews ?? [];
-    } catch (error) {
-        if (error.code !== "ENOENT") console.error(`[freeride] Could not read ${FILE}: ${error.message}`);
-    }
+    crews = store.load("crews")?.crews ?? [];
 }
 
 function save() {
-    try {
-        fs.mkdirSync(profiles.DATA_DIR, {recursive: true});
-        fs.writeFileSync(`${FILE}.tmp`, JSON.stringify({version: 1, crews}, null, 1));
-        fs.renameSync(`${FILE}.tmp`, FILE);
-    } catch (error) {
-        console.error(`[freeride] Could not save crews: ${error.message}`);
-    }
+    store.save("crews", {version: 1, crews});
 }
 
 function crewOf(player) {

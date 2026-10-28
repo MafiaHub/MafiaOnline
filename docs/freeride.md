@@ -39,9 +39,15 @@ garage is the crossing beside the mod's `sector moto2` frames that carry his
 name, and the container docks the crossing among its new container frames.
 
 Run the server with this project directory as its working directory. It
-discovers the resource and writes its records to `data/freeride/`
-(`profiles.json`, `crews.json`, `races.json`, `turf.json`, `speedtraps.json`,
-`interiors.json`), which is not tracked.
+discovers the resource and keeps everything it saves in one SQLite database,
+`data/freeride/freeride.db` (the server's built-in `node:sqlite`; see
+`server/lib/store.js`), which is not tracked. Player records are rows of the
+`players` table, with name, money, experience, kills, deaths and last-seen
+time as columns for queries; crews, races, turf, speed traps, interiors, the
+championship and the admin list are documents in `documents`. Changes are
+written within two seconds, each in its own transaction. The JSON files of
+earlier versions (`profiles.json`, `crews.json` and so on) are imported on the
+first start and left in place.
 
 ## Controls
 
@@ -71,6 +77,14 @@ district, Left/Right the character (thirteen stock models, each checked
 against the native skeleton first), C turns the camera and Enter spawns. A
 returning player starts on the district and character they chose last time.
 
+A returning player is also offered "Where you left off", selected first: the
+spot on this map's streets where they last stood, with the health, weapons
+and ammunition and the wanted level they had. The server saves it every five
+seconds while they are on the street and not busy with a race, a duel, a job
+or a sentence, so those never become the place to come back to; a player
+with time left to serve goes back to jail instead. After a death they come
+back at their usual district.
+
 Each life starts with a baseball bat; guns are bought at Yellow Pete's. Dead players come back where
 they entered the city after five seconds (`server/lib/life.js`).
 
@@ -78,8 +92,9 @@ they entered the city after five seconds (`server/lib/life.js`).
 
 A player record belongs to a nickname on one machine (nickname plus the
 framework hardware ID). It keeps cash, experience, kills, deaths, best kill
-streak, race wins and records, deliveries, bounties, event wins, duel wins and
-play time. New players start with $800. Experience comes from kills, races,
+streak, race wins and records, deliveries, bounties, event wins, duel wins,
+play time, owned cars, stashes found, speed-trap bests, a jail sentence still
+to serve, and where the player last was. New players start with $800. Experience comes from kills, races,
 deliveries, events, duels, bounties and time on the streets; levels follow
 100 · n(n−1)/2 XP and carry the ranks Greenhorn, Street Runner, Associate,
 Soldier, Capo, Underboss and Don. The HUD shows the level strip and each gain.
@@ -141,7 +156,7 @@ where they were.
 two and three laps, with a minute to enter each round and a short break
 between them. Finishes score 25-18-15-12-10-8-6-4-2-1. After the last round
 the top three take $3,000, $1,500 and $750, the champion gains experience, and
-the champion is remembered in `data/freeride/championship.json`.
+the champion is remembered in the database.
 
 ## Bounties and the kill feed
 
@@ -285,7 +300,7 @@ their street side cannot be told from the model data. Record them in development
 it and type `/entrance add <name> [public|safehouse]`, walk to where players
 should arrive, face the way they should look and type `/entrance inside`.
 `/entrance list` and `/entrance delete <name>` manage them; they are saved to
-`data/freeride/interiors.json` and work at once.
+the database and work at once.
 
 ## Getting together
 
@@ -323,7 +338,7 @@ minutes.
 
 ## Admins
 
-Admins are listed by profile in `data/freeride/admins.json`; the server
+Admins are listed by player record in the database; the server
 console manages them with `fr admin add|remove|list <player>`. `/car` gives
 an admin the full motor pool, or spawns a model directly with
 `/car <model.i3d>`.
@@ -355,7 +370,7 @@ recording interiors. They are off by default.
 | --- | --- |
 | `server/main.js` | Player lifecycle, profiles on join, the admin motor pool, `/repair`, `/help`, menu requests, console commands. |
 | `server/dealership.js`, `economy.js` | The car lot, the garage and car locks; `/pay` and the street wage. |
-| `server/lib/` | Shared rules: commands, profiles and ranks, respawn and activities, invitations, notifications, nametags, the road graph, admins and car prices. |
+| `server/lib/` | Shared rules: the database (`store.js`), commands, profiles and ranks, respawn and activities, invitations, notifications, nametags, the road graph, admins and car prices. |
 | `server/selector.js`, `ambience.js`, `shops.js`, `police.js`, `props.js`, `doors.js` | Entering the city, clock and weather, shops and courier, police outcomes, prop repair, the door lab. |
 | `server/races.js`, `combat.js`, `duels.js`, `crews.js`, `world_events.js`, `social.js` | Races, bounties, duels, crews, city events, rides, messages and dice. |
 | `server/export.js`, `police_duty.js`, `taxi.js`, `robbery.js` | The jobs. |

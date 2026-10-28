@@ -2,8 +2,7 @@
 // the car's speed against the player's own best and the server record;
 // beating the record is announced and pays. Records and bests are keyed
 // "<map>:<trap>"; plain numbers are stock Lost Heaven's from before maps.
-const fs = require("node:fs");
-const path = require("node:path");
+const store = require("./lib/store.js");
 const roads = require("./lib/roads.js");
 const maps = require("./lib/maps.js");
 const profiles = require("./lib/profiles.js");
@@ -12,7 +11,6 @@ const commands = require("./lib/commands.js");
 const {toast, markersAll, markers, feed, name, text, COLORS} = require("./lib/notify.js");
 const {MAIN_WORLD, flatDistance, playable, speedOf, formatMoney, onStart, onStop} = require("./lib/util.js");
 
-const FILE = path.join(profiles.DATA_DIR, "speedtraps.json");
 const TRAP_COUNT = 6;
 const RADIUS = 14;
 const REPEAT_MS = 10_000;
@@ -43,21 +41,12 @@ const lastHit = new Map();
 let timer = null;
 
 function load() {
-    try {
-        records = migrate(JSON.parse(fs.readFileSync(FILE, "utf8")).records);
-    } catch (error) {
-        if (error.code !== "ENOENT") console.error(`[freeride] Could not read ${FILE}: ${error.message}`);
-    }
+    const stored = store.load("speedtraps");
+    if (stored) records = migrate(stored.records);
 }
 
 function save() {
-    try {
-        fs.mkdirSync(profiles.DATA_DIR, {recursive: true});
-        fs.writeFileSync(`${FILE}.tmp`, JSON.stringify({version: 1, records}, null, 1));
-        fs.renameSync(`${FILE}.tmp`, FILE);
-    } catch (error) {
-        console.error(`[freeride] Could not save speed traps: ${error.message}`);
-    }
+    store.save("speedtraps", {version: 1, records});
 }
 
 function items() {

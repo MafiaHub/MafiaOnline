@@ -2,8 +2,7 @@
 // Extended). A season is three rounds of growing length; anyone can enter any
 // round, every finish scores points, and the standings after the last round
 // pay out and crown a champion. Champions are remembered between sessions.
-const fs = require("node:fs");
-const path = require("node:path");
+const store = require("./lib/store.js");
 const maps = require("./lib/maps.js");
 const profiles = require("./lib/profiles.js");
 const menu = require("./lib/menu.js");
@@ -12,7 +11,6 @@ const races = require("./races.js");
 const {toast, toastAll, feed, name, text, COLORS} = require("./lib/notify.js");
 const {formatMoney, formatDuration, onStop} = require("./lib/util.js");
 
-const FILE = path.join(profiles.DATA_DIR, "championship.json");
 const ROUNDS = [
     {laps: 1, name: "Round 1 · Sprint"},
     {laps: 2, name: "Round 2 · Feature"},
@@ -30,21 +28,11 @@ let champions = [];
 let timer = null;
 
 function load() {
-    try {
-        champions = JSON.parse(fs.readFileSync(FILE, "utf8")).champions ?? [];
-    } catch (error) {
-        if (error.code !== "ENOENT") console.error(`[freeride] Could not read ${FILE}: ${error.message}`);
-    }
+    champions = store.load("championship")?.champions ?? [];
 }
 
 function save() {
-    try {
-        fs.mkdirSync(profiles.DATA_DIR, {recursive: true});
-        fs.writeFileSync(`${FILE}.tmp`, JSON.stringify({version: 1, champions}, null, 1));
-        fs.renameSync(`${FILE}.tmp`, FILE);
-    } catch (error) {
-        console.error(`[freeride] Could not save the championship: ${error.message}`);
-    }
+    store.save("championship", {version: 1, champions});
 }
 
 // Standings by points, then by wins; names carry over a reconnect.

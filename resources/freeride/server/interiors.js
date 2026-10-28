@@ -8,10 +8,8 @@
 // outside the game. Record them in-game in development mode: stand on the
 // street at the door, "/entrance add <name> [public|safehouse]", walk to the
 // arrival point inside, "/entrance inside". They are saved in
-// data/freeride/interiors.json, each with its map, and live at once.
-const fs = require("node:fs");
-const path = require("node:path");
-const profiles = require("./lib/profiles.js");
+// the gamemode's database (lib/store.js), each with its map, and live at once.
+const store = require("./lib/store.js");
 const life = require("./lib/life.js");
 const devmode = require("./lib/devmode.js");
 const maps = require("./lib/maps.js");
@@ -20,7 +18,6 @@ const commands = require("./lib/commands.js");
 const {toast, markers, markersAll, COLORS} = require("./lib/notify.js");
 const {MAIN_WORLD, distance, playable, plain, headingOf, emit, onStart, onStop} = require("./lib/util.js");
 
-const FILE = path.join(profiles.DATA_DIR, "interiors.json");
 const TICK_MS = 250;
 const TRIGGER_RADIUS = 1.4;
 const REARM_DISTANCE = 3;
@@ -38,22 +35,12 @@ let nextId = 1;
 let timer = null;
 
 function load() {
-    try {
-        interiors = JSON.parse(fs.readFileSync(FILE, "utf8")).interiors ?? [];
-    } catch (error) {
-        if (error.code !== "ENOENT") console.error(`[freeride] Could not read ${FILE}: ${error.message}`);
-    }
+    interiors = store.load("interiors")?.interiors ?? [];
     nextId = interiors.reduce((highest, interior) => Math.max(highest, interior.id), 0) + 1;
 }
 
 function save() {
-    try {
-        fs.mkdirSync(profiles.DATA_DIR, {recursive: true});
-        fs.writeFileSync(`${FILE}.tmp`, JSON.stringify({version: 1, interiors}, null, 1));
-        fs.renameSync(`${FILE}.tmp`, FILE);
-    } catch (error) {
-        console.error(`[freeride] Could not save interiors: ${error.message}`);
-    }
+    store.save("interiors", {version: 1, interiors});
 }
 
 function label(interior) {

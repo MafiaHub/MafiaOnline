@@ -3,8 +3,7 @@
 // places the cars, runs the countdown, checks every checkpoint against the
 // car's replicated position and pays the podium. Built-in routes follow the
 // stock road graph; players can record their own with /race create.
-const fs = require("node:fs");
-const path = require("node:path");
+const store = require("./lib/store.js");
 const roads = require("./lib/roads.js");
 const maps = require("./lib/maps.js");
 const profiles = require("./lib/profiles.js");
@@ -17,7 +16,6 @@ const util = require("./lib/util.js");
 const {toast, card, compass, markers, feed, name, text, COLORS} = notify;
 const {distance, flatDistance, playable, formatMoney, formatDuration, formatMinutes, emit} = util;
 
-const FILE = path.join(profiles.DATA_DIR, "races.json");
 const LOBBY_MS = 45_000;
 const COUNTDOWN_MS = 4_000;
 const TICK_MS = 200;
@@ -126,25 +124,15 @@ function allRoutes() {
 }
 
 function load() {
-    try {
-        const stored = JSON.parse(fs.readFileSync(FILE, "utf8"));
-        customRoutes = Array.isArray(stored.routes) ? stored.routes : [];
-        records = stored.records && typeof stored.records === "object" ? stored.records : {};
-    } catch (error) {
-        if (error.code !== "ENOENT") console.error(`[freeride] Could not read ${FILE}: ${error.message}`);
-    }
+    const stored = store.load("races");
+    customRoutes = Array.isArray(stored?.routes) ? stored.routes : [];
+    records = stored?.records && typeof stored.records === "object" ? stored.records : {};
 }
 
 function save() {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-        try {
-            fs.mkdirSync(profiles.DATA_DIR, {recursive: true});
-            fs.writeFileSync(`${FILE}.tmp`, JSON.stringify({version: 1, routes: customRoutes, records}, null, 1));
-            fs.renameSync(`${FILE}.tmp`, FILE);
-        } catch (error) {
-            console.error(`[freeride] Could not save races: ${error.message}`);
-        }
+        store.save("races", {version: 1, routes: customRoutes, records});
     }, 1000);
 }
 
