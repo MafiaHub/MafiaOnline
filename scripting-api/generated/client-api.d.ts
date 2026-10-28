@@ -695,6 +695,22 @@ declare global {
     showMessage(text: string, color?: number): boolean;
 
     /**
+     * Prints a line of the game's own text database in the message console, as the retail police do.
+     * @param textId Retail text database id, such as the police lines 2100-2110 ("Police! Shots fired!" is 2101) or 2200 "All Cops have been alerted!".
+     * @param color 0xRRGGBB color; defaults to the retail police red.
+     * @returns False while no mission is loaded.
+     */
+    showGameText(textId: number, color?: number): boolean;
+
+    /**
+     * Shows or hides the retail wanted badge.
+     * @param level Retail wanted badge: 0 hides it, 1 minor, 2 arrest, 3 lethal, 4 hidden.
+     * @param dimmed Drawn faded, as retail shows it while the officers lost sight.
+     * @returns False while no mission is loaded.
+     */
+    setWanted(level: number, dimmed?: boolean): boolean;
+
+    /**
      * Shows large white centred text, the race flash text, fading out over its last second.
      * @param text Announcement; at most 127 characters are shown.
      * @param durationSeconds How long it stays; defaults to 3.

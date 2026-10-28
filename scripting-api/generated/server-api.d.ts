@@ -226,7 +226,7 @@ declare global {
     pedestrianDeath: [pedestrian: Pedestrian, killer: Player | Vehicle | null];
 
     /**
-     * Dispatched when the simulation host starts running an armed human, such as a gangster pedestrian someone hit that draws its weapon.
+     * Dispatched when the simulation host starts running an armed human, such as a gangster pedestrian someone hit that draws its weapon or a police walker the police manager sends after a player.
      */
     npcSpawn: [npc: Npc];
 
@@ -244,6 +244,41 @@ declare global {
      * Dispatched once when an NPC dies; killer is the last attacker. The weapon in its hand drops as a pickup, as retail Do_WeaponDrop does (weaponDropped).
      */
     npcDeath: [npc: Npc, killer: Player | Npc | Vehicle | null];
+
+    /**
+     * Dispatched when the simulation host's police manager records a new crime of a player. The player's wanted level may rise with it (playerWantedChange).
+     */
+    playerCrime: [player: Player, info: PlayerCrimeInfo];
+
+    /**
+     * Dispatched when a player's wanted level changes: the police raise it for a crime, a script sets it, an arrest or Police.clear settles it, the officers lose the player, or a new simulation host takes over (every record starts again at 0).
+     */
+    playerWantedChange: [player: Player, info: PlayerWantedInfo];
+
+    /**
+     * Dispatched when a simulation host police officer finished arresting or fining a player. Nothing else happens to the player: the game goes on and the script decides the outcome. The player's crime record is cleared.
+     */
+    playerArrest: [player: Player, officer: Npc, info: PlayerArrestInfo];
+
+    /**
+     * Dispatched when a car the simulation host drove becomes the player's: the host stops driving it and the player's client simulates it. After a steal the player gets in with the next use, as in retail.
+     */
+    vehicleTrafficTaken: [vehicle: Vehicle, player: Player, info: VehicleTrafficTakenInfo];
+
+    /**
+     * Dispatched when the server refused a player's steal of a traffic car: the car moved out of reach or was not standing still, another player took it first or its driver had left. A player's repeated try within 500 ms is refused without this event. The player's client already played the pull-out; the driver stays in the car.
+     */
+    vehicleStealRefused: [vehicle: Vehicle, player: Player];
+
+    /**
+     * Dispatched after vehiclePlayerExited when a simulation host NPC pulled the player out of the seat (retail Do_ThrowCocotFromCar).
+     */
+    playerThrownOut: [player: Player, vehicle: Vehicle, info: PlayerThrownOutInfo];
+
+    /**
+     * Dispatched after a tram or metro train knocked a player on foot down, following playerDamage (cause railway).
+     */
+    railwayHitPlayer: [player: Player, info: RailwayHitInfo];
 
     /**
      * Dispatched after Vehicle.spawn created a vehicle.
@@ -404,9 +439,9 @@ declare global {
     weaponId: number | null;
 
     /**
-     * Server damage path that changed health. Explosions and fires can have a weaponId when they came from a thrown weapon.
+     * Server damage path that changed health; railway is a tram or metro train running into the player on foot. Explosions and fires can have a weaponId when they came from a thrown weapon.
      */
-    cause: "script" | "firearm" | "melee" | "explosion" | "fire" | "fall" | "drowning" | "vehicle";
+    cause: "script" | "firearm" | "melee" | "explosion" | "fire" | "fall" | "drowning" | "vehicle" | "railway";
 
     /**
      * Health before the change.
@@ -585,13 +620,188 @@ declare global {
   }
 
   /**
+   * A player's retail police crime record on the simulation host.
+   */
+  interface PoliceRecord {
+    /**
+     * Wanted level: 0 none, 1 minor (pursuit), 2 arrest, 3 lethal.
+     */
+    level: number;
+
+    /**
+     * Crimes since the record was last settled.
+     */
+    crimes: ("weaponSeen" | "firing" | "speeding" | "crashObject" | "crashCar" | "crashPedestrian" | "sidewalk" | "violence" | "redLight" | "carTheft" | "signDamage" | "assaultOnPolice" | "forcedArrest" | "policeCarRammed")[];
+
+    /**
+     * Officers assigned to the player.
+     */
+    officers: number;
+  }
+
+  /**
+   * A crime the police noticed.
+   */
+  interface PlayerCrimeInfo {
+    /**
+     * What the player did: a weapon in hand, shots, speeding, a crash, driving on the sidewalk, fist fights, a red light, car theft, a damaged sign, assault on police, a scripted arrest or ramming a police car.
+     */
+    crime: "weaponSeen" | "firing" | "speeding" | "crashObject" | "crashCar" | "crashPedestrian" | "sidewalk" | "violence" | "redLight" | "carTheft" | "signDamage" | "assaultOnPolice" | "forcedArrest" | "policeCarRammed";
+  }
+
+  /**
+   * A wanted level change.
+   */
+  interface PlayerWantedInfo {
+    /**
+     * New level: 0 none, 1 minor, 2 arrest, 3 lethal.
+     */
+    level: number;
+
+    /**
+     * Level before the change.
+     */
+    previous: number;
+  }
+
+  /**
+   * How a police officer caught a player.
+   */
+  interface PlayerArrestInfo {
+    /**
+     * arrest: the retail arrest, which ends a single-player game; fine: the on-the-spot fine.
+     */
+    kind: "arrest" | "fine";
+  }
+
+  /**
+   * How a player took a car of the city's traffic.
+   */
+  interface VehicleTrafficTakenInfo {
+    /**
+     * True when the player pulled its driver out, who stays as a driver NPC; false for a seat nobody held.
+     */
+    stolen: boolean;
+  }
+
+  /**
+   * How an NPC threw a player out of a car.
+   */
+  interface PlayerThrownOutInfo {
+    /**
+     * Seat the player was thrown out of; 0 is the driver.
+     */
+    seat: number;
+
+    /**
+     * The NPC that did it: a traffic driver taking its car back, a policeman before an arrest or a gangster.
+     */
+    by: Npc;
+  }
+
+  /**
+   * One wagon behind a railway's body.
+   */
+  interface RailwayWagonInfo {
+    /**
+     * Wagon position.
+     */
+    position: { x: number; y: number; z: number };
+
+    /**
+     * Unit direction of the wagon.
+     */
+    direction: { x: number; y: number; z: number };
+  }
+
+  /**
+   * A tram or metro train as the simulation host last reported it.
+   */
+  interface RailwayInfo {
+    /**
+     * Load index within the mission, from 0; stable for the mission generation.
+     */
+    index: number;
+
+    /**
+     * Position of the body.
+     */
+    position: { x: number; y: number; z: number };
+
+    /**
+     * Unit direction of the body.
+     */
+    direction: { x: number; y: number; z: number };
+
+    /**
+     * Speed in units per second.
+     */
+    speed: number;
+
+    /**
+     * Retail railway state. driverHit stops it after a bullet hit its driver; the host lets it go on after 30 seconds.
+     */
+    state: "moving" | "stationArrival" | "passengersLeaving" | "passengersEntering" | "stationWait" | "scheduleWait" | "departing" | "collisionBraking" | "stopPointBraking" | "semaphoreBraking" | "driverHit" | "followingRailway" | "unknown";
+
+    /**
+     * Wagons behind the body; empty for a tram, one for a freeride metro train.
+     */
+    wagons: RailwayWagonInfo[];
+  }
+
+  /**
+   * A drawbridge as the simulation host last reported it.
+   */
+  interface BridgeInfo {
+    /**
+     * Load index within the mission, from 0; stable for the mission generation.
+     */
+    index: number;
+
+    /**
+     * Position of the bridge frame, one of its two leaves.
+     */
+    position: { x: number; y: number; z: number };
+
+    /**
+     * Retail bridge phase. A steamer in its request zone moves a closed bridge to signaling (red road lights); it opens once no traffic car is on it.
+     */
+    phase: "closed" | "signaling" | "preparing" | "opening" | "open" | "closing" | "unknown";
+
+    /**
+     * Leaf angle in radians, 0 closed; the retail bridges open to 50 degrees.
+     */
+    angle: number;
+
+    /**
+     * True while opening, open or closing: the leaves are up, and a player on foot who walks into the raised bridge dies, as in retail.
+     */
+    raised: boolean;
+  }
+
+  /**
+   * A railway running into a player.
+   */
+  interface RailwayHitInfo {
+    /**
+     * The railway, as last reported.
+     */
+    railway: RailwayInfo | null;
+
+    /**
+     * Damage applied: retail (|speed| - 2.5) * 4.2.
+     */
+    damage: number;
+  }
+
+  /**
    * An accepted firearm pellet against a vehicle.
    */
   interface VehicleHitInfo {
     /**
-     * Player who fired, or null when they have left.
+     * Player or simulation host NPC who fired, or null when they are gone.
      */
-    shooter: Player | null;
+    shooter: Player | Npc | null;
 
     /**
      * Damage derived from the accepted shot.
@@ -604,12 +814,12 @@ declare global {
     position: { x: number; y: number; z: number };
 
     /**
-     * Shooter's fire sequence.
+     * Shooter's fire sequence; 0 for an NPC.
      */
     shotSequence: number;
 
     /**
-     * Pellet of that shot.
+     * Pellet of that shot; 0 for an NPC.
      */
     pelletIndex: number;
   }
@@ -1386,6 +1596,21 @@ declare global {
     readonly seatCount: number;
 
     /**
+     * True for a car of the city's traffic the simulation host spawned, also after a player took it (vehicleTrafficTaken).
+     */
+    readonly traffic: boolean;
+
+    /**
+     * What kind of traffic car it is; none for a script car.
+     */
+    readonly trafficKind: "none" | "civil" | "police" | "mafia";
+
+    /**
+     * True while the simulation host drives it: its traffic driver or an NPC crew sits in it. Players only steal it or take a seat nobody holds.
+     */
+    readonly hostDriven: boolean;
+
+    /**
      * 0 active, 1 exploded, 2 native water contact, 3 fall volume or native invalid fall.
      */
     readonly terminalState: number;
@@ -1729,7 +1954,7 @@ declare global {
     constructor(id: number);
 
     /**
-     * What it is: "gangster".
+     * What it is: "gangster", "police" or "driver" (a traffic driver thrown out of its car).
      */
     readonly kind: string;
 
@@ -1776,6 +2001,12 @@ declare global {
     getInventory(): Inventory | null;
 
     /**
+     * Returns the car a driver NPC was thrown out of when a player stole it.
+     * @returns The vehicle, or null for another kind of NPC or once that car is gone.
+     */
+    getThrownFromVehicle(): Vehicle | null;
+
+    /**
      * Asks the simulation host to retire it now; npcRetire follows.
      * @returns False when it no longer exists or no host is attached.
      */
@@ -1803,6 +2034,95 @@ declare global {
   }
 
   interface Npc extends Entity {}
+
+  /**
+   * The retail police, which the simulation host runs for every player: each player's crime record, the wanted level it reaches and the officers it sends. Officers come from police walkers and from the traffic's police cars, which also chase players and set up roadblocks.
+   */
+  const Police: {
+    /**
+     * Returns the player's crime record as the host last reported it.
+     * @param player A spawned player.
+     * @returns The record, or null when the player is not spawned.
+     */
+    getRecord(player: Player): PoliceRecord | null;
+
+    /**
+     * Raises the record to this level, which sends the police the retail way, or lowers it (calling off the officers first). playerWantedChange follows.
+     * @param player A spawned player.
+     * @param level 0 none, 1 minor, 2 arrest, 3 lethal.
+     * @returns False when the player is not spawned, no simulation host is attached, or the police are off and the level would rise.
+     */
+    setWanted(player: Player, level: number): boolean;
+
+    /**
+     * Settles the player's record and calls off every officer after them.
+     * @param player A spawned player.
+     * @returns False when the player is not spawned or no simulation host is attached.
+     */
+    clear(player: Player): boolean;
+
+    /**
+     * Turns the police reaction to crimes on or off for everyone. While off, crimes raise nothing, Police.setWanted cannot raise a level and a hit officer opens no new case. Officers already on a case keep it; Police.clear calls them off.
+     * @param enabled Whether crimes raise wanted levels.
+     */
+    setEnabled(enabled: boolean): void;
+
+    /**
+     * Whether crimes raise wanted levels.
+     * @returns True unless Police.setEnabled(false).
+     */
+    isEnabled(): boolean;
+  };
+
+  /**
+   * The mission's trams and metro trains. The simulation host runs them with the retail AI everywhere on the map and reports them ten times a second; every player sees them, with the host's passengers, where the host has them. Players ride them through the doors at stations.
+   */
+  const Railway: {
+    /**
+     * Lists every railway the simulation host has reported this mission.
+     * @returns The railways, by load index.
+     */
+    getAll(): RailwayInfo[];
+
+    /**
+     * Returns one railway as the host last reported it.
+     * @param index Load index from 0.
+     * @returns The railway, or null before the host reported it.
+     */
+    get(index: number): RailwayInfo | null;
+
+    /**
+     * Lists the railways whose body is within radius of position.
+     * @param position Center; three numbers are accepted too.
+     * @param radius Distance in units.
+     * @returns The railways in range.
+     */
+    getInRange(position: Vector3 | { x: number; y: number; z: number }, radius: number): RailwayInfo[];
+
+    /**
+     * Counts the reported railways.
+     * @returns The number of railways; freeride has 38.
+     */
+    getCount(): number;
+  };
+
+  /**
+   * The mission's drawbridges. The simulation host runs them with the retail AI, which raises one when a steamer comes; every player sees them, their steamers and their collision where the host has them, a few hundred milliseconds later. Read only.
+   */
+  const Bridge: {
+    /**
+     * Lists every bridge the simulation host has reported this mission.
+     * @returns The bridges, by load index.
+     */
+    getAll(): BridgeInfo[];
+
+    /**
+     * Returns one bridge as the host last reported it.
+     * @param index Load index from 0.
+     * @returns The bridge, or null before the host reported it.
+     */
+    get(index: number): BridgeInfo | null;
+  };
 
   /**
    * A server-owned weapon in the world: a script pickup, a dropped weapon or a dead player's weapon. The use key asks the server, which checks reach, life and inventory.
@@ -2092,6 +2412,21 @@ declare global {
   }
 
   /**
+   * What happened to the mission's world props since it loaded or was last repaired.
+   */
+  interface PropDamageInfo {
+    /**
+     * Breakables knocked down: phone booths, hydrants, trash bins, barrels and the other crash-material scene models. Traffic signs from the city cache are not counted or synchronized.
+     */
+    broken: number;
+
+    /**
+     * Physical props (boxes, railings, mail boxes, cans) resting away from where the mission placed them.
+     */
+    moved: number;
+  }
+
+  /**
    * The shared Mafia 1 world: mission, collections, weather, scene frames, city music and effects everyone sees.
    */
   const World: {
@@ -2207,6 +2542,18 @@ declare global {
      * @param name One frame to restore; omit to restore every overridden frame.
      */
     resetFrameOpacity(name?: string): void;
+
+    /**
+     * Counts the world props broken or moved in this mission, which every client and late joiner sees the same.
+     * @returns The broken and moved counts.
+     */
+    getPropDamage(): PropDamageInfo;
+
+    /**
+     * Puts every broken booth, hydrant, bin and other breakable back up, with its collision, and every box or other physical prop back where the mission placed it, for every client. The debris pieces and hydrant jets go. Traffic signs from the city cache (dopravni1B-8B), which a car or shot knocks down on that client only, stay down until the mission changes. Mission changes start with every prop whole.
+     * @returns How many props were broken or moved.
+     */
+    repairProps(): number;
 
     /**
      * Explodes for every client. The server applies player damage and fires playerDamage and playerDeath; clients damage cars and objects.
