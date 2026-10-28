@@ -37,10 +37,21 @@ namespace Mafia1Online::Shared::Entities {
         // The controller's native locomotion state; it rides with the pose so
         // observers play the same walk, run, strafe or idle at the same time.
         int16_t locomotion = 1;
+        // Aboard a tram or metro train: the railway index (0xff for none), its
+        // body (0) or wagon, and the position and yaw in that part's basis
+        // (Shared::Railway). Observers place the body there on their copy.
+        uint8_t railway = 0xff;
+        uint8_t railwayPart = 0;
+        glm::vec3 railwayLocal {0.0f};
+        float railwayYaw = 0.0f;
 
         void SerializeTransform(Framework::Networking::Replication::FieldSerializer &fields) override {
             NetworkEntity::SerializeTransform(fields);
             fields.Field(locomotion);
+            fields.Field(railway);
+            fields.Field(railwayPart);
+            fields.Field(railwayLocal);
+            fields.Field(railwayYaw);
         }
 
         Framework::Networking::Replication::NametagState *GetNametag() override {

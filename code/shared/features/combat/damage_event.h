@@ -21,6 +21,8 @@ namespace Mafia1Online::Shared::Combat {
         float directionX               = 0.0f;
         float directionY               = 0.0f;
         float directionZ               = 0.0f;
+        // The car of a car impact (hit type 4), else 0.
+        uint64_t sourceCarId           = 0;
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {
             stream->Serialize(write, targetNetworkId);
@@ -33,6 +35,7 @@ namespace Mafia1Online::Shared::Combat {
             stream->Serialize(write, directionX);
             stream->Serialize(write, directionY);
             stream->Serialize(write, directionZ);
+            stream->Serialize(write, sourceCarId);
         }
     };
 } // namespace Mafia1Online::Shared::Combat

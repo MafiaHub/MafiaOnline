@@ -30,10 +30,11 @@ int main(int argc, char **argv) {
     bytes = Chunk(0x4c53, Chunk(0xae20, Chunk(0xae21, Chunk(0xae23, {'b', 'a', 'd'}))));
     if (ReadMissionActors(bytes, records))
         return 4;
-    if (KeepMissionActorGeometry(4) || KeepMissionActorGeometry(8) || KeepMissionActorGeometry(27) || !KeepMissionActorGeometry(6) || !KeepMissionActorGeometry(20))
+    if (KeepMissionActorGeometry(4) || !KeepMissionActorGeometry(8) || KeepMissionActorGeometry(27) || !KeepMissionActorGeometry(6) || !KeepMissionActorGeometry(20) || !KeepMissionActorGeometry(35))
         return 5;
     for (uint32_t typeId = 0; typeId <= 35; ++typeId) {
-        if (LoadMissionActor(typeId) != (typeId == 6 || typeId == 18))
+        if (LoadMissionActor(typeId, false) != (typeId == 6 || typeId == 8 || typeId == 18 || typeId == 20 || typeId == 35) ||
+            LoadMissionActor(typeId, true) != (typeId == 6 || typeId == 8 || typeId == 12 || typeId == 18 || typeId == 20 || typeId == 35))
             return 7;
     }
     if (argc == 2) {

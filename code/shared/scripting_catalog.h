@@ -135,7 +135,8 @@ namespace Mafia1Online::Scripting {
         auto &health = catalog.data_type("PlayerHealthInfo", "An accepted change of a player's server health.");
         health.add_property("attacker", "Player | Npc | null", "Player or simulation host NPC the damage is attributed to, or null when the source is absent or has disconnected.");
         health.add_property("weaponId", "number | null", "Validated weapon used for this damage: 0 is fists, 5 is a Molotov, 15 is a grenade; null for script, fall, vehicle or unknown damage. Remains known if the attacker disconnects after throwing.");
-        health.add_property("cause", "\"script\" | \"firearm\" | \"melee\" | \"explosion\" | \"fire\" | \"fall\" | \"drowning\" | \"vehicle\"", "Server damage path that changed health. Explosions and fires can have a weaponId when they came from a thrown weapon.");
+        health.add_property("cause", "\"script\" | \"firearm\" | \"melee\" | \"explosion\" | \"fire\" | \"fall\" | \"drowning\" | \"vehicle\" | \"railway\"",
+            "Server damage path that changed health; railway is a tram or metro train running into the player on foot. Explosions and fires can have a weaponId when they came from a thrown weapon.");
         health.add_property("oldHealth", "number", "Health before the change.");
         health.add_property("health", "number", "Health after the change.");
         health.add_property("amount", "number", "oldHealth minus health; negative for healing.");
@@ -183,7 +184,7 @@ namespace Mafia1Online::Scripting {
         pedestrianDamage.add_property("healthAfter", "number", "Health after the hit; 0 or less means it died.");
         events.add_property("pedestrianDamage", "[pedestrian: Pedestrian, info: PedestrianDamageInfo]", "Dispatched after the simulation host applied a hit.");
         events.add_property("pedestrianDeath", "[pedestrian: Pedestrian, killer: Player | Vehicle | null]", "Dispatched once when a pedestrian dies; killer is the last attacker.");
-        events.add_property("npcSpawn", "[npc: Npc]", "Dispatched when the simulation host starts running an armed human, such as a gangster pedestrian someone hit that draws its weapon.");
+        events.add_property("npcSpawn", "[npc: Npc]", "Dispatched when the simulation host starts running an armed human, such as a gangster pedestrian someone hit that draws its weapon or a police walker the police manager sends after a player.");
         events.add_property("npcRetire", "[npc: Npc]", "Dispatched just before an NPC leaves the world: no player within 150 units, Npc.remove or the host leaving. A mission change removes every NPC without this event.");
         auto &npcDamage = catalog.data_type("NpcDamageInfo", "A hit the simulation host applied to an NPC.");
         npcDamage.add_property("attacker", "Player | Npc | Vehicle | null", "Who hit it, when known.");
@@ -194,6 +195,63 @@ namespace Mafia1Online::Scripting {
         events.add_property("npcDamage", "[npc: Npc, info: NpcDamageInfo]", "Dispatched after the simulation host applied a hit.");
         events.add_property("npcDeath", "[npc: Npc, killer: Player | Npc | Vehicle | null]",
             "Dispatched once when an NPC dies; killer is the last attacker. The weapon in its hand drops as a pickup, as retail Do_WeaponDrop does (weaponDropped).");
+        auto &record = catalog.data_type("PoliceRecord", "A player's retail police crime record on the simulation host.");
+        record.add_property("level", "number", "Wanted level: 0 none, 1 minor (pursuit), 2 arrest, 3 lethal.");
+        record.add_property("crimes", "(\"weaponSeen\" | \"firing\" | \"speeding\" | \"crashObject\" | \"crashCar\" | \"crashPedestrian\" | \"sidewalk\" | \"violence\" | \"redLight\" | \"carTheft\" | \"signDamage\" | \"assaultOnPolice\" | \"forcedArrest\" | \"policeCarRammed\")[]", "Crimes since the record was last settled.");
+        record.add_property("officers", "number", "Officers assigned to the player.");
+        auto &crime = catalog.data_type("PlayerCrimeInfo", "A crime the police noticed.");
+        crime.add_property("crime", "\"weaponSeen\" | \"firing\" | \"speeding\" | \"crashObject\" | \"crashCar\" | \"crashPedestrian\" | \"sidewalk\" | \"violence\" | \"redLight\" | \"carTheft\" | \"signDamage\" | \"assaultOnPolice\" | \"forcedArrest\" | \"policeCarRammed\"", "What the player did: a weapon in hand, shots, speeding, a crash, driving on the sidewalk, fist fights, a red light, car theft, a damaged sign, assault on police, a scripted arrest or ramming a police car.");
+        events.add_property("playerCrime", "[player: Player, info: PlayerCrimeInfo]",
+            "Dispatched when the simulation host's police manager records a new crime of a player. The player's wanted level may rise with it (playerWantedChange).");
+        auto &wanted = catalog.data_type("PlayerWantedInfo", "A wanted level change.");
+        wanted.add_property("level", "number", "New level: 0 none, 1 minor, 2 arrest, 3 lethal.");
+        wanted.add_property("previous", "number", "Level before the change.");
+        events.add_property("playerWantedChange", "[player: Player, info: PlayerWantedInfo]",
+            "Dispatched when a player's wanted level changes: the police raise it for a crime, a script sets it, an arrest or Police.clear settles it, the officers lose the player, "
+            "or a new simulation host takes over (every record starts again at 0).");
+        auto &arrest = catalog.data_type("PlayerArrestInfo", "How a police officer caught a player.");
+        arrest.add_property("kind", "\"arrest\" | \"fine\"", "arrest: the retail arrest, which ends a single-player game; fine: the on-the-spot fine.");
+        events.add_property("playerArrest", "[player: Player, officer: Npc, info: PlayerArrestInfo]",
+            "Dispatched when a simulation host police officer finished arresting or fining a player. Nothing else happens to the player: the game goes on and the script decides the outcome. The player's crime record is cleared.");
+        auto &taken = catalog.data_type("VehicleTrafficTakenInfo", "How a player took a car of the city's traffic.");
+        taken.add_property("stolen", "boolean", "True when the player pulled its driver out, who stays as a driver NPC; false for a seat nobody held.");
+        events.add_property("vehicleTrafficTaken", "[vehicle: Vehicle, player: Player, info: VehicleTrafficTakenInfo]",
+            "Dispatched when a car the simulation host drove becomes the player's: the host stops driving it and the player's client simulates it. "
+            "After a steal the player gets in with the next use, as in retail.");
+        events.add_property("vehicleStealRefused", "[vehicle: Vehicle, player: Player]",
+            "Dispatched when the server refused a player's steal of a traffic car: the car moved out of reach or was not standing still, another player took it first or its driver had left. "
+            "A player's repeated try within 500 ms is refused without this event. "
+            "The player's client already played the pull-out; the driver stays in the car.");
+        auto &thrown = catalog.data_type("PlayerThrownOutInfo", "How an NPC threw a player out of a car.");
+        thrown.add_property("seat", "number", "Seat the player was thrown out of; 0 is the driver.");
+        thrown.add_property("by", "Npc", "The NPC that did it: a traffic driver taking its car back, a policeman before an arrest or a gangster.");
+        events.add_property("playerThrownOut", "[player: Player, vehicle: Vehicle, info: PlayerThrownOutInfo]",
+            "Dispatched after vehiclePlayerExited when a simulation host NPC pulled the player out of the seat (retail Do_ThrowCocotFromCar).");
+        auto &wagon = catalog.data_type("RailwayWagonInfo", "One wagon behind a railway's body.");
+        wagon.add_property("position", "{ x: number; y: number; z: number }", "Wagon position.");
+        wagon.add_property("direction", "{ x: number; y: number; z: number }", "Unit direction of the wagon.");
+        auto &railway = catalog.data_type("RailwayInfo", "A tram or metro train as the simulation host last reported it.");
+        railway.add_property("index", "number", "Load index within the mission, from 0; stable for the mission generation.");
+        railway.add_property("position", "{ x: number; y: number; z: number }", "Position of the body.");
+        railway.add_property("direction", "{ x: number; y: number; z: number }", "Unit direction of the body.");
+        railway.add_property("speed", "number", "Speed in units per second.");
+        railway.add_property("state",
+            "\"moving\" | \"stationArrival\" | \"passengersLeaving\" | \"passengersEntering\" | \"stationWait\" | \"scheduleWait\" | \"departing\" | \"collisionBraking\" | "
+            "\"stopPointBraking\" | \"semaphoreBraking\" | \"driverHit\" | \"followingRailway\" | \"unknown\"",
+            "Retail railway state. driverHit stops it after a bullet hit its driver; the host lets it go on after 30 seconds.");
+        railway.add_property("wagons", "RailwayWagonInfo[]", "Wagons behind the body; empty for a tram, one for a freeride metro train.");
+        auto &bridge = catalog.data_type("BridgeInfo", "A drawbridge as the simulation host last reported it.");
+        bridge.add_property("index", "number", "Load index within the mission, from 0; stable for the mission generation.");
+        bridge.add_property("position", "{ x: number; y: number; z: number }", "Position of the bridge frame, one of its two leaves.");
+        bridge.add_property("phase", "\"closed\" | \"signaling\" | \"preparing\" | \"opening\" | \"open\" | \"closing\" | \"unknown\"",
+            "Retail bridge phase. A steamer in its request zone moves a closed bridge to signaling (red road lights); it opens once no traffic car is on it.");
+        bridge.add_property("angle", "number", "Leaf angle in radians, 0 closed; the retail bridges open to 50 degrees.");
+        bridge.add_property("raised", "boolean", "True while opening, open or closing: the leaves are up, and a player on foot who walks into the raised bridge dies, as in retail.");
+        auto &railwayHit = catalog.data_type("RailwayHitInfo", "A railway running into a player.");
+        railwayHit.add_property("railway", "RailwayInfo | null", "The railway, as last reported.");
+        railwayHit.add_property("damage", "number", "Damage applied: retail (|speed| - 2.5) * 4.2.");
+        events.add_property("railwayHitPlayer", "[player: Player, info: RailwayHitInfo]",
+            "Dispatched after a tram or metro train knocked a player on foot down, following playerDamage (cause railway).");
         events.add_property("vehicleSpawn", "[vehicle: Vehicle]", "Dispatched after Vehicle.spawn created a vehicle.");
         events.add_property("vehicleDestroy", "[vehicle: Vehicle]", "Dispatched immediately before Vehicle.destroy removes the vehicle. A mission change removes every vehicle without this event.");
         for (const char *name : {"vehicleEngineChange", "vehicleFuelChange", "vehicleLightsChange", "vehicleHornChange", "vehicleSirenChange", "vehicleGearChange", "vehicleDamageState"}) {
@@ -205,11 +263,11 @@ namespace Mafia1Online::Scripting {
         events.add_property("vehicleTerminal", "[vehicle: Vehicle, state: number]", "Dispatched when a vehicle explodes (1), its native body hits water (2), or it enters a fall volume or native invalid-fall state (3). Water and fall occupants die through server combat immediately after this event; explosion occupants die before it. Scripts decide when to destroy the car.");
 
         auto &hit = catalog.data_type("VehicleHitInfo", "An accepted firearm pellet against a vehicle.");
-        hit.add_property("shooter", "Player | null", "Player who fired, or null when they have left.");
+        hit.add_property("shooter", "Player | Npc | null", "Player or simulation host NPC who fired, or null when they are gone.");
         hit.add_property("damage", "number", "Damage derived from the accepted shot.");
         hit.add_property("position", "{ x: number; y: number; z: number }", "World-space impact position.");
-        hit.add_property("shotSequence", "number", "Shooter's fire sequence.");
-        hit.add_property("pelletIndex", "number", "Pellet of that shot.");
+        hit.add_property("shotSequence", "number", "Shooter's fire sequence; 0 for an NPC.");
+        hit.add_property("pelletIndex", "number", "Pellet of that shot; 0 for an NPC.");
         events.add_property("vehicleHit", "[vehicle: Vehicle, info: VehicleHitInfo]", "Dispatched when a pellet hit is replayed to the vehicle's simulation controller, before the resulting vehicleDamage.");
 
         auto &part = catalog.data_type("VehiclePartInfo", "A loose part a vehicle shed.");

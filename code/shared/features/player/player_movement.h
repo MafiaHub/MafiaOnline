@@ -18,6 +18,15 @@ namespace Mafia1Online::Shared::Player {
         float yaw = 0.0f;
         // The controller's native locomotion state (C_human m_iAnimState).
         int16_t locomotion = 1;
+        // Aboard a tram or metro train (Shared::Railway), or kNoRailway: the
+        // railway index, its body (0) or wagon, and the position and yaw in
+        // that part's basis (Railway::kNoRailway documents it).
+        uint8_t railway = 0xff;
+        uint8_t railwayPart = 0;
+        float railwayX = 0.0f;
+        float railwayY = 0.0f;
+        float railwayZ = 0.0f;
+        float railwayYaw = 0.0f;
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {
             stream->Serialize(write, networkId);
@@ -29,6 +38,14 @@ namespace Mafia1Online::Shared::Player {
             stream->Serialize(write, z);
             stream->Serialize(write, yaw);
             stream->Serialize(write, locomotion);
+            stream->Serialize(write, railway);
+            if (railway != 0xff) {
+                stream->Serialize(write, railwayPart);
+                stream->Serialize(write, railwayX);
+                stream->Serialize(write, railwayY);
+                stream->Serialize(write, railwayZ);
+                stream->Serialize(write, railwayYaw);
+            }
         }
     };
 } // namespace Mafia1Online::Shared::Player

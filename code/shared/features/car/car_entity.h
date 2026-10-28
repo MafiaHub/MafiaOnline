@@ -39,6 +39,32 @@ namespace Mafia1Online::Shared::Entities {
             Cleared,
         };
 
+        // A car the simulation host's retail traffic spawned.
+        enum class TrafficKind : uint8_t {
+            None,
+            Civil,
+            Police,
+            Mafia,
+        };
+
+        // A traffic car's driver or passenger, an I3D model only (never a
+        // C_human) until the car leaves traffic.
+        enum class CrewState : uint8_t {
+            None,
+            Seated,
+            // Shot in the seat (DostalJsemRanuKachlou): the in-car death pose.
+            Dead,
+            // Got out, was thrown out, or became an armed NPC.
+            Gone,
+            // Retail's door animation out of the seat (a parking driver,
+            // who then walks off as a pedestrian) or into it (a pedestrian
+            // taking a parked car, ChodDoRici).
+            Exiting,
+            Entering,
+        };
+
+        static constexpr size_t kMaxCrewModelLength = 63;
+
         // Model and mission generation are fixed for this replica's lifetime.
         std::string model;
         uint64_t missionGeneration = 0;
@@ -114,6 +140,20 @@ namespace Mafia1Online::Shared::Entities {
         // Per-wheel skid bits in the retail replay record's layout.
         uint8_t skidMask = 0;
 
+        // Traffic identity, fixed for this replica's lifetime: the host's key
+        // for it (0 for any other car) and what kind of traffic car it was.
+        uint32_t trafficKey = 0;
+        TrafficKind trafficKind = TrafficKind::None;
+        // The traffic driver's and passenger's models (empty for none); a
+        // pedestrian who takes a parked car brings its own.
+        std::string driverModel;
+        std::string passengerModel;
+        // The simulation host drives it (traffic, or an NPC crew). Its seats
+        // are the host's until the server hands the car to a player.
+        bool hostDriven = false;
+        CrewState driverState = CrewState::None;
+        CrewState passengerState = CrewState::None;
+
         // Values that change every tick while driving ride with the pose on
         // the unreliable transform channel, quantized; the reliable state
         // channel would otherwise resend them on every serialize tick.
@@ -154,8 +194,12 @@ namespace Mafia1Online::Shared::Entities {
             fields.Field(missionGeneration);
             fields.Field(simulationControllerGuid);
             fields.Field(seatCount);
+            auto kind = static_cast<uint8_t>(trafficKind);
+            fields.Field(trafficKey);
+            fields.Field(kind);
             if (!fields.Writing()) {
                 model = modelName.C_String();
+                trafficKind = kind <= static_cast<uint8_t>(TrafficKind::Mafia) ? static_cast<TrafficKind>(kind) : TrafficKind::None;
             }
         }
 
@@ -201,9 +245,28 @@ namespace Mafia1Online::Shared::Entities {
             fields.Field(seatIndex);
             auto seat = static_cast<uint8_t>(seatResult);
             fields.Field(seat);
+            fields.Field(hostDriven);
+            auto driver = static_cast<uint8_t>(driverState);
+            auto passenger = static_cast<uint8_t>(passengerState);
+            fields.Field(driver);
+            fields.Field(passenger);
+            MafiaNet::RakString driverName(driverModel.c_str());
+            MafiaNet::RakString passengerName(passengerModel.c_str());
+            fields.Field(driverName);
+            fields.Field(passengerName);
             if (!fields.Writing()) {
                 terminalState = terminal <= static_cast<uint8_t>(TerminalState::FatalFall) ? static_cast<TerminalState>(terminal) : TerminalState::Active;
                 seatResult    = seat <= static_cast<uint8_t>(SeatResult::Cleared) ? static_cast<SeatResult>(seat) : SeatResult::None;
+                driverState   = driver <= static_cast<uint8_t>(CrewState::Entering) ? static_cast<CrewState>(driver) : CrewState::None;
+                passengerState = passenger <= static_cast<uint8_t>(CrewState::Entering) ? static_cast<CrewState>(passenger) : CrewState::None;
+                driverModel = driverName.C_String();
+                passengerModel = passengerName.C_String();
+                if (driverModel.size() > kMaxCrewModelLength) {
+                    driverModel.clear();
+                }
+                if (passengerModel.size() > kMaxCrewModelLength) {
+                    passengerModel.clear();
+                }
             }
         }
     };

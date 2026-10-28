@@ -63,6 +63,12 @@ namespace Mafia1Online::Shared::Npc {
         float yaw = 0.0f;
         float health = 0.0f;
         Inventory inventory;
+        // The reported walker (Pedestrian::Spawned key) the retail game
+        // turned into this NPC, or 0.
+        uint32_t walkerKey = 0;
+        // The network car a traffic driver was thrown out of (Corovacka in
+        // Do_ThrowCocotFromCar), or 0.
+        uint64_t carId = 0;
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {
             auto kindValue = static_cast<uint8_t>(kind);
@@ -76,6 +82,8 @@ namespace Mafia1Online::Shared::Npc {
             stream->Serialize(write, yaw);
             stream->Serialize(write, health);
             inventory.Serialize(stream, write);
+            stream->Serialize(write, walkerKey);
+            stream->Serialize(write, carId);
             if (!write) {
                 kind = static_cast<Entities::NpcKind>(kindValue);
             }
@@ -304,6 +312,180 @@ namespace Mafia1Online::Shared::Npc {
         }
     };
 
+    // One NPC bullet on a player's network car body, which the host's
+    // C_car::Hit hook keeps from its own copy. The server forwards it to the
+    // car's simulation controller as a Car::AuthoritativeHit. Bullets on an
+    // occupant's frame reach that human instead and arrive as a PlayerHit.
+    struct CarHit {
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::NpcCarHit");
+
+        uint64_t missionGeneration = 0;
+        uint32_t key = 0;
+        uint64_t carId = 0;
+        // The C_car::Hit argument: pellet damage after range falloff.
+        float damage = 0.0f;
+        float directionX = 0.0f;
+        float directionY = 0.0f;
+        float directionZ = 0.0f;
+        float hitX = 0.0f;
+        float hitY = 0.0f;
+        float hitZ = 0.0f;
+        float normalX = 0.0f;
+        float normalY = 0.0f;
+        float normalZ = 0.0f;
+        // The hit point and direction in the car's frame, as the host saw it.
+        float localHitX = 0.0f;
+        float localHitY = 0.0f;
+        float localHitZ = 0.0f;
+        float localDirectionX = 0.0f;
+        float localDirectionY = 0.0f;
+        float localDirectionZ = 0.0f;
+
+        void Serialize(MafiaNet::BitStream *stream, bool write) {
+            stream->Serialize(write, missionGeneration);
+            stream->Serialize(write, key);
+            stream->Serialize(write, carId);
+            stream->Serialize(write, damage);
+            stream->Serialize(write, directionX);
+            stream->Serialize(write, directionY);
+            stream->Serialize(write, directionZ);
+            stream->Serialize(write, hitX);
+            stream->Serialize(write, hitY);
+            stream->Serialize(write, hitZ);
+            stream->Serialize(write, normalX);
+            stream->Serialize(write, normalY);
+            stream->Serialize(write, normalZ);
+            stream->Serialize(write, localHitX);
+            stream->Serialize(write, localHitY);
+            stream->Serialize(write, localHitZ);
+            stream->Serialize(write, localDirectionX);
+            stream->Serialize(write, localDirectionY);
+            stream->Serialize(write, localDirectionZ);
+        }
+    };
+
+    // Retail AI_ACTION_KICK_DRIVER (gangster fights, police arrests) threw a
+    // player's replica out of a seat of that player's network car on the
+    // host: Do_ThrowCocotFromCar -> intern_ThrowMeFromCar. The thrower never
+    // takes the seat. The server frees it and every player replays the throw
+    // with the NPC's replica, as it does a player's steal.
+    struct Kick {
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::NpcKick");
+
+        uint64_t missionGeneration = 0;
+        uint32_t key = 0;
+        uint64_t carId = 0;
+        uint8_t seat = 0;
+        uint64_t victimNetworkId = 0;
+        uint64_t victimSpawnGeneration = 0;
+
+        void Serialize(MafiaNet::BitStream *stream, bool write) {
+            stream->Serialize(write, missionGeneration);
+            stream->Serialize(write, key);
+            stream->Serialize(write, carId);
+            stream->Serialize(write, seat);
+            stream->Serialize(write, victimNetworkId);
+            stream->Serialize(write, victimSpawnGeneration);
+        }
+    };
+
+    // Host -> server: a player's police crime record (C_shvestky S_shvestky)
+    // after a police manager tick that changed it.
+    struct PoliceRecord {
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::NpcPoliceRecord");
+
+        uint64_t missionGeneration = 0;
+        uint64_t playerNetworkId = 0;
+        uint64_t playerSpawnGeneration = 0;
+        // 0 none, 1 minor, 2 arrest, 3 lethal.
+        uint8_t level = 0;
+        // Retail crime bits since the record was last settled.
+        uint16_t crimes = 0;
+        uint8_t officers = 0;
+
+        void Serialize(MafiaNet::BitStream *stream, bool write) {
+            stream->Serialize(write, missionGeneration);
+            stream->Serialize(write, playerNetworkId);
+            stream->Serialize(write, playerSpawnGeneration);
+            stream->Serialize(write, level);
+            stream->Serialize(write, crimes);
+            stream->Serialize(write, officers);
+        }
+    };
+
+    // Server -> host: a script changed a player's police record.
+    struct PoliceOrder {
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::NpcPoliceOrder");
+
+        enum class Action : uint8_t {
+            // Raise or lower the record to level; a higher level brings the
+            // police the retail way.
+            SetWanted = 1,
+            // Settle the record and call off every officer after the player.
+            Clear = 2,
+        };
+
+        uint64_t missionGeneration = 0;
+        uint64_t playerNetworkId = 0;
+        uint64_t playerSpawnGeneration = 0;
+        Action action = Action::Clear;
+        uint8_t level = 0;
+
+        void Serialize(MafiaNet::BitStream *stream, bool write) {
+            auto actionValue = static_cast<uint8_t>(action);
+            stream->Serialize(write, missionGeneration);
+            stream->Serialize(write, playerNetworkId);
+            stream->Serialize(write, playerSpawnGeneration);
+            stream->Serialize(write, actionValue);
+            stream->Serialize(write, level);
+            if (!write) {
+                action = static_cast<Action>(actionValue);
+            }
+        }
+    };
+
+    // Server -> host: whether the police manager reacts to crimes at all.
+    struct PoliceSwitch {
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::NpcPoliceSwitch");
+
+        bool enabled = true;
+
+        void Serialize(MafiaNet::BitStream *stream, bool write) {
+            stream->Serialize(write, enabled);
+        }
+    };
+
+    // A police officer finished catching a player's replica: the retail
+    // arrest (which would end a single-player game) or the on-the-spot
+    // fine. The host keeps the retail game running; the server leaves the
+    // outcome to its scripts.
+    struct Caught {
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::NpcCaught");
+
+        enum class Outcome : uint8_t {
+            Arrest = 0,
+            Fine = 1,
+        };
+
+        uint64_t missionGeneration = 0;
+        uint32_t key = 0;
+        uint64_t targetNetworkId = 0;
+        uint64_t targetSpawnGeneration = 0;
+        Outcome outcome = Outcome::Arrest;
+
+        void Serialize(MafiaNet::BitStream *stream, bool write) {
+            auto outcomeValue = static_cast<uint8_t>(outcome);
+            stream->Serialize(write, missionGeneration);
+            stream->Serialize(write, key);
+            stream->Serialize(write, targetNetworkId);
+            stream->Serialize(write, targetSpawnGeneration);
+            stream->Serialize(write, outcomeValue);
+            if (!write) {
+                outcome = static_cast<Outcome>(outcomeValue);
+            }
+        }
+    };
+
     // A native hit the host applied to its NPC.
     struct Damaged {
         static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::NpcDamaged");
@@ -373,6 +555,28 @@ namespace Mafia1Online::Shared::Npc {
             stream->Serialize(write, x);
             stream->Serialize(write, y);
             stream->Serialize(write, z);
+        }
+    };
+
+    // Host -> server: one of its NPCs sat down in, or left, a seat of a car
+    // the host drives (C_human +0x98 used car, +0xac seat). seat kNoSeat
+    // means on foot; animated means it plays the native enter or exit.
+    struct Seat {
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::NpcSeat");
+        static constexpr uint8_t kNoSeat = 0xff;
+
+        uint64_t missionGeneration = 0;
+        uint32_t key = 0;
+        uint64_t carId = 0;
+        uint8_t seat = kNoSeat;
+        bool animated = false;
+
+        void Serialize(MafiaNet::BitStream *stream, bool write) {
+            stream->Serialize(write, missionGeneration);
+            stream->Serialize(write, key);
+            stream->Serialize(write, carId);
+            stream->Serialize(write, seat);
+            stream->Serialize(write, animated);
         }
     };
 

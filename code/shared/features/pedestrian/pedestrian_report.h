@@ -17,7 +17,10 @@ namespace Mafia1Online::Shared::Pedestrian {
         uint32_t key = 0;
         std::string model;
         // Index among the mission's pedestrian generators in actor order,
-        // which every client loads identically from scene2.bin.
+        // which every client loads identically from scene2.bin; kNoGenerator
+        // for a walker no pool owns (a traffic driver who parked and got
+        // out, AddFreePersonFromCar; a released officer's walker copy).
+        static constexpr uint8_t kNoGenerator = 0xff;
         uint8_t generator = 0;
         // C_traffic_element walk style (+0x1b4), rerolled by every activation.
         uint8_t walkStyle = 0;

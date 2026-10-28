@@ -80,12 +80,16 @@ namespace Mafia1Online::Shared::Car {
         float localDirectionX = 0.0f;
         float localDirectionY = 0.0f;
         float localDirectionZ = 0.0f;
+        // The accepted report's shooter (a player or a host NPC), whose
+        // replica the simulation host passes to C_car::Hit as the attacker.
+        uint64_t shooterId = 0;
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {
             stream->Serialize(write, carId);
             stream->Serialize(write, missionGeneration);
             stream->Serialize(write, controllerGuid);
             stream->Serialize(write, serverSequence);
+            stream->Serialize(write, shooterId);
             stream->Serialize(write, damage);
             stream->Serialize(write, directionX);
             stream->Serialize(write, directionY);

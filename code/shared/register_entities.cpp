@@ -8,6 +8,7 @@
 #include "features/pickup/weapon_pickup_entity.h"
 #include "features/player/player_entity.h"
 #include "features/simulation/simulator_entity.h"
+#include "features/traffic/road_barrier_entity.h"
 #include "features/sound/sound_entity.h"
 #include "features/world/mission_entity.h"
 #include "features/world/world_state_entity.h"
@@ -28,5 +29,6 @@ namespace Mafia1Online::Shared::Entities {
         registry.Register<SimulatorEntity>(SimulatorEntity::kTypeName);
         registry.Register<PedestrianEntity>(PedestrianEntity::kTypeName);
         registry.Register<NpcEntity>(NpcEntity::kTypeName);
+        registry.Register<RoadBarrierEntity>(RoadBarrierEntity::kTypeName);
     }
 } // namespace Mafia1Online::Shared::Entities

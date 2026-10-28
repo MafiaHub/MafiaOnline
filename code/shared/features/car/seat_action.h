@@ -13,6 +13,9 @@ namespace Mafia1Online::Shared::Car {
         ExitBlocked = 5,
         EnterBegin = 6,
         Move = 7,
+        // Server -> players only: a player stole a traffic car, whose driver
+        // is a crew model there; the thief plays only its pull-out.
+        StealTraffic = 8,
     };
 
     struct SeatIntent {
