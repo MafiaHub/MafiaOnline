@@ -259,10 +259,11 @@
         node.className = `card ${data.tone ?? ""}`;
         const width = typeof data.progress === "number" ? Math.round(data.progress * 100) : null;
         const bar = node.querySelector(".bar span");
-        node.replaceChildren(el("div", {class: "inside"},
+        // replaceChildren would print a null argument as text.
+        node.replaceChildren(...[el("div", {class: "inside"},
           el("h3", {}, data.title ?? ""), data.subtitle ? el("p", {class: "sub"}, data.subtitle) : null,
           (data.rows ?? []).map(([label, value]) => el("div", {class: "row"}, el("span", {}, label), el("b", {}, value)))),
-          width === null ? null : el("div", {class: "bar"}, bar ?? el("span")));
+          width === null ? null : el("div", {class: "bar"}, bar ?? el("span"))].filter(Boolean));
         if (width !== null) node.querySelector(".bar span").style.width = `${width}%`;
       }
     }

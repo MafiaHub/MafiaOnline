@@ -3,7 +3,9 @@
 const commands = require("./lib/commands.js");
 const devmode = require("./lib/devmode.js");
 const {toast} = require("./lib/notify.js");
-const {emit, playable, findPlayer, vehicleById} = require("./lib/util.js");
+const {emit, playable, findPlayer, vehicleById, headingOf, onStop} = require("./lib/util.js");
+
+const testObjects = new Map();
 
 
 function testKit(player, big) {
@@ -62,13 +64,32 @@ const actions = {
         const broken = (parts, bit) => parts.filter((part) => (part.flags & bit) !== 0).length;
         return `Damage revision ${damage.revision}, body ${damage.bodyDamage.toFixed(1)}, glass/parts ${broken(damage.zones, 1)}, tires ${broken(damage.wheels, 0x400)}`;
     },
+    // Straight to a cell, as after an arrest at this wanted level.
+    jail(player, [level = "1"]) {
+        return require("./jail.js").sentence(player, Math.max(1, Number(level) || 1)) ? "Locked up" : "Could not lock you up here";
+    },
+    // A map object four metres ahead, for collision tests; the next one replaces it.
+    object(player, [model]) {
+        if (typeof MapObject === "undefined") return "This server has no MapObject";
+        if (!model) return "Use /dev object <model.4ds> (off removes it)";
+        testObjects.get(player.id)?.destroy();
+        testObjects.delete(player.id);
+        if (model === "off") return "Removed";
+        const heading = headingOf(player.rotation);
+        const {x, y, z} = player.position;
+        const object = MapObject.create(model, {x: x + Math.sin(heading) * 4, y, z: z + Math.cos(heading) * 4}, {x: 0, y: heading, z: 0},
+            {virtualWorld: player.virtualWorld});
+        if (!object) return `Could not create ${model}`;
+        testObjects.set(player.id, object);
+        return `Object ${object.id}: ${model}`;
+    },
     money(player, [amount, who]) {
         const target = who ? findPlayer(who) : player;
         return target && Number.isInteger(Number(amount)) && target.giveMoney(Number(amount)) ? `${target.nickname} has $${target.money}` : "Use /dev money <amount> [player]";
     },
 };
 
-commands.register({name: "dev", usage: "/dev weapons|fists|drop|model|wanted|hud|opacity|carstate|cardamage|money",
+commands.register({name: "dev", usage: "/dev weapons|fists|drop|model|wanted|hud|opacity|carstate|cardamage|jail|object|money",
     help: "Development tools (FREERIDE_DEV=1 or console: fr dev on).", category: "Dev", hidden: true}, (player, [action, ...args]) => {
     if (!devmode.isOn()) {
         toast(player, "Development commands are off on this server.", {tone: "bad"});
@@ -81,3 +102,16 @@ commands.register({name: "dev", usage: "/dev weapons|fists|drop|model|wanted|hud
     if (!playable(player) && action !== "hud") return;
     player.sendMessage(actions[action](player, args), 0xd9cdb4);
 });
+
+Events.on("playerDisconnect", (player) => {
+    testObjects.get(player.id)?.destroy();
+    testObjects.delete(player.id);
+});
+onStop(() => testObjects.clear());
+
+// The server console runs any action on a player: fr as <player> <action> ...
+function run(player, action, args) {
+    return actions[action] ? actions[action](player, args) : `Actions: ${Object.keys(actions).join("|")}`;
+}
+
+module.exports = {run};

@@ -410,6 +410,9 @@ Events.on("consoleCommand", (command, args) => {
             for (const key of keys) admin.set(key, rest[0] === "add");
             console.log(`[freeride] ${keys.join(", ")} ${rest[0] === "add" ? "now admin" : "no longer admin"}`);
         }
+    } else if (action === "as" && rest.length >= 2) {
+        const target = util.findPlayer(rest[0]);
+        console.log(`[freeride] ${target ? require("./dev.js").run(target, rest[1], rest.slice(2)) : `No connected player "${rest[0]}"`}`);
     } else if (action === "admin") {
         console.log(`[freeride] Admins: ${admin.list().join(", ") || "none"}`);
     } else if (action === "dev" && ["on", "off"].includes(rest[0])) {
@@ -418,6 +421,6 @@ Events.on("consoleCommand", (command, args) => {
     } else if (action === "say" && rest.length) {
         toastAll(rest.join(" "), {title: "City Hall", tone: "gold", seconds: 8});
     } else if (action !== "event") {
-        console.log("[freeride] Console: fr save | fr money <player> <amount> | fr say <text> | fr admin add|remove <player> | fr admin list | fr dev on|off | fr event <supply|hotcar>");
+        console.log("[freeride] Console: fr save | fr money <player> <amount> | fr say <text> | fr admin add|remove <player> | fr admin list | fr as <player> <dev action> | fr dev on|off | fr event <supply|hotcar>");
     }
 });

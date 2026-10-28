@@ -131,7 +131,12 @@ Events.on("resourceStop", (name) => { if (name === "freeride") clearMarket(); })
 Events.on("render", () => {
     const player = LocalPlayer;
     if (!player?.spawned || !player.alive || market.generation !== World.getMissionGeneration()) return;
-    if ((market.lastMoney !== player.money || Hud.getScore() !== player.money || Hud.isScoreVisible() !== true)
+    // The watch and the money counter share the top-right corner; the
+    // watch has it while a countdown runs (a jail sentence).
+    if (Hud.getCountdown() !== null) {
+        if (Hud.isScoreVisible()) Hud.hideScore();
+        market.lastMoney = null;
+    } else if ((market.lastMoney !== player.money || Hud.getScore() !== player.money || Hud.isScoreVisible() !== true)
         && Hud.setScore(player.money)) market.lastMoney = player.money;
     const now = Date.now();
     if (market.actors.size < market.shops.length && now - market.lastModelAttempt > 2_000) {
