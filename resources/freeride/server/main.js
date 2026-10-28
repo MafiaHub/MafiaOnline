@@ -6,13 +6,21 @@ const commands = require("./lib/commands.js");
 const profiles = require("./lib/profiles.js");
 const life = require("./lib/life.js");
 const menu = require("./lib/menu.js");
+const maps = require("./lib/maps.js");
 const nametag = require("./lib/nametag.js");
 const devmode = require("./lib/devmode.js");
+const admin = require("./lib/admin.js");
+const cars = require("./lib/cars.js");
+const dealership = require("./dealership.js");
 const {toast, toastAll, feed, name, text, COLORS} = require("./lib/notify.js");
 
 const {RESOURCE, onClient, distance, playable, vehicleById, formatMoney, headingOf, speedOf} = util;
 const CAR_CHOICE_COOLDOWN_MS = 750;
 const REPAIR_COOLDOWN_MS = 45_000;
+// A mechanic comes out anywhere; the pump and the car lot charge less.
+const REPAIR_COST = 150;
+const REPAIR_COST_AT_GARAGE = 50;
+const GARAGE_REACH = 25;
 const FLIP_COOLDOWN_MS = 10_000;
 const CAR_REACH = 8;
 const TIP_EVERY_MS = 7 * 60_000;
@@ -20,28 +28,6 @@ const MENU_COMMAND_INTERVAL_MS = 300;
 const MENU_REQUEST_INTERVAL_MS = 800;
 const LEADERBOARD_CACHE_MS = 5000;
 
-// IDs and default-color models from patched retail tables/carindex.def in
-// a8.dta. The client reads that table for the display names. A page event
-// supplies only an ID; the server chooses the model filename.
-const CAR_MODELS_BY_ID = [
-    null,
-    "fordttud00.i3d", "fordtto00.i3d", "fordtru00.i3d", "fordtpi00.i3d", "fordtfor00.i3d", "fordtco00.i3d",
-    "foratu00.i3d", "foraro00.i3d", "forapic00.i3d", "forafo00.i3d", "forade00.i3d", "foracou00.i3d", "foraca00.i3d",
-    "chev00.i3d", "forvco00.i3d", "forvfor00.i3d", "forvro00.i3d", "forvto00.i3d", "forvtud00.i3d",
-    "chemafor00.i3d", "chematud00.i3d", "blackha00.i3d", "taxi00.i3d", "pontfor00.i3d", "ponttud00.i3d",
-    "hudcou00.i3d", "hudfor00.i3d", "hudtu00.i3d", "cordca00.i3d", "cordph00.i3d", "cordse00.i3d",
-    "buicou00.i3d", "buikfor00.i3d", "speedster00.i3d", "merced500k00.i3d", "cad_ford00.i3d", "cad_phaeton00.i3d",
-    "cad_road00.i3d", "arrow00.i3d", "hartmann00.i3d", "phantom00.i3d", "deusejco00.i3d", "bugatti00.i3d",
-    "miller00.i3d", "duesenberg00.i3d", "alfa8c00.i3d", "ambulance00.i3d", "fire00.i3d", "hearsea00.i3d",
-    "hearseca00.i3d", "airflfor00.i3d", "airfltud00.i3d", "polcad00.i3d", "poli00.i3d", "polimfor00.i3d",
-    "polimtud00.i3d", "trucka00.i3d", "truckb00.i3d", "alfa00.i3d", "thunderbird00.i3d", "TruckBx00.i3d",
-    "fordhot00.i3d", "buigang00.i3d", "black00.i3d", "lowgas00.i3d", "blackdragon00.i3d", "cord_sedanh00.i3d",
-    "flamer00.i3d", "fordapick00.i3d", "fordapicktaxi00.i3d", "fordth00.i3d", "fthot00.i3d", "hotrodp200.i3d",
-    "hotrodp300.i3d", "hotrodp400.i3d", "hotrodp500.i3d", "chevroletm6h00.i3d", "tbirdold00.i3d",
-    "fordadelh00.i3d", "hotrodp600.i3d", "phantomtaxi00.i3d",
-];
-
-const CAR_MODELS = new Set(CAR_MODELS_BY_ID.filter(Boolean).map((model) => model.toLowerCase()));
 
 const spawnedInGeneration = new Map();
 const welcomed = new Set();
@@ -57,6 +43,8 @@ let leaderboardCache = null;
 
 const TIPS = [
     "F2 opens the city menu: jobs, races, crews, events and everyone in town.",
+    "Buy a car at the car lot with /dealer. /garage brings it to you, /park puts it away, /lock keeps it yours.",
+    "Jobs pay: taxi fares, courier envelopes, Lucas's export list, police duty and bootleg runs.",
     "Lucas Bertone pays for particular traffic cars. /export shows his list.",
     "Go on police duty with /duty and take down wanted players for pay.",
     "Thirty cash stashes hide at the roadside. They show only up close.",
@@ -127,7 +115,7 @@ function carColor(player) {
 
 function spawnPersonalCar(player, model) {
     if (!playable(player)) return {ok: false, message: "Enter the city before choosing a car."};
-    if (!CAR_MODELS.has(model.toLowerCase())) return {ok: false, message: "That car model is unavailable."};
+    if (!cars.byModel(model)) return {ok: false, message: "That car model is unavailable."};
     if (["race", "duel", "jail"].includes(life.activity(player)?.kind)) return {ok: false, message: life.busyMessage(player)};
     const oldVehicle = player.getVehicle();
     const {x, y, z} = oldVehicle?.position ?? player.position;
@@ -154,7 +142,7 @@ function currentOrLastVehicle(player) {
 function nearbyCar(player) {
     const vehicle = currentOrLastVehicle(player);
     if (!vehicle || !vehicle.model || vehicle.terminalState !== 0) {
-        toast(player, "Get in a car, or call one with /car.", {tone: "bad"});
+        toast(player, "Get in a car, or call one of yours with /garage.", {tone: "bad"});
         return null;
     }
     if (!player.getVehicle() && distance(player.position, vehicle.position) > CAR_REACH) {
@@ -222,7 +210,9 @@ Events.on("playerConnect", (player) => {
 
 Events.on("playerDisconnect", (player) => {
     feed("leave", [name(player), text(" left the city")]);
-    profiles.detach(player);
+    // After every other module's disconnect handler, so they can still
+    // write to the player's record (a parked car's condition, for one).
+    setTimeout(() => profiles.detach(player), 0);
     welcomed.delete(player.id);
     spawnedInGeneration.delete(player.id);
     lastVehicles.delete(player.id);
@@ -266,9 +256,16 @@ Events.on("playerSpawn", (player) => { if (!life.isTransit(player)) welcome(play
 Events.on("vehiclePlayerEntered", (vehicle, player) => lastVehicles.set(player.id, vehicle.id));
 Events.on("vehiclePlayerExited", (vehicle, player) => lastVehicles.set(player.id, vehicle.id));
 
+// The one handler for the car picker: the admin motor pool here, the car lot
+// and the garage in dealership.js.
 onClient("fr:car:choose", (player, request) => {
     if (!request || request.generation !== World.getMissionGeneration() || !Number.isInteger(request.id)) return;
-    const model = CAR_MODELS_BY_ID[request.id];
+    if (request.mode === "dealer" || request.mode === "garage") {
+        dealership.choose(player, request);
+        return;
+    }
+    if (request.mode !== "admin" || !admin.isAdmin(player)) return;
+    const model = cars.byId(request.id)?.model;
     if (!model || cooldown(player, "car", CAR_CHOICE_COOLDOWN_MS)) return;
     const result = spawnPersonalCar(player, model);
     util.emit(player, "fr:car:result", {id: request.id, ...result});
@@ -322,10 +319,14 @@ commands.register({name: "stats", usage: "/stats [player]", help: "Show a career
     player.sendMessage(statsLine(record), 0xe8c57d);
 });
 
-commands.register({name: "car", aliases: ["cars", "v"], usage: "/car [model.i3d]", help: "Open the motor pool or spawn a stock car model.", category: "Cars"}, (player, args) => {
+commands.register({name: "car", aliases: ["v"], usage: "/car [model.i3d]", help: "Admins: spawn any stock car.", category: "Dev", hidden: true}, (player, args) => {
+    if (!admin.isAdmin(player)) {
+        toast(player, "Buy a car at the car lot (/dealer), call one of yours (/garage), or take one from the street.", {tone: "bad"});
+        return;
+    }
     if (!playable(player)) return;
     if (!args.length) {
-        util.emit(player, "fr:car:open", {generation: World.getMissionGeneration()});
+        util.emit(player, "fr:car:open", {generation: World.getMissionGeneration(), mode: "admin"});
         return;
     }
     if (cooldown(player, "car", CAR_CHOICE_COOLDOWN_MS)) return;
@@ -333,16 +334,25 @@ commands.register({name: "car", aliases: ["cars", "v"], usage: "/car [model.i3d]
     toast(player, result.message, {tone: result.ok ? "good" : "bad"});
 });
 
-commands.register({name: "repair", aliases: ["fix"], usage: "/repair", help: "Patch up your car once every 45 seconds.", category: "Cars"}, (player) => {
+commands.register({name: "repair", aliases: ["fix"], usage: "/repair", help: "Pay a mechanic to fix your car; cheaper at the pump or the car lot.", category: "Cars"}, (player) => {
     if (!playable(player)) return;
     const vehicle = nearbyCar(player);
     if (!vehicle) return;
-    const wait = cooldown(player, "repair", REPAIR_COOLDOWN_MS);
-    if (wait) {
-        toast(player, `The mechanic needs ${wait} more seconds.`, {tone: "bad"});
+    const garages = maps.places().filter((place) => ["pump", "bertone"].includes(place.key));
+    const cost = garages.some((place) => distance(vehicle.position, place.position) <= GARAGE_REACH) ? REPAIR_COST_AT_GARAGE : REPAIR_COST;
+    if (cooldown(player, "repair", REPAIR_COOLDOWN_MS)) {
+        toast(player, "The mechanic is still busy with the last job.", {tone: "bad"});
         return;
     }
-    toast(player, vehicle.repair() ? "Good as new." : "This car cannot be repaired.", {tone: "good"});
+    if (!player.trySpendMoney(cost)) {
+        toast(player, `The mechanic wants ${formatMoney(cost)}.`, {tone: "bad"});
+        return;
+    }
+    if (vehicle.repair()) toast(player, `Good as new, for ${formatMoney(cost)}.`, {tone: "good"});
+    else {
+        player.giveMoney(cost);
+        toast(player, "This car cannot be repaired.", {tone: "bad"});
+    }
 });
 
 commands.register({name: "flip", usage: "/flip", help: "Put an overturned car back on its wheels.", category: "Cars"}, (player) => {
@@ -389,12 +399,18 @@ Events.on("consoleCommand", (command, args) => {
         const amount = Number(rest[1]);
         if (target && Number.isInteger(amount) && target.giveMoney(amount)) console.log(`[freeride] ${target.nickname} now has ${formatMoney(target.money)}`);
         else console.log("[freeride] Usage: fr money <player> <whole dollars>");
+    } else if (action === "admin" && ["add", "remove"].includes(rest[0]) && rest[1]) {
+        const target = util.findPlayer(rest.slice(1).join(" "));
+        if (target && admin.set(target, rest[0] === "add")) console.log(`[freeride] ${target.nickname} ${rest[0] === "add" ? "is now" : "is no longer"} an admin`);
+        else console.log("[freeride] Usage: fr admin add|remove <connected player>");
+    } else if (action === "admin") {
+        console.log(`[freeride] Admins: ${admin.list().join(", ") || "none"}`);
     } else if (action === "dev" && ["on", "off"].includes(rest[0])) {
         devmode.set(rest[0] === "on");
         console.log(`[freeride] Development commands ${devmode.isOn() ? "on" : "off"}`);
     } else if (action === "say" && rest.length) {
         toastAll(rest.join(" "), {title: "City Hall", tone: "gold", seconds: 8});
     } else if (action !== "event") {
-        console.log("[freeride] Console: fr save | fr money <player> <amount> | fr say <text> | fr dev on|off | fr event <supply|hotcar>");
+        console.log("[freeride] Console: fr save | fr money <player> <amount> | fr say <text> | fr admin add|remove <player> | fr admin list | fr dev on|off | fr event <supply|hotcar>");
     }
 });

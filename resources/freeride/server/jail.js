@@ -10,23 +10,30 @@ const life = require("./lib/life.js");
 const menu = require("./lib/menu.js");
 const commands = require("./lib/commands.js");
 const {toast, card, feed, name, text, COLORS} = require("./lib/notify.js");
-const {MAIN_WORLD, distance, formatMoney, formatMinutes, onStart, onStop} = require("./lib/util.js");
+const {MAIN_WORLD, distance, emit, formatMoney, formatMinutes, onStart, onStop} = require("./lib/util.js");
 
 const BASE_SENTENCE_MS = 45_000;
 const PER_LEVEL_MS = 30_000;
 const BAIL_PER_SECOND = 5;
-const CELL_REACH = 4;
+const CELL_REACH = 3;
 const FIRST_JAIL_WORLD = 0x50000000;
 const TICK_MS = 1000;
+const GUARD_MS = 250;
+const RELEASE_FADE_MS = 1500;
 
 const prisoners = new Map();
 let timer = null;
+let guard = null;
 
 function cellFor(player) {
     const jail = maps.current()?.jail;
-    if (jail) return {cell: jail.cell, release: jail.release, name: jail.name};
+    if (jail) return {cell: jail.cell, release: jail.release, guard: jail.guard, name: jail.name};
     const spot = life.spotFor(player);
-    return spot ? {cell: spot, release: spot, name: "a holding cell"} : null;
+    if (!spot) return null;
+    const heading = spot.heading ?? 0;
+    const guard = {position: {x: spot.position.x + Math.sin(heading) * 1.6, y: spot.position.y, z: spot.position.z + Math.cos(heading) * 1.6},
+        direction: {x: -Math.sin(heading), y: 0, z: -Math.cos(heading)}};
+    return {cell: spot, release: spot, guard, name: "a holding cell"};
 }
 
 function lockUp(player, until) {
@@ -43,6 +50,8 @@ function lockUp(player, until) {
     }
     prisoners.set(player.id, {until, place});
     profiles.setField(player, "jailUntil", until);
+    // The prisoner's client stands a guard in the doorway and starts the watch.
+    emit(player, "fr:jail", {active: true, seconds: Math.ceil((until - Date.now()) / 1000), guard: place.guard});
     return true;
 }
 
@@ -53,10 +62,15 @@ function release(player, message) {
     profiles.setField(player, "jailUntil", 0);
     card(player, "jail", null);
     life.end(player, "jail");
-    player.setVirtualWorld(MAIN_WORLD);
-    const {position, heading} = prisoner.place.release;
-    life.teleport(player, position, heading ?? 0, {...life.STARTER_KIT, health: 100});
-    if (message) toast(player, message, {title: "Released", tone: "good"});
+    // The guard walks the prisoner out: fade, then the release point.
+    emit(player, "fr:jail", {active: false});
+    setTimeout(() => {
+        if (!World.getPlayers().some((other) => other.id === player.id)) return;
+        player.setVirtualWorld(MAIN_WORLD);
+        const {position, heading} = prisoner.place.release;
+        life.teleport(player, position, heading ?? 0, {...life.STARTER_KIT, health: 100});
+        if (message) toast(player, message, {title: "Released", tone: "good"});
+    }, RELEASE_FADE_MS);
 }
 
 // Called by police.js for an arrest (not a fine).
@@ -85,15 +99,30 @@ function tick() {
             release(player, "You served your time. Keep your nose clean.");
             continue;
         }
-        if (!player.alive) continue;
-        if (distance(player.position, prisoner.place.cell.position) > CELL_REACH) {
-            life.teleport(player, prisoner.place.cell.position, prisoner.place.cell.heading ?? 0);
-            toast(player, "The guard walks you back to your cell.", {tone: "bad", seconds: 3});
-        }
         card(player, "jail", {title: "In jail", subtitle: prisoner.place.name, rows: [["Released in", formatMinutes(prisoner.until - now)], ["Bail", formatMoney(bail(player))]],
             tone: "bad"});
     }
 }
+
+// The guard: a prisoner who gets more than a few steps from the cell is put
+// straight back.
+function watch() {
+    for (const [id, prisoner] of prisoners) {
+        const player = World.getPlayers().find((other) => other.id === id);
+        if (!player?.alive || distance(player.position, prisoner.place.cell.position) <= CELL_REACH) continue;
+        if (player.getVehicle()) player.removeFromVehicle();
+        life.teleport(player, prisoner.place.cell.position, prisoner.place.cell.heading ?? 0, {weapons: [], selected: 0, health: player.health});
+        toast(player, "The guard walks you back to your cell.", {tone: "bad", seconds: 3});
+    }
+}
+
+// A door a prisoner opens is the cell door: it is shut and stays locked.
+Events.on("doorStateChange", (door, player) => {
+    if (!player || !prisoners.has(player.id) || !door.open) return;
+    door.closeDoor();
+    door.locked = true;
+    toast(player, "The cell door is locked.", {tone: "bad", seconds: 3});
+});
 
 commands.register({name: "bail", usage: "/bail", help: "Pay your way out of jail.", category: "Combat"}, (player) => {
     if (!prisoners.has(player.id)) {
@@ -127,9 +156,13 @@ Events.on("playerRespawn", (player) => {
 });
 Events.on("playerDisconnect", (player) => prisoners.delete(player.id));
 Events.on("missionChange", () => prisoners.clear());
-onStart(() => { timer = setInterval(tick, TICK_MS); });
+onStart(() => {
+    timer = setInterval(tick, TICK_MS);
+    guard = setInterval(watch, GUARD_MS);
+});
 onStop(() => {
     clearInterval(timer);
+    clearInterval(guard);
     for (const player of World.getPlayers()) if (prisoners.has(player.id)) player.setVirtualWorld(MAIN_WORLD);
 });
 

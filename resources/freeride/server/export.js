@@ -1,5 +1,5 @@
 // The export list. Lucas Bertone wants three particular models, and only
-// cars taken from the city's traffic count; a car from the motor pool is
+// cars taken from the city's traffic count; a bought or admin car is
 // worthless to him. The list comes from the models actually driving around
 // this server and changes once all three are in, or after an hour. Each map
 // names its own yard in lib/maps.js; on Lost Heaven Extended it is his garage.
@@ -96,7 +96,7 @@ function tick() {
 commands.register({name: "export", aliases: ["lucas"], usage: "/export", help: "Which traffic cars Lucas wants this hour.", category: "City"}, (player) => {
     if (!list) newList();
     const open = list.models.filter((entry) => !entry.deliveredBy).map((entry) => entry.model.replace(/00\.i3d$/i, ""));
-    toast(player, `Lucas wants: ${open.join(", ")}. Take them from traffic, not the motor pool. New list in ${formatMinutes(list.expiresAt - Date.now())}.`,
+    toast(player, `Lucas wants: ${open.join(", ")}. Take them from traffic; your own car does not count. New list in ${formatMinutes(list.expiresAt - Date.now())}.`,
         {title: "Export list", seconds: 9});
 });
 

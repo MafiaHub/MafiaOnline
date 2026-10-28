@@ -358,7 +358,7 @@
           el("p", {class: "big"}, `Level ${you.level ?? 1} · ${you.rank ?? ""}`),
           el("div", {class: "meter"}, el("span", {style: `width:${Math.round((you.levelXp ?? 0) / Math.max(1, you.levelSpan ?? 1) * 100)}%`})),
           el("p", {}, `${you.levelXp ?? 0} of ${you.levelSpan ?? 100} XP to the next level`),
-          el("div", {class: "actions"}, button("Get a car", "/car", true), button("My stats", "/stats"))),
+          el("div", {class: "actions"}, button("My cars", "/garage", true), button("Car lot", "/dealer"), button("My stats", "/stats"))),
         invites.length ? panel("Invitations", invites.map((invite) => line(invite.from, invite.summary,
           button("Accept", `/accept ${invite.id}`, true), button("Decline", `/decline ${invite.id}`)))) : null,
         panel("City event", event.kind

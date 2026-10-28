@@ -50,8 +50,8 @@ the server. A separate native pose report lets the gamemode choose a
 matching initial spawn. Server scripts control spawn, respawn, despawn and
 health through `Players`, and car replicas through `Cars`. The default
 gamemode, [Free Ride](docs/freeride.md) under `resources/freeride`, spawns
-ready players. `/car` opens a catalog with native model previews and seats
-the player in the chosen car. In a loaded mission, press T to open the
+ready players. `/dealer` at the car lot opens a catalog with native model
+previews and prices, and `/garage` brings an owned car round. In a loaded mission, press T to open the
 native chat input, Enter to send and Escape to cancel. Incoming chat uses the
 game's own HUD console; the stock lives display receives the local player's
 authoritative health. Run the server with this project directory as its

@@ -183,7 +183,7 @@ function lobbyCard(race, racer) {
         title: race.route.name, subtitle: circuit ? `Circuit · ${race.route.laps} lap${race.route.laps === 1 ? "" : "s"} · ${lengthText(race.route)}`
             : `Street race · ${lengthText(race.route)} · ${race.route.checkpoints.length} checkpoints`,
         rows: [["Starts in", formatMinutes(race.lobbyEndsAt - Date.now())], ["Racers", String(race.racers.size)],
-            ["You", circuit ? "You will be put on the grid" : atStart ? "At the start line" : racer.player.getSeat() === 0 ? "Drive to the start" : "Get a car (/car)"]],
+            ["You", circuit ? "You will be put on the grid" : atStart ? "At the start line" : racer.player.getSeat() === 0 ? "Drive to the start" : "Get a car (/garage)"]],
         progress: Math.max(0, (race.lobbyEndsAt - Date.now()) / race.lobbyMs), tone: atStart ? "good" : "gold",
     });
 }

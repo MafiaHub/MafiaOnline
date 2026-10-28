@@ -10,7 +10,7 @@ const {emit, onStop} = require("./util.js");
 const DATA_DIR = path.join(process.cwd(), "data", "freeride");
 const FILE = path.join(DATA_DIR, "profiles.json");
 const SAVE_DELAY_MS = 10_000;
-const STARTING_CASH = 500;
+const STARTING_CASH = 800;
 const PLAYTIME_XP_EVERY_MS = 5 * 60_000;
 const PLAYTIME_XP = 25;
 
@@ -59,7 +59,7 @@ function fresh(player) {
     const now = Date.now();
     return {name: player.nickname, money: STARTING_CASH, xp: 0, kills: 0, deaths: 0, bestStreak: 0,
         racesRun: 0, racesWon: 0, raceRecords: 0, deliveries: 0, bountiesClaimed: 0, eventsWon: 0,
-        duelsWon: 0, exports: 0, fares: 0, arrests: 0, robberies: 0, turfCaptures: 0, stashes: [], speedBest: {}, playMs: 0, model: null, district: null, firstSeen: now, lastSeen: now};
+        duelsWon: 0, cars: [], exports: 0, fares: 0, arrests: 0, robberies: 0, turfCaptures: 0, stashes: [], speedBest: {}, playMs: 0, model: null, district: null, firstSeen: now, lastSeen: now};
 }
 
 function levelFor(xp) {
@@ -74,6 +74,11 @@ function rankFor(level) {
     let rank = RANKS[0][1];
     for (const [minimum, title] of RANKS) if (level >= minimum) rank = title;
     return rank;
+}
+
+// The record key of a connected player, or null before attach.
+function keyOf(player) {
+    return sessions.get(player.id)?.key ?? null;
 }
 
 function get(player) {
@@ -213,5 +218,5 @@ Events.on("playerSpawn", publish);
 
 load();
 
-module.exports = {get, attach, save: writeNow, detach, publish, setPublic, addXp, bump, setField, progress, leaderboard,
+module.exports = {get, keyOf, attach, save: writeNow, detach, publish, setPublic, addXp, bump, setField, progress, leaderboard,
     levelFor, rankFor, STARTING_CASH, DATA_DIR};

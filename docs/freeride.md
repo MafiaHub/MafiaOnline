@@ -71,7 +71,7 @@ district, Left/Right the character (thirteen stock models, each checked
 against the native skeleton first), C turns the camera and Enter spawns. A
 returning player starts on the district and character they chose last time.
 
-Each life starts with a baseball bat and a Colt. Dead players come back where
+Each life starts with a baseball bat; guns are bought at Yellow Pete's. Dead players come back where
 they entered the city after five seconds (`server/lib/life.js`).
 
 ## Career
@@ -79,7 +79,7 @@ they entered the city after five seconds (`server/lib/life.js`).
 A player record belongs to a nickname on one machine (nickname plus the
 framework hardware ID). It keeps cash, experience, kills, deaths, best kill
 streak, race wins and records, deliveries, bounties, event wins, duel wins and
-play time. New players start with $500. Experience comes from kills, races,
+play time. New players start with $800. Experience comes from kills, races,
 deliveries, events, duels, bounties and time on the streets; levels follow
 100 · n(n−1)/2 XP and carry the ranks Greenhorn, Street Runner, Associate,
 Soldier, Capo, Underboss and Don. The HUD shows the level strip and each gain.
@@ -91,8 +91,8 @@ the player list and the world labels on every client read them from there.
 ## Street races
 
 `/race` (or F2 → Races) opens a lobby on a route. Everyone in town is invited;
-racers have 45 seconds to reach the start line as a driver (`/car` works in
-the lobby). The server then puts every car on a starting grid with
+racers have 45 seconds to reach the start line as a driver (`/garage` works
+in the lobby). The server then puts every car on a starting grid with
 `Vehicle.setTransform`, repairs it, holds it there through the countdown and
 releases all cars on the same tick. It checks each checkpoint against the
 car's replicated position, ranks the field live and sends each racer their
@@ -210,7 +210,7 @@ The Jobs tab of the city menu shows every one of these with its live state.
 
 - **Export list.** Lucas Bertone wants three particular models this hour,
   chosen from the cars actually driving in this server's traffic. Steal one
-  from traffic (a motor pool car does not count) and stop it at the map's
+  from traffic (your own car does not count) and stop it at the map's
   yard (Lucas Bertone's garage on Lost Heaven Extended): $400 each, $600 more for closing the list. `/export` shows it.
 - **Police duty.** `/duty` puts on the uniform, issues a Colt, a shotgun and
   a squad car, and points the compass at the nearest wanted player or bounty
@@ -262,9 +262,12 @@ An arrest is a jail sentence: 45 seconds, plus 30 for each wanted level above
 minor that the case reached. The police keep the prisoner's weapons. On Lost
 Heaven Extended the cell is the motel's storeroom, `&& sklad` in the mod's
 `motel.4ds` (550.7, 32.9, 2035.7), in a private copy of the map; elsewhere the
-player is held where they would respawn. A prisoner who strays is walked back,
-`/car` and `/kill` are refused, and `/bail` pays $5 per second left. Release
-is at the ridge with the starting kit. A sentence survives a reconnect. A fine
+player is held where they would respawn. The prisoner's client stands a guard in the
+cell doorway and shows the countdown. A prisoner who strays more than 3 m is
+walked back within a quarter second, a door a prisoner opens is shut and
+locked, `/kill` is refused, and `/bail` pays $5 per second left. At the end
+the guard walks them out: the screen fades and they stand at the ridge with
+the starting kit. A sentence survives a reconnect. A fine
 still costs $100.
 
 ## Buildings
@@ -295,9 +298,35 @@ proximity voice.
 
 ## Cars
 
-`/car` opens the motor pool with native model previews; one personal car at a
-time, marked on the radar in your crew colour. `/repair` fixes it every 45
-seconds, `/flip` puts it back on its wheels and `/engine` starts or stops it.
+Cars are bought, not spawned. Each map has a car lot on the road beside a
+landmark (the pump on Lost Heaven, Bertone's garage on Lost Heaven Extended,
+the lowlands in The Countryside): `/dealer` points the compass there
+and, on the lot, opens the catalog with native model previews and prices,
+from $450 for a Model T to $9,000 for the racing cars. Police cars are not for
+sale. A garage holds three cars (`server/lib/cars.js` has the prices).
+
+One owned car is out at a time, marked on the radar in your crew colour and
+locked: `/lock` toggles it, and anyone outside your crew is pulled out of the
+driver's seat. `/garage` has a car brought to the nearest road ($75 away from
+the lot, once a minute), `/park` puts it away with its damage and fuel
+(`Vehicle.saveState`), and it survives a reconnect. A wrecked car stays in the
+garage and is rebuilt for 30% of its price; `/sellcar <n>` sells one at the
+lot for half. `/repair` costs $150, or $50 within 25 m of the pump or
+Bertone's, `/flip` puts a car back on its wheels and `/engine` starts or
+stops it. Traffic cars can still be taken from the street.
+
+## Money
+
+Jobs pay best (see above). `/pay <player> <amount>` hands cash to someone
+within 6 m, and every player on the street gets $30 for odd jobs every ten
+minutes.
+
+## Admins
+
+Admins are listed by profile in `data/freeride/admins.json`; the server
+console manages them with `fr admin add|remove|list <player>`. `/car` gives
+an admin the full motor pool, or spawns a model directly with
+`/car <model.i3d>`.
 
 ## The living city
 
@@ -324,8 +353,9 @@ recording interiors. They are off by default.
 
 | File | Role |
 | --- | --- |
-| `server/main.js` | Player lifecycle, profiles on join, personal cars, `/help`, menu requests, console commands. |
-| `server/lib/` | Shared rules: commands, profiles and ranks, respawn and activities, invitations, notifications, nametags, the road graph. |
+| `server/main.js` | Player lifecycle, profiles on join, the admin motor pool, `/repair`, `/help`, menu requests, console commands. |
+| `server/dealership.js`, `economy.js` | The car lot, the garage and car locks; `/pay` and the street wage. |
+| `server/lib/` | Shared rules: commands, profiles and ranks, respawn and activities, invitations, notifications, nametags, the road graph, admins and car prices. |
 | `server/selector.js`, `ambience.js`, `shops.js`, `police.js`, `props.js`, `doors.js` | Entering the city, clock and weather, shops and courier, police outcomes, prop repair, the door lab. |
 | `server/races.js`, `combat.js`, `duels.js`, `crews.js`, `world_events.js`, `social.js` | Races, bounties, duels, crews, city events, rides, messages and dice. |
 | `server/export.js`, `police_duty.js`, `taxi.js`, `robbery.js` | The jobs. |
@@ -334,7 +364,7 @@ recording interiors. They are off by default.
 | `server/championship.js`, `jail.js`, `hospital.js` | The Autodrom championship, jail sentences and hospital respawns. |
 | `client/hud.js`, `client/hud.html` | One transparent web view for toasts, feed, activity cards, race panel, level strip and the city menu; it also arbitrates the single native compass by priority. |
 | `client/markers.js` | Beacons, checkpoint and crate markers, door arrows, turf rings, bounty and crewmate labels. |
-| `client/selector.js`, `shops.js`, `car_picker.js`, `radio.js`, `police.js`, `main.js` | The selector, shop staff, motor pool, radio, police HUD, fades and race countdown. |
+| `client/selector.js`, `shops.js`, `car_picker.js`, `radio.js`, `police.js`, `jail.js`, `main.js` | The selector, shop staff, the car lot, garage and motor pool, radio, police HUD, the jail guard and countdown, fades and race countdown. |
 
 Gameplay requests use `Events.emitServer` and are checked again on the
 server; the server answers with `player.emit` or `Events.emitAllClients` and

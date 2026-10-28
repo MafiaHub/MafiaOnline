@@ -69,7 +69,7 @@
   <main class="catalog" role="dialog" aria-modal="true" aria-labelledby="catalog-title">
     <header class="masthead">
       <span class="seal" aria-hidden="true">LH</span>
-      <div><p class="edition">Lost Heaven · Motor Pool</p><h1 id="catalog-title">Choose your car</h1></div>
+      <div><p class="edition" id="edition">Lost Heaven · Motor Pool</p><h1 id="catalog-title">Choose your car</h1></div>
       <span class="count" id="count">Loading catalog…</span>
     </header>
     <div class="content">
@@ -129,7 +129,7 @@
         name.textContent = model.name;
         const file = document.createElement("span");
         file.className = "file";
-        file.textContent = model.model;
+        file.textContent = model.note ?? model.model;
         button.append(name, file);
         button.addEventListener("click", () => send("car:select", {id: model.id}));
         list.append(button);
@@ -144,12 +144,14 @@
       count.textContent = `${models.length} of ${state.models.length} models`;
       selected.replaceChildren(document.createTextNode(active?.name ?? "Select a car"));
       const subtitle = document.createElement("small");
-      subtitle.textContent = active?.model ?? "All models come from the retail catalog.";
+      subtitle.textContent = active?.note ?? active?.model ?? "All models come from the retail catalog.";
       selected.append(subtitle);
       number.textContent = active ? `MODEL ${String(active.id).padStart(2, "0")}` : "";
       status.textContent = state.message || "Choose a model and take the wheel.";
-      choose.disabled = state.pending || !state.previewReady;
-      choose.textContent = state.pending ? "Starting…" : "Drive this car";
+      choose.disabled = state.pending || !state.previewReady || Boolean(active?.disabled);
+      choose.textContent = state.pending ? "One moment…" : active?.action ?? "Drive this car";
+      if (state.edition) document.getElementById("edition").textContent = state.edition;
+      if (state.title) document.getElementById("catalog-title").textContent = state.title;
     }
     window.addEventListener("car:state", ({detail}) => {
       if (!detail || !Array.isArray(detail.models)) return;

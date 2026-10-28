@@ -1,5 +1,7 @@
 // A focused CEF catalog surrounds a native LS3D model preview. The page
-// supplies its actual CSS rectangle; the preview uses backbuffer pixels.
+// supplies its actual CSS rectangle; the preview uses backbuffer pixels. The
+// server opens it as the car lot (prices), the player's garage, or the admin
+// motor pool; it decides every purchase and delivery.
 const CAR_PICKER_PAGE = "fw://resources/freeride/client/car_picker.html";
 const CAR_PICKER_RESOURCE = "freeride";
 const CAR_PICKER_TIMEOUT_MS = 10_000;
@@ -17,10 +19,40 @@ const carPicker = {
     pending: false,
     pendingSince: 0,
     message: "",
+    mode: "admin",
 };
+
+const PICKER_TITLES = {
+    admin: {edition: "Lost Heaven · Motor Pool", title: "Choose any car"},
+    dealer: {edition: "Lost Heaven · Car Lot", title: "Buy a car"},
+    garage: {edition: "Lost Heaven · Your Garage", title: "Bring a car round"},
+};
+
+function money(value) {
+    return `$${Math.round(value).toLocaleString("en-US")}`;
+}
+
+// What the page lists for each mode: the catalog names with the server's offers.
+function pickerModels(request) {
+    const catalog = Scene.getCarCatalog().filter((entry) => Number.isInteger(entry.id) && entry.id > 0 && typeof entry.name === "string" && typeof entry.model === "string");
+    if (carPicker.mode === "admin") return catalog.map((entry) => ({...entry, note: entry.model, action: "Drive this car"}));
+    const names = new Map(catalog.map((entry) => [entry.model.toLowerCase(), entry.name]));
+    return (Array.isArray(request.offers) ? request.offers : []).filter((offer) => Number.isInteger(offer.id) && typeof offer.model === "string")
+        .map((offer) => {
+            const name = names.get(offer.model.toLowerCase()) ?? offer.model;
+            if (carPicker.mode === "dealer") {
+                const full = request.room <= 0;
+                return {id: offer.id, name, model: offer.model, note: offer.owned ? `${money(offer.price)} · already yours` : money(offer.price),
+                    action: offer.owned ? "Already yours" : full ? "Garage full" : `Buy for ${money(offer.price)}`, disabled: offer.owned || full};
+            }
+            return {id: offer.id, name, model: offer.model, note: offer.totaled ? `Wrecked · rebuild ${money(offer.recover)}` : "In your garage",
+                action: offer.totaled ? `Rebuild for ${money(offer.recover)}` : `Bring it round (${money(request.fee)} away from the lot)`};
+        });
+}
 
 function carPickerState() {
     return {
+        ...PICKER_TITLES[carPicker.mode],
         models: carPicker.models,
         selectedId: carPicker.selectedId,
         previewReady: carPicker.preview !== null,
@@ -68,18 +100,21 @@ function chooseCarModel() {
         sendCarPickerState();
         return;
     }
+    const choice = carPicker.models.find((entry) => entry.id === carPicker.selectedId);
+    if (choice?.disabled) return;
     carPicker.pending = true;
     carPicker.pendingSince = Date.now();
-    carPicker.message = "Taking the wheel…";
+    carPicker.message = carPicker.mode === "dealer" ? "Signing the papers…" : "Taking the wheel…";
     sendCarPickerState();
-    Events.emitServer("fr:car:choose", {generation: carPicker.generation, id: carPicker.selectedId});
+    Events.emitServer("fr:car:choose", {generation: carPicker.generation, id: carPicker.selectedId, mode: carPicker.mode});
 }
 
 function openCarPicker(request) {
     if (!World.isReady() || request?.generation !== World.getMissionGeneration() || !LocalPlayer?.spawned || !LocalPlayer.alive) return;
     closeCarPicker();
     carPicker.generation = request.generation;
-    carPicker.models = Scene.getCarCatalog().filter((entry) => Number.isInteger(entry.id) && entry.id > 0 && typeof entry.name === "string" && typeof entry.model === "string");
+    carPicker.mode = PICKER_TITLES[request.mode] ? request.mode : "admin";
+    carPicker.models = pickerModels(request);
     if (carPicker.models.length === 0) {
         Hud.showMessage("The stock car catalog is unavailable.", 0xe8c57d);
         return;

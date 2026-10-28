@@ -55,7 +55,7 @@ function openView() {
     Web.on(view, "hud:car", () => {
         if (view !== hud.view) return;
         closeMenu();
-        Events.emitServer("fr:menu:command", {text: "/car"});
+        Events.emitServer("fr:menu:command", {text: "/garage"});
     });
 }
 

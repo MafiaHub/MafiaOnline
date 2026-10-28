@@ -165,7 +165,29 @@ function build(data) {
         return pointAlong(road.line, random() * lineLength(road.line));
     }
 
-    return {crossings, lines, nearestCrossing, shortestPath, polyline, route, crossingAround, roadside, roadPoint,
+    // The closest point on any road, and the direction along it.
+    function nearestRoadPoint(position) {
+        let best = null;
+        for (const road of lines) {
+            for (let index = 1; index < road.line.length; index++) {
+                const a = road.line[index - 1];
+                const b = road.line[index];
+                const dx = b.x - a.x;
+                const dz = b.z - a.z;
+                const span = dx * dx + dz * dz;
+                const t = span > 0 ? Math.max(0, Math.min(1, ((position.x - a.x) * dx + (position.z - a.z) * dz) / span)) : 0;
+                const point = {x: a.x + dx * t, y: a.y + (b.y - a.y) * t, z: a.z + dz * t};
+                const gap = flat(point, position);
+                if (!best || gap < best.gap) {
+                    const length = Math.sqrt(span) || 1;
+                    best = {gap, position: point, direction: {x: dx / length, z: dz / length}};
+                }
+            }
+        }
+        return best;
+    }
+
+    return {crossings, lines, nearestCrossing, nearestRoadPoint, shortestPath, polyline, route, crossingAround, roadside, roadPoint,
         lineLength, pointAlong, checkpoints, gridSlots};
 }
 

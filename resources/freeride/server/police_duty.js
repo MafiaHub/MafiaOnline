@@ -39,7 +39,7 @@ function endDuty(player, message, tone = "info") {
     card(player, "duty", null);
     if (World.getPlayers().some((other) => other.id === player.id)) {
         player.setModel(duty.model);
-        if (player.alive) player.setInventory(duty.loadout.weapons, duty.loadout.selected || undefined);
+        if (player.alive) life.equip(player, duty.loadout.weapons, duty.loadout.selected);
     }
     const car = vehicleById(duty.carId);
     if (car && car.getOccupants().every((occupant) => occupant === null || occupant.id === player.id)) setTimeout(() => {

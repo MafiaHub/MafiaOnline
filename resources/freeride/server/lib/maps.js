@@ -144,7 +144,10 @@ const MAPS = {
         hospital: {name: "Lost Heaven Hospital", door: {x: -759.4, y: 14.9, z: 761.5}, spawn: {position: {x: -759.4, y: 14.9, z: 759.5}, heading: Math.PI}},
         // The motel's storeroom: sector "&& sklad" in models/motel.4ds, on the
         // ground floor (y 32.9) beside the lobby and office.
+        // The guard stands in the storeroom's doorway ("&& futro07", 2.6 m
+        // from the room's origin), facing the prisoner.
         jail: {name: "the motel lock-up", cell: {position: {x: 550.7, y: 33.1, z: 2035.7}, heading: 0},
+            guard: {position: {x: 552.6, y: 32.9, z: 2036.3}, direction: {x: -0.95, y: 0, z: -0.3}},
             release: {position: LANDMARKS.ridge.position, heading: 29 * Math.PI / 180}},
         // Sarah's apartment, models/quarters_sr.4ds: the street door frame
         // "&& futro out" and the corridor "&& chodba" behind it.

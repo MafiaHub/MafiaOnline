@@ -5,7 +5,8 @@
 const profiles = require("./profiles.js");
 
 const RESPAWN_DELAY_MS = 5000;
-const STARTER_KIT = Object.freeze({weapons: [{weaponId: 4}, {weaponId: 6, loaded: 6, reserve: 12}], selected: 6});
+// A bat; guns are bought at Yellow Pete's.
+const STARTER_KIT = Object.freeze({weapons: [{weaponId: 4}], selected: 4});
 
 const activities = new Map();
 const overrides = new Map();
@@ -56,8 +57,14 @@ function clearOverride(player) {
     overrides.delete(player.id);
 }
 
+// setInventory takes a selected weapon only when one is given; an explicit
+// undefined is rejected.
+function equip(player, weapons, selected) {
+    return selected ? player.setInventory(weapons, selected) : player.setInventory(weapons);
+}
+
 function giveKit(player, kit = STARTER_KIT) {
-    if (!player.setInventory(kit.weapons, kit.selected)) {
+    if (!equip(player, kit.weapons, kit.selected)) {
         console.error(`[freeride] Could not equip ${player.nickname}`);
     }
 }
@@ -81,7 +88,7 @@ function teleport(player, position, heading = 0, loadout = loadoutOf(player)) {
     pending.delete(player.id);
     if (!spawned) return false;
     transit.set(player.id, player.spawnGeneration);
-    player.setInventory(loadout.weapons, loadout.selected || undefined);
+    equip(player, loadout.weapons, loadout.selected);
     if (loadout.health < 100) player.setHealth(Math.max(1, loadout.health));
     return true;
 }
@@ -140,4 +147,4 @@ Events.on("missionChange", () => {
 });
 
 module.exports = {begin, end, activity, busyMessage, setRespawnProvider, setHospital, setOverride, clearOverride,
-    giveKit, loadoutOf, teleport, restart, spotFor, isTransit, STARTER_KIT, RESPAWN_DELAY_MS};
+    equip, giveKit, loadoutOf, teleport, restart, spotFor, isTransit, STARTER_KIT, RESPAWN_DELAY_MS};
