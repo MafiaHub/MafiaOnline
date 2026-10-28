@@ -16,6 +16,16 @@ namespace Mafia1Online::SDK::UI {
     inline constexpr uint32_t kRadarFlag = 0x80000;
     inline constexpr uint32_t kTimerFlag   = 0x8;
     inline constexpr uint32_t kCompassFlag = 0x80;
+    // G_IndicatorsClass::ConsoleAddTextByID(unsigned textId, unsigned color),
+    // thiscall, ret 8: the text database line (GetTextOrNULL 0x60fba0 on
+    // g_pTextDB) through ConsoleAddText; nothing for an unknown id. The
+    // police print 2100+ crime lines with it (VasekSelChlastatNaOslavu).
+    inline constexpr uintptr_t kConsoleAddTextById = 0x5f9de0;
+    // SetWantedLevel(int level, float alpha), thiscall, ret 8: the wanted
+    // badge level (+0x46e0, 1-3, 4 hidden) and its alpha (+0x46e4), drawn
+    // while kWantedFlag is set (C_shvestky::Tick 0x49b603).
+    inline constexpr uintptr_t kSetWantedLevel = 0x47a300;
+    inline constexpr uint32_t kWantedFlag      = 0x4000000;
 
     // Game-owned HUD singleton in the verified retail executable. Its
     // lifetime spans the initialized game UI; callers never own this view.
@@ -93,6 +103,12 @@ namespace Mafia1Online::SDK::UI {
         // Large white centred text; copies at most 127 characters.
         void RaceFlashText(const char *text, float seconds) {
             reinterpret_cast<void(__thiscall *)(NativeIndicators *, const char *, float)>(0x5fafc0)(this, text, seconds);
+        }
+        void ConsoleAddTextById(uint32_t textId, uint32_t rgb) {
+            reinterpret_cast<void(__thiscall *)(NativeIndicators *, uint32_t, uint32_t)>(kConsoleAddTextById)(this, textId, rgb);
+        }
+        void SetWantedLevel(int32_t level, float alpha) {
+            reinterpret_cast<void(__thiscall *)(NativeIndicators *, int32_t, float)>(kSetWantedLevel)(this, level, alpha);
         }
         // Five line console, five seconds per line; colour is 0xRRGGBB.
         void ConsoleAddText(const char *text, uint32_t rgb) {

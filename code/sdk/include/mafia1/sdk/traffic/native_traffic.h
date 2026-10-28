@@ -73,7 +73,13 @@ namespace Mafia1Online::SDK::Traffic {
     // static void __fastcall FizlosNamakatDoAkce(C_human *offender,
     // unsigned mode, std::vector<C_actor *> &police, bool announce,
     // float radius, bool directional), ret 10h: turns walkers into police.
+    // It returns at once while traffic is hidden, takes only active walkers
+    // of type 1 or 3 (0x44fe5e-0x44fe70) in range and sight of the offender,
+    // and makes each a C_entity at the walker's position from a duplicate of
+    // its model, which it adds to the retirement list (AddDoRiciActor).
     inline constexpr uintptr_t kRecruitPolice = 0x44FDE0;
+    inline constexpr uint8_t kPolicePedestrian = 1;
+    inline constexpr uint8_t kPoliceSecondaryPedestrian = 3;
     // void __thiscall SetAlpha(float), ret 4: the walker's fade, applied to
     // its transparency object (+0xb8). Tick fades +0xbc in and out.
     inline constexpr uintptr_t kElementSetAlpha = 0x456EA0;

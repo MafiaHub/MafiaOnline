@@ -38,6 +38,11 @@ namespace Mafia1Online::SDK::Player {
     // reM HUMAN_ANIM_THROW_GRENADE; Do_Shoot(false) selects this state only
     // after a throwable has charged for more than 400 ms.
     inline constexpr int32_t kHumanThrowGrenadeAnimation = 163;
+    // reM E_human_car_throw_animation: Do_ThrowCocotFromCar (0x587d70) moves
+    // the thrower to the door and starts its pull-out as state 306 or 307.
+    // C_human::Update (0x572f8a) returns it to HUMAN_ANIM_STOP at track end.
+    inline constexpr int32_t kHumanCarThrowAttackerFrontAnimation = 306;
+    inline constexpr int32_t kHumanCarThrowAttackerBackAnimation  = 307;
     // reM C_human::Movement dispatches on m_iCanWork. Ordinary movement
     // changes idle (1) to locomotion (2); timed actions (5) and animation
     // sequences (6) own their tracks until the native state machine ends them.
@@ -157,6 +162,9 @@ namespace Mafia1Online::SDK::Player {
         }
         [[nodiscard]] int32_t AnimationState() const {
             return _animationState;
+        }
+        [[nodiscard]] bool IsPullingFromCar() const {
+            return _animationState == kHumanCarThrowAttackerFrontAnimation || _animationState == kHumanCarThrowAttackerBackAnimation;
         }
         [[nodiscard]] bool IsClimbing() const {
             return _animationId == kClimbLowAnimation || _animationId == kClimbHighAnimation || _animationState == kClimbLowAnimation || _animationState == kClimbHighAnimation;
