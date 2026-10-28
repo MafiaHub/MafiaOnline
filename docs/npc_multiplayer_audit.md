@@ -92,6 +92,71 @@ them all: `NpcHost` on the simulation host, `NpcService` on the server (entity,
   them out of its inventory record (never more rounds than it holds) and
   creates the pickups, as it does for a dead player.
 
+## Scripted NPCs
+
+`Npc.spawn` makes a `C_entity` on the simulation host (`ScriptedNpcHost`,
+`features/npc/scripted_npc_host.cpp`), tracked and reported like every other
+NPC (kind `scripted`, server keys with bit 31 set). The server creates the
+entity at once and sends `Npc::Create`; tasks (`Npc::Task`) and orders
+(`Npc::Order`) follow on the same ordered channel, and the host answers each
+task with `Npc::TaskDone`.
+
+- Creation is `CreateMafianos`' (0x459b90) sequence: `C_mission::CreateActor`
+  (27), `Init`, then behaviour mask (C_human +0x5fc: 2 guard, 8 reacts on hit,
+  16 moves away), initial health (+0x604), morale (+0x63c) and aggressivity
+  (+0x620) before `AddTemporaryActor`, whose `C_entity::GameInit` maps the mask
+  to the behaviour class (+0xf4c) and copies the initial properties. It is in
+  no retirement list and never network controlled.
+- Each task makes the calls of the retail entity script command
+  (`C_entity::Process` 0x51fda0, IDA): `Entity_ActionFollow` (0x520c04-0x520cdc:
+  `NewFollow(leader, distance, 19, flags)` job, `NewTurnTo` idle,
+  `ai_follow_manager::AddFollower`, `ForceAI(0, 1, 0, 0)`), `EntityMoveToFrame`
+  (0x521f3d: `NewMove(position, 0, 19, 2 | run, radius)`; `Entity_Move` 0x51ff00
+  passes run as bit 0), `Entity_MoveToCar` (0x52063f: `NewMoveToCar(car, 200,
+  0.3, seat, run, 19)`) followed by `Enemy_UseCar`'s `Use_Actor(car, 1, seat, 0)`
+  (reM C_entity.cpp 3431), `Entity_CarMoveTo` (0x520a36: `C_sledovacka::
+  AddCarMoveTo` 0x4a1220, then `ActionStatus` 0x4a8670 until 1 arrived, 2 failed,
+  3 blocked; `RemoveCar` 0x4a1c30) and `Entity_ActionFire` (0x5213a3-0x5214ae:
+  `WeaponChoose`, then `NewJob(NewFollow(target, best range, 19, 8))`,
+  `NewIdle(NewTurnTo)`, `NewModifier(NewFire(target, -1, ((flags & 0x8000) |
+  0x10000) >> 14))`, `AddModifier(NewCarJump(1))`; seated, `NewJob(NewFire)`).
+  `ForceAI` 0x523d30 does nothing while the process interval (+0xafc) is 0.75
+  or more; an entity without a program has it at 0.
+- The host watches the job's uid in the action manager (+0x1164, jobs vector
+  first/last at +0x4/+0x8). A fight (`StateSwitcher`) replaces the jobs; once the
+  entity is idle again (+0xf40 0) the host issues the task again (a walk at
+  most three times). `C_game::InvalidateActor` 0x5afe40 already clears every
+  entity's actions and followships aimed at a removed actor and a removed
+  car's `C_sledovacka` record (`VypicujMiToyotu`).
+- A car a scripted NPC boards becomes the host's: the server sets `hostDriven`
+  and makes the host its controller (no traffic key, no player in it); host
+  NPCs may only take seats in cars the host drives (`SeatService::
+  BlocksNpcEntry`). The host's `CarService` now creates the native car of a
+  host-driven car without a traffic key instead of waiting to adopt it. The
+  server gives the car back (`hostDriven` false, `UpdateCarControllers`) once
+  no scripted NPC boards or sits in it.
+- Not done: following a player into a player-driven car (the follow manager
+  boards the leader's car, which `BlocksNpcEntry` refuses), script animations
+  (replicas would not play them) and changing the behaviour class at runtime.
+
+## NPC melee
+
+Retail NPCs swing through `C_human::Do_Shoot` 0x583590 like the player:
+`C_entity::Do_Shoot_Timed` 0x528680 calls it at 0x52872d (press) and 0x52873d
+(release). The host's `DoShootHook` reads its tracked NPCs' swings as it reads
+the local player's (armed on press, release changed the combo, animation, work
+state or overlay, else a cancel) and sends `Npc::Melee`; the server relays it as
+a `Combat::Event` (`MeleeStart`, `Melee` with combo index or heavy finisher,
+`MeleeCancel`), which every player replays on the NPC's replica with the
+player-replica path. Before, only the hit arrived (`PlayerHit`) and the replica
+stood idle: `ClassifyLocomotion` turns the swing's animation states into idle.
+A hostile thrown-out traffic driver gets item 6 one time in five, otherwise
+item 4 (baseball bat) half the time, otherwise fights with its fists (reM
+C_human.cpp 8202-8224), so most of those fights are melee. The host now also
+reports a weapon change before a shot or swing (`SendInventory`), since the
+server takes a shot or swing only with the weapon it records in hand and the
+first one after drawing used to be dropped.
+
 ## Police on foot
 
 - Mission script alone turns the police manager on (`C_shvestky::SetActive`

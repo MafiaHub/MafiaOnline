@@ -26,3 +26,11 @@ target_link_libraries(Mafia1OnlineCarSnapshotTests PRIVATE Framework::Framework)
 
 add_executable(Mafia1OnlineMissionActorTests mission_actor_tests.cpp)
 target_include_directories(Mafia1OnlineMissionActorTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
+add_executable(Mafia1OnlineMapObjectTests
+    map_object_tests.cpp
+    ../client/src/features/map_object/collision_template.cpp
+    ../client/src/features/map_object/static_collision.cpp
+)
+target_include_directories(Mafia1OnlineMapObjectTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/.." "${CMAKE_CURRENT_SOURCE_DIR}/../client/src")
+target_link_libraries(Mafia1OnlineMapObjectTests PRIVATE Framework::Framework Mafia1OnlineSDK)

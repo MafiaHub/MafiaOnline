@@ -243,9 +243,12 @@ namespace Mafia1Online::Features::Car {
             }
             else {
                 if (!_nativeById.contains(it->first) && !it->second.creationFailed) {
-                    // The simulation host's own cars are adopted from the
-                    // retail world, never created beside it.
-                    if (auto *car = replication->GetEntity<Shared::Entities::CarEntity>(it->first); car && !(car->hostDriven && it->second.simulationController)) {
+                    // The simulation host's own traffic cars are adopted from
+                    // the retail world, never created beside it. A script's
+                    // car it drives for a scripted NPC (no traffic key) is
+                    // created like any other.
+                    if (auto *car = replication->GetEntity<Shared::Entities::CarEntity>(it->first);
+                        car && !(car->hostDriven && car->trafficKey != 0 && it->second.simulationController)) {
                         // Retail explosion can deactivate and eventually destroy
                         // the original car while keeping its wreckage in the
                         // mission. A terminal replica only needs a native car

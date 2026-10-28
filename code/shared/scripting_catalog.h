@@ -128,6 +128,7 @@ namespace Mafia1Online::Scripting {
         events.add_property("doorStateChange", "[door: Door, player: Player | null]", "Dispatched after a player uses a mission door or a script changes its open target. Player is null for script changes.");
         events.add_property("doorLockChange", "[door: Door, player: null]", "Dispatched after a script changes a mission door lock.");
         events.add_property("doorInteractionChange", "[door: Door, player: null]", "Dispatched after a script enables or disables native door use.");
+        events.add_property("mapObjectMoved", "[object: MapObject]", "Dispatched after a MapObject.moveTo reached its target. A teleport, stop or new move does not dispatch it for the move it replaced.");
         events.add_property("playerSpawn", "[player: Player]", "Dispatched after Player.spawn started a new life.");
         events.add_property("playerRespawn", "[player: Player]", "Dispatched after Player.respawn started a new life.");
         events.add_property("playerDespawn", "[player: Player]", "Dispatched after Player.despawn ended the current life.");
@@ -195,6 +196,14 @@ namespace Mafia1Online::Scripting {
         events.add_property("npcDamage", "[npc: Npc, info: NpcDamageInfo]", "Dispatched after the simulation host applied a hit.");
         events.add_property("npcDeath", "[npc: Npc, killer: Player | Npc | Vehicle | null]",
             "Dispatched once when an NPC dies; killer is the last attacker. The weapon in its hand drops as a pickup, as retail Do_WeaponDrop does (weaponDropped).");
+        auto &npcTask = catalog.data_type("NpcTaskInfo", "How a scripted NPC's task ended.");
+        npcTask.add_property("id", "number", "The id the task method returned.");
+        npcTask.add_property("task", "\"stop\" | \"follow\" | \"walkTo\" | \"enterVehicle\" | \"exitVehicle\" | \"driveTo\" | \"attack\"", "The task.");
+        npcTask.add_property("result", "\"completed\" | \"failed\" | \"cancelled\"",
+            "completed: arrived, seated, out of the car or the target is dead; failed: the retail AI gave up, the target or car is gone or the NPC died; cancelled: another task replaced it.");
+        npcTask.add_property("success", "boolean", "True when result is completed.");
+        events.add_property("npcTaskComplete", "[npc: Npc, info: NpcTaskInfo]",
+            "Dispatched when a task of an NPC spawned with Npc.spawn ends on the simulation host. A follow or attack task runs until it is replaced, its target is gone or (attack) dead.");
         auto &record = catalog.data_type("PoliceRecord", "A player's retail police crime record on the simulation host.");
         record.add_property("level", "number", "Wanted level: 0 none, 1 minor (pursuit), 2 arrest, 3 lethal.");
         record.add_property("crimes", "(\"weaponSeen\" | \"firing\" | \"speeding\" | \"crashObject\" | \"crashCar\" | \"crashPedestrian\" | \"sidewalk\" | \"violence\" | \"redLight\" | \"carTheft\" | \"signDamage\" | \"assaultOnPolice\" | \"forcedArrest\" | \"policeCarRammed\")[]", "Crimes since the record was last settled.");

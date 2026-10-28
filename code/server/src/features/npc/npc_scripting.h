@@ -31,6 +31,7 @@ namespace Mafia1Online::Scripting {
         double GetHealth() const;
         uint32_t GetWeapon() const;
         v8::Local<v8::Value> GetInventory(v8::Isolate *isolate) const;
+        std::string GetBehaviour() const;
         bool Remove();
         std::string ToString() const override;
 

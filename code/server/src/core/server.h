@@ -18,6 +18,7 @@
 #include "features/world/props_service.h"
 #include "features/world/world_script_service.h"
 #include "features/mod/mod_service.h"
+#include "features/map_object/map_object_service.h"
 
 #include <chrono>
 #include <cstdint>
@@ -118,6 +119,9 @@ namespace Mafia1Online::Core {
         Features::Bridge::BridgeService &Bridges() {
             return _bridges;
         }
+        Features::MapObject::MapObjectService &MapObjects() {
+            return _mapObjects;
+        }
         Features::World::PropsService &Props() {
             return _props;
         }
@@ -144,6 +148,7 @@ namespace Mafia1Online::Core {
         Features::Railway::RailwayService _railways;
         Features::Bridge::BridgeService _bridges;
         Features::World::PropsService _props;
+        Features::MapObject::MapObjectService _mapObjects;
         std::unordered_set<uint64_t> _reportedCarLoadFailures;
         // Clients whose native car creation failed, per car. None of them can
         // simulate that car.

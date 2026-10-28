@@ -10,6 +10,7 @@
 #include "features/combat/combat_service.h"
 #include "features/combat/weapon_scripting.h"
 #include "features/door/door_scripting.h"
+#include "features/map_object/map_object_scripting.h"
 #include "features/pickup/pickup_scripting.h"
 #include "features/player/player_scripting.h"
 #include "features/bridge/bridge_scripting.h"
@@ -84,6 +85,7 @@ namespace Mafia1Online::Features::Script {
         Scripting::Bridge::Register(isolate, global);
         Scripting::Pickup::Register(isolate, global);
         Scripting::Door::Register(isolate, global);
+        Scripting::MapObject::Register(isolate, global);
         Scripting::Weapon::Register(isolate, global);
         Scripting::Sound::Register(isolate, global);
         Scripting::World::Register(isolate, global);
@@ -281,6 +283,18 @@ namespace Mafia1Online::Features::Script {
         });
     }
 
+    void EmitNpcTaskComplete(Core::Server &, Shared::Entities::NpcEntity &npc, uint32_t taskId, Shared::Npc::TaskType type, Shared::Npc::TaskDone::Result result) {
+        EmitEvent("npcTaskComplete", [&](v8::Isolate *isolate, v8::Local<v8::Context> context, EventArguments &arguments) {
+            auto info = v8::Object::New(isolate);
+            SetField(isolate, context, info, "id", v8::Uint32::New(isolate, taskId));
+            SetField(isolate, context, info, "task", v8pp::to_v8(isolate, Shared::Npc::TaskName(type)));
+            SetField(isolate, context, info, "result", v8pp::to_v8(isolate, Shared::Npc::TaskResultName(result)));
+            SetField(isolate, context, info, "success", v8::Boolean::New(isolate, result == Shared::Npc::TaskDone::Result::Completed));
+            arguments.push_back(WrapNpc(isolate, npc.GetNetworkID()));
+            arguments.push_back(info);
+        });
+    }
+
     void EmitPlayerCrime(Core::Server &, uint64_t playerId, uint16_t crime) {
         const char *name = Scripting::PoliceCrimeName(crime);
         if (!name) {
@@ -365,6 +379,10 @@ namespace Mafia1Online::Features::Script {
             arguments.push_back(WrapVehicle(isolate, hit.carId));
             arguments.push_back(info);
         });
+    }
+
+    void EmitMapObjectEvent(Core::Server &, const char *name, uint64_t objectId) {
+        EmitEvent(name, [&](v8::Isolate *isolate, v8::Local<v8::Context>, EventArguments &arguments) { arguments.push_back(WrapMapObject(isolate, objectId)); });
     }
 
     void EmitPickupEvent(Core::Server &server, const char *name, uint64_t pickupId, uint64_t playerId) {

@@ -6,6 +6,7 @@
 #include "shared/features/car/car_entity.h"
 #include "shared/features/combat/damage_event.h"
 #include "shared/features/npc/npc_entity.h"
+#include "shared/features/npc/npc_melee.h"
 #include "shared/features/npc/npc_report.h"
 #include "shared/features/npc/npc_seized.h"
 #include "shared/features/player/player_entity.h"
@@ -42,6 +43,11 @@ namespace Mafia1Online::Features::Npc {
             return weaponId >= 6 && weaponId <= 14;
         }
 
+        // Fists, knuckleduster, knife and baseball bat, as for players.
+        bool MeleeWeapon(uint8_t weaponId) {
+            return weaponId == 0 || (weaponId >= 2 && weaponId <= 4);
+        }
+
         uint16_t DeathAnimation(uint64_t networkId) {
             return 131 + static_cast<uint16_t>(networkId % 6);
         }
@@ -50,6 +56,18 @@ namespace Mafia1Online::Features::Npc {
             state.inventoryMask = inventory.mask;
             state.selectedWeapon = inventory.selected;
             state.ammo = inventory.ammo;
+        }
+
+        // A plain retail .i3d file name every client can open: the rule
+        // Player.setModel applies, within the NPC entity's model limit.
+        bool ValidModel(const std::string &model) {
+            constexpr std::string_view kExtension = ".i3d";
+            if (model.size() <= kExtension.size() || model.size() > NpcEntity::kMaxModelLength || !model.ends_with(kExtension)) {
+                return false;
+            }
+            return std::all_of(model.begin(), model.end(), [](unsigned char c) {
+                return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.';
+            });
         }
 
         bool SameInventory(const Shared::Combat::State &state, const Shared::Npc::Inventory &inventory) {
@@ -99,7 +117,40 @@ namespace Mafia1Online::Features::Npc {
         });
         auto *network = Framework::CoreModules::GetNetworkPeer();
         network->RegisterRPC<Shared::Npc::Spawned>([this](const Shared::Npc::Spawned &spawned, MafiaNet::Packet *packet) {
-            if (!FromHost(MafiaNet::ToPeerGuid(packet->guid), spawned.missionGeneration) || _npcs.contains(spawned.key) || _npcs.size() >= kMaxNpcs ||
+            if (!FromHost(MafiaNet::ToPeerGuid(packet->guid), spawned.missionGeneration)) {
+                return;
+            }
+            // The host created a scripted NPC the server already made the
+            // entity of (Spawn).
+            if (const auto pending = _npcs.find(spawned.key); pending != _npcs.end()) {
+                auto &npc = pending->second;
+                if (!npc.scripted || npc.confirmed || spawned.kind != Shared::Entities::NpcKind::Scripted || !Finite(spawned.x, spawned.y, spawned.z) ||
+                    !std::isfinite(spawned.yaw) || !std::isfinite(spawned.health) || !spawned.inventory.Valid()) {
+                    return;
+                }
+                npc.confirmed = true;
+                npc.lastSeen = std::chrono::steady_clock::now();
+                SetPose(*npc.entity, spawned.x, spawned.y, spawned.z, spawned.yaw, 0.0f);
+                npc.entity->alive = spawned.health > 0.0f;
+                npc.state.alive = npc.entity->alive;
+                npc.state.health = std::max(spawned.health, 0.0f);
+                SetInventory(npc.state, spawned.inventory);
+                Publish(npc);
+                if (_events.spawn) {
+                    _events.spawn(*npc.entity);
+                }
+                return;
+            }
+            // A scripted NPC the server gave up on (its creation timed out,
+            // a script removed it): the host's copy goes too.
+            if (Shared::Npc::IsScriptedKey(spawned.key)) {
+                Shared::Npc::Remove remove;
+                remove.missionGeneration = spawned.missionGeneration;
+                remove.key = spawned.key;
+                Framework::CoreModules::GetNetworkPeer()->SendRPC(remove, MafiaNet::ToGuid(MafiaNet::ToPeerGuid(packet->guid)), MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
+                return;
+            }
+            if (_npcs.size() >= kMaxNpcs ||
                 spawned.model.empty() || spawned.model.size() > NpcEntity::kMaxModelLength || !Finite(spawned.x, spawned.y, spawned.z) || !std::isfinite(spawned.yaw) ||
                 !std::isfinite(spawned.health) || !spawned.inventory.Valid() || !Shared::Entities::KnownNpcKind(spawned.kind)) {
                 return;
@@ -147,7 +198,7 @@ namespace Mafia1Online::Features::Npc {
             for (uint8_t i = 0; i < snapshot.count; ++i) {
                 const auto &pose = snapshot.npcs[i];
                 auto *npc = FindKey(pose.key);
-                if (!npc || !Finite(pose.x, pose.y, pose.z) || !std::isfinite(pose.yaw) || !std::isfinite(pose.speed) || !std::isfinite(pose.health) ||
+                if (!npc || (npc->scripted && !npc->confirmed) || !Finite(pose.x, pose.y, pose.z) || !std::isfinite(pose.yaw) || !std::isfinite(pose.speed) || !std::isfinite(pose.health) ||
                     !Finite(pose.poseTargetX, pose.poseTargetY, pose.poseTargetZ)) {
                     continue;
                 }
@@ -181,6 +232,7 @@ namespace Mafia1Online::Features::Npc {
                     state.health = 0.0f;
                     state.aiming = false;
                     entity.alive = false;
+                    npc->diedAt = now;
                 }
                 Publish(*npc);
                 if (died && _events.death) {
@@ -273,6 +325,28 @@ namespace Mafia1Online::Features::Npc {
             event.pelletCount = fire.pelletCount;
             event.scatterRandom = fire.scatterRandom;
             event.pellets = fire.pellets;
+            Emit(*npc, event);
+        });
+        network->RegisterRPC<Shared::Npc::Melee>([this](const Shared::Npc::Melee &melee, MafiaNet::Packet *packet) {
+            using Action = Shared::Combat::Action;
+            if (!FromHost(MafiaNet::ToPeerGuid(packet->guid), melee.missionGeneration) || !MeleeWeapon(melee.weaponId) ||
+                (melee.action != Action::MeleeStart && melee.action != Action::Melee && melee.action != Action::MeleeCancel) ||
+                (melee.meleeIndex != Shared::Combat::kHeavyMelee && (melee.meleeIndex < 0 || melee.meleeIndex > 3)) || melee.holdMs > Shared::Combat::kMaximumMeleeHoldMs ||
+                !Finite(melee.directionX, melee.directionY, melee.directionZ)) {
+                return;
+            }
+            auto *npc = FindKey(melee.key);
+            if (!npc || !npc->state.alive || npc->state.selectedWeapon != melee.weaponId) {
+                return;
+            }
+            Shared::Combat::Event event;
+            event.action = melee.action;
+            event.weaponId = melee.weaponId;
+            event.directionX = melee.directionX;
+            event.directionY = melee.directionY;
+            event.directionZ = melee.directionZ;
+            event.meleeIndex = melee.meleeIndex;
+            event.meleeHoldMs = melee.holdMs;
             Emit(*npc, event);
         });
         network->RegisterRPC<Shared::Npc::Reload>([this](const Shared::Npc::Reload &reload, MafiaNet::Packet *packet) {
@@ -405,6 +479,24 @@ namespace Mafia1Online::Features::Npc {
             event.sourceCarId = event.hitType == 4 ? damaged.attackerId : 0;
             Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(event, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered, MafiaNet::ToGuid(*_simulation->Host()));
         });
+        network->RegisterRPC<Shared::Npc::TaskDone>([this](const Shared::Npc::TaskDone &done, MafiaNet::Packet *packet) {
+            using Result = Shared::Npc::TaskDone::Result;
+            if (!FromHost(MafiaNet::ToPeerGuid(packet->guid), done.missionGeneration) || !Shared::Npc::KnownTaskType(done.type) ||
+                (done.result != Result::Completed && done.result != Result::Failed && done.result != Result::Cancelled)) {
+                return;
+            }
+            auto *npc = FindKey(done.key);
+            if (!npc || !npc->scripted) {
+                return;
+            }
+            if (npc->task.id == done.taskId) {
+                npc->taskRunning = false;
+            }
+            ReleaseIfUnused(*npc);
+            if (_events.taskDone) {
+                _events.taskDone(*npc->entity, done.taskId, done.type, done.result);
+            }
+        });
         network->RegisterRPC<Shared::Npc::Retired>([this](const Shared::Npc::Retired &retired, MafiaNet::Packet *packet) {
             if (!FromHost(MafiaNet::ToPeerGuid(packet->guid), retired.missionGeneration)) {
                 return;
@@ -452,8 +544,21 @@ namespace Mafia1Online::Features::Npc {
         const auto now = std::chrono::steady_clock::now();
         for (auto it = _npcs.begin(); it != _npcs.end();) {
             auto current = it++;
-            if (now - current->second.lastSeen > kStaleAfter) {
+            auto &npc = current->second;
+            if (npc.scripted && !npc.confirmed) {
+                // The host creates it once it has the mission loaded.
+                if (now - npc.createdAt > kPendingTimeout) {
+                    Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->warn("Simulation host never created scripted NPC {}", npc.state.networkId);
+                    Retire(current);
+                }
+                continue;
+            }
+            if (now - npc.lastSeen > kStaleAfter) {
                 Retire(current);
+                continue;
+            }
+            if (npc.scripted && !npc.state.alive && !npc.removeSent && now - npc.diedAt > kCorpseLifetime) {
+                npc.removeSent = Remove(npc.state.networkId);
             }
         }
     }
@@ -467,6 +572,7 @@ namespace Mafia1Online::Features::Npc {
     }
 
     void NpcService::Retire(Iterator npc) {
+        ReleaseClaim(npc->second);
         auto *entity = npc->second.entity;
         if (_events.retire) {
             _events.retire(*entity);
@@ -479,6 +585,9 @@ namespace Mafia1Online::Features::Npc {
     void NpcService::Clear() {
         if (_npcs.empty()) {
             return;
+        }
+        for (auto &[key, npc] : _npcs) {
+            ReleaseClaim(npc);
         }
         if (auto *replication = Framework::CoreModules::GetReplication()) {
             for (const auto &[key, npc] : _npcs) {
@@ -524,6 +633,192 @@ namespace Mafia1Online::Features::Npc {
     void NpcService::ForEach(const std::function<void(Shared::Entities::NpcEntity &)> &visit) const {
         for (const auto &[key, npc] : _npcs) {
             visit(*npc.entity);
+        }
+    }
+
+    NpcService::Record *NpcService::FindNetwork(uint64_t networkId) {
+        const auto key = _keyByNetworkId.find(networkId);
+        return key == _keyByNetworkId.end() ? nullptr : FindKey(key->second);
+    }
+
+    const NpcService::Record *NpcService::FindNetwork(uint64_t networkId) const {
+        const auto key = _keyByNetworkId.find(networkId);
+        if (key == _keyByNetworkId.end()) {
+            return nullptr;
+        }
+        const auto npc = _npcs.find(key->second);
+        return npc == _npcs.end() ? nullptr : &npc->second;
+    }
+
+    Shared::Entities::NpcEntity *NpcService::Spawn(const SpawnRequest &request) {
+        const auto host = _simulation ? _simulation->Host() : std::nullopt;
+        const size_t scripted = static_cast<size_t>(std::count_if(_npcs.begin(), _npcs.end(), [](const auto &entry) { return entry.second.scripted; }));
+        if (!host || _missionGeneration == 0 || _npcs.size() >= kMaxNpcs || scripted >= kMaxScripted || !ValidModel(request.model) ||
+            !Finite(request.position.x, request.position.y, request.position.z) || !std::isfinite(request.heading) || !std::isfinite(request.health) ||
+            request.health <= 0.0f || !Shared::Npc::KnownBehaviour(request.behaviour) || (request.weaponId != 0 && !Combat::CombatService::Weapon(request.weaponId))) {
+            return nullptr;
+        }
+        // Server keys never repeat within a mission generation.
+        uint32_t key = 0;
+        do {
+            key = Shared::Npc::kScriptedKeyBit | (_nextScriptedKey++ & ~Shared::Npc::kScriptedKeyBit);
+        } while (_npcs.contains(key) || key == Shared::Npc::kScriptedKeyBit);
+
+        auto *entity = Framework::CoreModules::GetReplication()->CreateEntity<NpcEntity>();
+        entity->model = request.model;
+        entity->missionGeneration = _missionGeneration;
+        entity->kind = Shared::Entities::NpcKind::Scripted;
+        entity->alive = true;
+        entity->streaming.range = kStreamRange;
+        entity->SetVirtualWorld(request.virtualWorld);
+        SetPose(*entity, request.position.x, request.position.y, request.position.z, request.heading, 0.0f);
+        auto &npc = _npcs[key];
+        npc.entity = entity;
+        npc.scripted = true;
+        npc.behaviour = request.behaviour;
+        npc.createdAt = std::chrono::steady_clock::now();
+        npc.lastSeen = npc.createdAt;
+        auto &state = npc.state;
+        state.networkId = entity->GetNetworkID();
+        state.missionGeneration = _missionGeneration;
+        state.spawnGeneration = NpcEntity::kSpawnGeneration;
+        state.spawned = true;
+        state.alive = true;
+        state.health = request.health;
+        state.deathAnimation = DeathAnimation(state.networkId);
+        _keyByNetworkId[state.networkId] = key;
+
+        Shared::Npc::Create create;
+        create.missionGeneration = _missionGeneration;
+        create.key = key;
+        create.model = request.model;
+        create.x = request.position.x;
+        create.y = request.position.y;
+        create.z = request.position.z;
+        create.yaw = request.heading;
+        create.health = request.health;
+        create.behaviour = request.behaviour;
+        create.weaponId = request.weaponId;
+        create.loaded = request.loaded;
+        create.reserve = request.reserve;
+        Framework::CoreModules::GetNetworkPeer()->SendRPC(create, MafiaNet::ToGuid(*host), MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
+        Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->info("Scripted NPC {} ({}, {}) requested", state.networkId, request.model, Shared::Npc::BehaviourName(request.behaviour));
+        return entity;
+    }
+
+    uint32_t NpcService::GiveTask(uint64_t networkId, Shared::Npc::Task task) {
+        using Type = Shared::Npc::TaskType;
+        auto *npc = FindNetwork(networkId);
+        const auto host = _simulation ? _simulation->Host() : std::nullopt;
+        if (!npc || !npc->scripted || !npc->state.alive || !host || !Shared::Npc::KnownTaskType(task.type) || !Finite(task.x, task.y, task.z) ||
+            !std::isfinite(task.distance)) {
+            return 0;
+        }
+        // A player or car goes by network id; an NPC by key, since the host
+        // binds none of its own as network objects.
+        if (task.type == Type::Follow || task.type == Type::Attack) {
+            if (const auto target = _keyByNetworkId.find(task.targetId); target != _keyByNetworkId.end()) {
+                if (target->first == networkId) {
+                    return 0;
+                }
+                task.targetKey = target->second;
+                task.targetId = 0;
+            }
+            else {
+                auto *player = _players->FindByNetworkId(task.targetId);
+                if (!player || !player->spawned || player->missionGeneration != _missionGeneration) {
+                    return 0;
+                }
+            }
+        }
+        if (task.type == Type::EnterVehicle) {
+            // The host drives the car while a scripted NPC boards or sits in
+            // it (NpcHost's seat rule: only cars it drives).
+            if (npc->claimedCar != task.targetId) {
+                const uint64_t previous = npc->claimedCar;
+                bool shared = false;
+                for (const auto &[key, other] : _npcs) {
+                    shared = shared || (&other != npc && other.claimedCar == task.targetId);
+                }
+                if (!shared && (!_vehicles.claim || !_vehicles.claim(task.targetId))) {
+                    return 0;
+                }
+                npc->claimedCar = 0;
+                ReleaseCar(previous);
+                npc->claimedCar = task.targetId;
+            }
+        }
+        task.missionGeneration = _missionGeneration;
+        task.key = _keyByNetworkId.at(networkId);
+        task.taskId = _nextTaskId++;
+        npc->task = {task.taskId, task.type};
+        npc->taskRunning = task.type != Type::Stop;
+        ReleaseIfUnused(*npc);
+        Framework::CoreModules::GetNetworkPeer()->SendRPC(task, MafiaNet::ToGuid(*host), MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
+        return task.taskId;
+    }
+
+    bool NpcService::SendOrder(uint64_t networkId, Shared::Npc::Order order) {
+        auto *npc = FindNetwork(networkId);
+        const auto host = _simulation ? _simulation->Host() : std::nullopt;
+        if (!npc || !npc->scripted || !npc->state.alive || !host) {
+            return false;
+        }
+        order.missionGeneration = _missionGeneration;
+        order.key = _keyByNetworkId.at(networkId);
+        Framework::CoreModules::GetNetworkPeer()->SendRPC(order, MafiaNet::ToGuid(*host), MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
+        return true;
+    }
+
+    bool NpcService::IsScripted(uint64_t networkId) const {
+        const auto *npc = FindNetwork(networkId);
+        return npc && npc->scripted;
+    }
+
+    std::optional<Shared::Npc::Behaviour> NpcService::GetBehaviour(uint64_t networkId) const {
+        const auto *npc = FindNetwork(networkId);
+        return npc && npc->scripted ? std::optional<Shared::Npc::Behaviour>(npc->behaviour) : std::nullopt;
+    }
+
+    std::optional<NpcService::CurrentTask> NpcService::GetTask(uint64_t networkId) const {
+        const auto *npc = FindNetwork(networkId);
+        return npc && npc->scripted && npc->taskRunning ? std::optional<CurrentTask>(npc->task) : std::nullopt;
+    }
+
+    void NpcService::OnSeatChanged(uint64_t networkId) {
+        if (auto *npc = FindNetwork(networkId)) {
+            ReleaseIfUnused(*npc);
+        }
+    }
+
+    void NpcService::ReleaseIfUnused(Record &npc) {
+        if (!npc.claimedCar) {
+            return;
+        }
+        const bool boarding = npc.taskRunning && npc.task.type == Shared::Npc::TaskType::EnterVehicle;
+        const bool seated = _vehicles.seatedCar && _vehicles.seatedCar(npc.state.networkId) == npc.claimedCar;
+        if (!boarding && !seated) {
+            ReleaseClaim(npc);
+        }
+    }
+
+    void NpcService::ReleaseClaim(Record &npc) {
+        const uint64_t carId = npc.claimedCar;
+        npc.claimedCar = 0;
+        ReleaseCar(carId);
+    }
+
+    void NpcService::ReleaseCar(uint64_t carId) {
+        if (!carId) {
+            return;
+        }
+        for (const auto &[key, other] : _npcs) {
+            if (other.claimedCar == carId) {
+                return;
+            }
+        }
+        if (_vehicles.release) {
+            _vehicles.release(carId);
         }
     }
 } // namespace Mafia1Online::Features::Npc

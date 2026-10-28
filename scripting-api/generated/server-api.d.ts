@@ -106,6 +106,11 @@ declare global {
     doorInteractionChange: [door: Door, player: null];
 
     /**
+     * Dispatched after a MapObject.moveTo reached its target. A teleport, stop or new move does not dispatch it for the move it replaced.
+     */
+    mapObjectMoved: [object: MapObject];
+
+    /**
      * Dispatched after Player.spawn started a new life.
      */
     playerSpawn: [player: Player];
@@ -244,6 +249,11 @@ declare global {
      * Dispatched once when an NPC dies; killer is the last attacker. The weapon in its hand drops as a pickup, as retail Do_WeaponDrop does (weaponDropped).
      */
     npcDeath: [npc: Npc, killer: Player | Npc | Vehicle | null];
+
+    /**
+     * Dispatched when a task of an NPC spawned with Npc.spawn ends on the simulation host. A follow or attack task runs until it is replaced, its target is gone or (attack) dead.
+     */
+    npcTaskComplete: [npc: Npc, info: NpcTaskInfo];
 
     /**
      * Dispatched when the simulation host's police manager records a new crime of a player. The player's wanted level may rise with it (playerWantedChange).
@@ -617,6 +627,31 @@ declare global {
      * Health after the hit; 0 or less means it died.
      */
     healthAfter: number;
+  }
+
+  /**
+   * How a scripted NPC's task ended.
+   */
+  interface NpcTaskInfo {
+    /**
+     * The id the task method returned.
+     */
+    id: number;
+
+    /**
+     * The task.
+     */
+    task: "stop" | "follow" | "walkTo" | "enterVehicle" | "exitVehicle" | "driveTo" | "attack";
+
+    /**
+     * completed: arrived, seated, out of the car or the target is dead; failed: the retail AI gave up, the target or car is gone or the NPC died; cancelled: another task replaced it.
+     */
+    result: "completed" | "failed" | "cancelled";
+
+    /**
+     * True when result is completed.
+     */
+    success: boolean;
   }
 
   /**
@@ -1944,7 +1979,7 @@ declare global {
   interface Pedestrian extends Entity {}
 
   /**
-   * An armed human the simulation host runs with the retail AI, such as a gangster pedestrian someone hit that draws a Thompson and fights back.
+   * A human the simulation host runs with the retail AI: a gangster pedestrian someone hit that draws a Thompson and fights back, a policeman, a thrown-out driver, or one a script spawned and gives tasks.
    */
   class Npc {
     /**
@@ -1954,7 +1989,7 @@ declare global {
     constructor(id: number);
 
     /**
-     * What it is: "gangster", "police" or "driver" (a traffic driver thrown out of its car).
+     * What it is: "gangster", "police", "driver" (a traffic driver thrown out of its car) or "scripted" (Npc.spawn).
      */
     readonly kind: string;
 
@@ -1989,6 +2024,11 @@ declare global {
     readonly weapon: number;
 
     /**
+     * A scripted NPC's spawn behaviour, "neutral", "friendly" or "hostile"; an empty string for another kind.
+     */
+    readonly behaviour: string;
+
+    /**
      * Formats this NPC for logging.
      * @returns The NPC ID, kind and model.
      */
@@ -2013,6 +2053,92 @@ declare global {
     remove(): boolean;
 
     /**
+     * Follows the target the way retail companions follow Tommy (Entity_ActionFollow), until another task or the target is gone. It runs to catch up and resumes after a fight. The task replaces the current one; npcTaskComplete reports how it ends. Scripted NPCs only.
+     * @param target Who to follow.
+     * @param distance How close it keeps, 0.5 to 50; defaults to 2.
+     * @returns The task id, or 0 when refused (not a living scripted NPC, no host, a target that is gone).
+     */
+    follow(target: Player | Npc, distance?: number): number;
+
+    /**
+     * Walks over the mission's pedestrian paths to the point (EntityMoveToFrame). The task replaces the current one; npcTaskComplete reports how it ends. Scripted NPCs only.
+     * @param position Where to go; three numbers are accepted too.
+     * @param options run: run instead of walking; radius: how close it must come, 0.3 to 20 (default 0.5).
+     * @returns The task id, or 0 when refused (not a living scripted NPC, no host, a target that is gone).
+     */
+    walkTo(position: Vector3 | { x: number; y: number; z: number }, options?: { run?: boolean; radius?: number }): number;
+
+    /**
+     * Walks to the car's door and gets in (Entity_MoveToCar, Enemy_UseCar). The simulation host drives the car while a scripted NPC boards or sits in it, and players cannot get in meanwhile. The task replaces the current one; npcTaskComplete reports how it ends. Scripted NPCs only.
+     * @param vehicle A script's vehicle with no player in it; not a traffic car.
+     * @param seat Seat index; 0, the driver's, by default.
+     * @param options run: run to the car.
+     * @returns The task id, or 0 when refused (not a living scripted NPC, no host, a target that is gone).
+     */
+    enterVehicle(vehicle: Vehicle, seat?: number, options?: { run?: boolean }): number;
+
+    /**
+     * Gets out of its car once the car is nearly still (Enemy_UseCar). The task replaces the current one; npcTaskComplete reports how it ends. Scripted NPCs only.
+     * @returns The task id, or 0 when refused (not a living scripted NPC, no host, a target that is gone).
+     */
+    exitVehicle(): number;
+
+    /**
+     * Drives the car it sits in as driver over the road network to the point and stops there (Entity_CarMoveTo). The task replaces the current one; npcTaskComplete reports how it ends. Scripted NPCs only.
+     * @param position Destination; three numbers are accepted too.
+     * @returns The task id, or 0 when refused (not a living scripted NPC, no host, a target that is gone).
+     */
+    driveTo(position: Vector3 | { x: number; y: number; z: number }): number;
+
+    /**
+     * Chases and shoots the target with its best weapon (Entity_ActionFire) until the target is dead (completed) or gone. The task replaces the current one; npcTaskComplete reports how it ends. Scripted NPCs only.
+     * @param target Who to fight.
+     * @returns The task id, or 0 when refused (not a living scripted NPC, no host, a target that is gone).
+     */
+    attack(target: Player | Npc): number;
+
+    /**
+     * Drops every action and stands (Entity_ActionsClear). The task replaces the current one; npcTaskComplete reports how it ends. Scripted NPCs only.
+     * @returns The task id, or 0 when refused (not a living scripted NPC, no host, a target that is gone).
+     */
+    stop(): number;
+
+    /**
+     * Turns it on the spot (ACTOR_SETDIR). Scripted NPCs only; a task that moves it turns it again.
+     * @param target A heading in radians, or a position to turn towards.
+     * @returns False when it is not a living scripted NPC or no host is attached.
+     */
+    face(target: number | Vector3 | { x: number; y: number; z: number }): boolean;
+
+    /**
+     * Adds a weapon to a scripted NPC's native inventory (HUMAN_ADDWEAPON); the retail AI picks what it holds. getInventory shows it once the host reports it.
+     * @param weaponId Supported stock weapon, 2 through 15.
+     * @param ammo Loaded rounds; defaults to a full magazine for a firearm and 1 otherwise.
+     * @param reserve Reserve rounds; defaults to 0.
+     * @returns False when it is not a living scripted NPC or no host is attached.
+     */
+    giveWeapon(weaponId: number, ammo?: number, reserve?: number): boolean;
+
+    /**
+     * Sets a living scripted NPC's health.
+     * @param health Above 0, up to 100000.
+     * @returns False when it is not a living scripted NPC or no host is attached.
+     */
+    setHealth(health: number): boolean;
+
+    /**
+     * Returns the scripted NPC's running task.
+     * @returns The task, or null when it runs none.
+     */
+    getTask(): { id: number; task: string } | null;
+
+    /**
+     * Returns the car it sits in.
+     * @returns The vehicle, or null on foot.
+     */
+    getVehicle(): Vehicle | null;
+
+    /**
      * Lists every NPC.
      * @returns The current NPCs.
      */
@@ -2031,6 +2157,16 @@ declare global {
      * @returns The number of NPCs.
      */
     static getCount(): number;
+
+    /**
+     * Spawns a human the simulation host runs with the retail AI and that scripts give tasks. The handle is usable at once; npcSpawn follows once the host created it, npcRetire if it could not.
+     * @param model Stock human .i3d filename, such as "pol01.i3d" for a policeman.
+     * @param position Where it stands; three numbers are accepted too.
+     * @param heading Facing in radians; defaults to 0.
+     * @param options health: defaults to 100; behaviour: how the retail AI rates players (default neutral); weapon, ammo, reserve: a weapon to hold; virtualWorld: the only world whose players see it (default every world).
+     * @returns The NPC, or null when no simulation host is attached, no mission is loaded, 64 scripted NPCs exist or an argument is unusable.
+     */
+    static spawn(model: string, position: Vector3 | { x: number; y: number; z: number }, heading?: number, options?: { health?: number; behaviour?: "neutral" | "friendly" | "hostile"; weapon?: number; ammo?: number; reserve?: number; virtualWorld?: number }): Npc | null;
   }
 
   interface Npc extends Entity {}
@@ -2277,6 +2413,97 @@ declare global {
   }
 
   interface Door extends Entity {}
+
+  /**
+   * A script-placed world object built from a stock model, like SA-MP's CreateObject. Every client in its virtual world sees it and collides with it on foot, in cars and with bullets. It lasts until destroyed, until the mission changes or until the resource that created it stops.
+   */
+  class MapObject {
+    /**
+     * Creates a handle for an existing map object; use MapObject.create to place one.
+     * @param id Network entity identifier.
+     */
+    constructor(id: number);
+
+    /**
+     * Model file the object was created from.
+     */
+    readonly model: string;
+
+    /**
+     * Whether players, cars and bullets collide with the object.
+     */
+    readonly collision: boolean;
+
+    /**
+     * Whether a moveTo is running.
+     */
+    readonly moving: boolean;
+
+    /**
+     * Mission generation the object belongs to.
+     */
+    readonly missionGeneration: number;
+
+    /**
+     * Current position, also while moving. Assigning teleports the object and stops a running move without mapObjectMoved.
+     */
+    position: Vector3;
+
+    /**
+     * Current rotation. Assigning a quaternion or Euler radians { x, y, z } turns the object at once and stops a running move.
+     */
+    rotation: Quaternion;
+
+    /**
+     * Virtual world; only players in it see and collide with the object. 4294967295 (assign -1 for it) is every world, the default.
+     */
+    virtualWorld: number;
+
+    /**
+     * Formats this object for logging.
+     * @returns The object ID and model.
+     */
+    toString(): string;
+
+    /**
+     * Moves the object smoothly from where it is. Fires mapObjectMoved on arrival. Replaces a running move.
+     * @param position Where to go; three numbers are accepted too.
+     * @param speed Meters per second, up to 1000. A move that only turns uses radians per second.
+     * @param rotation Rotation to reach on arrival, turned evenly on the way; keeps the current one when omitted.
+     * @returns False for an invalid speed or a destroyed object.
+     */
+    moveTo(position: Vector3 | { x: number; y: number; z: number }, speed: number, rotation?: Quaternion | { x: number; y: number; z: number }): boolean;
+
+    /**
+     * Stops a running move where the object is now. Does not fire mapObjectMoved.
+     * @returns False when the object no longer exists.
+     */
+    stop(): boolean;
+
+    /**
+     * Removes the object and its collision from every client.
+     * @returns False when it no longer exists.
+     */
+    destroy(): boolean;
+
+    /**
+     * Places an object in the current mission for every client, including late joiners.
+     * @param model Stock model file under models\, such as "bar_fence.4ds"; .i3d is accepted too.
+     * @param position World position; three numbers are accepted too.
+     * @param rotation A quaternion, or Euler angles in radians about x, y (up) and z. Defaults to none.
+     * @param options virtualWorld defaults to every world (-1). collision defaults to true. scale is 0.01 to 100 per axis. material is a tables\materials.def id (0 to 46 except glass 24 and crash frames 41) for collision built from the model's mesh; by default the mission's own collision for the model is used where it has some, and concrete (4) otherwise.
+     * @returns The object, or null at the limit of 4096 objects.
+     */
+    static create(model: string, position: Vector3 | { x: number; y: number; z: number }, rotation?: Quaternion | { x: number; y: number; z: number }, options?: { virtualWorld?: number; collision?: boolean; scale?: number | Vector3 | { x: number; y: number; z: number }; material?: number }): MapObject | null;
+
+    /**
+     * Lists every map object.
+     * @returns The current map objects.
+     */
+    static getAll(): MapObject[];
+  }
+
+  interface MapObject extends Entity {}
 
   /**
    * A stock Mafia 1 weapon the server accepts.

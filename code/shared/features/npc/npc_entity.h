@@ -18,10 +18,12 @@ namespace Mafia1Online::Shared::Entities {
         // A traffic driver turned into a C_entity: thrown out of its car by a
         // player (Do_ThrowCocotFromCar) or a mafia car's crew (Krles).
         Driver = 3,
+        // A C_entity a server script spawned (Npc.spawn) and gives tasks.
+        Scripted = 4,
     };
 
     inline bool KnownNpcKind(NpcKind kind) {
-        return kind == NpcKind::Gangster || kind == NpcKind::Police || kind == NpcKind::Driver;
+        return kind == NpcKind::Gangster || kind == NpcKind::Police || kind == NpcKind::Driver || kind == NpcKind::Scripted;
     }
 
     inline const char *NpcKindName(NpcKind kind) {
@@ -29,6 +31,7 @@ namespace Mafia1Online::Shared::Entities {
         case NpcKind::Gangster: return "gangster";
         case NpcKind::Police: return "police";
         case NpcKind::Driver: return "driver";
+        case NpcKind::Scripted: return "scripted";
         }
         return "unknown";
     }

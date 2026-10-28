@@ -2,6 +2,7 @@
 
 #include "features/car/car_entity.h"
 #include "features/door/door_entity.h"
+#include "features/map_object/map_object_entity.h"
 #include "features/npc/npc_entity.h"
 #include "features/pedestrian/pedestrian_entity.h"
 #include "features/car/car_debris_entity.h"
@@ -30,5 +31,6 @@ namespace Mafia1Online::Shared::Entities {
         registry.Register<PedestrianEntity>(PedestrianEntity::kTypeName);
         registry.Register<NpcEntity>(NpcEntity::kTypeName);
         registry.Register<RoadBarrierEntity>(RoadBarrierEntity::kTypeName);
+        registry.Register<MapObjectEntity>(MapObjectEntity::kTypeName);
     }
 } // namespace Mafia1Online::Shared::Entities

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "scripted_npc_host.h"
+
 #include "shared/features/npc/npc_entity.h"
 #include "shared/features/npc/npc_report.h"
 
@@ -63,8 +65,17 @@ namespace Mafia1Online::Features::Npc {
 
         // Starts reporting a C_entity the retail game just created from the
         // reported walker with this key (0 for none). carId: the network car
-        // a traffic driver was just thrown out of (0 for none).
-        void Track(SDK::Player::NativeActor *actor, Shared::Entities::NpcKind kind, const std::string &model, uint32_t walkerKey, uint64_t carId = 0);
+        // a traffic driver was just thrown out of (0 for none). key: the
+        // server's key of a scripted NPC, else 0 for the next of the host's.
+        void Track(SDK::Player::NativeActor *actor, Shared::Entities::NpcKind kind, const std::string &model, uint32_t walkerKey, uint64_t carId = 0, uint32_t key = 0);
+        [[nodiscard]] SDK::Player::NativeActor *FindByKey(uint32_t key) const;
+        // Stops reporting one of them now (Retired), before its removal.
+        void Release(SDK::Player::NativeActor *actor) {
+            Retire(actor);
+        }
+        // A Retired for a key the host never tracked (a scripted NPC it could
+        // not create).
+        void ReportRetired(uint32_t key) const;
         // A C_entity the retail game made without a spawn hook of its own
         // (a mafia car's crew, a police car's crew, a thrown traffic driver):
         // tracked with the model its frame was opened from.
@@ -87,6 +98,9 @@ namespace Mafia1Online::Features::Npc {
         void RestoreAnger(void *npc);
         void OnNativeDestroyed(void *actor);
         void OnShot(SDK::Player::NativeHuman &human, const Combat::NativeShotData &shot);
+        // C_human::Do_Shoot started, released or dropped a melee attack of
+        // one of them (combat_hooks.cpp).
+        void OnMelee(SDK::Player::NativeHuman &human, Shared::Combat::Action action, int8_t meleeIndex, uint16_t holdMs);
         // Retail DropOutItems on one of them; the server creates the pickups.
         void OnNativeDrop(SDK::Player::NativeHuman &human, const SDK::World::NativeItemVector &items);
         // A native Hit by one of them on a player's protected replica.
@@ -202,6 +216,7 @@ namespace Mafia1Online::Features::Npc {
         void UpdatePolice(World::WorldService &world);
 
         World::WorldService *_world = nullptr;
+        ScriptedNpcHost _scripted {*this};
         uint64_t _missionGeneration = 0;
         uint32_t _nextKey = 1;
         std::unordered_map<void *, Tracked> _npcs;

@@ -34,6 +34,43 @@ namespace Mafia1Online::SDK::Player {
             return human;
         }
 
+        // A C_entity that runs its own retail AI (never network controlled),
+        // as CreateMafianos makes one (0x459b90): configure sets its
+        // behaviour mask and initial properties after Init and before
+        // AddTemporaryActor, whose GameInit maps the mask to the behaviour
+        // class and copies the initial properties into the current ones.
+        template <typename Configure>
+        static NativeActor *CreateAiEntity(Core::Mission::NativeMission &mission, const char *frameName, const char *modelName, const Vector3 &position, const Vector3 &direction,
+                                           Configure &&configure) {
+            auto *scene = mission.GetScene();
+            auto *frame = Scene::GetDriver()->CreateModel();
+            if (!frame) {
+                return nullptr;
+            }
+            if (!frame->SetName(frameName) || !Scene::GetModelCache()->OpenModel(frame, modelName) || !frame->LinkTo(scene->PrimarySector())) {
+                frame->Release();
+                return nullptr;
+            }
+            frame->SetWorldPosition(position);
+            frame->SetDirection(direction);
+            frame->Update();
+            scene->AddFrame(frame);
+
+            auto *actor = mission.CreateActor(NativeActor::Type::Entity);
+            if (!actor || !actor->Initialize(frame)) {
+                if (actor) {
+                    actor->Release();
+                }
+                scene->DeleteFrame(frame);
+                frame->Release();
+                return nullptr;
+            }
+            configure(actor);
+            mission.Game()->AddTemporaryActor(actor);
+            frame->Release();
+            return actor;
+        }
+
         static NativeActor *CreateTemporary(Core::Mission::NativeMission &mission, NativeActor::Type type, const char *frameName, const char *modelName, const Vector3 &position, const Vector3 &direction) {
             auto *scene = mission.GetScene();
             auto *frame = Scene::GetDriver()->CreateModel();

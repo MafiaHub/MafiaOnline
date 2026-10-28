@@ -181,6 +181,11 @@ namespace Mafia1Online::Features::Npc {
         if (melee.canWork == SDK::Player::kHumanTimedActionWorkState || melee.canWork == SDK::Player::kHumanAnimationSequenceWorkState || melee.weaponChangeTime >= 0) {
             return;
         }
+        // Do_Shoot(false) throws as state 163 until the track ends, as on a
+        // player's replica (PlayerService::ApplyRemotePose).
+        if (human->AnimationState() == SDK::Player::kHumanThrowGrenadeAnimation) {
+            return;
+        }
         // The state at the same render time as the pose.
         std::optional<int16_t> state;
         for (const auto &[at, value] : replica.locomotion) {

@@ -10,6 +10,7 @@
 #include "core/application.h"
 #include "features/world/world_service.h"
 #include "shared/features/car/car_entity.h"
+#include "shared/features/npc/npc_melee.h"
 #include "shared/features/npc/npc_seized.h"
 #include "shared/features/player/player_entity.h"
 
@@ -189,6 +190,12 @@ namespace Mafia1Online::Features::Npc {
             _policeEnabled = change.enabled;
         });
         network->RegisterRPC<Shared::Npc::Remove>([this](const Shared::Npc::Remove &remove, MafiaNet::Packet *) {
+            // A scripted NPC is in no retirement list; it goes in order with
+            // its other messages, whatever the mission the host has loaded.
+            if (Shared::Npc::IsScriptedKey(remove.key)) {
+                _scripted.RequestRemove(remove.missionGeneration, remove.key);
+                return;
+            }
             if (remove.missionGeneration != _missionGeneration) {
                 return;
             }
@@ -198,6 +205,7 @@ namespace Mafia1Online::Features::Npc {
                 }
             }
         });
+        _scripted.RegisterRPC(world);
     }
 
     void NpcHost::Reset() {
@@ -217,9 +225,10 @@ namespace Mafia1Online::Features::Npc {
         _policePersons.clear();
         _reportedRecords.clear();
         _policeOrders.clear();
+        _scripted.Reset();
     }
 
-    void NpcHost::Track(NativeActor *actor, Shared::Entities::NpcKind kind, const std::string &model, uint32_t walkerKey, uint64_t carId) {
+    void NpcHost::Track(NativeActor *actor, Shared::Entities::NpcKind kind, const std::string &model, uint32_t walkerKey, uint64_t carId, uint32_t key) {
         if (!_missionGeneration) {
             return;
         }
@@ -227,7 +236,7 @@ namespace Mafia1Online::Features::Npc {
         const auto position = SDK::Player::WorldPosition(actor);
         const auto direction = SDK::Player::WorldDirection(actor);
         Tracked tracked;
-        tracked.key = _nextKey++;
+        tracked.key = key ? key : _nextKey++;
         tracked.kind = kind;
         tracked.temporary = IsTemporaryActor(actor);
         tracked.lastPosition = position;
@@ -269,11 +278,28 @@ namespace Mafia1Online::Features::Npc {
         if (found == _npcs.end()) {
             return;
         }
+        const uint32_t key = found->second.key;
+        _npcs.erase(found);
+        ReportRetired(key);
+        if (Shared::Npc::IsScriptedKey(key)) {
+            _scripted.Forget(key);
+        }
+    }
+
+    void NpcHost::ReportRetired(uint32_t key) const {
         Shared::Npc::Retired retired;
         retired.missionGeneration = _missionGeneration;
-        retired.key = found->second.key;
+        retired.key = key;
         Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(retired);
-        _npcs.erase(found);
+    }
+
+    NativeActor *NpcHost::FindByKey(uint32_t key) const {
+        for (const auto &[actor, tracked] : _npcs) {
+            if (tracked.key == key) {
+                return static_cast<NativeActor *>(actor);
+            }
+        }
+        return nullptr;
     }
 
     void NpcHost::TrackIfNew(NativeActor *actor, Shared::Entities::NpcKind kind, uint64_t carId) {
@@ -592,6 +618,7 @@ namespace Mafia1Online::Features::Npc {
                 }
             });
         }
+        _scripted.Update(world, generation);
         if (world.IsReady()) {
             UpdatePolice(world);
             ScanTemporaryActors(world);
@@ -1102,6 +1129,10 @@ namespace Mafia1Online::Features::Npc {
         if (found == _npcs.end()) {
             return;
         }
+        // The server takes a shot only with the weapon it records in hand: a
+        // weapon drawn since the last snapshot goes first (same ordered
+        // channel), or the first shot after the draw would be dropped.
+        SendInventory(found->second, human, false);
         const float length = std::sqrt(shot.directionX * shot.directionX + shot.directionY * shot.directionY + shot.directionZ * shot.directionZ);
         if (!std::isfinite(length) || length < 0.001f) {
             return;
@@ -1123,6 +1154,27 @@ namespace Mafia1Online::Features::Npc {
         fire.scatterRandom = shot.scatterRandom;
         fire.pellets = shot.pellets;
         Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(fire, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
+    }
+
+    void NpcHost::OnMelee(NativeHuman &human, Shared::Combat::Action action, int8_t meleeIndex, uint16_t holdMs) {
+        const auto found = _npcs.find(&human.Actor());
+        if (found == _npcs.end()) {
+            return;
+        }
+        // As for a shot: the weapon in hand reaches the server first.
+        SendInventory(found->second, human, false);
+        const auto direction = Unit(SDK::Player::WorldDirection(&human.Actor()), {0.0f, 0.0f, 1.0f});
+        Shared::Npc::Melee melee;
+        melee.missionGeneration = _missionGeneration;
+        melee.key = found->second.key;
+        melee.action = action;
+        melee.weaponId = static_cast<uint8_t>(human.SelectedWeapon());
+        melee.meleeIndex = meleeIndex;
+        melee.holdMs = holdMs;
+        melee.directionX = direction.x;
+        melee.directionY = direction.y;
+        melee.directionZ = direction.z;
+        Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(melee, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
     }
 
     void NpcHost::OnHitPlayer(World::WorldService &world, NativeHuman &target, SDK::Player::NativeHitType type, const Vector3 &direction, float damage, NativeActor *attacker,

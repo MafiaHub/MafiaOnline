@@ -80,8 +80,15 @@ namespace Mafia1Online::Features::Combat {
         // A melee release only attacks when Do_Shoot changes the combo, the
         // attack animation, the work state or loads an overlay; a release
         // often does nothing, and notes toggle the armed flag on their own.
+        Npc::NpcHost &HostNpcs();
+
         bool __fastcall DoShootHook(NativeHuman *human, void *, bool pressed, const Vector3 *target) {
-            const bool captureMelee = gReplayDepth == 0 && gService && human->Actor().IsPlayer() && human->HoldsMeleeItem();
+            // On the simulation host its NPCs' swings (C_entity::Do_Shoot_Timed
+            // calls Do_Shoot, 0x52872d/0x52873d) are read the same way and
+            // sent for players to replay, as their shots are.
+            const bool npcMelee = gReplayDepth == 0 && gService && Simulation::IsHost() && !human->Actor().IsPlayer() && human->HoldsMeleeItem() &&
+                                  HostNpcs().Owns(&human->Actor());
+            const bool captureMelee = gReplayDepth == 0 && gService && (human->Actor().IsPlayer() || npcMelee) && human->HoldsMeleeItem();
             const bool captureThrow = gReplayDepth == 0 && gService && human->Actor().IsPlayer() && human->HoldsThrowable();
             if (captureThrow) {
                 const bool chargingBefore = human->GrenadeCharging();
@@ -118,14 +125,30 @@ namespace Mafia1Online::Features::Combat {
             const bool result = gDoShootOriginal(human, pressed, target);
             const auto after  = human->Melee();
             if (pressed && !armedBefore && human->MeleeArmed()) {
-                gService->OnNativeMeleeStart(*human);
+                if (npcMelee) {
+                    HostNpcs().OnMelee(*human, Shared::Combat::Action::MeleeStart, 0, 0);
+                }
+                else {
+                    gService->OnNativeMeleeStart(*human);
+                }
             }
             if (!pressed && armedBefore && (after.animationState != before.animationState || after.canWork != before.canWork || after.weaponChangeTime != before.weaponChangeTime || after.actionTimeRemaining != before.actionTimeRemaining)) {
                 const bool heavy = after.index == Shared::Combat::kHeavyMelee;
-                gService->OnNativeMelee(*human, heavy ? Shared::Combat::kHeavyMelee : static_cast<int8_t>(std::clamp(before.index, 0, 3)), holdMs);
+                const int8_t index = heavy ? Shared::Combat::kHeavyMelee : static_cast<int8_t>(std::clamp(before.index, 0, 3));
+                if (npcMelee) {
+                    HostNpcs().OnMelee(*human, Shared::Combat::Action::Melee, index, holdMs);
+                }
+                else {
+                    gService->OnNativeMelee(*human, index, holdMs);
+                }
             }
             else if (!pressed && armedBefore) {
-                gService->OnNativeMeleeCancel(*human);
+                if (npcMelee) {
+                    HostNpcs().OnMelee(*human, Shared::Combat::Action::MeleeCancel, 0, 0);
+                }
+                else {
+                    gService->OnNativeMeleeCancel(*human);
+                }
             }
             return result;
         }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "shared/features/npc/npc_task_done.h"
+
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -54,6 +56,7 @@ namespace Mafia1Online::Features::Script {
     void EmitNpcEvent(Core::Server &server, const char *name, Shared::Entities::NpcEntity &npc);
     void EmitNpcDamage(Core::Server &server, Shared::Entities::NpcEntity &npc, uint64_t attackerId, int32_t hitType, float damage, float healthBefore, float healthAfter);
     void EmitNpcDeath(Core::Server &server, Shared::Entities::NpcEntity &npc, uint64_t killerId);
+    void EmitNpcTaskComplete(Core::Server &server, Shared::Entities::NpcEntity &npc, uint32_t taskId, Shared::Npc::TaskType type, Shared::Npc::TaskDone::Result result);
     void EmitPlayerCrime(Core::Server &server, uint64_t playerId, uint16_t crime);
     void EmitPlayerWanted(Core::Server &server, uint64_t playerId, uint8_t level, uint8_t previous);
     void EmitPlayerArrest(Core::Server &server, uint64_t playerId, Shared::Entities::NpcEntity &officer, bool fine);
@@ -63,6 +66,7 @@ namespace Mafia1Online::Features::Script {
     void EmitRailwayHit(Core::Server &server, uint64_t playerId, uint8_t index, float damage);
     void EmitCarHitEvent(Core::Server &server, const Shared::Car::HitReport &hit, float damage);
     void EmitPickupEvent(Core::Server &server, const char *name, uint64_t pickupId, uint64_t playerId);
+    void EmitMapObjectEvent(Core::Server &server, const char *name, uint64_t objectId);
     void EmitCarDebrisEvent(Core::Server &server, const char *name, Shared::Entities::CarDebrisEntity &debris);
     void EmitPlayerStateEvent(Core::Server &server, const char *name, Shared::Entities::PlayerEntity &player);
     void EmitPlayerHealthEvent(Core::Server &server, uint64_t playerId, uint64_t sourceId, std::optional<uint8_t> weaponId,

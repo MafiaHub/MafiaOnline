@@ -155,6 +155,10 @@ namespace Mafia1Online::Core {
             Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->critical("Could not install native door hooks");
             ExitProcess(1);
         }
+        if (!_mapObjects.Install()) {
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->critical("Could not install the map object collision hook");
+            ExitProcess(1);
+        }
         _world.SetMissionClosingCallback([this] {
             // Crew models leave C_game's driver list while it still exists.
             _trafficCrew.Reset();
@@ -171,6 +175,7 @@ namespace Mafia1Online::Core {
             _script.OnMissionClosing();
             _pickups.OnMissionClosing();
             _doors.Reset();
+            _mapObjects.OnMissionClosing();
             _sounds.OnMissionClosing();
             _hud.OnMissionClosing();
             _environment.OnMissionClosing();
@@ -225,6 +230,7 @@ namespace Mafia1Online::Core {
         _debris.Update(_world);
         _pickups.Update(_world);
         _doors.Update(_world);
+        _mapObjects.Update(_world);
         _seats.Update(_world);
         if (!host) _cameraFollow.Update(_world);
         _death.Update(_world, _combat);
@@ -340,6 +346,7 @@ namespace Mafia1Online::Core {
         _environment.Reset();
         _pickups.Shutdown();
         _doors.Shutdown();
+        _mapObjects.Uninstall();
         Features::Car::UninstallDebrisHooks();
         _webUi.Shutdown();
         _chat.Shutdown();
@@ -380,6 +387,7 @@ namespace Mafia1Online::Core {
         _nametags.Reset();
         _pickups.Reset();
         _doors.Reset();
+        _mapObjects.Reset();
         _players.Reset(_world);
         _debris.Reset(_world);
         _cars.Reset();

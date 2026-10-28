@@ -16,6 +16,7 @@
 #include "features/combat/combat_service.h"
 #include "features/death/death_service.h"
 #include "features/door/door_service.h"
+#include "features/map_object/map_object_service.h"
 #include "features/effects/effects_service.h"
 #include "features/environment/environment_service.h"
 #include "features/hud/hud_service.h"
@@ -155,6 +156,7 @@ namespace Mafia1Online::Core {
         Features::Nametag::NametagService _nametags;
         Features::Pickup::PickupService _pickups;
         Features::Door::DoorService _doors;
+        Features::MapObject::MapObjectService _mapObjects;
         Features::WebUi::WebUiService _webUi;
         Features::GameplayMenu::GameplayMenuService _gameplayMenus;
         Features::Environment::EnvironmentService _environment;

@@ -1,7 +1,7 @@
 # Server scripting API
 
 Server resources run in Node.js. Mafia1Online adds `Player`, `Vehicle`,
-`Pickup`, `Door`, `Sound`, `Weapon`, and `World` to the framework scripting globals.
+`Pickup`, `Door`, `MapObject`, `Sound`, `Weapon`, and `World` to the framework scripting globals.
 Use these bindings for authoritative game state. Client resources handle
 presentation such as HUD, fade, camera and local sounds; see the
 [client API](client_scripting_api.md).
@@ -40,12 +40,13 @@ mission loading, vehicle commands, respawning, and server to client events.
 | Players | `World.getPlayers()`, `Player` | Lives, health, inventory, seats, chat, connection details. |
 | Vehicles | `Vehicle.spawn()`, `World.getVehicles()` | Cars, occupancy, native damage, engine and physics commands; traffic cars the simulation host drives. |
 | Pedestrians | `Pedestrian.getAll()`, `Pedestrian.setDensity()` | The city's walkers the simulation host runs around every player. |
-| NPCs | `Npc.getAll()`, `Npc.getInRange()` | Armed humans the host runs: gangsters, policemen and thrown-out traffic drivers. |
+| NPCs | `Npc.spawn()`, `Npc.getAll()`, `Npc.getInRange()` | Humans the host runs with the retail AI: gangsters, policemen, thrown-out traffic drivers, and scripted NPCs that follow, walk, drive and fight on command. |
 | Police | `Police.getRecord()`, `Police.setWanted()` | Each player's retail crime record, wanted level and the officers it sends. |
 | Railways | `Railway.getAll()`, `Railway.getInRange()` | The mission's trams and metro trains, which the host runs and every player sees. |
 | Bridges | `Bridge.getAll()`, `Bridge.get()` | The mission's drawbridges, which the host raises for its steamers and every player sees. |
 | Pickups and weapons | `Pickup.create()`, `Weapon` | World weapon items and the supported stock weapon catalog. |
 | Mission doors | `Door.create()`, `Door.getAll()` | Lock, use, swing and paired-leaf state shared across clients. |
+| Map objects | `MapObject.create()`, `MapObject.getAll()` | Script-placed models with collision that can move, for custom maps. |
 | World | `World` | Missions, weather, music, scene frames, fire, explosions, world prop repair. |
 | Positional audio | `Sound.create()`, `Sound.play()` | Persistent or one-shot world sounds. |
 | Events | `Events.on()`, `Events.onClient()` | Native transitions and client-originated messages. |
@@ -322,8 +323,66 @@ are validated like a player's.
 - `weapon`: `number`. Retail item id of the weapon in hand, 0 for none; 10 is the Thompson.
 - `npc.getInventory(): Inventory | null` — The selected weapon and the held weapons the server records for it.
 - `npc.getThrownFromVehicle(): Vehicle | null` — The car a `driver` NPC was thrown out of when a player stole it; null for another kind or once that car is gone.
-- `npc.remove(): boolean` — Asks the simulation host to retire it now; `npcRetire` follows.
+- `npc.remove(): boolean` — Asks the simulation host to retire it now; `npcRetire` follows. This also removes a scripted NPC.
 - `Npc.getAll(): Npc[]`, `Npc.getInRange(position, radius): Npc[]`, `Npc.getCount(): number` — The current NPCs.
+
+### Scripted NPCs
+
+`Npc.spawn` creates a retail `C_entity` on the simulation host that the
+script gives tasks, the way a stock mission script drives its companions and
+enemies. Each task runs the calls the retail entity script command makes, so
+the retail AI does the walking, following, boarding, driving and fighting;
+every player sees it like any other NPC. Only kind `"scripted"` NPCs take
+tasks.
+
+- `Npc.spawn(model: string, position, heading?: number, options?): Npc | null` — Spawns it. `options`: `health` (default 100), `behaviour`, `weapon`, `ammo`, `reserve` (a weapon to hold from the start) and `virtualWorld` (only players in that world see it; default every world). The handle works at once; `npcSpawn` follows once the host created it, `npcRetire` if it could not (an unknown model). Null when no simulation host is attached, no mission is loaded, 64 scripted NPCs exist or an argument is unusable.
+- `behaviour`: `string`. How the retail AI rates others (`ai_logs::Event` by behaviour class; players count as guards):
+  - `"neutral"` (default, reacts on hit): ignores players until one aims at or shoots it.
+  - `"friendly"` (guard): every player and every friendly NPC is a friend; gangsters are enemies it fights on sight.
+  - `"hostile"` (moves away, like the gangsters a hit pedestrian becomes): every player and friendly NPC is an enemy.
+- Every task method returns a task id (0 when refused) and replaces the task before it, which ends as `"cancelled"`. `npcTaskComplete` reports how each ends.
+  - `npc.follow(target: Player | Npc, distance = 2): number` — `Entity_ActionFollow`: follows, runs to catch up and turns towards the target, until another task or the target dies or leaves. It resumes after a fight.
+  - `npc.walkTo(position, { run?, radius? }): number` — `EntityMoveToFrame`: walks (or runs) over the mission's pedestrian paths (`check.bin`) to within `radius` (default 0.5). Completed on arrival; failed when the path is not found three times.
+  - `npc.enterVehicle(vehicle: Vehicle, seat = 0, { run? }): number` — `Entity_MoveToCar` to the door, then `Enemy_UseCar`'s `Use_Actor` within 3 of a nearly still car. The car must be a script's car with no player in it, not a traffic car: the simulation host drives it while a scripted NPC boards or sits in it, and players cannot get in meanwhile. Completed once seated.
+  - `npc.exitVehicle(): number` — `Enemy_UseCar` leave once the car is nearly still. Completed once out.
+  - `npc.driveTo(position): number` — `Entity_CarMoveTo`: drives the car it sits in as driver over the road graph (`road.bin`) and stops there. Completed on arrival, failed when the retail driver gives up or is blocked.
+  - `npc.attack(target: Player | Npc): number` — `Entity_ActionFire`: picks its best weapon, chases to its range and shoots (from a car seat it shoots out of the window). Completed when the target is dead.
+  - `npc.stop(): number` — `Entity_ActionsClear`: drops every action. Completed at once.
+- `npc.face(target: number | position): boolean` — Turns it on the spot to a heading in radians or towards a point (`ACTOR_SETDIR`). A task that moves it turns it again.
+- `npc.giveWeapon(weaponId, ammo?, reserve?): boolean` — `HUMAN_ADDWEAPON` on its native inventory; the AI chooses what it holds. `getInventory()` shows it once the host reports it.
+- `npc.setHealth(health): boolean` — Sets its health (above 0).
+- `npc.getTask(): { id, task } | null` — The task still running.
+- `npc.getVehicle(): Vehicle | null` — The car it sits in.
+
+A scripted NPC never retires by distance. A dead one stays for 60 seconds,
+then goes (`npcRetire`); `npc.remove()` removes it earlier. `npcDamage` and
+`npcDeath` fire for it like for any NPC. `npc.setVirtualWorld()` changes which
+players see it; the host runs it in its one retail world, so it still meets
+players of every world there.
+
+```js
+// A policeman walks to a cell door, turns to it and goes.
+const officer = Npc.spawn("pol01.i3d", { x: -1890.5, y: -5.2, z: 18.1 }, Math.PI, { behaviour: "neutral", virtualWorld: 7 });
+let walk = 0;
+Events.on("npcSpawn", (npc) => {
+    if (officer && npc.id === officer.id) walk = officer.walkTo({ x: -1884.0, y: -5.2, z: 24.6 });
+});
+Events.on("npcTaskComplete", (npc, info) => {
+    if (!officer || npc.id !== officer.id || info.id !== walk) return;
+    if (info.success) officer.face({ x: -1884.0, y: -5.2, z: 26.0 });
+    setTimeout(() => officer.remove(), 5000);
+});
+
+// A companion that follows a player and fights for them.
+const guard = Npc.spawn("frank.i3d", player.position, 0, { behaviour: "friendly", weapon: 10, reserve: 200 });
+guard?.follow(player, 2.5);
+```
+
+Not supported yet: riding along in a player's car (a companion whose leader
+gets into a car walks to it but does not board, because the host seats its
+NPCs only in cars it drives), script animations on NPCs (players' copies
+would not show them), and turning a running NPC friendly or hostile after it
+spawned.
 
 ## Police
 
@@ -448,6 +507,61 @@ Events.on("doorStateChange", (door, player) => {
 });
 ```
 
+## MapObject
+
+`MapObject` places a stock model in the current mission for every client,
+like SA-MP's `CreateObject` and `MoveObject`. Players collide with it on foot,
+in cars and with bullets, and so do the simulation host's NPCs and traffic.
+Late joiners receive every object with its current pose and a running move.
+An object lasts until `destroy()`, until the mission changes, or until the
+resource that created it stops, so a restarted resource builds its map anew.
+
+```js
+const gate = MapObject.create("bar_fence.4ds", { x: -1200, y: 2, z: 300 }, { x: 0, y: Math.PI / 2, z: 0 });
+gate.moveTo({ x: -1200, y: -1, z: 300 }, 1.5); // sink into the ground at 1.5 m/s
+Events.on("mapObjectMoved", (object) => {
+    if (object.id === gate.id) console.log("gate open");
+});
+```
+
+- `MapObject.create(model, position, rotation?, options?): MapObject | null`.
+  `model` is a file under `models\`, such as `"bar_fence.4ds"` (`.i3d` works
+  too). `rotation` is a `Quaternion` or Euler angles in radians `{ x, y, z }`
+  (y is up), applied as `glm::quat(euler)`. `options`:
+  - `virtualWorld` (default `-1`, every world): only players in that world see
+    and collide with it. Reads back as `4294967295` for every world.
+  - `collision` (default `true`).
+  - `scale`: a number or `{ x, y, z }`, 0.01 to 100 per axis.
+  - `material`: a `tables\materials.def` id for collision built from the
+    model's mesh (0 to 46, not glass 24 or crash frames 41); for example 4
+    concrete, 13 wood, 19 metal structures, 27 wire fence, 38 brick.
+  It returns null at the limit of 4096 objects. A model the client cannot load
+  is logged there and shows nothing.
+- `MapObject.getAll()` lists every object.
+- `object.position` and `object.rotation` read the current pose, also while
+  it moves. Assigning either teleports the object and stops a running move
+  without `mapObjectMoved`. `object.virtualWorld` can be assigned (`-1` is
+  every world).
+- `object.moveTo(position, speed, rotation?)` moves it in a straight line at
+  `speed` m/s (up to 1000), turning evenly to `rotation` on the way. A move
+  that only turns takes `speed` as radians per second. A new move or a
+  teleport replaces a running one. `mapObjectMoved(object)` fires on arrival.
+- `object.stop()` halts it where it is; `object.moving` tells whether it moves.
+- `object.model`, `object.collision` and `object.missionGeneration` are read
+  only. `object.destroy()` removes it and its collision everywhere.
+
+Collision comes from the game's own data where it can. When the loaded mission
+places the same model and its `tree.klz` gives that placement collision, the
+object takes those primitives (faces, boxes, plates, spheres, cylinders) with
+their materials, so a lamp post keeps its cylinder and a traffic sign its box.
+Otherwise every triangle of the model's mesh collides from both sides, in
+concrete or the given `material`. Passing `material` always selects the mesh.
+Collision follows a moving object, but a player standing on one is not carried
+along; prefer slow moves for lifts. Only objects inside the mission's
+collision grid (the freeride grid spans x -3797 to 2849 and z -2222 to 1600,
+at any height) collide; one outside it is still drawn. AI path finding does
+not know about map objects.
+
 ## World
 
 - `World.getMission(): string` — Returns the current mission. Returns: Stock or detected mod mission directory name.
@@ -566,6 +680,7 @@ are defined by your resources.
 | `playerVoiceStop` | `[player: Player]` | The player's voice relay stopped receiving speech. |
 | `weaponDropped` | `[pickup: Pickup | null, player: Player | Npc | null, info: PickupEventInfo]` | Dispatched when a drop or a death leaves a weapon pickup in the world; a dead NPC's weapon names the NPC. |
 | `pickupTaken` | `[pickup: Pickup | null, player: Player | null, info: PickupEventInfo]` | Dispatched after the server moved a pickup into a player's inventory. The pickup handle is null when nothing is left on the ground. |
+| `mapObjectMoved` | `[object: MapObject]` | Dispatched after a MapObject.moveTo reached its target. A teleport, stop or new move does not dispatch it for the move it replaced. |
 | `vehicleSpawn` | `[vehicle: Vehicle]` | Dispatched after Vehicle.spawn created a vehicle. |
 | `vehicleDestroy` | `[vehicle: Vehicle]` | Dispatched immediately before Vehicle.destroy removes the vehicle. A mission change removes every vehicle without this event. |
 | `vehicleDamage` | `[vehicle: Vehicle, damage: VehicleDamage | null]` | Dispatched when the native per-part damage snapshot changes. |
@@ -591,6 +706,7 @@ are defined by your resources.
 | `npcRetire` | `[npc: Npc]` | Just before an NPC leaves the world: no player within 150 units, `Npc.remove` or the host leaving. A mission change removes every NPC without this event. |
 | `npcDamage` | `[npc: Npc, info: NpcDamageInfo]` | After the simulation host applied a hit. |
 | `npcDeath` | `[npc: Npc, killer: Player \| Npc \| Vehicle \| null]` | Once when an NPC dies; the weapon in its hand drops as a pickup (`weaponDropped`). |
+| `npcTaskComplete` | `[npc: Npc, info: NpcTaskInfo]` | A scripted NPC's task ended: `info.id` (the id the task method returned), `info.task` (`"stop"`, `"follow"`, `"walkTo"`, `"enterVehicle"`, `"exitVehicle"`, `"driveTo"` or `"attack"`), `info.result` (`"completed"`, `"failed"` or `"cancelled"`) and `info.success`. |
 | `playerCrime` | `[player: Player, info: PlayerCrimeInfo]` | The police manager recorded a new crime of a player; the wanted level may rise with it. |
 | `playerWantedChange` | `[player: Player, info: PlayerWantedInfo]` | A player's wanted level changed: a crime, a script, an arrest, `Police.clear`, the officers losing the player, or a new simulation host taking over (to 0). |
 | `playerArrest` | `[player: Player, officer: Npc, info: PlayerArrestInfo]` | An officer finished arresting or fining a player: both animations played to the end (an officer killed or called off before then caught nobody). Nothing else happens to the player; the script decides the outcome. The crime record is cleared. |
@@ -742,8 +858,8 @@ are defined by your resources.
   being relayed.
 - **Pickups.** Dropped and dead players' weapons become pickups for two
   minutes; scripts create their own with `Pickup.create`.
-- **Mission changes** remove every vehicle, pickup and sound and clear frame
-  overrides; weather and city music carry over.
+- **Mission changes** remove every vehicle, pickup, map object and sound and
+  clear frame overrides; weather and city music carry over.
 - **World props.** Breakables (phone booths, hydrants, trash bins, barrels and
   the other scene models a car, bullet, explosion or bat knocks down) and
   physical props (boxes, railings, mail boxes, cans) are the same for every
