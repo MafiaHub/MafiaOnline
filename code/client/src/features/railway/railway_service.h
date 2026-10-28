@@ -49,6 +49,10 @@ namespace Mafia1Online::Features::Railway {
 
         void OnGameInit(SDK::Rail::NativeRailway *railway);
         void OnGameDone(SDK::Rail::NativeRailway *railway);
+        // Players: places the railway from the host's reports just before
+        // its C_railway::Update draws them, so its frames, its passengers
+        // and its riders all stand on the same placement this frame.
+        void BeforeUpdate(SDK::Rail::NativeRailway *railway, int frameMs);
         // Simulation host: one of its railways ran into a player's replica
         // (C_human::Collision, railway branch, into the Hit hook).
         void OnHitPlayer(World::WorldService &world, SDK::Player::NativeHuman &target, SDK::Player::NativeActor *railway, const SDK::Player::Vector3 &direction, float damage);
@@ -165,8 +169,9 @@ namespace Mafia1Online::Features::Railway {
         // Players: the last puppet tick.
         std::chrono::steady_clock::time_point _lastPuppetTick {};
         std::chrono::steady_clock::time_point _lastSummary {};
-        // Players: local clock minus host clock, the least over recent
-        // packets (the least delayed one), to date the samples here.
+        // Players: local clock minus host clock, slewed toward the least
+        // over recent packets (the least delayed one), to date the samples
+        // here.
         std::deque<double> _clockOffsets;
         double _clockOffset = 0.0;
         bool _hasClockOffset = false;

@@ -127,8 +127,10 @@ namespace Mafia1Online::Features::Pedestrian {
                 replica.holding = false;
             }
             Framework::Utils::TransformSnapshot pose;
-            const auto delay = static_cast<MafiaNet::Time>(replica.snapshots.EffectiveDelayMs());
-            const bool sampled = replica.snapshots.Sample(networkNow > delay ? networkNow - delay : 0, pose);
+            // The buffer's presentation clock slews as the adaptive delay
+            // moves with each packet's jitter; subtracting that delay here
+            // instead stepped the walker on every late or early packet.
+            const bool sampled = replica.snapshots.Sample(replica.snapshots.RenderTime(networkNow), pose);
             if (sampled && !replica.holding) {
                 // Root motion moves the element; the host's pose, which
                 // already carries the host's root motion, replaces it.

@@ -397,8 +397,10 @@ of its frame name (`Shared::Railway`).
 - Players make theirs network controlled (+0x20): `C_actor::Tick` 0x4064f0
   then calls the empty `NetDirect` 0x4ab130 instead of AI, and `Update` 0x4894d0
   still places the frames and dynamic collision from those fields. Players
-  interpolate 200 ms behind the host's clock (the least delayed packet dates
-  it) and continue at most 300 ms past the newest report.
+  interpolate two mean report intervals behind the host's clock (slewed
+  toward the least delayed packet), write those fields in a hook just before
+  `Update`, so the frames, passengers and riders share one placement each
+  frame, and continue at most 300 ms past the newest report.
 - Railway AI is not deterministic (`IsOnSchedule` 0x4979b0 reads
   `timeGetTime`, braking depends on local cars and traffic lights), so players
   never run it.

@@ -31,17 +31,24 @@ namespace Mafia1Online::Features::Railway {
         using SDK::Player::Vector3;
 
         using Lifecycle = void(__thiscall *)(NativeRailway *);
+        using Tick = void(__thiscall *)(NativeRailway *, unsigned int);
         Lifecycle gGameInitOriginal = nullptr;
         Lifecycle gGameDoneOriginal = nullptr;
+        Tick gUpdateOriginal = nullptr;
         RailwayService *gService = nullptr;
 
         // Two host reports behind: one lost packet still leaves a bracket.
         constexpr double kRenderDelayMs = 200.0;
         // A lost far report leaves a gap of two far intervals.
         constexpr double kMaximumRenderDelayMs = 2000.0;
-        // Delay change per frame millisecond: a railway runs a quarter slower
-        // or faster for a moment rather than jumping.
-        constexpr double kRenderDelayEaseRate = 0.25;
+        // Delay change per frame millisecond: a railway runs a tenth slower
+        // or faster for a while rather than jumping.
+        constexpr double kRenderDelayEaseRate = 0.1;
+        // Clock offset change per packet: a late or early packet, or the
+        // least delayed one leaving the window, never steps the railways.
+        constexpr double kClockSlewMs = 1.0;
+        // Beyond this the offset is another clock and is taken at once.
+        constexpr double kClockResetMs = 1000.0;
         // Past the newest report, continue along it for at most this long.
         constexpr double kExtrapolationMs = 300.0;
         // A hit driver stops a railway until Update's out-of-range reset,
@@ -62,6 +69,17 @@ namespace Mafia1Online::Features::Railway {
                 gService->OnGameDone(railway);
             }
             gGameDoneOriginal(railway);
+        }
+
+        // C_railway::Update (0x4894d0, vtable +0x38, ret 4) places the body
+        // and wagon frames from C_actor +0x24/+0x30 and +0xbc/+0xc0. Written
+        // after the mission tick instead, they would be drawn a frame late,
+        // behind the passengers and riders placed from the same fields.
+        void __fastcall UpdateHook(NativeRailway *railway, void *, unsigned int frameTimeMs) {
+            if (gService && !Simulation::IsHost()) {
+                gService->BeforeUpdate(railway, static_cast<int>(std::min(frameTimeMs, 100u)));
+            }
+            gUpdateOriginal(railway, frameTimeMs);
         }
 
         bool WriteCodeByte(uintptr_t address, uint8_t value) {
@@ -181,7 +199,9 @@ namespace Mafia1Online::Features::Railway {
         gService = this;
         if (MH_CreateHook(reinterpret_cast<void *>(NativeRailway::kGameInit), reinterpret_cast<void *>(&GameInitHook), reinterpret_cast<void **>(&gGameInitOriginal)) != MH_OK ||
             MH_CreateHook(reinterpret_cast<void *>(NativeRailway::kGameDone), reinterpret_cast<void *>(&GameDoneHook), reinterpret_cast<void **>(&gGameDoneOriginal)) != MH_OK ||
-            MH_EnableHook(reinterpret_cast<void *>(NativeRailway::kGameInit)) != MH_OK || MH_EnableHook(reinterpret_cast<void *>(NativeRailway::kGameDone)) != MH_OK) {
+            MH_CreateHook(reinterpret_cast<void *>(NativeRailway::kUpdate), reinterpret_cast<void *>(&UpdateHook), reinterpret_cast<void **>(&gUpdateOriginal)) != MH_OK ||
+            MH_EnableHook(reinterpret_cast<void *>(NativeRailway::kGameInit)) != MH_OK || MH_EnableHook(reinterpret_cast<void *>(NativeRailway::kGameDone)) != MH_OK ||
+            MH_EnableHook(reinterpret_cast<void *>(NativeRailway::kUpdate)) != MH_OK) {
             Uninstall();
             return false;
         }
@@ -200,7 +220,7 @@ namespace Mafia1Online::Features::Railway {
 
     void RailwayService::Uninstall() {
         Seat::SetRailwayUseHandler(nullptr);
-        for (uintptr_t address : {NativeRailway::kGameInit, NativeRailway::kGameDone}) {
+        for (uintptr_t address : {NativeRailway::kGameInit, NativeRailway::kGameDone, NativeRailway::kUpdate}) {
             MH_DisableHook(reinterpret_cast<void *>(address));
             MH_RemoveHook(reinterpret_cast<void *>(address));
         }
@@ -210,6 +230,7 @@ namespace Mafia1Online::Features::Railway {
         }
         gGameInitOriginal = nullptr;
         gGameDoneOriginal = nullptr;
+        gUpdateOriginal = nullptr;
         gService = nullptr;
         Reset();
     }
@@ -287,17 +308,26 @@ namespace Mafia1Online::Features::Railway {
                 // Another simulation host, with its own clock.
                 _hostSession = snapshot.hostSession;
                 _clockOffsets.clear();
+                _hasClockOffset = false;
                 for (auto &entry : _railways) {
                     entry.samples.clear();
                     entry.renderDelayMs = 0.0;
                 }
             }
-            // The least delayed packet dates the host clock here.
+            // The least delayed packet dates the host clock here. The offset
+            // only slews toward it: stepped, every railway would jump by
+            // its speed times the step.
             _clockOffsets.push_back(LocalMs() - static_cast<double>(snapshot.hostTimeMs));
             while (_clockOffsets.size() > 32) {
                 _clockOffsets.pop_front();
             }
-            _clockOffset = *std::min_element(_clockOffsets.begin(), _clockOffsets.end());
+            const double floor = *std::min_element(_clockOffsets.begin(), _clockOffsets.end());
+            if (!_hasClockOffset || std::abs(floor - _clockOffset) > kClockResetMs) {
+                _clockOffset = floor;
+            }
+            else {
+                _clockOffset += std::clamp(floor - _clockOffset, -kClockSlewMs, kClockSlewMs);
+            }
             _hasClockOffset = true;
             for (uint8_t i = 0; i < snapshot.count; ++i) {
                 const auto &state = snapshot.railways[i];
@@ -722,7 +752,6 @@ namespace Mafia1Online::Features::Railway {
         if (!_hasClockOffset) {
             return;
         }
-        const double hostNow = LocalMs() - _clockOffset;
         auto *localHuman = SDK::Player::CurrentPlayer();
         const auto now = std::chrono::steady_clock::now();
         const int frameMs = _lastPuppetTick == std::chrono::steady_clock::time_point {}
@@ -748,12 +777,24 @@ namespace Mafia1Online::Features::Railway {
         }
         for (auto &entry : _railways) {
             if (entry.railway && entry.prepared && !entry.samples.empty()) {
-                Place(entry, hostNow, frameMs);
                 UpdateEntries(entry, localHuman);
             }
-            // After Place: the puppets stand on this frame's railway.
+            // After BeforeUpdate's Place: the puppets stand on the railway
+            // as this frame draws it.
             if (entry.railway) {
                 UpdatePuppets(entry, frameMs);
+            }
+        }
+    }
+
+    void RailwayService::BeforeUpdate(NativeRailway *railway, int frameMs) {
+        if (!_world || !_world->IsReady() || !_hasClockOffset) {
+            return;
+        }
+        for (auto &entry : _railways) {
+            if (entry.railway == railway && entry.prepared && !entry.samples.empty()) {
+                Place(entry, LocalMs() - _clockOffset, frameMs);
+                return;
             }
         }
     }
@@ -974,11 +1015,15 @@ namespace Mafia1Online::Features::Railway {
         const auto &samples = entry.samples;
         // Two reports behind at the rate this railway is reported (the far
         // ones every kFarSnapshotDivider snapshots), eased so a railway
-        // coming into or leaving the stream range does not jump.
+        // coming into or leaving the stream range does not jump. The rate
+        // is the mean over the buffered reports: the host's 30 Hz frames
+        // space its 10 Hz reports three or four frames apart (a lost one,
+        // two intervals), and a delay that followed each interval kept the
+        // railway speeding up and slowing down.
         double wantedDelay = kRenderDelayMs;
         if (samples.size() > 1) {
-            const double interval = static_cast<double>(static_cast<int32_t>(samples.back().hostTimeMs - samples[samples.size() - 2].hostTimeMs));
-            wantedDelay = std::clamp(interval * 2.0, kRenderDelayMs, kMaximumRenderDelayMs);
+            const double span = static_cast<double>(static_cast<int32_t>(samples.back().hostTimeMs - samples.front().hostTimeMs));
+            wantedDelay = std::clamp(span / static_cast<double>(samples.size() - 1) * 2.0, kRenderDelayMs, kMaximumRenderDelayMs);
         }
         // The first pair of reports shows the rate; ease only from there.
         if (entry.renderDelayMs <= 0.0) {
