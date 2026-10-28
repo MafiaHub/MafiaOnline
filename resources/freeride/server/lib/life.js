@@ -12,6 +12,7 @@ const overrides = new Map();
 const transit = new Map();
 const pending = new Set();
 let provider = () => null;
+let hospital = () => null;
 
 // One exclusive activity per player: a race, a duel, a delivery run.
 function begin(player, kind, label) {
@@ -40,6 +41,10 @@ function busyMessage(player) {
 
 function setRespawnProvider(handler) {
     provider = handler;
+}
+
+function setHospital(handler) {
+    hospital = handler;
 }
 
 // override: {spawn?(player) -> {position, heading} | null, kit?, delayMs?}
@@ -81,11 +86,11 @@ function teleport(player, position, heading = 0, loadout = loadoutOf(player)) {
     return true;
 }
 
-// Where a player comes back: the active override, the district they chose,
-// or the native spawn hint.
+// Where a player comes back: the active override, the map's hospital, the
+// district they chose, or the native spawn hint.
 function spotFor(player) {
     const suggested = player.getSuggestedSpawn();
-    return overrides.get(player.id)?.spawn?.(player) ?? provider(player) ??
+    return overrides.get(player.id)?.spawn?.(player) ?? hospital() ?? provider(player) ??
         (suggested ? {position: suggested, heading: 0} : null);
 }
 
@@ -134,5 +139,5 @@ Events.on("missionChange", () => {
     transit.clear();
 });
 
-module.exports = {begin, end, activity, busyMessage, setRespawnProvider, setOverride, clearOverride,
-    giveKit, loadoutOf, teleport, restart, isTransit, STARTER_KIT, RESPAWN_DELAY_MS};
+module.exports = {begin, end, activity, busyMessage, setRespawnProvider, setHospital, setOverride, clearOverride,
+    giveKit, loadoutOf, teleport, restart, spotFor, isTransit, STARTER_KIT, RESPAWN_DELAY_MS};

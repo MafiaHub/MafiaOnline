@@ -15,12 +15,71 @@ const LANDMARKS = {
     // props carry Bertone's name, and the crossing at the container docks.
     bertone: {name: "Lucas Bertone's garage", position: {x: -717.7, y: 1.4, z: 61.2}},
     docks: {name: "the container docks", position: {x: -2568.4, y: -5.9, z: -642.9}},
+    hospital: {name: "Lost Heaven Hospital", position: {x: -759.4, y: 14.9, z: 759.5}},
     // The stock FREEKRAJINA emeth_* frames; Freeride Extended carries the
     // same countryside at the same heights.
     crossroads: {name: "the country crossroads", position: {x: -1485.96, y: 11.39, z: 939.36}},
     lowlands: {name: "the lowlands", position: {x: -1895.82, y: -4.53, z: 1886.73}},
     hills: {name: "the hills", position: {x: 363.97, y: 84.11, z: 2733.72}},
     ridge: {name: "the ridge", position: {x: 527.29, y: 32.13, z: 2054.58}},
+};
+
+// The Freeride Extended autodrom is the stock MISE06-AUTODROM track model,
+// placed by its "anchr" frame at (-3736.52, 10.52, -1005.79) with rotation
+// (0.1607, 0, -0.9870, 0) (models/autodrom.4ds). These are the stock race
+// mission's start0-start15 grid frames and the 26 trackside nodes of its
+// check.bin (type 8, at the race_cam* frames, linked into the racing line) in
+// lap order, transformed by that anchor as S_quat::RotationMatrix does; the
+// last point is the start/finish line just ahead of the grid.
+const AUTODROM = {
+    heading: -1.8937,
+    grid: [
+        {x: -4070.17, y: 10.52, z: -972.35},
+        {x: -4065.62, y: 10.52, z: -958.79},
+        {x: -4053.89, y: 10.52, z: -966.95},
+        {x: -4049.55, y: 10.52, z: -953.58},
+        {x: -4037.65, y: 10.52, z: -962.05},
+        {x: -4033.18, y: 10.52, z: -948.61},
+        {x: -4021.44, y: 10.52, z: -956.91},
+        {x: -4016.87, y: 10.52, z: -943.6},
+        {x: -4004.66, y: 10.52, z: -951.61},
+        {x: -4000.36, y: 10.52, z: -938.09},
+        {x: -3988.58, y: 10.52, z: -946.22},
+        {x: -3984.11, y: 10.52, z: -932.75},
+        {x: -3972.24, y: 10.52, z: -941.38},
+        {x: -3967.83, y: 10.52, z: -927.95},
+        {x: -3956.05, y: 10.52, z: -936.24},
+        {x: -3951.65, y: 10.52, z: -922.81},
+    ],
+    lap: [
+        {x: -4124.63, y: 14.84, z: -969.05},
+        {x: -4216.84, y: 12.14, z: -1031.39},
+        {x: -4312.89, y: 13.67, z: -1103.79},
+        {x: -4341.42, y: 14.02, z: -1176.37},
+        {x: -4318.33, y: 19.04, z: -1246.22},
+        {x: -4290.85, y: 13.98, z: -1128.88},
+        {x: -4217.83, y: 11.76, z: -1072.88},
+        {x: -4145.15, y: 12.67, z: -1085.31},
+        {x: -4038.05, y: 13.96, z: -1160.5},
+        {x: -3923.67, y: 26.43, z: -1268.18},
+        {x: -4033.4, y: 26.31, z: -1371.33},
+        {x: -4041.21, y: 25.86, z: -1452.87},
+        {x: -3881.97, y: 42.58, z: -1564.21},
+        {x: -3773.44, y: 49.6, z: -1594.09},
+        {x: -3658.36, y: 31.43, z: -1501.55},
+        {x: -3582.29, y: 14.22, z: -1380.02},
+        {x: -3486.92, y: 13.29, z: -1268.12},
+        {x: -3459.18, y: 13.41, z: -1170.4},
+        {x: -3539.67, y: 13.41, z: -1123.19},
+        {x: -3615.56, y: 15.21, z: -1058.74},
+        {x: -3605.19, y: 16.62, z: -945.7},
+        {x: -3495.93, y: 25.03, z: -869.05},
+        {x: -3526.05, y: 17.82, z: -803.31},
+        {x: -3579.24, y: 30.69, z: -752.58},
+        {x: -3653.02, y: 14.35, z: -821.35},
+        {x: -3781.95, y: 13.12, z: -890.66},
+        {x: -4085.36, y: 10.52, z: -971.72},
+    ],
 };
 
 // Facing in degrees from each frame's stored rotation.
@@ -76,8 +135,22 @@ const MAPS = {
         // places them from the stock countryside's own spawn frames.
         districts: [...CITY_DISTRICTS, ...COUNTRY_DISTRICTS.map(({frame, ...district}) => district)],
         routes: [...CITY_ROUTES, ...EXTENDED_ROUTES],
-        places: ["salieri", "pete", "pump", "dispensary", "bertone", "docks", "crossroads", "lowlands", "hills", "ridge"],
+        places: ["salieri", "pete", "pump", "dispensary", "bertone", "docks", "hospital", "crossroads", "lowlands", "hills", "ridge"],
         exportYard: LANDMARKS.bertone,
+        circuit: AUTODROM,
+        // models/9medic.4ds placed by cache.bin at (-759.22, 11.56, 778.99),
+        // unrotated; its doors sit at local z -15.5, beside the stock
+        // "lekarna" frame where the Dispensary's attendant stands (y 14.81).
+        hospital: {name: "Lost Heaven Hospital", door: {x: -759.4, y: 14.9, z: 761.5}, spawn: {position: {x: -759.4, y: 14.9, z: 759.5}, heading: Math.PI}},
+        // The motel's storeroom: sector "&& sklad" in models/motel.4ds, on the
+        // ground floor (y 32.9) beside the lobby and office.
+        jail: {name: "the motel lock-up", cell: {position: {x: 550.7, y: 33.1, z: 2035.7}, heading: 0},
+            release: {position: LANDMARKS.ridge.position, heading: 29 * Math.PI / 180}},
+        // Sarah's apartment, models/quarters_sr.4ds: the street door frame
+        // "&& futro out" and the corridor "&& chodba" behind it.
+        interiors: [{id: "b:sarah", name: "Sarah's Apartment", kind: "safehouse",
+            outside: {position: {x: -1770.6, y: -5.2, z: 171.5}, heading: -1.54},
+            inside: {position: {x: -1759.4, y: -3.3, z: 171.8}, heading: 1.6}}],
     },
     freekrajina: {
         id: "freekrajina", title: "The Countryside", roads: require("../data/roads_freekrajina.js"), shops: false,

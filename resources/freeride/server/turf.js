@@ -91,6 +91,7 @@ function tick() {
     const now = Date.now();
     let changed = false;
     const street = World.getPlayers().filter((player) => playable(player) && player.virtualWorld === MAIN_WORLD);
+    const onTurf = new Set();
     for (const turf of turfs) {
         const present = street.filter((player) => flatDistance(player.position, turf.position) <= RADIUS);
         const crews = new Map();
@@ -128,12 +129,14 @@ function tick() {
         }
         for (const player of present) {
             const crew = player.state.get("fr.crew");
+            onTurf.add(player.id);
             card(player, "turf", {title: `Turf ${turf.id}`, subtitle: turf.owner ? `Held by [${turf.owner.tag}] ${turf.owner.name}` : "Nobody holds this corner",
                 rows: [["Status", contested ? "Contested" : !crew ? "Join a crew to take it" : crew.tag === turf.owner?.tag ? "Yours" :
                     `Taking over · ${Math.round(turf.progress / CAPTURE_MS * 100)}%`], ["Pays", `${formatMoney(INCOME)} each, every 3 min`]],
-                progress: turf.progress / CAPTURE_MS, tone: contested ? "bad" : "gold", seconds: 3});
+                progress: turf.progress / CAPTURE_MS, tone: contested ? "bad" : "gold"});
         }
     }
+    for (const player of World.getPlayers()) if (!onTurf.has(player.id)) card(player, "turf", null);
     if (changed) publish();
     if (now - lastIncome >= INCOME_EVERY_MS) {
         lastIncome = now;

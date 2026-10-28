@@ -128,7 +128,7 @@ function carColor(player) {
 function spawnPersonalCar(player, model) {
     if (!playable(player)) return {ok: false, message: "Enter the city before choosing a car."};
     if (!CAR_MODELS.has(model.toLowerCase())) return {ok: false, message: "That car model is unavailable."};
-    if (["race", "duel"].includes(life.activity(player)?.kind)) return {ok: false, message: life.busyMessage(player)};
+    if (["race", "duel", "jail"].includes(life.activity(player)?.kind)) return {ok: false, message: life.busyMessage(player)};
     const oldVehicle = player.getVehicle();
     const {x, y, z} = oldVehicle?.position ?? player.position;
     const heading = oldVehicle ? headingOf(oldVehicle.rotation) : headingOf(player.rotation);
@@ -371,8 +371,8 @@ commands.register({name: "engine", usage: "/engine", help: "Start or stop the en
 commands.register({name: "kill", aliases: ["suicide"], usage: "/kill", help: "End this life and respawn.", category: "City"}, (player) => {
     if (!player.alive) return;
     const busy = life.activity(player);
-    if (busy?.kind === "duel") {
-        toast(player, "Not in the middle of a duel.", {tone: "bad"});
+    if (busy?.kind === "duel" || busy?.kind === "jail") {
+        toast(player, busy.kind === "jail" ? "Serve your time or pay /bail." : "Not in the middle of a duel.", {tone: "bad"});
         return;
     }
     player.setHealth(0);

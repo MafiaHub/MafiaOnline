@@ -61,9 +61,10 @@ function label(interior) {
 }
 
 // Interiors of the loaded map; ones recorded before maps existed are stock Lost Heaven's.
+// Built into the map (lib/maps.js) first, then the recorded ones.
 function here() {
-    const mission = maps.current()?.id;
-    return interiors.filter((interior) => (interior.mission ?? "freeride") === mission);
+    const map = maps.current();
+    return [...(map?.interiors ?? []), ...interiors.filter((interior) => (interior.mission ?? "freeride") === map?.id)];
 }
 
 function publishEntrances(player = null) {
@@ -140,7 +141,7 @@ function leave(player, interior) {
 function tick() {
     for (const player of World.getPlayers()) {
         if (!playable(player) || player.getVehicle() || pending.has(player.id)) continue;
-        const current = interiors.find((interior) => interior.id === inside.get(player.id));
+        const current = here().find((interior) => interior.id === inside.get(player.id));
         const checks = current ? [[current, "inside"]] : player.virtualWorld === MAIN_WORLD ? here().map((interior) => [interior, "outside"]) : [];
         for (const [interior, side] of checks) {
             const key = `${player.id}:${interior.id}:${side}`;
@@ -195,7 +196,7 @@ const subcommands = {
     delete(player, args) {
         const name = args.join(" ").trim().toLowerCase();
         const before = interiors.length;
-        const doomed = new Set(here().filter((interior) => interior.name.toLowerCase() === name));
+        const doomed = new Set(interiors.filter((interior) => interior.name.toLowerCase() === name && (interior.mission ?? "freeride") === maps.current()?.id));
         interiors = interiors.filter((interior) => !doomed.has(interior));
         if (interiors.length === before) {
             toast(player, "No interior by that name.", {tone: "bad"});
@@ -206,7 +207,7 @@ const subcommands = {
         toast(player, "Interior removed.");
     },
     list(player) {
-        if (!here().length) player.sendMessage("No interiors recorded on this map yet.", 0xd9cdb4);
+        if (!here().length) player.sendMessage("No interiors on this map yet.", 0xd9cdb4);
         for (const interior of here()) {
             player.sendMessage(`${interior.name} (${interior.kind}) · ${Math.round(distance(player.position, interior.outside.position))} m away`, 0xd9cdb4);
         }

@@ -2,6 +2,7 @@
 // police for everyone and reports each player's crimes and wanted level; this
 // resource decides what the player sees and what an arrest costs.
 const life = require("./lib/life.js");
+const jail = require("./jail.js");
 const commands = require("./lib/commands.js");
 const {toast, feed, name, text, COLORS} = require("./lib/notify.js");
 const {emit, formatMoney} = require("./lib/util.js");
@@ -37,6 +38,7 @@ Events.on("playerCrime", (player, {crime}) => {
 });
 
 Events.on("playerWantedChange", (player, {level, previous}) => {
+    if (level > 0) caseLevel.set(player.id, Math.max(level, caseLevel.get(player.id) ?? 0));
     sendPolice(player, {action: "wanted", level});
     if (level === 0 && previous > 0) toast(player, "The police lost interest in you.", {tone: "good"});
     if (level === 3 && previous < 3) feed("police", [name(player, COLORS.red), text(" is wanted dead or alive")]);
@@ -45,23 +47,32 @@ Events.on("playerWantedChange", (player, {level, previous}) => {
 Events.on("playerSpawn", (player) => sendPolice(player, {action: "wanted", level: Police.getRecord(player)?.level ?? 0}));
 Events.on("playerRespawn", (player) => sendPolice(player, {action: "wanted", level: 0}));
 
-// Retail fines cost score and an arrest ends the game; here a fine costs
-// cash and an arrest costs bail and a fresh start where the player entered.
+// Retail fines cost score and an arrest ends the game. The record is already settled when playerArrest arrives; the sentence goes
+// by the highest level the player reached on this case.
+const caseLevel = new Map();
+
+// A fine costs cash. An arrest is a jail sentence (jail.js); where a map has
+// no cell for the player, it costs bail and a fresh start instead.
 Events.on("playerArrest", (player, _officer, {kind}) => {
-    const charge = Math.min(player.money, kind === "fine" ? FINE : BAIL);
-    if (charge > 0) player.giveMoney(-charge);
     if (kind === "fine") {
+        const charge = Math.min(player.money, FINE);
+        if (charge > 0) player.giveMoney(-charge);
         sendPolice(player, {action: "fine"});
         toast(player, `Fined ${formatMoney(charge)} by the police.`, {tone: "bad"});
         return;
     }
+    const level = caseLevel.get(player.id) ?? 2;
+    caseLevel.delete(player.id);
     const {missionGeneration, spawnGeneration} = player;
     Police.clear(player);
     sendPolice(player, {action: "arrest"});
-    toast(player, `Arrested. Bail cost you ${formatMoney(charge)}.`, {title: "Police", tone: "bad"});
-    feed("police", [name(player), text(" was arrested")]);
     setTimeout(() => {
         if (!player.alive || player.missionGeneration !== missionGeneration || player.spawnGeneration !== spawnGeneration) return;
+        if (jail.sentence(player, level)) return;
+        const charge = Math.min(player.money, BAIL);
+        if (charge > 0) player.giveMoney(-charge);
+        toast(player, `Arrested. Bail cost you ${formatMoney(charge)}.`, {title: "Police", tone: "bad"});
+        feed("police", [name(player), text(" was arrested")]);
         life.restart(player);
     }, ARREST_RESPAWN_MS);
 });
@@ -75,3 +86,5 @@ commands.register({name: "wanted", usage: "/wanted", help: "Show your police rec
     toast(player, `You are ${WANTED_NAMES[record.level] ?? "wanted"}. ${record.officers} officers on you. ` +
         `Crimes: ${record.crimes.join(", ") || "none"}.`, {title: "Police record", tone: record.level ? "bad" : "info"});
 });
+
+Events.on("playerDisconnect", (player) => caseLevel.delete(player.id));

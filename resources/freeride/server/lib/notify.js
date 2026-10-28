@@ -28,10 +28,26 @@ function feed(kind, parts) {
     broadcast("fr:feed", {kind, parts});
 }
 
-// Activity cards on the right of the HUD; null removes the card.
+// Activity cards on the right of the HUD; null removes the card. Many are
+// refreshed on a timer, so one that has not changed is not sent again.
+const lastCards = new Map();
+
 function card(player, id, content) {
-    emit(player, "fr:card", content ? {id, ...content} : {id, remove: true});
+    const key = `${player.id}:${id}`;
+    const payload = JSON.stringify(content ? {id, ...content} : {id, remove: true});
+    if (lastCards.get(key) === payload) return;
+    lastCards.set(key, payload);
+    player.emit("fr:card", payload);
 }
+
+function forgetCards(player) {
+    for (const key of [...lastCards.keys()]) if (key.startsWith(`${player.id}:`)) lastCards.delete(key);
+}
+
+// A freshly loaded HUD page shows no cards, whatever was sent before.
+Events.onClient("fr:hud:ready", (player) => { if (player) forgetCards(player); });
+Events.on("playerDisconnect", forgetCards);
+Events.on("missionChange", () => lastCards.clear());
 
 function compass(player, source, priority, target) {
     emit(player, "fr:compass", {source, priority, target: target ?? null});

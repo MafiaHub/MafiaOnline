@@ -26,6 +26,7 @@ const HOT_CAR_PRIZE = 600;
 const HOT_CAR_PASSENGER_PRIZE = 150;
 const HOT_CAR_XP = 150;
 const DELIVERY_RADIUS = 14;
+const CARD_RANGE = 1500;
 
 const HOT_CARS = [
     {model: "bugatti00.i3d", name: "Bugatti Type 57"}, {model: "duesenberg00.i3d", name: "Duesenberg"},
@@ -195,11 +196,16 @@ function sendCards(now) {
         if (!player.spawned) continue;
         const driving = vehicle && vehicle.getDriver()?.id === player.id;
         const goal = driving ? current.delivery : target;
+        // Far away, the announcement, compass and marker are enough.
+        if (!driving && (!goal || distance(player.position, goal) > CARD_RANGE)) {
+            card(player, "event", null);
+            continue;
+        }
         card(player, "event", {
             title: current.title,
             subtitle: current.kind === "supply" ? "First to the crate keeps it"
                 : driving ? `Deliver to ${current.dropOff}` : current.driverId ? "Someone has the car. Stop them or ride along" : "Find the car and take the wheel",
-            rows: [["Distance", goal ? `${Math.round(distance(player.position, goal))} m` : "-"], ["Ends in", formatMinutes(current.expiresAt - now)],
+            rows: [["Distance", `${Math.round(distance(player.position, goal) / 10) * 10} m`], ["Ends in", formatMinutes(current.expiresAt - now)],
                 ["Prize", formatMoney(current.kind === "supply" ? DROP_PRIZE : HOT_CAR_PRIZE)]],
             progress: Math.max(0, (current.expiresAt - now) / (current.kind === "supply" ? DROP_LIFETIME_MS : HOT_CAR_LIFETIME_MS)),
             tone: current.kind === "supply" ? "gold" : "bad",

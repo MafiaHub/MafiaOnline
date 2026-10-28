@@ -40,6 +40,10 @@ const MAX_CUSTOM_POINTS = 40;
 const MIN_CUSTOM_SPACING = 40;
 const MAX_CUSTOM_ROUTES = 60;
 const MAX_ROUTES_PER_AUTHOR = 5;
+// Circuit races put every entrant on the grid in the same car, wherever they
+// were, and bring them back to that spot afterwards.
+const CIRCUIT_CAR = "speedster00.i3d";
+const CIRCUIT_RETURN_MS = 10_000;
 
 // Each map lists its built-in routes in lib/maps.js as landmark waypoints;
 // the street line between them is the map's road graph's shortest path.
@@ -58,10 +62,25 @@ function slug(value) {
     return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
+// A race of `laps` laps on the map's circuit, for the route book and the
+// championship.
+function circuitRoute(map, laps, name, description, id = `b:${map.id}:circuit-${laps}`) {
+    const {lap, grid, heading} = map.circuit;
+    let length = 0;
+    for (let index = 0; index < lap.length; index++) length += flatDistance(lap[index], lap[(index + 1) % lap.length]);
+    const slots = grid.map((point) => ({position: {x: point.x, y: point.y + 0.6, z: point.z}, heading}));
+    return {id, name, description, builtIn: true, author: null, circuit: true, laps,
+        checkpoints: Array.from({length: laps}, () => lap).flat(), grid: slots, start: slots[0].position, length: length * laps};
+}
+
 function builtIn(map) {
     if (routesByMap.has(map.id)) return routesByMap.get(map.id);
     const graph = roads.forMap(map);
     const built = [];
+    if (map.circuit) {
+        built.push(circuitRoute(map, 1, "Autodrom Sprint", "One lap of the official circuit, in identical cars."));
+        built.push(circuitRoute(map, 3, "Autodrom Grand Prix", "Three laps of the official circuit, in identical cars."));
+    }
     for (const spec of map.routes) {
         const line = graph.route(spec.via.map((key) => maps.landmark(key).position));
         if (!line) {
@@ -158,13 +177,32 @@ function lengthText(route) {
 }
 
 function lobbyCard(race, racer) {
-    const atStart = racer.player.getSeat() === 0 && distance(racer.player.getVehicle().position, race.route.start) <= START_REACH;
+    const circuit = race.route.circuit;
+    const atStart = circuit || (racer.player.getSeat() === 0 && distance(racer.player.getVehicle().position, race.route.start) <= START_REACH);
     card(racer.player, "race", {
-        title: race.route.name, subtitle: `Street race · ${lengthText(race.route)} · ${race.route.checkpoints.length} checkpoints`,
+        title: race.route.name, subtitle: circuit ? `Circuit · ${race.route.laps} lap${race.route.laps === 1 ? "" : "s"} · ${lengthText(race.route)}`
+            : `Street race · ${lengthText(race.route)} · ${race.route.checkpoints.length} checkpoints`,
         rows: [["Starts in", formatMinutes(race.lobbyEndsAt - Date.now())], ["Racers", String(race.racers.size)],
-            ["You", atStart ? "At the start line" : racer.player.getSeat() === 0 ? "Drive to the start" : "Get a car (/car)"]],
-        progress: Math.max(0, (race.lobbyEndsAt - Date.now()) / LOBBY_MS), tone: atStart ? "good" : "gold",
+            ["You", circuit ? "You will be put on the grid" : atStart ? "At the start line" : racer.player.getSeat() === 0 ? "Drive to the start" : "Get a car (/car)"]],
+        progress: Math.max(0, (race.lobbyEndsAt - Date.now()) / race.lobbyMs), tone: atStart ? "good" : "gold",
     });
+}
+
+// Back to where the player was before the circuit took them, once they are
+// out of the race; the race car goes.
+function sendHome(racer) {
+    if (!racer.returnTo) return;
+    const {player, returnTo, raceCarId} = racer;
+    racer.returnTo = null;
+    setTimeout(() => {
+        const car = util.vehicleById(raceCarId);
+        const current = life.activity(player);
+        if (World.getPlayers().some((other) => other.id === player.id) && player.alive && !raceOf(player) && !current) {
+            if (player.getVehicle()) player.removeFromVehicle();
+            life.teleport(player, returnTo.position, returnTo.heading);
+        }
+        if (car && car.getOccupants().every((occupant) => occupant === null)) car.destroy();
+    }, CIRCUIT_RETURN_MS);
 }
 
 function routeMarkers(race, racer) {
@@ -181,6 +219,7 @@ function routeMarkers(race, racer) {
 
 function leaveRace(race, racer, message) {
     race.racers.delete(racer.player.id);
+    sendHome(racer);
     life.end(racer.player, "race-lobby");
     life.end(racer.player, "race");
     card(racer.player, "race", null);
@@ -205,47 +244,76 @@ function join(race, player) {
         toast(player, life.busyMessage(player), {tone: "bad"});
         return false;
     }
-    const racer = {player, cp: 0, finishedMs: null, dnf: false, outOfCarSince: null, slot: null};
+    const racer = {player, cp: 0, finishedMs: null, dnf: false, outOfCarSince: null, slot: null, returnTo: null, raceCarId: null};
     race.racers.set(player.id, racer);
-    compass(player, "race", 100, {position: race.route.start});
-    markers(player, "race", [{id: "start", position: race.route.start, label: "START LINE", color: COLORS.gold, beacon: true, primary: true}]);
-    toast(player, `You're in. Be at the start line in a car within ${formatMinutes(race.lobbyEndsAt - Date.now())}.`, {title: race.route.name, tone: "gold"});
+    if (race.route.circuit) {
+        toast(player, `You're in. A race car will be waiting for you on the grid in ${formatMinutes(race.lobbyEndsAt - Date.now())}.`, {title: race.route.name, tone: "gold"});
+    } else {
+        compass(player, "race", 100, {position: race.route.start});
+        markers(player, "race", [{id: "start", position: race.route.start, label: "START LINE", color: COLORS.gold, beacon: true, primary: true}]);
+        toast(player, `You're in. Be at the start line in a car within ${formatMinutes(race.lobbyEndsAt - Date.now())}.`, {title: race.route.name, tone: "gold"});
+    }
     for (const other of racerList(race)) if (other.player.id !== player.id) toast(other.player, `${player.nickname} joined the race.`);
     return true;
 }
 
-function openRace(host, route) {
-    if (!playable(host)) return;
-    if (raceOf(host)) {
-        toast(host, "You are already in a race. /race leave first.", {tone: "bad"});
-        return;
-    }
-    if (openLobby()) {
-        toast(host, "A race lobby is already open. Join it with /race join.", {tone: "bad"});
-        return;
-    }
-    if (races.size >= MAX_RACES) {
-        toast(host, "The streets are busy with races. Try again in a minute.", {tone: "bad"});
-        return;
-    }
-    const race = {id: nextRaceId++, route, host: host.nickname, generation: World.getMissionGeneration(), phase: "lobby",
-        racers: new Map(), lobbyEndsAt: Date.now() + LOBBY_MS, startedAt: 0, firstFinishAt: 0, lastStateAt: 0, entrants: 0};
+// A player opens a lobby, or with host null a scripted event such as a
+// championship round does: options.title names it, options.lobbyMs sets the
+// wait and options.onConclude(finishers, entrants) receives the result.
+function openRace(host, route, options = {}) {
+    const refuse = (message) => {
+        if (host) toast(host, message, {tone: "bad"});
+        else console.warn(`[freeride] ${message}`);
+        return null;
+    };
+    if (host && !playable(host)) return null;
+    if (host && raceOf(host)) return refuse("You are already in a race. /race leave first.");
+    if (openLobby()) return refuse("A race lobby is already open. Join it with /race join.");
+    if (races.size >= MAX_RACES) return refuse("The streets are busy with races. Try again in a minute.");
+    const lobbyMs = options.lobbyMs ?? LOBBY_MS;
+    const race = {id: nextRaceId++, route, host: host?.nickname ?? options.title ?? "City Hall", generation: World.getMissionGeneration(), phase: "lobby",
+        racers: new Map(), lobbyMs, lobbyEndsAt: Date.now() + lobbyMs, startedAt: 0, firstFinishAt: 0, lastStateAt: 0, entrants: 0,
+        onConclude: options.onConclude ?? null};
     races.set(race.id, race);
-    if (!join(race, host)) {
+    if (host && !join(race, host)) {
         races.delete(race.id);
-        return;
+        return null;
     }
     for (const player of World.getPlayers()) {
-        if (player.id === host.id || !player.spawned) continue;
-        toast(player, `${host.nickname} opened a street race: ${route.name}, ${lengthText(route)}. Type /race join or use F2.`,
+        if (player.id === host?.id || !player.spawned) continue;
+        toast(player, `${race.host} opened ${route.circuit ? "a circuit race" : "a street race"}: ${route.name}, ${lengthText(route)}. Type /race join or use F2.`,
             {title: "Race invitation", tone: "gold", seconds: 9});
     }
-    feed("race", [name(host, COLORS.gold), text(" opened a race on "), text(route.name, COLORS.white)]);
+    feed("race", [host ? name(host, COLORS.gold) : text(race.host, COLORS.gold), text(" opened a race on "), text(route.name, COLORS.white)]);
+    return race;
+}
+
+// Puts a circuit entrant in a fresh race car on their grid slot.
+function seatOnGrid(racer, slot) {
+    const {player} = racer;
+    racer.returnTo = {position: util.plain(player.position), heading: util.headingOf(player.rotation)};
+    if (player.getVehicle()) player.removeFromVehicle();
+    if (!life.teleport(player, slot.position, slot.heading)) return false;
+    const car = Vehicle.spawn(CIRCUIT_CAR, slot.position, slot.heading, player);
+    if (!car) return false;
+    racer.raceCarId = car.id;
+    car.state.set("fr.fullTank", true);
+    car.state.set("fr.owner", player.nickname);
+    return player.putInVehicle(car, 0);
 }
 
 function startCountdown(race) {
     const ready = [];
     for (const racer of racerList(race)) {
+        if (race.route.circuit) {
+            // Moving to the grid starts a new native life; nobody shakes off the police that way.
+            if (!playable(racer.player) || racer.player.virtualWorld !== util.MAIN_WORLD || (Police.getRecord(racer.player)?.level ?? 0) > 0) {
+                leaveRace(race, racer, "Only players on the street with a clean record can be put on the grid.");
+                continue;
+            }
+            ready.push(racer);
+            continue;
+        }
         const car = racer.player.getSeat() === 0 ? racer.player.getVehicle() : null;
         if (!playable(racer.player) || !car || car.terminalState !== 0 || distance(car.position, race.route.start) > START_REACH) {
             leaveRace(race, racer, "You were not at the start line in a car. The race went without you.");
@@ -266,8 +334,12 @@ function startCountdown(race) {
     const order = ready.map((racer) => ({racer, lot: Math.random()})).sort((a, b) => a.lot - b.lot).map((entry) => entry.racer);
     order.forEach((racer, index) => {
         life.end(racer.player, "race-lobby");
-        life.begin(racer.player, "race", `Street race · ${race.route.name}`);
+        life.begin(racer.player, "race", `${race.route.circuit ? "Circuit race" : "Street race"} · ${race.route.name}`);
         racer.slot = race.route.grid[index];
+        if (race.route.circuit && !seatOnGrid(racer, racer.slot)) {
+            leaveRace(race, racer, "Your race car could not be brought to the grid.");
+            return;
+        }
         const car = racer.player.getVehicle();
         car.setTransform(racer.slot.position, racer.slot.heading, {x: 0, y: 0, z: 0});
         car.repair();
@@ -354,6 +426,11 @@ function concludeRace(race) {
             rows: finishers.slice(0, 5).map((other, place) => [`${place + 1}. ${other.player.nickname}`, formatDuration(other.finishedMs)])
                 .concat(prize > 0 ? [["Prize", formatMoney(prize)]] : []), tone: "gold", seconds: 15});
     });
+    try {
+        race.onConclude?.(finishers.map((racer) => ({player: racer.player, ms: racer.finishedMs})), race.entrants);
+    } catch (error) {
+        console.error(`[freeride] Race result handler failed: ${error?.stack ?? error}`);
+    }
     if (finishers.length && race.entrants > 1) {
         feed("race", [name(finishers[0].player, COLORS.gold), text(` won ${race.route.name} against ${race.entrants - 1} `),
             text(race.entrants === 2 ? "rival" : "rivals"), text(` · ${formatDuration(finishers[0].finishedMs)}`, COLORS.white)]);
@@ -362,6 +439,7 @@ function concludeRace(race) {
         if (racer.finishedMs === null) leaveRace(race, racer, "The race is over. You did not finish.");
         else {
             race.racers.delete(racer.player.id);
+            sendHome(racer);
             emit(racer.player, "fr:race:state", {active: false});
         }
     }
@@ -437,7 +515,8 @@ function tick() {
         if (race.phase === "lobby") tickLobby(race, now);
         else if (race.phase === "countdown") tickCountdown(race, now);
         else tickRunning(race, now);
-        if (races.has(race.id) && !race.racers.size) races.delete(race.id);
+        // An empty lobby waits for its timer: a scripted one starts with nobody in it.
+        if (races.has(race.id) && !race.racers.size && race.phase !== "lobby") races.delete(race.id);
     }
     for (const [id, recording] of recordings) {
         const player = util.playerById(id);
@@ -634,3 +713,5 @@ Events.on("playerDisconnect", (player) => {
     lastSoloPrize.delete(player.id);
     lastCreated.delete(player.id);
 });
+
+module.exports = {openRace, circuitRoute, raceOf};

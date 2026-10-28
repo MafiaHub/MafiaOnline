@@ -167,6 +167,7 @@ Key.bind("f2", () => {
 Events.on("browserDocumentReady", ({viewId}) => {
     if (viewId !== hud.view) return;
     hud.pageReady = true;
+    Events.emitServer("fr:hud:ready", {});
     const queued = hud.queue;
     hud.queue = [];
     for (const [name, payload] of queued) Web.emit(hud.view, name, payload ?? {});

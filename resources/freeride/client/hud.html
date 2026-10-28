@@ -126,16 +126,16 @@
     .page th { color: var(--red-deep); border-bottom-color: #b9ab8c; }
     .page td { border-bottom-color: #e1d5ba; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
-    .panel { padding: 14px 16px; background: #f7f0e1; border: 1px solid #d4c6a6; }
+    .panel { min-width: 0; padding: 14px 16px; background: #f7f0e1; border: 1px solid #d4c6a6; overflow-wrap: anywhere; }
     .panel h3 { margin: 0 0 10px; color: var(--red-deep); font: 700 10px/1.2 var(--sans); letter-spacing: .18em; text-transform: uppercase; }
     .panel p { margin: 0 0 8px; font: 13px/1.45 var(--sans); color: #3c3b33; }
     .panel .big { font: 22px/1.15 var(--serif); color: var(--ink); }
     .line { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-top: 1px solid #e1d5ba; font: 13px/1.35 var(--sans); }
     .line:first-of-type { border-top: 0; }
-    .line .what { min-width: 0; }
+    .line .what { min-width: 0; flex: 1; }
     .line .what b { display: block; font: 15px/1.2 var(--serif); font-weight: normal; color: var(--ink); }
     .line .what small { display: block; margin-top: 2px; color: var(--ink-soft); font-size: 11px; }
-    .actions { display: flex; gap: 6px; flex: none; }
+    .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; flex: none; }
     .btn { padding: 7px 11px; border: 1px solid #8c7b58; background: transparent; color: var(--ink); font: 700 10px/1 var(--sans); letter-spacing: .1em; text-transform: uppercase; cursor: pointer; white-space: nowrap; }
     .btn:hover { background: #e7dbc0; }
     .btn.primary { background: var(--red-deep); border-color: var(--red-deep); color: #fff4de; }
@@ -154,8 +154,9 @@
     .lb li { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; border-top: 1px solid #e1d5ba; font: 13px/1.3 var(--sans); counter-increment: lb; }
     .lb li::before { content: counter(lb) "."; width: 22px; color: var(--ink-soft); }
     .lb li span { flex: 1; }
-    .cmd { display: grid; grid-template-columns: minmax(150px, 34%) 1fr; gap: 10px; padding: 6px 0; border-top: 1px solid #e1d5ba; font: 12px/1.4 var(--sans); }
-    .cmd code { color: var(--red-deep); font: 12px Consolas, monospace; }
+    .cmd { display: grid; grid-template-columns: minmax(0, 42%) minmax(0, 1fr); gap: 10px; padding: 6px 0; border-top: 1px solid #e1d5ba; font: 12px/1.4 var(--sans); }
+    /* Usages wrap after "|" (see usage()), and anywhere as a last resort. */
+    .cmd code { min-width: 0; color: var(--red-deep); font: 12px Consolas, monospace; overflow-wrap: anywhere; }
     .keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font: 13px/1.4 var(--sans); }
     .keys kbd { padding: 3px 7px; border: 1px solid #8c7b58; font: 700 11px var(--sans); text-align: center; }
     .menu footer { display: flex; align-items: center; gap: 10px; padding: 10px 24px; border-top: 1px solid #b9ab8c; background: var(--paper-deep); color: var(--ink-soft); font: 11px/1.3 var(--sans); }
@@ -242,13 +243,28 @@
     });
 
     /* Cards */
+    // Cards update in place: only a new card slides in, so a timer ticking
+    // on a card does not replay its entrance every second.
+    const cardNodes = new Map();
     function renderCards() {
       const box = document.getElementById("cards");
-      box.replaceChildren(...[...state.cards.values()].map(({data}) => el("div", {class: `card ${data.tone ?? ""}`},
-        el("div", {class: "inside"},
+      for (const [id, node] of cardNodes) if (!state.cards.has(id)) { node.remove(); cardNodes.delete(id); }
+      for (const [id, {data}] of state.cards) {
+        let node = cardNodes.get(id);
+        if (!node) {
+          node = el("div");
+          cardNodes.set(id, node);
+          box.append(node);
+        }
+        node.className = `card ${data.tone ?? ""}`;
+        const width = typeof data.progress === "number" ? Math.round(data.progress * 100) : null;
+        const bar = node.querySelector(".bar span");
+        node.replaceChildren(el("div", {class: "inside"},
           el("h3", {}, data.title ?? ""), data.subtitle ? el("p", {class: "sub"}, data.subtitle) : null,
           (data.rows ?? []).map(([label, value]) => el("div", {class: "row"}, el("span", {}, label), el("b", {}, value)))),
-        typeof data.progress === "number" ? el("div", {class: "bar"}, el("span", {style: `width:${Math.round(data.progress * 100)}%`})) : null)));
+          width === null ? null : el("div", {class: "bar"}, bar ?? el("span")));
+        if (width !== null) node.querySelector(".bar span").style.width = `${width}%`;
+      }
     }
     on("card", (data) => {
       if (!data.id) return;
@@ -405,6 +421,12 @@
           race.phase === "lobby" ? `Lobby · ${race.racers.join(", ")} · ${race.secondsLeft} s` : `Running · ${race.racers.join(", ")}`,
           race.phase === "lobby" ? (race.joined ? button("Leave", "/race leave") : button("Join", `/race join ${race.id}`, true, inRace)) : null))
           : empty("No race on the streets right now. Pick a route and open one; everyone in town is invited.")),
+        data.championship?.available ? panel("Autodrom Championship", data.championship.running
+          ? [el("p", {class: "big"}, `${data.championship.running.name}`), el("p", {}, `Round ${data.championship.running.round} of ${data.championship.running.rounds}. Join each round with the race lobby; a race car waits on the grid.`),
+            el("div", {class: "lb"}, el("ol", {}, data.championship.running.standings.map((row) => el("li", {}, el("span", {}, row.name), el("b", {}, `${row.points} pts`)))))]
+          : [el("p", {}, "Three rounds on the official circuit: a sprint, a feature and a grand prix. Every finish scores; the top three share $5,250."),
+            (data.championship.champions ?? []).length ? el("p", {}, `Last champion: ${data.championship.champions[0].name} (${data.championship.champions[0].points} pts)`) : null,
+            button("Start a championship", "/championship start", true)]) : null,
         panel("Route book", races.routes.map((route) => line(
           [route.name, route.builtIn ? null : el("span", {class: "pill gold"}, "Player made")],
           `${(route.length / 1000).toFixed(1)} km · ${route.checkpoints} checkpoints${route.record ? ` · record ${clock(route.record.ms)} by ${route.record.name}` : ""}`,
@@ -470,6 +492,11 @@
         column("Most kills", board.kills, (row) => row.value), column("Race wins", board.races, (row) => row.value));
     }
 
+    // Lets a long usage wrap after each "|" rather than inside a word.
+    function usage(text) {
+      return text.split("|").flatMap((part, index) => index ? ["|", el("wbr"), part] : [part]);
+    }
+
     function helpPage(data) {
       const byCategory = new Map();
       for (const entry of data.commands ?? []) {
@@ -482,7 +509,7 @@
           el("kbd", {}, "Tab"), el("span", {}, "City map"),
           el("kbd", {}, "T"), el("span", {}, "Chat"), el("kbd", {}, "N / B"), el("span", {}, "Browse and buy at a shop counter"),
           el("kbd", {}, "F9"), el("span", {}, "Car radio on or off"), el("kbd", {}, "K"), el("span", {}, "Siren, in a police car"))),
-        [...byCategory].map(([category, entries]) => panel(category, entries.map((entry) => el("div", {class: "cmd"}, el("code", {}, entry.usage), el("span", {}, entry.help))))));
+        [...byCategory].map(([category, entries]) => panel(category, entries.map((entry) => el("div", {class: "cmd"}, el("code", {}, usage(entry.usage)), el("span", {}, entry.help))))));
     }
 
     let composeTarget = null;
