@@ -55,7 +55,7 @@ let tipIndex = 0;
 let leaderboardCache = null;
 
 const TIPS = [
-    "Hold Tab for the scoreboard; F1 opens the city menu.",
+    "Hold F2 for the scoreboard; F1 opens the city menu.",
     "Open a street race with /race and race anyone who joins. Routes follow the real city roads.",
     "Three kills in a row put a price on your head. Anyone who drops you collects it.",
     "Challenge someone with /duel <name>. Duels run in a private copy of the city.",
@@ -168,7 +168,7 @@ function welcome(player) {
         : `Welcome to Lost Heaven, ${player.nickname}. You start with ${formatMoney(player.money)}.`,
     {title: "Free Ride", tone: "gold", seconds: 7});
     setTimeout(() => {
-        if (player.spawned) toast(player, "F1 opens the city menu · Hold Tab for the scoreboard · /help lists commands.", {seconds: 8});
+        if (player.spawned) toast(player, "F1 opens the city menu · Hold F2 for the scoreboard · /help lists commands.", {seconds: 8});
     }, 2500);
 }
 
@@ -310,7 +310,7 @@ commands.register({name: "help", aliases: ["commands"], usage: "/help", help: "L
         if (!byCategory.has(entry.category)) byCategory.set(entry.category, []);
         byCategory.get(entry.category).push(`/${entry.name}`);
     }
-    player.sendMessage("Free Ride · F1 city menu · Tab scoreboard · F9 radio", 0xe8c57d);
+    player.sendMessage("Free Ride · F1 city menu · F2 scoreboard · F9 radio", 0xe8c57d);
     for (const [category, names] of byCategory) player.sendMessage(`${category}: ${names.join(" ")}`, 0xd9cdb4);
 });
 

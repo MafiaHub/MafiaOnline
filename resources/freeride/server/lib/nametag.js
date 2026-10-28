@@ -6,7 +6,8 @@ function hex(color) {
 }
 
 function refresh(player) {
-    if (!defaults.has(player.id)) defaults.set(player.id, player.getNametagColor());
+    // getNametagColor reads 0xAARRGGBB; setNametag takes 0xRRGGBB.
+    if (!defaults.has(player.id)) defaults.set(player.id, player.getNametagColor() & 0xffffff);
     const crew = player.state.get("fr.crew");
     const bounty = player.state.get("fr.bounty");
     player.setNametag({

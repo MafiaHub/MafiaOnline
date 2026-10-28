@@ -15,7 +15,7 @@ discovers the resource and writes its records to `data/freeride/`
 | Key | Action |
 | --- | --- |
 | F1 | City menu: events, race lobbies, bounties, players, crews, leaderboards and help. Esc or F1 closes it; 1–6 switch tabs. |
-| Tab (hold) | Scoreboard with crews, ranks, kills, deaths, what everyone is doing and ping. |
+| F2 (hold) | Scoreboard with crews, ranks, kills, deaths, what everyone is doing and ping. |
 | T | Chat. Every command below can also be typed. |
 | N / B | At a shop counter: next offer / buy or accept it. |
 | F9 | Car radio on or off. |

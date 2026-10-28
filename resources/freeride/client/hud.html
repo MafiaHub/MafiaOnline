@@ -338,7 +338,7 @@
       box.replaceChildren(el("div", {class: "board"},
         el("header", {}, el("span", {class: "seal"}, "LH"),
           el("div", {}, el("p", {class: "eyebrow"}, `Lost Heaven · ${mission === "freeridenoc" ? "Night" : "Day"}${weather && weather !== "default" ? ` · ${weather}` : ""}`), el("h2", {}, "Free Ride")),
-          el("span", {class: "count"}, `${rows.length} in town`, el("br"), "Hold Tab")),
+          el("span", {class: "count"}, `${rows.length} in town`, el("br"), "Hold F2")),
         el("div", {class: "table"}, el("table", {},
           el("thead", {}, el("tr", {}, el("th", {}, "Player"), el("th", {}, "Rank"), el("th", {class: "num"}, "Kills"), el("th", {class: "num"}, "Deaths"), el("th", {}, "Doing"), el("th", {class: "num"}, "Ping"))),
           el("tbody", {}, rows.map((row) => el("tr", {class: `${row.you ? "you" : ""} ${row.alive ? "" : "dead"}`},
@@ -463,7 +463,7 @@
       }
       return el("div", {class: "grid"},
         panel("Controls", el("div", {class: "keys"},
-          el("kbd", {}, "F1"), el("span", {}, "City menu"), el("kbd", {}, "Tab"), el("span", {}, "Scoreboard (hold)"),
+          el("kbd", {}, "F1"), el("span", {}, "City menu"), el("kbd", {}, "F2"), el("span", {}, "Scoreboard (hold)"),
           el("kbd", {}, "T"), el("span", {}, "Chat"), el("kbd", {}, "N / B"), el("span", {}, "Browse and buy at a shop counter"),
           el("kbd", {}, "F9"), el("span", {}, "Car radio on or off"), el("kbd", {}, "K"), el("span", {}, "Siren, in a police car"))),
         [...byCategory].map(([category, entries]) => panel(category, entries.map((entry) => el("div", {class: "cmd"}, el("code", {}, entry.usage), el("span", {}, entry.help))))));

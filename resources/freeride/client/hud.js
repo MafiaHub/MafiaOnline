@@ -190,7 +190,8 @@ Key.bind("f1", () => {
     if (hud.menuOpen) closeMenu();
     else openMenu();
 });
-Key.bind("tab", "both", (_key, state) => {
+// Tab is the retail map, so the scoreboard sits on F2.
+Key.bind("f2", "both", (_key, state) => {
     if (state === "down") openScoreboard();
     else closeScoreboard();
 });
@@ -228,7 +229,7 @@ Events.on("render", () => {
         post("player", {spawned: Boolean(player?.spawned), alive: Boolean(player?.alive), id: player?.id ?? null});
         if (!player?.alive) closeMenu();
     }
-    // Chat or a menu can swallow the Tab release.
-    if (hud.scoreboardOpen && !Key.isDown("tab")) closeScoreboard();
+    // Chat or a menu can swallow the F2 release.
+    if (hud.scoreboardOpen && !Key.isDown("f2")) closeScoreboard();
     updateCompass(false);
 });
