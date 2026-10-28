@@ -3,6 +3,7 @@
 // across town with the police on its tail. Places come from the stock road
 // graph, so both always appear on a street.
 const roads = require("./lib/roads.js");
+const maps = require("./lib/maps.js");
 const profiles = require("./lib/profiles.js");
 const commands = require("./lib/commands.js");
 const menu = require("./lib/menu.js");
@@ -31,12 +32,6 @@ const HOT_CARS = [
     {model: "alfa8c00.i3d", name: "Alfa Romeo 8C"}, {model: "speedster00.i3d", name: "Speedster"},
     {model: "merced500k00.i3d", name: "Mercedes 500K"},
 ];
-const DROP_OFFS = [
-    {name: "Yellow Pete's", position: {x: 61.1, y: 6.1, z: 113.5}},
-    {name: "the Night Pump", position: {x: -110.6, y: 8.5, z: -135.5}},
-    {name: "the Dispensary", position: {x: -761.3, y: 14.8, z: 762.5}},
-    {name: "Salieri's bar", position: {x: -1774.5, y: -4.5, z: 5.2}},
-];
 const DROP_LOOT = [
     {weaponId: 10, loaded: 50, reserve: 100}, {weaponId: 11, loaded: 8, reserve: 24},
     {weaponId: 15, loaded: 3, reserve: 0}, {weaponId: 6, loaded: 6, reserve: 30},
@@ -54,8 +49,9 @@ function streetPlayers() {
 function spotNear(minimum, maximum) {
     const anchor = pick(streetPlayers());
     if (!anchor) return null;
-    const index = roads.crossingAround(anchor.position, minimum, maximum) ?? roads.crossingAround(anchor.position, 0, maximum * 2);
-    return index === null ? null : roads.roadside(index);
+    const graph = roads.current();
+    const index = graph.crossingAround(anchor.position, minimum, maximum) ?? graph.crossingAround(anchor.position, 0, maximum * 2);
+    return index === null ? graph.roadPoint() : graph.roadside(index);
 }
 
 function clearPresentation() {
@@ -104,8 +100,10 @@ function startHotCar() {
     const spot = spotNear(400, 1000);
     if (!spot) return false;
     const choice = pick(HOT_CARS);
-    const dropOff = pick(DROP_OFFS.filter((entry) => flatDistance(entry.position, spot.position) > 800)) ?? pick(DROP_OFFS);
-    const delivery = roads.crossings[roads.nearestCrossing(dropOff.position)];
+    const dropOffs = maps.places();
+    const dropOff = pick(dropOffs.filter((entry) => flatDistance(entry.position, spot.position) > 800)) ?? pick(dropOffs);
+    const graph = roads.current();
+    const delivery = graph.crossings[graph.nearestCrossing(dropOff.position)];
     const heading = Math.atan2(spot.direction.x, spot.direction.z);
     const vehicle = Vehicle.spawn(choice.model, {x: spot.position.x, y: spot.position.y + 0.6, z: spot.position.z}, heading);
     if (!vehicle) return false;

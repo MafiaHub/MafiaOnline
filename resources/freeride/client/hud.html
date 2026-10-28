@@ -352,7 +352,10 @@
           race.joined ? button("Leave", "/race leave") : button("Join", `/race join ${race.id}`, true))) : [empty("No lobby is open."), button("Open a race", "/race start", true)]),
         panel("Bounties", bounties.length ? bounties.map((bounty) => line(bounty.name, bounty.reason === "police" ? "Wanted by the police" : "Kill streak",
           el("span", {class: "pill red"}, money(bounty.amount)), bounty.id === state.player.id ? null : button("Hunt", `/hunt #${bounty.id}`))) : empty("Nobody has a price on their head.")),
-        panel("Around town", (data.places ?? []).map((place) => line(place.name, place.offers.join(" · ")))));
+        panel("Map", (data.maps?.maps ?? []).map((map) => line(map.title,
+          map.id === data.maps.current ? "Playing now" : !map.available ? "Not installed on this server" : `${map.votes} of ${data.maps.needed} votes`,
+          map.id === data.maps.current || !map.available ? null : button(map.yours ? "Voted" : "Vote", `/map ${map.id}`, !map.yours, map.yours)))),
+        (data.places ?? []).length ? panel("Around town", data.places.map((place) => line(place.name, place.offers.join(" · ")))) : null);
     }
 
     function jobsPage(data) {
@@ -362,7 +365,7 @@
       const stashes = data.stashes ?? {found: 0, total: 30};
       return el("div", {class: "grid"},
         panel("Lucas's export list", exportList
-          ? [el("p", {}, `Take these from the city's traffic and bring them to the export yard. ${money(exportList.pay)} each, a bonus for the full list. New list in ${exportList.minutesLeft} min.`),
+          ? [el("p", {}, `Take these from the traffic and bring them to ${exportList.yard ?? "the export yard"}. ${money(exportList.pay)} each, a bonus for the full list. New list in ${exportList.minutesLeft} min.`),
             exportList.models.map((entry) => line(entry.name ?? entry.model, entry.deliveredBy ? `Delivered by ${entry.deliveredBy}` : "Wanted",
               entry.deliveredBy ? el("span", {class: "pill green"}, "Done") : el("span", {class: "pill gold"}, money(exportList.pay))))]
           : empty("Lucas is drawing up a list.")),
@@ -375,6 +378,9 @@
           taxi.active ? el("p", {}, `On shift · ${taxi.fares} fare${taxi.fares === 1 ? "" : "s"}`) : null,
           button(taxi.active ? "End shift" : "Start a shift", "/taxi", !taxi.active)),
         panel("Courier", el("p", {}, "Salieri's back window has sealed envelopes for Yellow Pete. Eight minutes, $180."), button("Check my run", "/courier")),
+        data.bootleg?.available ? panel("Bootleg run",
+          el("p", {}, `Drive out to the still in the hills, wait while the crates go in, then bring the whisky to Salieri's within ten minutes. ${money(data.bootleg.pay)}. Loading tips off the police.`),
+          button(data.bootleg.active ? "Call it off" : "Start a run", data.bootleg.active ? "/bootleg cancel" : "/bootleg", !data.bootleg.active)) : null,
         panel("Hold-ups", el("p", {}, "Draw a gun at a shop counter and /rob it. The police come at once; keep the counter fifteen seconds."),
           (data.robbery ?? []).map((shop) => line(shop.name, shop.readyInSeconds ? `Till empty · ${minutes(shop.readyInSeconds)}` : "Till full"))),
         panel("Turf", el("p", {}, "Crews take street corners by holding them for a minute. Each corner pays its crew every three minutes."),

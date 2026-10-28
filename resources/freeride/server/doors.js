@@ -7,7 +7,7 @@
 // assumed city coordinates or frame names are baked into this example.
 const commands = require("./lib/commands.js");
 
-const FREE_RIDE_MISSIONS = new Set(["freeitaly", "freeride", "freeridenoc", "freekrajina"]);
+const FREE_RIDE_MISSIONS = new Set(["freeitaly", "freeride", "freeridenoc", "freekrajina", "freeride_extended"]);
 const COMMAND_REACH = 4.5;
 const LIST_REACH = 18;
 

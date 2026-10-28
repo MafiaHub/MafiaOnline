@@ -1,25 +1,14 @@
-// Entering the city. Retail Free Ride's emeth_* frames are loaded in both the
-// day and night missions; the client reports them and the server checks them
-// against its native spawn hint before a district may be chosen. Each waiting
-// player is held in a private virtual world so another player's ped never
-// walks into their preview.
+// Entering the city. Each map's districts are listed in lib/maps.js. Most are
+// the mission's own emeth_* frames: the client reports them and the server
+// checks each against that map's stock position, so no client can choose its
+// own spawn point. Districts without a frame in the loaded scene (Lost Heaven
+// Extended's countryside) are placed by the server alone. Each waiting player
+// is held in a private virtual world so another player's ped never walks
+// into their preview.
 const profiles = require("./lib/profiles.js");
 const life = require("./lib/life.js");
+const maps = require("./lib/maps.js");
 const {MAIN_WORLD, inFreeRide, distance, emit, onClient, onStart, onStop} = require("./lib/util.js");
-
-// emeth_1 is also the native start the spawn hint names, a short walk from
-// the stock Salieri_save frame. The positions are the frames in each
-// mission's stock scene2.bin; a client report must land within a few metres
-// of them, so no client can choose its own spawn point.
-const STOCK_FRAMES = {
-    freeride: {emeth_1: {x: -1984.884, y: -5.032, z: 23.145}, emeth_3: {x: -189.258, y: 18.106, z: -690.477}, emeth_4: {x: 529.439, y: -5.477, z: 86.797}},
-    freeridenoc: {emeth_1: {x: -1970.751, y: -4.846, z: 22.701}, emeth_3: {x: -187.805, y: 18.052, z: -683.178}, emeth_4: {x: 529.356, y: -5.514, z: 85.892}},
-};
-const DISTRICTS = [
-    {id: "little-italy", frame: "emeth_1", name: "Little Italy", subtitle: "A short walk from Salieri's bar"},
-    {id: "downtown", frame: "emeth_3", name: "Downtown", subtitle: "Where the deals are made"},
-    {id: "hoboken", frame: "emeth_4", name: "Hoboken", subtitle: "The rough side of town"},
-];
 
 // Stock models from a2.dta; each client also drops any that fail the full
 // native skeleton check before offering them.
@@ -74,7 +63,7 @@ function point(value) {
 
 // The client supplies the facing; the position must match the stock frame.
 function validAnchor(report, frame) {
-    const stock = STOCK_FRAMES[World.getMission()]?.[frame];
+    const stock = maps.current()?.frames[frame];
     if (!stock || !report || report.frame !== frame) return null;
     const position = point(report.position);
     const direction = point(report.direction);
@@ -88,7 +77,7 @@ function headingOf(anchor) {
 
 function sendOpen(player, selection) {
     const record = profiles.get(player);
-    const locations = DISTRICTS.filter((district) => selection.anchors.has(district.id)).map((district) => ({
+    const locations = (maps.current()?.districts ?? []).filter((district) => selection.anchors.has(district.id)).map((district) => ({
         id: district.id, name: district.name, subtitle: district.subtitle, frame: district.frame,
         ...selection.anchors.get(district.id),
     }));
@@ -121,8 +110,10 @@ onClient("fr:selector:ready", (player, report) => {
         report?.generation !== World.getMissionGeneration() || !Array.isArray(report.anchors)) return;
 
     const anchors = new Map();
-    for (const district of DISTRICTS) {
-        const anchor = validAnchor(report.anchors.find((candidate) => candidate?.frame === district.frame), district.frame);
+    for (const district of maps.current().districts) {
+        const anchor = district.frame
+            ? validAnchor(report.anchors.find((candidate) => candidate?.frame === district.frame), district.frame)
+            : {position: district.position, direction: district.direction};
         if (anchor) anchors.set(district.id, anchor);
     }
     if (anchors.size < 2) return;
@@ -138,7 +129,7 @@ onClient("fr:selector:spawn", (player, request) => {
     if (!inFreeRide() || !selection || !request || player.spawned || !World.isReady() ||
         selection.generation !== World.getMissionGeneration() || request.generation !== selection.generation) return;
 
-    const district = DISTRICTS.find((entry) => entry.id === request.locationId);
+    const district = maps.current().districts.find((entry) => entry.id === request.locationId);
     const anchor = district && selection.anchors.get(district.id);
     const character = CHARACTERS.find((entry) => entry.file === request.model);
     if (!anchor || !character) return;

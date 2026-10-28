@@ -1,16 +1,15 @@
 // The export list. Lucas Bertone wants three particular models, and only
 // cars taken from the city's traffic count; a car from the motor pool is
 // worthless to him. The list comes from the models actually driving around
-// this server and changes once all three are in, or after an hour.
-const roads = require("./lib/roads.js");
+// this server and changes once all three are in, or after an hour. Each map
+// names its own yard in lib/maps.js; on Lost Heaven Extended it is his garage.
+const maps = require("./lib/maps.js");
 const profiles = require("./lib/profiles.js");
 const menu = require("./lib/menu.js");
 const commands = require("./lib/commands.js");
 const {toast, toastAll, card, compass, markers, feed, name, text, COLORS} = require("./lib/notify.js");
 const {flatDistance, playable, speedOf, formatMoney, formatMinutes, onStart, onStop} = require("./lib/util.js");
 
-// A quiet crossing in the south-west, far from every landmark and spawn.
-const YARD = roads.crossings[28];
 const YARD_RADIUS = 12;
 const LIST_SIZE = 3;
 const LIST_LIFETIME_MS = 60 * 60_000;
@@ -34,6 +33,10 @@ function newList() {
     hinted.clear();
 }
 
+function yard() {
+    return maps.current()?.exportYard ?? null;
+}
+
 function wanted(vehicle) {
     return vehicle.traffic && vehicle.trafficKind === "civil" &&
         list.models.find((entry) => entry.model === vehicle.model.toLowerCase() && !entry.deliveredBy) || null;
@@ -52,7 +55,7 @@ function deliver(player, vehicle, entry) {
     player.giveMoney(PAY);
     profiles.bump(player, "exports");
     profiles.addXp(player, XP, "Car for Lucas");
-    feed("export", [name(player, COLORS.gold), text(" delivered a "), text(vehicle.model.replace(/00\.i3d$/i, ""), COLORS.white), text(" to the export yard")]);
+    feed("export", [name(player, COLORS.gold), text(" delivered a "), text(vehicle.model.replace(/00\.i3d$/i, ""), COLORS.white), text(` to ${yard().name}`)]);
     toast(player, `Lucas looks it over and nods. ${formatMoney(PAY)}.`, {title: "Export", tone: "good"});
     player.removeFromVehicle();
     setTimeout(() => vehicle.destroy(), 1500);
@@ -66,6 +69,8 @@ function deliver(player, vehicle, entry) {
 function tick() {
     for (const vehicle of World.getVehicles()) if (vehicle.traffic && vehicle.trafficKind === "civil") seen.add(vehicle.model.toLowerCase());
     if (!list || Date.now() > list.expiresAt) newList();
+    const target = yard();
+    if (!target) return;
     for (const player of World.getPlayers()) {
         const vehicle = playable(player) && player.getSeat() === 0 ? player.getVehicle() : null;
         const entry = vehicle && wanted(vehicle);
@@ -73,18 +78,18 @@ function tick() {
             clearHint(player);
             continue;
         }
-        if (flatDistance(vehicle.position, YARD) <= YARD_RADIUS && speedOf(vehicle) < 3) {
+        if (flatDistance(vehicle.position, target.position) <= YARD_RADIUS && speedOf(vehicle) < 3) {
             deliver(player, vehicle, entry);
             continue;
         }
         if (hinted.get(player.id) !== vehicle.id) {
             hinted.set(player.id, vehicle.id);
-            compass(player, "export", 50, {position: YARD});
-            markers(player, "export", [{id: "yard", position: YARD, label: "EXPORT YARD", color: COLORS.gold, beacon: true, primary: true}]);
-            toast(player, "Lucas wants this one. Bring it to the export yard in one piece.", {title: "Export list", tone: "gold"});
+            compass(player, "export", 50, {position: target.position});
+            markers(player, "export", [{id: "yard", position: target.position, label: target.name.toUpperCase(), color: COLORS.gold, beacon: true, primary: true}]);
+            toast(player, `Lucas wants this one. Bring it to ${target.name} in one piece.`, {title: "Export list", tone: "gold"});
         }
-        card(player, "export", {title: "Export", subtitle: "Deliver to the export yard",
-            rows: [["Distance", `${Math.round(flatDistance(vehicle.position, YARD))} m`], ["Pay", formatMoney(PAY)]], tone: "gold"});
+        card(player, "export", {title: "Export", subtitle: `Deliver to ${target.name}`,
+            rows: [["Distance", `${Math.round(flatDistance(vehicle.position, target.position))} m`], ["Pay", formatMoney(PAY)]], tone: "gold"});
     }
 }
 
@@ -95,7 +100,7 @@ commands.register({name: "export", aliases: ["lucas"], usage: "/export", help: "
         {title: "Export list", seconds: 9});
 });
 
-menu.provide("export", () => list && {models: list.models, minutesLeft: Math.ceil((list.expiresAt - Date.now()) / 60_000), pay: PAY});
+menu.provide("export", () => list && {models: list.models, minutesLeft: Math.ceil((list.expiresAt - Date.now()) / 60_000), pay: PAY, yard: yard()?.name ?? null});
 
 onStart(() => {
     newList();

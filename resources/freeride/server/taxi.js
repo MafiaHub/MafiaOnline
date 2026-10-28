@@ -26,9 +26,17 @@ function cabOf(player) {
     return car && TAXI_MODELS.has(car.model.toLowerCase()) ? car : null;
 }
 
+// Country roads have few crossings, so a fare can wait anywhere on a road.
 function corner(origin, minimum, maximum) {
-    const index = roads.crossingAround(origin, minimum, maximum) ?? roads.crossingAround(origin, 0, maximum * 2);
-    return roads.crossings[index];
+    const graph = roads.current();
+    const index = graph.crossingAround(origin, minimum, maximum);
+    if (index !== null) return graph.crossings[index];
+    for (let attempt = 0; attempt < 40; attempt++) {
+        const {position} = graph.roadPoint();
+        const gap = flatDistance(position, origin);
+        if (gap >= minimum && gap <= maximum * 2) return position;
+    }
+    return graph.roadPoint().position;
 }
 
 function call(player, shift) {

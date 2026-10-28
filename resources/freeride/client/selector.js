@@ -1,7 +1,7 @@
 // A world-space wardrobe: the mission's own Free Ride start frames place the
 // preview and camera. Only the server can turn the choice into a player life.
 const FREE_RIDE_FRAMES = ["emeth_1", "emeth_2", "emeth_3", "emeth_4"];
-const SELECTOR_MISSIONS = new Set(["freeridenoc", "freeride"]);
+const SELECTOR_MISSIONS = new Set(["freeride", "freeride_extended", "freekrajina"]);
 const SELECTOR_PAGE = "fw://resources/freeride/client/selector.html";
 const SELECTOR_RESOURCE = "freeride";
 const NAVIGATION_SOUND = "00_kompas.wav";

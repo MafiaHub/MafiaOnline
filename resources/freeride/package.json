@@ -1,6 +1,6 @@
 {
   "name": "freeride",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "Mafia1Online",
   "description": "Free Ride, the default Mafia1Online gamemode: street races, bounties, duels, crews, turf wars, jobs, hold-ups, interiors, city events and a persistent career",
   "mafiahub": {
@@ -8,6 +8,7 @@
       "server/main.js",
       "server/selector.js",
       "server/ambience.js",
+      "server/map_vote.js",
       "server/shops.js",
       "server/races.js",
       "server/combat.js",
@@ -23,6 +24,7 @@
       "server/stashes.js",
       "server/speed_traps.js",
       "server/robbery.js",
+      "server/bootleg.js",
       "server/police.js",
       "server/props.js",
       "server/doors.js",

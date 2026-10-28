@@ -1,10 +1,12 @@
 // Small helpers every Free Ride server module shares.
+const maps = require("./maps.js");
+
 const RESOURCE = "freeride";
-const FREE_RIDE_MISSIONS = new Set(["freeride", "freeridenoc"]);
 const MAIN_WORLD = 0;
 
+// Whether the loaded mission is one of the maps in lib/maps.js.
 function inFreeRide() {
-    return FREE_RIDE_MISSIONS.has(World.getMission());
+    return maps.current() !== null;
 }
 
 function distance(a, b) {
@@ -108,7 +110,7 @@ function pick(list) {
 }
 
 module.exports = {
-    RESOURCE, MAIN_WORLD, FREE_RIDE_MISSIONS,
+    RESOURCE, MAIN_WORLD,
     inFreeRide, distance, flatDistance, speedOf, plain, formatMoney, formatDuration, formatMinutes,
     headingOf, headingFrom, playable, playerById, vehicleById, findPlayer, emit, broadcast,
     onClient, onStart, onStop, pick,

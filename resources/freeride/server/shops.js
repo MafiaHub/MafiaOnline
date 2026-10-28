@@ -9,7 +9,13 @@ const life = require("./lib/life.js");
 const menu = require("./lib/menu.js");
 const commands = require("./lib/commands.js");
 const {toast, card, compass} = require("./lib/notify.js");
-const {inFreeRide, distance, emit, onClient, onStart, onStop, formatMoney, formatMinutes} = require("./lib/util.js");
+const maps = require("./lib/maps.js");
+const {distance, emit, onClient, onStart, onStop, formatMoney, formatMinutes} = require("./lib/util.js");
+
+// The city maps have the shops; the countryside has none.
+function shopsOpen() {
+    return Boolean(maps.current()?.shops);
+}
 
 const WEAPON = Object.freeze({BAT: 4, COLT: 6, THOMPSON: 10, SHOTGUN: 11, GRENADE: 15});
 const START_FUEL_FRACTION = 0.12;
@@ -56,7 +62,7 @@ let fuelTimer = null;
 let courierTimer = null;
 
 function shopState(player) {
-    if (!inFreeRide()) return;
+    if (!shopsOpen()) return;
     emit(player, "fr:shops:state", {generation: World.getMissionGeneration(), shops: SHOPS, courier: courier.has(player.id)});
 }
 
@@ -152,7 +158,7 @@ function startCourier(player) {
 }
 
 function buy(player, request) {
-    if (!inFreeRide() || !World.isReady() || !player.spawned || !player.alive ||
+    if (!shopsOpen() || !World.isReady() || !player.spawned || !player.alive ||
         player.missionGeneration !== World.getMissionGeneration() ||
         request?.generation !== World.getMissionGeneration()) return;
     const shop = SHOPS.find((entry) => entry.id === request.shopId);
@@ -172,7 +178,7 @@ function buy(player, request) {
 
 function deliver(player) {
     const job = courier.get(player.id);
-    if (!job || !inFreeRide() || !player.spawned || !player.alive ||
+    if (!job || !shopsOpen() || !player.spawned || !player.alive ||
         distance(player.position, SHOPS[0].position) > SHOP_REACH) return;
     if (Date.now() - job.startedAt > COURIER_TIME_MS) {
         endCourier(player, "The envelope arrived too late. Nobody at Pete's will take it.");
@@ -225,7 +231,7 @@ Events.on("missionChange", () => {
 // Personal cars start nearly dry so the pump has a use; race and event cars
 // mark themselves full with the "fr.fullTank" state key.
 Events.on("vehicleSpawn", (vehicle) => {
-    if (inFreeRide() && !vehicle.traffic) lowFuelPending.set(vehicle.id, {generation: World.getMissionGeneration(), retries: 0});
+    if (shopsOpen() && !vehicle.traffic) lowFuelPending.set(vehicle.id, {generation: World.getMissionGeneration(), retries: 0});
 });
 Events.on("vehicleDestroy", (vehicle) => lowFuelPending.delete(vehicle.id));
 Events.on("vehiclePlayerEntered", (vehicle, player) => lastVehicle.set(player.id, vehicle));

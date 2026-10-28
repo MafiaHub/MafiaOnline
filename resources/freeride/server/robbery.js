@@ -6,6 +6,7 @@ const life = require("./lib/life.js");
 const menu = require("./lib/menu.js");
 const commands = require("./lib/commands.js");
 const {SHOPS} = require("./shops.js");
+const maps = require("./lib/maps.js");
 const {toast, card, feed, name, text, COLORS} = require("./lib/notify.js");
 const {MAIN_WORLD, distance, playable, formatMoney, formatMinutes, onStart, onStop} = require("./lib/util.js");
 
@@ -67,7 +68,7 @@ function tick() {
 
 commands.register({name: "rob", usage: "/rob", help: "Hold up the shop counter you are standing at.", category: "Combat"}, (player) => {
     if (!playable(player) || player.virtualWorld !== MAIN_WORLD || player.getVehicle()) return;
-    const shop = SHOPS.find((entry) => distance(player.position, entry.position) <= COUNTER_REACH);
+    const shop = maps.current()?.shops && SHOPS.find((entry) => distance(player.position, entry.position) <= COUNTER_REACH);
     if (!shop) {
         toast(player, "Stand at a shop counter first.", {tone: "bad"});
         return;

@@ -6,6 +6,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const roads = require("./lib/roads.js");
+const maps = require("./lib/maps.js");
 const profiles = require("./lib/profiles.js");
 const life = require("./lib/life.js");
 const menu = require("./lib/menu.js");
@@ -40,23 +41,9 @@ const MIN_CUSTOM_SPACING = 40;
 const MAX_CUSTOM_ROUTES = 60;
 const MAX_ROUTES_PER_AUTHOR = 5;
 
-// Waypoints are stock landmarks; the street line between them comes from the
-// road graph's shortest path.
-const LANDMARKS = {
-    salieri: {x: -1774.5, y: -4.5, z: 5.2},
-    pete: {x: 61.1, y: 6.1, z: 113.5},
-    pump: {x: -110.6, y: 8.5, z: -135.5},
-    dispensary: {x: -761.3, y: 14.8, z: 762.5},
-};
-const BUILT_IN = [
-    {id: "pump-loop", name: "Pump Loop", description: "A quick blast from Pete's to the Night Pump and back.", via: ["pete", "pump", "pete"]},
-    {id: "dispensary-dash", name: "Dispensary Dash", description: "Yellow Pete's to the Dispensary.", via: ["pete", "dispensary"]},
-    {id: "night-pump-run", name: "Night Pump Run", description: "The Dispensary down to the Night Pump.", via: ["dispensary", "pump"]},
-    {id: "little-italy-sprint", name: "Little Italy Sprint", description: "Salieri's bar across the river to Yellow Pete's.", via: ["salieri", "pete"]},
-    {id: "grand-tour", name: "Grand Tour", description: "Salieri's, the Dispensary, the Night Pump and home again.", via: ["salieri", "dispensary", "pump", "salieri"]},
-];
-
-const routes = [];
+// Each map lists its built-in routes in lib/maps.js as landmark waypoints;
+// the street line between them is the map's road graph's shortest path.
+const routesByMap = new Map();
 let customRoutes = [];
 let records = {};
 const races = new Map();
@@ -71,17 +58,21 @@ function slug(value) {
     return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
-function buildBuiltIn() {
-    for (const spec of BUILT_IN) {
-        const line = roads.route(spec.via.map((key) => LANDMARKS[key]));
+function builtIn(map) {
+    if (routesByMap.has(map.id)) return routesByMap.get(map.id);
+    const graph = roads.forMap(map);
+    const built = [];
+    for (const spec of map.routes) {
+        const line = graph.route(spec.via.map((key) => maps.landmark(key).position));
         if (!line) {
-            console.error(`[freeride] Race route ${spec.name} has no street path`);
+            console.error(`[freeride] Race route ${spec.name} has no street path on ${map.id}`);
             continue;
         }
-        const grid = roads.gridSlots(line, MAX_RACERS);
-        routes.push({id: `b:${spec.id}`, name: spec.name, description: spec.description, builtIn: true, author: null,
-            checkpoints: roads.checkpoints(line), grid, start: line[0], length: roads.lineLength(line)});
+        built.push({id: `b:${map.id}:${spec.id}`, name: spec.name, description: spec.description, builtIn: true, author: null,
+            checkpoints: roads.checkpoints(line), grid: roads.gridSlots(line, MAX_RACERS), start: line[0], length: roads.lineLength(line)});
     }
+    routesByMap.set(map.id, built);
+    return built;
 }
 
 // A recorded route starts where its author stood. The grid lines up behind
@@ -107,8 +98,12 @@ function customRoute(stored) {
         author: stored.author, checkpoints: stored.checkpoints, grid, start, length};
 }
 
+// The routes of the loaded map; routes recorded before maps existed belong to
+// stock Lost Heaven.
 function allRoutes() {
-    return [...routes, ...customRoutes.map(customRoute)];
+    const map = maps.current();
+    if (!map) return [];
+    return [...builtIn(map), ...customRoutes.filter((route) => (route.mission ?? "freeride") === map.id).map(customRoute)];
 }
 
 function load() {
@@ -474,7 +469,7 @@ function routeSummary(route, index) {
 
 const subcommands = {
     start(player, args) {
-        const route = args.length ? findRoute(args.join(" ")) : util.pick(routes);
+        const route = args.length ? findRoute(args.join(" ")) : util.pick(allRoutes().filter((entry) => entry.builtIn));
         if (!route) {
             toast(player, "No such route. /race list shows them.", {tone: "bad"});
             return;
@@ -504,7 +499,8 @@ const subcommands = {
             toast(player, "Name the route with 3 to 28 letters, digits or spaces.", {tone: "bad"});
             return;
         }
-        if (allRoutes().some((route) => slug(route.name) === slug(routeName))) {
+        // Recorded route IDs are shared by every map, so names must be too.
+        if (allRoutes().some((route) => slug(route.name) === slug(routeName)) || customRoutes.some((route) => route.id === slug(routeName))) {
             toast(player, "A route with that name exists.", {tone: "bad"});
             return;
         }
@@ -563,7 +559,7 @@ const subcommands = {
             return;
         }
         customRoutes.push({id: slug(recording.name), name: recording.name, author: player.nickname, start: recording.start,
-            checkpoints: recording.checkpoints, created: Date.now()});
+            checkpoints: recording.checkpoints, mission: maps.current()?.id ?? "freeride", created: Date.now()});
         recordings.delete(player.id);
         lastCreated.set(player.id, Date.now());
         markers(player, "race-edit", []);
@@ -615,7 +611,6 @@ menu.provide("races", (player) => ({
 
 util.onStart(() => {
     load();
-    buildBuiltIn();
     tickTimer = setInterval(tick, TICK_MS);
 });
 util.onStop(() => {

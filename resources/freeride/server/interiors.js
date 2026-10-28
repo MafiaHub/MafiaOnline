@@ -8,12 +8,13 @@
 // outside the game. Record them in-game in development mode: stand on the
 // street at the door, "/entrance add <name> [public|safehouse]", walk to the
 // arrival point inside, "/entrance inside". They are saved in
-// data/freeride/interiors.json and live at once.
+// data/freeride/interiors.json, each with its map, and live at once.
 const fs = require("node:fs");
 const path = require("node:path");
 const profiles = require("./lib/profiles.js");
 const life = require("./lib/life.js");
 const devmode = require("./lib/devmode.js");
+const maps = require("./lib/maps.js");
 const menu = require("./lib/menu.js");
 const commands = require("./lib/commands.js");
 const {toast, markers, markersAll, COLORS} = require("./lib/notify.js");
@@ -59,8 +60,14 @@ function label(interior) {
     return interior.kind === "safehouse" ? `${interior.name.toUpperCase()} · SAFEHOUSE` : interior.name.toUpperCase();
 }
 
+// Interiors of the loaded map; ones recorded before maps existed are stock Lost Heaven's.
+function here() {
+    const mission = maps.current()?.id;
+    return interiors.filter((interior) => (interior.mission ?? "freeride") === mission);
+}
+
 function publishEntrances(player = null) {
-    const items = interiors.map((interior) => ({id: `in${interior.id}`, position: interior.outside.position, label: label(interior),
+    const items = here().map((interior) => ({id: `in${interior.id}`, position: interior.outside.position, label: label(interior),
         color: interior.kind === "safehouse" ? COLORS.blue : COLORS.gold, model: "sipka.i3d", range: MARKER_RANGE}));
     if (player) markers(player, "entrances", items);
     else markersAll("entrances", items);
@@ -134,7 +141,7 @@ function tick() {
     for (const player of World.getPlayers()) {
         if (!playable(player) || player.getVehicle() || pending.has(player.id)) continue;
         const current = interiors.find((interior) => interior.id === inside.get(player.id));
-        const checks = current ? [[current, "inside"]] : player.virtualWorld === MAIN_WORLD ? interiors.map((interior) => [interior, "outside"]) : [];
+        const checks = current ? [[current, "inside"]] : player.virtualWorld === MAIN_WORLD ? here().map((interior) => [interior, "outside"]) : [];
         for (const [interior, side] of checks) {
             const key = `${player.id}:${interior.id}:${side}`;
             const gap = distance(player.position, interior[side].position);
@@ -179,7 +186,7 @@ const subcommands = {
         }
         recording.delete(player.id);
         const interior = {id: nextId++, ...record, inside: {position: plain(player.position), heading: headingOf(player.rotation)},
-            author: player.nickname, created: Date.now()};
+            mission: maps.current()?.id ?? "freeride", author: player.nickname, created: Date.now()};
         interiors.push(interior);
         save();
         publishEntrances();
@@ -188,7 +195,8 @@ const subcommands = {
     delete(player, args) {
         const name = args.join(" ").trim().toLowerCase();
         const before = interiors.length;
-        interiors = interiors.filter((interior) => interior.name.toLowerCase() !== name);
+        const doomed = new Set(here().filter((interior) => interior.name.toLowerCase() === name));
+        interiors = interiors.filter((interior) => !doomed.has(interior));
         if (interiors.length === before) {
             toast(player, "No interior by that name.", {tone: "bad"});
             return;
@@ -198,8 +206,8 @@ const subcommands = {
         toast(player, "Interior removed.");
     },
     list(player) {
-        if (!interiors.length) player.sendMessage("No interiors recorded yet.", 0xd9cdb4);
-        for (const interior of interiors) {
+        if (!here().length) player.sendMessage("No interiors recorded on this map yet.", 0xd9cdb4);
+        for (const interior of here()) {
             player.sendMessage(`${interior.name} (${interior.kind}) · ${Math.round(distance(player.position, interior.outside.position))} m away`, 0xd9cdb4);
         }
     },
@@ -217,7 +225,7 @@ commands.register({name: "entrance", usage: "/entrance add <name> [public|safeho
 
 commands.register({name: "interiors", usage: "/interiors", help: "List the buildings you can walk into.", category: "City"}, (player) => subcommands.list(player));
 
-menu.provide("interiors", (player) => interiors.map((interior) => ({name: interior.name, kind: interior.kind,
+menu.provide("interiors", (player) => here().map((interior) => ({name: interior.name, kind: interior.kind,
     distance: Math.round(distance(player.position, interior.outside.position))})));
 
 onStart(() => {

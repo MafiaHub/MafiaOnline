@@ -1,11 +1,7 @@
 const {onStart, onStop} = require("./lib/util.js");
-const {toastAll} = require("./lib/notify.js");
 
-// Free Ride always plays the stock day map. The night map is loaded only if
-// a server is configured with it; this module then moves to day, so the
-// sky, lighting and the gamemode's recorded positions stay together.
-const DAY_MAP = "freeride";
-const NIGHT_MAP = "freeridenoc";
+// Weather fronts over the city. Which map plays, always by day, is
+// map_vote.js's business.
 const UPDATE_MS = 60_000;
 const WEATHER_FRONT_HOURS = 2;
 
@@ -39,10 +35,6 @@ function weatherAt(date) {
 
 function updateAmbience() {
     const now = new Date();
-    if (World.getMission() === NIGHT_MAP) {
-        toastAll("Lost Heaven moves to daylight.", {title: "Free Ride", tone: "gold", seconds: 6});
-        if (!World.changeMission(DAY_MAP)) console.error(`[freeride] Could not load ${DAY_MAP}`);
-    }
 
     const weather = weatherAt(now);
     const signature = `${weather.kind}:${weather.intensity}`;

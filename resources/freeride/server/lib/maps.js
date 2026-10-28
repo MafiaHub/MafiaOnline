@@ -1,0 +1,109 @@
+// The maps Free Ride plays: stock Lost Heaven, Lost Heaven Extended (the
+// Freeride Extended mod as mission "freeride_extended", city and countryside
+// in one map) and the stock countryside. Everything a map needs that cannot
+// be read at runtime lives here: its road graph, its spawn districts and the
+// landmarks races, jobs and events use. Positions come from the stock a1.dta
+// scenes and the mod's scene2.bin; road graphs from tools/export_road_graph.py.
+const DEFAULT_MAP = process.env.FREERIDE_MAP || "freeride_extended";
+
+const LANDMARKS = {
+    salieri: {name: "Salieri's bar", position: {x: -1774.5, y: -4.5, z: 5.2}},
+    pete: {name: "Yellow Pete's", position: {x: 61.1, y: 6.1, z: 113.5}},
+    pump: {name: "the Night Pump", position: {x: -110.6, y: 8.5, z: -135.5}},
+    dispensary: {name: "the Dispensary", position: {x: -761.3, y: 14.8, z: 762.5}},
+    // Freeride Extended: the crossing outside the "sector moto2" garage whose
+    // props carry Bertone's name, and the crossing at the container docks.
+    bertone: {name: "Lucas Bertone's garage", position: {x: -717.7, y: 1.4, z: 61.2}},
+    docks: {name: "the container docks", position: {x: -2568.4, y: -5.9, z: -642.9}},
+    // The stock FREEKRAJINA emeth_* frames; Freeride Extended carries the
+    // same countryside at the same heights.
+    crossroads: {name: "the country crossroads", position: {x: -1485.96, y: 11.39, z: 939.36}},
+    lowlands: {name: "the lowlands", position: {x: -1895.82, y: -4.53, z: 1886.73}},
+    hills: {name: "the hills", position: {x: 363.97, y: 84.11, z: 2733.72}},
+    ridge: {name: "the ridge", position: {x: 527.29, y: 32.13, z: 2054.58}},
+};
+
+// Facing in degrees from each frame's stored rotation.
+function country(id, name, subtitle, key, frame, degrees) {
+    const radians = degrees * Math.PI / 180;
+    return {id, name, subtitle, frame, position: LANDMARKS[key].position, direction: {x: Math.sin(radians), y: 0, z: Math.cos(radians)}};
+}
+
+const CITY_DISTRICTS = [
+    {id: "little-italy", frame: "emeth_1", name: "Little Italy", subtitle: "A short walk from Salieri's bar"},
+    {id: "downtown", frame: "emeth_3", name: "Downtown", subtitle: "Where the deals are made"},
+    {id: "hoboken", frame: "emeth_4", name: "Hoboken", subtitle: "The rough side of town"},
+];
+const COUNTRY_DISTRICTS = [
+    country("crossroads", "Country Crossroads", "Where the city road meets the fields", "crossroads", "emeth_1", 17),
+    country("lowlands", "The Lowlands", "Flat farmland by the water", "lowlands", "emeth_2", 63),
+    country("hills", "The Hills", "High ground, far from the law", "hills", "emeth_3", 123),
+    country("ridge", "The Ridge", "Between the farms and the forest", "ridge", "emeth_4", 29),
+];
+
+const CITY_ROUTES = [
+    {id: "pump-loop", name: "Pump Loop", description: "A quick blast from Pete's to the Night Pump and back.", via: ["pete", "pump", "pete"]},
+    {id: "dispensary-dash", name: "Dispensary Dash", description: "Yellow Pete's to the Dispensary.", via: ["pete", "dispensary"]},
+    {id: "night-pump-run", name: "Night Pump Run", description: "The Dispensary down to the Night Pump.", via: ["dispensary", "pump"]},
+    {id: "little-italy-sprint", name: "Little Italy Sprint", description: "Salieri's bar across the river to Yellow Pete's.", via: ["salieri", "pete"]},
+    {id: "grand-tour", name: "Grand Tour", description: "Salieri's, the Dispensary, the Night Pump and home again.", via: ["salieri", "dispensary", "pump", "salieri"]},
+];
+const EXTENDED_ROUTES = [
+    {id: "harbour-dash", name: "Harbour Dash", description: "Salieri's bar to the container docks.", via: ["salieri", "docks"]},
+    {id: "bertone-run", name: "Bertone Run", description: "Yellow Pete's to Lucas Bertone's garage.", via: ["pete", "bertone"]},
+    {id: "country-mile", name: "Country Mile", description: "Out of the city to the country crossroads.", via: ["dispensary", "crossroads"]},
+    {id: "hill-climb", name: "Hill Climb", description: "The lowlands up to the hills.", via: ["lowlands", "hills"]},
+    {id: "lost-heaven-gp", name: "Lost Heaven Grand Prix", description: "City to countryside and back: Pete's, the ridge, the hills and Pete's again.", via: ["pete", "ridge", "hills", "pete"]},
+];
+const COUNTRY_ROUTES = [
+    {id: "country-loop", name: "Country Loop", description: "Crossroads, ridge, hills and back.", via: ["crossroads", "ridge", "hills", "crossroads"]},
+    {id: "hill-climb", name: "Hill Climb", description: "The lowlands up to the hills.", via: ["lowlands", "hills"]},
+    {id: "farm-sprint", name: "Farm Sprint", description: "The crossroads to the lowlands.", via: ["crossroads", "lowlands"]},
+];
+
+const MAPS = {
+    freeride: {
+        id: "freeride", title: "Lost Heaven", roads: require("../data/roads_freeride.js"), shops: true,
+        frames: {emeth_1: {x: -1984.884, y: -5.032, z: 23.145}, emeth_3: {x: -189.258, y: 18.106, z: -690.477}, emeth_4: {x: 529.439, y: -5.477, z: 86.797}},
+        districts: CITY_DISTRICTS, routes: CITY_ROUTES,
+        places: ["salieri", "pete", "pump", "dispensary"],
+        exportYard: {name: "the export yard", position: {x: -1141.0, y: -7.1, z: -709.9}},
+    },
+    freeride_extended: {
+        id: "freeride_extended", title: "Lost Heaven Extended", roads: require("../data/roads_freeride_extended.js"), shops: true,
+        frames: {emeth_1: {x: -1984.8, y: -5.03, z: 23.14}, emeth_3: {x: -189.26, y: 18.11, z: -690.48}, emeth_4: {x: 529.44, y: -5.48, z: 86.8}},
+        // The countryside districts have no frames in this scene; the server
+        // places them from the stock countryside's own spawn frames.
+        districts: [...CITY_DISTRICTS, ...COUNTRY_DISTRICTS.map(({frame, ...district}) => district)],
+        routes: [...CITY_ROUTES, ...EXTENDED_ROUTES],
+        places: ["salieri", "pete", "pump", "dispensary", "bertone", "docks", "crossroads", "lowlands", "hills", "ridge"],
+        exportYard: LANDMARKS.bertone,
+    },
+    freekrajina: {
+        id: "freekrajina", title: "The Countryside", roads: require("../data/roads_freekrajina.js"), shops: false,
+        frames: Object.fromEntries(COUNTRY_DISTRICTS.map((district) => [district.frame, district.position])),
+        districts: COUNTRY_DISTRICTS, routes: COUNTRY_ROUTES,
+        places: ["crossroads", "lowlands", "hills", "ridge"],
+        exportYard: LANDMARKS.lowlands,
+    },
+};
+// The stock night map plays only until Free Ride moves it to the default.
+const NIGHT_MAP = "freeridenoc";
+
+function get(id) {
+    return MAPS[id] ?? (id === NIGHT_MAP ? MAPS.freeride : null);
+}
+
+function current() {
+    return get(World.getMission());
+}
+
+function landmark(key) {
+    return LANDMARKS[key];
+}
+
+function places(map = current()) {
+    return (map?.places ?? []).map((key) => ({key, ...LANDMARKS[key]}));
+}
+
+module.exports = {MAPS, DEFAULT_MAP, NIGHT_MAP, get, current, landmark, places, ids: () => Object.keys(MAPS)};

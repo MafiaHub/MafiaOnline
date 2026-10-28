@@ -5,6 +5,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const roads = require("./lib/roads.js");
+const maps = require("./lib/maps.js");
 const profiles = require("./lib/profiles.js");
 const menu = require("./lib/menu.js");
 const commands = require("./lib/commands.js");
@@ -21,15 +22,15 @@ const INCOME = 40;
 const CAPTURE_XP = 60;
 const LETTERS = "ABCDEFGH";
 
-// Corners chosen by farthest-point sampling over the road crossings, so they
-// spread evenly and every one lies on a street.
-function chooseCorners() {
-    const chosen = [roads.nearestCrossing({x: 0, y: 0, z: 0})];
-    while (chosen.length < TURF_COUNT) {
+// Corners chosen by farthest-point sampling over the map's road crossings,
+// so they spread evenly and every one lies on a street.
+function chooseCorners(graph) {
+    const chosen = [graph.nearestCrossing({x: 0, y: 0, z: 0})];
+    while (chosen.length < Math.min(TURF_COUNT, graph.crossings.length)) {
         let best = -1;
         let bestGap = -1;
-        roads.crossings.forEach((crossing, index) => {
-            const gap = Math.min(...chosen.map((other) => flatDistance(crossing, roads.crossings[other])));
+        graph.crossings.forEach((crossing, index) => {
+            const gap = Math.min(...chosen.map((other) => flatDistance(crossing, graph.crossings[other])));
             if (gap > bestGap) {
                 best = index;
                 bestGap = gap;
@@ -37,26 +38,38 @@ function chooseCorners() {
         });
         chosen.push(best);
     }
-    return chosen.map((index, order) => ({id: LETTERS[order], position: roads.crossings[index], owner: null, progress: 0, by: null, contested: false}));
+    return chosen.map((index, order) => ({id: LETTERS[order], position: graph.crossings[index], owner: null, progress: 0, by: null, contested: false}));
 }
 
-const turfs = chooseCorners();
+// Owners per map: {map: {A: owner}}. A version 1 file held stock Lost Heaven.
+let owners = {};
+let turfs = [];
+let turfMap = null;
 let timer = null;
 let lastIncome = 0;
 
 function load() {
     try {
-        const stored = JSON.parse(fs.readFileSync(FILE, "utf8")).owners ?? {};
-        for (const turf of turfs) turf.owner = stored[turf.id] ?? null;
+        const stored = JSON.parse(fs.readFileSync(FILE, "utf8"));
+        owners = stored.version === 1 ? {freeride: stored.owners ?? {}} : stored.owners ?? {};
     } catch (error) {
         if (error.code !== "ENOENT") console.error(`[freeride] Could not read ${FILE}: ${error.message}`);
     }
 }
 
+function useMap() {
+    const map = maps.current();
+    turfMap = map?.id ?? null;
+    turfs = map ? chooseCorners(roads.forMap(map)) : [];
+    for (const turf of turfs) turf.owner = owners[turfMap]?.[turf.id] ?? null;
+}
+
 function save() {
+    if (!turfMap) return;
+    owners[turfMap] = Object.fromEntries(turfs.map((turf) => [turf.id, turf.owner]));
     try {
         fs.mkdirSync(profiles.DATA_DIR, {recursive: true});
-        fs.writeFileSync(`${FILE}.tmp`, JSON.stringify({version: 1, owners: Object.fromEntries(turfs.map((turf) => [turf.id, turf.owner]))}, null, 1));
+        fs.writeFileSync(`${FILE}.tmp`, JSON.stringify({version: 2, owners}, null, 1));
         fs.renameSync(`${FILE}.tmp`, FILE);
     } catch (error) {
         console.error(`[freeride] Could not save turf: ${error.message}`);
@@ -143,9 +156,11 @@ menu.provide("turf", () => turfs.map((turf) => ({id: turf.id, owner: turf.owner,
 
 onStart(() => {
     load();
+    useMap();
     lastIncome = Date.now();
     publish();
     timer = setInterval(tick, TICK_MS);
 });
 onStop(() => clearInterval(timer));
 Events.on("playerSpawn", (player) => publish(player));
+Events.on("missionChange", useMap);
