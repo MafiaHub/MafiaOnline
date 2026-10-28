@@ -1,5 +1,6 @@
 #pragma once
 
+#include "shared/features/npc/npc_animation.h"
 #include "shared/features/npc/npc_create.h"
 #include "shared/features/npc/npc_order.h"
 #include "shared/features/npc/npc_task.h"
@@ -9,6 +10,7 @@
 #include <cstdint>
 #include <deque>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace Mafia1Online::SDK::Player {
     struct NativeActor;
@@ -50,7 +52,7 @@ namespace Mafia1Online::Features::Npc {
         void Forget(uint32_t key);
 
       private:
-        enum class MessageKind : uint8_t { Create, Task, Order, Remove };
+        enum class MessageKind : uint8_t { Create, Task, Order, Remove, Animation };
         struct Message {
             MessageKind kind = MessageKind::Create;
             uint64_t generation = 0;
@@ -58,6 +60,7 @@ namespace Mafia1Online::Features::Npc {
             Shared::Npc::Create create;
             Shared::Npc::Task task;
             Shared::Npc::Order order;
+            Shared::Npc::Animation animation;
             std::chrono::steady_clock::time_point received;
         };
         enum class Phase : uint8_t { Running, Boarding, Leaving };
@@ -77,6 +80,8 @@ namespace Mafia1Online::Features::Npc {
         void Create(World::WorldService &world, const Shared::Npc::Create &create);
         void Begin(World::WorldService &world, SDK::Player::NativeActor *npc, const Shared::Npc::Task &task);
         void ApplyOrder(SDK::Player::NativeActor *npc, const Shared::Npc::Order &order);
+        // PERSON_PLAYANIM / PERSON_STOPANIM; a clip ends the running task.
+        void ApplyAnimation(SDK::Player::NativeActor *npc, const Shared::Npc::Animation &animation);
         void Destroy(uint32_t key);
         // Ends the native side of the current task: the car route, the
         // followship and every action.
@@ -93,5 +98,7 @@ namespace Mafia1Online::Features::Npc {
         uint64_t _generation = 0;
         std::deque<Message> _queue;
         std::unordered_map<uint32_t, Running> _running;
+        // NPCs playing a script clip.
+        std::unordered_set<uint32_t> _animating;
     };
 } // namespace Mafia1Online::Features::Npc

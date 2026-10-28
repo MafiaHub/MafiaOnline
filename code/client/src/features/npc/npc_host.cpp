@@ -189,6 +189,22 @@ namespace Mafia1Online::Features::Npc {
         network->RegisterRPC<Shared::Npc::PoliceSwitch>([this](const Shared::Npc::PoliceSwitch &change, MafiaNet::Packet *) {
             _policeEnabled = change.enabled;
         });
+        network->RegisterRPC<Shared::Npc::PoliceOfficers>([this](const Shared::Npc::PoliceOfficers &officers, MafiaNet::Packet *) {
+            _officerIds = {officers.playerNetworkIds.begin(), officers.playerNetworkIds.end()};
+        });
+        network->RegisterRPC<Shared::Npc::PoliceBackup>([this](const Shared::Npc::PoliceBackup &backup, MafiaNet::Packet *) {
+            if (backup.missionGeneration == _missionGeneration && _backups.size() < 16) {
+                _backups.push_back({backup, std::chrono::steady_clock::now()});
+                return;
+            }
+            // Every request is answered: the server holds each open until
+            // the reply, and refuses new ones once too many are.
+            Shared::Npc::PoliceBackupSent reply;
+            reply.missionGeneration = backup.missionGeneration;
+            reply.requestId = backup.requestId;
+            reply.sent = false;
+            Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(reply, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
+        });
         network->RegisterRPC<Shared::Npc::Remove>([this](const Shared::Npc::Remove &remove, MafiaNet::Packet *) {
             // A scripted NPC is in no retirement list; it goes in order with
             // its other messages, whatever the mission the host has loaded.
@@ -223,8 +239,10 @@ namespace Mafia1Online::Features::Npc {
         _npcs.clear();
         _observers.clear();
         _policePersons.clear();
+        _policeOfficers.clear();
         _reportedRecords.clear();
         _policeOrders.clear();
+        _backups.clear();
         _scripted.Reset();
     }
 
@@ -267,6 +285,7 @@ namespace Mafia1Online::Features::Npc {
         // C_shvestky::Tick reads every recorded person; the record goes
         // before the actor. Mission close cleared the set beforehand.
         _reportedRecords.erase(actor);
+        _policeOfficers.erase(actor);
         if (_policePersons.erase(actor)) {
             SDK::Police::PoliceManager(SDK::Core::Mission::Get()->Game())->DelPerson(static_cast<NativeActor *>(actor));
         }
@@ -405,6 +424,7 @@ namespace Mafia1Online::Features::Npc {
         }
         // C_shvestky::Tick reads every recorded person.
         _reportedRecords.erase(human);
+        _policeOfficers.erase(human);
         if (_policePersons.erase(human)) {
             SDK::Police::PoliceManager(SDK::Core::Mission::Get()->Game())->DelPerson(human);
         }
@@ -443,9 +463,9 @@ namespace Mafia1Online::Features::Npc {
         float currentSq = std::numeric_limits<float>::max();
         for (auto *entry = first; entry < last; ++entry) {
             // The same entries retail could pick, and only players it is at
-            // odds with: every player replica is in the police records.
+            // odds with.
             if (!entry->actor || entry->contacts == kDeadContacts || entry->contactStart == 0 || entry->attitude != kEnemyAttitude ||
-                !_policePersons.contains(entry->actor) || entry->actor->IsDead()) {
+                !IsPlayerReplica(entry->actor) || entry->actor->IsDead()) {
                 continue;
             }
             const uint64_t player = _world->NativeObjects().FindByNative(entry->actor).networkId;
@@ -475,7 +495,7 @@ namespace Mafia1Online::Features::Npc {
         // player that hurt it most, else the nearest, goes first) or a
         // player hurt this NPC lately: a cop or rival it fights is its own.
         auto *winner = static_cast<NativeCharacterLog *>(retail);
-        const bool retailPlayer = winner && winner->actor && _policePersons.contains(winner->actor);
+        const bool retailPlayer = winner && winner->actor && IsPlayerReplica(winner->actor);
         if (!chosen || (!retailPlayer && !byDamage)) {
             return retail;
         }
@@ -598,8 +618,10 @@ namespace Mafia1Online::Features::Npc {
         if (generation != _missionGeneration) {
             _npcs.clear();
             _policePersons.clear();
+            _policeOfficers.clear();
             _reportedRecords.clear();
             _policeOrders.clear();
+            _backups.clear();
             _nextKey = 1;
             _missionGeneration = generation;
         }
@@ -641,39 +663,70 @@ namespace Mafia1Online::Features::Npc {
             police->SetActive(true);
             Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Police manager on for mission generation {}", _missionGeneration);
         }
-        std::unordered_set<void *> current;
+        // Every spawned player's replica, and whether its player is on
+        // police duty.
+        std::unordered_map<void *, bool> current;
         if (auto *replication = Framework::CoreModules::GetReplication()) {
             replication->ForEach<Shared::Entities::PlayerEntity>([&](Shared::Entities::PlayerEntity *player) {
                 if (!player->spawned || player->missionGeneration != _missionGeneration) {
                     return;
                 }
                 if (void *native = world.NativeObjects().Resolve(world.NativeObjects().FindByNetwork(player->GetNetworkID()))) {
-                    current.insert(native);
+                    current.emplace(native, _officerIds.contains(player->GetNetworkID()));
                 }
             });
         }
         for (auto it = _policePersons.begin(); it != _policePersons.end();) {
-            if (current.contains(*it)) {
+            const auto found = current.find(*it);
+            if (found != current.end() && !found->second) {
                 ++it;
                 continue;
             }
-            police->DelPerson(static_cast<NativeActor *>(*it));
+            auto *person = static_cast<NativeActor *>(*it);
+            police->DelPerson(person);
             _reportedRecords.erase(*it);
+            if (found != current.end()) {
+                // On duty. Retail keeps no record of its officers: only
+                // C_game's player (SetActive 0x49b860) and those a mission
+                // script adds (POLICEMANAGER_ADD) become persons, and every
+                // detector, case and car hunt starts from a person.
+                SDK::Police::ForgetOffender(person);
+                SDK::Traffic::EndHuntsOf(SDK::Core::Mission::Get()->Game(), person);
+            }
             it = _policePersons.erase(it);
         }
-        for (void *native : current) {
+        std::erase_if(_policeOfficers, [&](void *native) {
+            const auto found = current.find(native);
+            return found == current.end() || !found->second;
+        });
+        for (const auto &[native, officer] : current) {
             auto *actor = static_cast<NativeActor *>(native);
             // ai_logs::Event rates a type 2 player as class 0 but a type 27
             // replica by this field: NPCs see every player as retail sees
-            // its own.
-            if (SDK::Police::BehaviourClass(actor) != SDK::Police::kPlayerBehaviourClass) {
-                SDK::Police::SetBehaviourClass(actor, SDK::Police::kPlayerBehaviourClass);
+            // its own, and an officer as it sees its police walkers
+            // (DoesntReactOnWeapon, class 2 from C_entity::GameInit 0x5074d0).
+            const uint32_t behaviourClass = officer ? SDK::Police::kPoliceBehaviourClass : SDK::Police::kPlayerBehaviourClass;
+            if (SDK::Police::BehaviourClass(actor) != behaviourClass) {
+                SDK::Police::SetBehaviourClass(actor, behaviourClass);
+                ForgetContacts(actor);
             }
-            if (_policePersons.insert(native).second) {
+            if (officer) {
+                _policeOfficers.insert(native);
+            }
+            else if (_policePersons.insert(native).second) {
                 police->AddPerson(actor);
             }
         }
         RetargetOfficers(*police);
+    }
+
+    void NpcHost::ForgetContacts(NativeActor *replica) {
+        for (auto &[native, tracked] : _npcs) {
+            auto *npc = static_cast<NativeActor *>(native);
+            if (npc->GetType() == NativeActor::Type::Entity) {
+                SDK::Police::ForgetContact(npc, replica);
+            }
+        }
     }
 
     void NpcHost::OnAttacked(World::WorldService &, NativeActor &npc, NativeActor &attacker) {
@@ -841,12 +894,45 @@ namespace Mafia1Online::Features::Npc {
             }
             return true;
         });
+        SendBackups(police);
         QuietGrabbed(police);
         if (_policeEnabled) {
             return;
         }
         // Crimes the detectors found since the last evaluation raise nothing.
         ClearPlayerCrimes(police);
+    }
+
+    void NpcHost::SendBackups(SDK::Police::NativePoliceManager &police) {
+        auto *replication = Framework::CoreModules::GetReplication();
+        const auto now = std::chrono::steady_clock::now();
+        std::erase_if(_backups, [&](const PendingBackup &pending) {
+            const auto &order = pending.order;
+            auto *player = replication && _world ? replication->GetEntity<Shared::Entities::PlayerEntity>(order.playerNetworkId) : nullptr;
+            const bool sameLife = player && player->spawnGeneration == order.playerSpawnGeneration;
+            auto *native = sameLife ? static_cast<NativeActor *>(_world->NativeObjects().Resolve(_world->NativeObjects().FindByNetwork(order.playerNetworkId))) : nullptr;
+            const auto *record = native && _policePersons.contains(native) ? police.FindRecord(native) : nullptr;
+            if (!record && sameLife && now - pending.received <= kPoliceOrderWait) {
+                return false;
+            }
+            // The level picks the hunt as VasekSelChlastatNaOslavu does:
+            // lethal kill, arrest arrest, minor pursue (car modes).
+            bool sent = false;
+            if (record && _policeEnabled && !native->IsDead() && record->Level() != SDK::Police::NativeCrimeRecord::kLevelNone) {
+                const uint16_t level = record->Level();
+                const uint32_t mode = level >= SDK::Police::NativeCrimeRecord::kLevelLethal ? SDK::Police::kBoardModeKill
+                                      : level == SDK::Police::NativeCrimeRecord::kLevelArrest ? SDK::Police::kBoardModeArrest
+                                                                                              : SDK::Police::kBoardModePursue;
+                sent = police.SendReinforcements(native, mode, kBackupRadius);
+            }
+            Shared::Npc::PoliceBackupSent reply;
+            reply.missionGeneration = _missionGeneration;
+            reply.requestId = order.requestId;
+            reply.sent = sent;
+            Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(reply, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Police backup {} after player {}: {}", order.requestId, order.playerNetworkId, sent ? "sent" : "refused");
+            return true;
+        });
     }
 
     void NpcHost::QuietGrabbed(SDK::Police::NativePoliceManager &police) {
@@ -1250,7 +1336,7 @@ namespace Mafia1Online::Features::Npc {
         // A car impact blames the car's driver, as C_entity::Hit does.
         NativeActor *blamed = attacker && attacker->GetType() == NativeActor::Type::Car ? static_cast<SDK::Seat::NativeCar *>(static_cast<void *>(attacker))->GetOwner(0) : attacker;
         damaged.attackerId = attacker ? world.NativeObjects().FindByNative(attacker).networkId : 0;
-        if (blamed && _policePersons.contains(blamed) && std::isfinite(damage) && damage > 0.0f) {
+        if (blamed && IsPlayerReplica(blamed) && std::isfinite(damage) && damage > 0.0f) {
             if (const uint64_t player = world.NativeObjects().FindByNative(blamed).networkId) {
                 auto &grudge = found->second.grudges[player];
                 grudge.damage += damage;

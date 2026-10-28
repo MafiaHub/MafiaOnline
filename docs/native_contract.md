@@ -190,6 +190,13 @@ Every client loads the mission's bridge actors (type 20). The simulation host
 runs them natively; players replay its phases, leaf angles and steamers
 (`BridgeService`, see the NPC multiplayer audit). Nothing shuts them down.
 
+Every client loads the gas station attendants (type 25, `C_pumper`) too. The
+host runs them and serves the cars the server hands it; players replay its
+state and animation through the native animation machine, and the customer's
+client runs the retail `Start` and release on its own car (`PumperService`,
+see the NPC multiplayer audit). Their `Collision`, `Hit` and `PumperPanic` are
+hooked off: the attendant never panics.
+
 reM `C_game::Tick` advances `m_uSemaphoreTime` through ten 3000 ms phases;
 `m_iSemaphoreStateZ` starts five phases after `m_iSemaphoreStateX`.
 `TickSemaphores` reads those phase fields for lamp visuals, and traffic AI
@@ -1675,6 +1682,43 @@ lifetime, radius and damage and `damageActors = damage > 0`; `C_fire::Tick`
 hits nothing without it. The source actor and parent frame are null, so the
 combat hooks do not report these as grenade detonations. A message for another
 mission generation is dropped.
+
+### Persistent fires and water jets
+
+`Fire` and `WaterJet` (replicated `FireEntity` / `WaterJetEntity`) do not go
+through `C_fire`: its damage scales with the remaining lifetime
+(`C_fire::Tick` `0x55da80`, damage x `m_iLifeRemaining`) and its particle is
+the self-decaying "fire_fading". `FireService` (client, `features/fire`) owns
+everything it creates and drops it in the mission-closing callback:
+
+- Flames: `C_ParticleManager::CreateParticle(int, const S_vector&, const
+  S_vector&, int, I3D_frame*)` `0x449690` on `C_mission +0x6c` (as
+  `C_game::AddHydrant` `0x5b9b90` calls it), effects "Fire" 6 and
+  "Fire_no_smoke" 57 of `tables\effects.tbl` (no emission decay), parented to
+  a dummy frame (`I3D_driver::CreateFrame(FRAME_DUMMY)`) we move for a fire on
+  a car; `DestroyParticle` `0x44a240` ends them. The table's order is
+  `EFFECTS.TXT`'s (`LoadData` `0x449380` appends in file order); C_fire's 21
+  and the hydrant's 87 match it.
+- Light: `C_game::SpawnFireFrameSlot(const S_vector&, float, int, short)`
+  `0x5b5b40` with `NewFire`'s size 10 and type 1, on the ten slots at
+  `C_game +0x2a48` (0xc each, time at +4). The slot's time is renewed while
+  the fire burns and cut to 500 ms when it goes out, so `C_game::Tick` fades
+  it as a retail fire's.
+- Sound: `C_sound_table::ConstructSound` `0x55f820` on `g_SoundManager`
+  `0x646f50` with C_fire's loop 20 (looped, as `C_fire::Init`) and
+  `NewFire`'s ignition 21, which `C_game::Play3DSound(I3D_sound*)` `0x5accb0`
+  owns and releases.
+- Water: effect "hadice" 89 (one type, flags 0x19: its velocity (5, 0, 0) and
+  spawn spread are turned by the parent frame's world matrix in
+  `C_Particle::Create`, scale included, since `S_vector::RotateByMatrix` is
+  the plain 3x3 product; phase gravity 9.8, 2 s life) on a dummy nozzle frame
+  whose x row is the launch direction and whose uniform scale is pressure / 5,
+  so the drops fly the lower ballistic arc onto the target. The hydrant loop
+  is sound table 327 (`AddHydrant` pushes `0x147`). The steam over a doused
+  fire is "smoke_parnik" 28; a put-out fire smokes with "slow_smoke" 55.
+
+The server decides intensity, dousing and damage (`CombatService::StartFire`
+every 500 ms with damage x intensity); clients only draw.
 
 ### HUD, fade and camera
 

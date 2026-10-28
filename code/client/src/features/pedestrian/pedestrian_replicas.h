@@ -60,6 +60,8 @@ namespace Mafia1Online::Features::Pedestrian {
             // animation. A corpse never gets one.
             bool holding = false;
             int32_t appliedAlpha = -1;
+            // The taxi wave shown, Shared::Taxi::kWave*.
+            uint8_t appliedWave = 0;
             std::chrono::steady_clock::time_point holdingSince;
             bool failed = false;
         };

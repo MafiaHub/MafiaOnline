@@ -261,7 +261,7 @@ namespace Mafia1Online::Features::Seat {
         }
     }
 
-    bool SeatService::BlocksNpcEntry(NativeHuman *human, NativeCar *car) const {
+    bool SeatService::BlocksNpcEntry(NativeHuman *human, NativeCar *car, int seat) const {
         if (!Simulation::IsHost() || !_world) {
             return false;
         }
@@ -276,6 +276,13 @@ namespace Mafia1Online::Features::Seat {
         // The cars the host drives are for its NPCs to use.
         auto *replication = Framework::CoreModules::GetReplication();
         const auto *state = replication ? replication->GetEntity<Shared::Entities::CarEntity>(vehicle.networkId) : nullptr;
+        // A passenger seat of a car a player drives, for a scripted NPC the
+        // server sent there (TrafficService::ApplyNpcSeat takes the seat).
+        if (state && seat > 0 && seat < static_cast<int>(state->seatCount) && seat < static_cast<int>(Shared::Entities::CarEntity::kMaxSeats) &&
+            application->Npcs().IsScripted(&human->actor) && state->occupantIds[0] != 0 &&
+            replication->GetEntity<Shared::Entities::PlayerEntity>(state->occupantIds[0])) {
+            return false;
+        }
         return !state || !state->hostDriven || state->simulationControllerGuid != static_cast<uint64_t>(replication->GetMyGUID());
     }
 

@@ -96,6 +96,31 @@ namespace Mafia1Online::Scripting {
         void JS_IsEnabled(const v8::FunctionCallbackInfo<v8::Value> &info) {
             info.GetReturnValue().Set(GetServer().Police().IsEnabled());
         }
+
+        void JS_SetOfficer(const v8::FunctionCallbackInfo<v8::Value> &info) {
+            constexpr const char *usage = "Police.setOfficer(player, officer) expects a Player and a boolean";
+            const uint64_t id = ReadPlayer(info, usage);
+            if (!id) {
+                return;
+            }
+            if (info.Length() != 2 || !info[1]->IsBoolean()) {
+                ScriptArgs::Throw(info.GetIsolate(), usage);
+                return;
+            }
+            info.GetReturnValue().Set(GetServer().Police().SetOfficer(id, info[1]->BooleanValue(info.GetIsolate())));
+        }
+
+        void JS_IsOfficer(const v8::FunctionCallbackInfo<v8::Value> &info) {
+            if (const uint64_t id = ReadPlayer(info, "Police.isOfficer(player) expects a Player")) {
+                info.GetReturnValue().Set(GetServer().Police().IsOfficer(id));
+            }
+        }
+
+        void JS_SendBackup(const v8::FunctionCallbackInfo<v8::Value> &info) {
+            if (const uint64_t id = ReadPlayer(info, "Police.sendBackup(player) expects a Player")) {
+                info.GetReturnValue().Set(v8::Uint32::New(info.GetIsolate(), GetServer().Police().SendBackup(id)));
+            }
+        }
     } // namespace
 
     const char *PoliceCrimeName(uint16_t crime) {
@@ -128,6 +153,20 @@ namespace Mafia1Online::Scripting {
                 "Turns the police reaction to crimes on or off for everyone. While off, crimes raise nothing, Police.setWanted cannot raise a level and a hit officer "
                 "opens no new case. Officers already on a case keep it; Police.clear calls them off."));
         police.function("isEnabled", &JS_IsEnabled, docs("boolean", {}, "Whether crimes raise wanted levels.", "True unless Police.setEnabled(false)."));
+        police.function("setOfficer", &JS_SetOfficer,
+            docs("boolean", {param("player", "Player", false, "A connected player."), param("officer", "boolean", false, "True on police duty, false back to a citizen.")},
+                "Makes the player a police officer for the retail police, as retail treats its own officers: no crime record (no crime, wanted level, case, "
+                "arrest or car hunt for them), and NPCs rate them as a policeman. The record is settled at once (playerWantedChange if they were wanted); "
+                "Police.setWanted cannot raise it. False turns them back into a citizen with a clean record. The setting lasts until changed or the player leaves.",
+                "False when the player is unknown."));
+        police.function("isOfficer", &JS_IsOfficer,
+            docs("boolean", {param("player", "Player", false, "A player.")}, "Whether Police.setOfficer made the player a police officer.", "True on police duty."));
+        police.function("sendBackup", &JS_SendBackup,
+            docs("number", {param("player", "Player", false, "A wanted player.")},
+                "Sends a police car with two officers after the player the retail way (the reinforcements a rising wanted level brings): it sets out from a "
+                "road about 140 m away and hunts them as their wanted level says (kill, arrest or pursue). policeBackup answers whether it set out; the "
+                "police pool must have two free officers.",
+                "The request id policeBackup carries, or 0 when the player is not wanted, is an officer, the police are off or no simulation host is attached."));
         police.publish(global);
     }
 } // namespace Mafia1Online::Scripting

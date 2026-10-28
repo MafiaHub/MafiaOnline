@@ -82,14 +82,16 @@ namespace Mafia1Online::Shared::World {
     // players place theirs from its reports. The drawbridges (20, C_bridge)
     // likewise: the host raises them, the players replay its phases. The
     // physical props (35, C_box_new: boxes, railings, mail boxes) run on
-    // every client, which load them in the same order for their poses.
+    // every client, which load them in the same order for their poses. The
+    // gas station attendants (25, C_pumper) too: the host runs them and
+    // serves the cars the server hands it, the players replay them.
     inline bool LoadMissionActor(uint32_t type, bool simulationHost) {
-        return type == 6 || type == 8 || type == 18 || type == 20 || type == 35 || (simulationHost && type == 12);
+        return type == 6 || type == 8 || type == 18 || type == 20 || type == 25 || type == 35 || (simulationHost && type == 12);
     }
 
     // Retain scenery even when its actor behaviour is suppressed. Doors,
-    // railways, bridges and physical props retain both their geometry and
-    // their native actor.
+    // railways, bridges, attendants and physical props retain both their
+    // geometry and their native actor.
     inline bool KeepMissionActorGeometry(uint32_t type) {
         switch (type) {
         case 1:

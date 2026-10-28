@@ -59,6 +59,7 @@ namespace Mafia1Online::Features::Script {
     void EmitNpcTaskComplete(Core::Server &server, Shared::Entities::NpcEntity &npc, uint32_t taskId, Shared::Npc::TaskType type, Shared::Npc::TaskDone::Result result);
     void EmitPlayerCrime(Core::Server &server, uint64_t playerId, uint16_t crime);
     void EmitPlayerWanted(Core::Server &server, uint64_t playerId, uint8_t level, uint8_t previous);
+    void EmitPoliceBackup(Core::Server &server, uint32_t requestId, uint64_t playerId, bool sent);
     void EmitPlayerArrest(Core::Server &server, uint64_t playerId, Shared::Entities::NpcEntity &officer, bool fine);
     void EmitTrafficTaken(Core::Server &server, uint64_t carId, uint64_t playerId, bool stolen);
     void EmitTrafficStealRefused(Core::Server &server, uint64_t carId, uint64_t playerId);

@@ -11,13 +11,16 @@
 #include "features/npc/police_service.h"
 #include "features/pedestrian/pedestrian_service.h"
 #include "features/player/player_service.h"
+#include "features/pumper/pumper_service.h"
 #include "features/railway/railway_service.h"
 #include "features/simulation/simulation_service.h"
+#include "features/taxi/taxi_service.h"
 #include "features/traffic/traffic_service.h"
 #include "features/world/mission_readiness.h"
 #include "features/world/props_service.h"
 #include "features/world/world_script_service.h"
 #include "features/mod/mod_service.h"
+#include "features/fire/fire_service.h"
 #include "features/map_object/map_object_service.h"
 
 #include <chrono>
@@ -113,14 +116,23 @@ namespace Mafia1Online::Core {
         Features::Traffic::TrafficService &Traffic() {
             return _traffic;
         }
+        Features::Taxi::TaxiService &Taxi() {
+            return _taxi;
+        }
         Features::Railway::RailwayService &Railways() {
             return _railways;
         }
         Features::Bridge::BridgeService &Bridges() {
             return _bridges;
         }
+        Features::Pumper::PumperService &Pumpers() {
+            return _pumpers;
+        }
         Features::MapObject::MapObjectService &MapObjects() {
             return _mapObjects;
+        }
+        Features::Fire::FireService &Fires() {
+            return _fires;
         }
         Features::World::PropsService &Props() {
             return _props;
@@ -145,10 +157,13 @@ namespace Mafia1Online::Core {
         Features::Npc::NpcService _npcs;
         Features::Npc::PoliceService _police;
         Features::Traffic::TrafficService _traffic;
+        Features::Taxi::TaxiService _taxi;
         Features::Railway::RailwayService _railways;
         Features::Bridge::BridgeService _bridges;
+        Features::Pumper::PumperService _pumpers;
         Features::World::PropsService _props;
         Features::MapObject::MapObjectService _mapObjects;
+        Features::Fire::FireService _fires;
         std::unordered_set<uint64_t> _reportedCarLoadFailures;
         // Clients whose native car creation failed, per car. None of them can
         // simulate that car.

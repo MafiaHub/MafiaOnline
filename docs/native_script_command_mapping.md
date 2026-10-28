@@ -38,6 +38,7 @@ ask one client to show a local effect.
 | `Entity_CarMoveTo` | `npc.driveTo` | Server; simulation host |
 | `Entity_ActionFire` | `npc.attack` | Server; simulation host |
 | `Entity_ActionsClear` | `npc.stop` | Server; simulation host |
+| `PERSON_PLAYANIM`, `PERSON_STOPANIM` (`C_human::Do_PlayAnim`, `Do_StopAnim`) | `npc.playAnimation`, `npc.stopAnimation` | Server; simulation host plays it, players' copies replay it |
 | `ACTOR_SETDIR` on an entity | `npc.face` | Server; simulation host |
 | `HUMAN_ADDWEAPON` on an entity | `npc.giveWeapon`, `Npc.spawn` `weapon` | Server; simulation host |
 

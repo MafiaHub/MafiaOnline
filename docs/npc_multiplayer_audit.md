@@ -101,6 +101,17 @@ entity at once and sends `Npc::Create`; tasks (`Npc::Task`) and orders
 (`Npc::Order`) follow on the same ordered channel, and the host answers each
 task with `Npc::TaskDone`.
 
+- `npc.playAnimation` sends `Npc::Animation` to the host, which plays the clip
+  as `PERSON_PLAYANIM` does (`C_program::Process` 0x470393:
+  `C_human::Do_PlayAnim(name, simple, 1)`, 0x585e80) after ending the running
+  task, and stops it with `Do_StopAnim` (0x57d2e0, `PERSON_STOPANIM`); any
+  task stops it too. Without a displacement track (`.tck`) the clip plays on
+  the animation stage while the human stays in work state 1, and
+  `PersonAnim` leaves it alone while `m_iAnimState` equals `m_iAnimID`. The
+  clip, its loop flag and a revision ride on the `NpcEntity` fields, so every
+  player's copy replays it, also one constructed later (a looping clip only),
+  and holds its locomotion stream off while it plays.
+
 - Creation is `CreateMafianos`' (0x459b90) sequence: `C_mission::CreateActor`
   (27), `Init`, then behaviour mask (C_human +0x5fc: 2 guard, 8 reacts on hit,
   16 moves away), initial health (+0x604), morale (+0x63c) and aggressivity
@@ -135,9 +146,9 @@ task with `Npc::TaskDone`.
   host-driven car without a traffic key instead of waiting to adopt it. The
   server gives the car back (`hostDriven` false, `UpdateCarControllers`) once
   no scripted NPC boards or sits in it.
-- Not done: following a player into a player-driven car (the follow manager
-  boards the leader's car, which `BlocksNpcEntry` refuses), script animations
-  (replicas would not play them) and changing the behaviour class at runtime.
+- Not done: following a player into a player-driven car by itself (the follow
+  manager boards the leader's car, which `BlocksNpcEntry` refuses) and
+  changing the behaviour class at runtime.
 
 ## NPC melee
 
@@ -229,6 +240,31 @@ first one after drawing used to be dropped.
   own. Class 0 is `ENTITY_BEHAVIOUR_GUARD`, but a replica never runs entity AI:
   it is network controlled, and `C_actor::Tick` 0x4064f0 then calls the empty
   `NetDirect` instead of `AI` (where `StateSwitcher` and the actions run).
+- A player on police duty (`Police.setOfficer`, `Npc::PoliceOfficers`) is
+  treated as retail treats its own officers. Retail records crimes only for
+  persons: `SetActive` adds C_game's player (0x49b860) and the mission script
+  adds others with `POLICEMANAGER_ADD`; officers are never persons, and every
+  detector (`Firing` 0x49cb20 and the rest) and dispatch looks its person up
+  in `m_Persons` first. The host drops the officer's replica from the records
+  (`DelPerson`), ends the board actions and car hunts aimed at it
+  (`ZinvalidujAktora`, the C_sledovacka hunts) and gives it class 2, the class
+  `C_entity::GameInit` 0x5074d0 gives police walkers (`DoesntReactOnWeapon`).
+  `ai_logs::Event` rates an actor once, when it creates the log entry
+  (0x4f6f22): class 2 is a friend to class 3 owners, neutral to 4, 5 and 6
+  and unknown to 0 and 1, and a police owner (2) is neutral to everyone. So the
+  host erases the replica's entry from every tracked NPC's logs
+  (`ai_logs::Destroy` 0x4f7a90 on `C_entity` +0xe88, as `InvalidateActor`
+  0x5288e3 does) whenever its class changes, and each rates it afresh.
+  `VseckyUbozakyStopni` 0x53d530's freeze, which also tests class 2, runs only
+  for a type 2 target and so never on the host.
+- `Police.sendBackup` runs `C_shvestky::DalsiChalpiDoPartie` 0x49eee0 (`ret
+  0Ch`), retail's reinforcements for its player's highest levels, on a wanted
+  player's replica from the police manager tick: it needs two free pool
+  officers (`GetFreeEnemy` 0x49e530, 0x49ef12) and the person's record, picks
+  a road node at least 0.66 of the radius away in ten tries (0x49efc0-
+  0x49f0c1), seats two shotgun officers in a pool car and opens a board action
+  of the level's car mode (`MamProVasAkciHosi`). The host answers with
+  `Npc::PoliceBackupSent`.
 - A cop (class 2) never changes offender by itself: `C_entity::Hit` escalates
   only when its action (`MamCisloDejAkci` 0x53bbf0 on +0xf54, offender +0x60)
   already targets the attacker. When a player who is not its offender hits it,
@@ -592,3 +628,149 @@ index plus an FNV-1a hash of its frame name (`Shared::Bridge`).
   so its preparing phase should end at once and players rarely hear the
   preparing sound. Traffic waits at the bridge only on the host,
   where it runs.
+
+## Gas station attendants
+
+The pump attendants are type-25 `C_pumper` actors (vtable 0x624990, 0x2ac
+bytes, reM `actors/C_pumper.cpp`). Every Free Ride scene has three, `pumpar`,
+`pumpar1` and `pumpar2`, for pumps 0 to 2 (`m_uPumpID` +0x80), each walking
+between web nodes 666+2n and 667+2n (+0x78, +0x7c) to his pump `_pumpa%i`
+with the hose model `_pumpa_hadice%i` (+0x234) and the camera
+`_pumpa_camera%i`. Every client now loads them (`LoadMissionActor`) in the same
+order; one is named by its load index and an FNV-1a hash of its frame name
+(`Shared::Pumper`).
+
+- `AI` 0x47ea30 runs `E_pumper_state` (+0xd0): the idle, idle-pause and
+  smoke-loop states count the action timer (+0x25c against +0x260), the
+  animated ones wait for `GetActiveAnimTime` + 250 ms, the four dialogue states
+  for `DabingIsSpeaking` 0x5f5c40 on +0x230, then `ChooseNextAction` 0x47f950
+  picks the next one with `rnd` (idle stand, Nuda01-03, KurakZapaleni/Loop/
+  Potahnuti/Zahozeni). Every state ends with `SetAnim` 0x47f8e0 (+0xd8, finite
+  +0xdc, track +0xdd, started only when it differs from +0xd4), the animation
+  machine's `Tick` 0x40f1b0 (+0xe0) and the frame's `Tick` (vtable +0x14),
+  whose `notify` child fires `PumperAnimEventHandler` 0x4809c0: footsteps,
+  `StartPumpFuel` 0x480da0 (event 42, the looping fuel sound on channel 3),
+  `EndPumpFuel` 0x480dd0 (event 43: `C_Vehicle::SetFuel(capacity)` on m_pCar
+  +0x24c and `ScoreSet(score - 500)`), the four cigar and cigarette props
+  (+0x238) and their smoke particles (+0xa0..+0xa8). `FUELING` also ticks the
+  hose and adds `frameTime * rate` to m_pCar's fuel while +0x258 is set.
+- Retail service: `C_player::Do_AB_OwnerCar` 0x594fa0 offers "use the pump"
+  when `CanPump` 0x4805d0 is AVAILABLE (fuel cap within 6 m of the pump, car
+  within 4 m and slower than 0.1, facing within 45 degrees). `Start` 0x480190
+  greets (0x1b996f7), puts out the cigarette, aligns the car's fuel cap with
+  the pump (`Deactivate`, `SetDir`, `Reset` 0x422be0 twice), sets it active,
+  raises its control override (`++C_car+0x21dc` at 0x480533, which reM's Start
+  leaves out), switches the engine off, locks the driver's controls and points
+  the camera at him. The player answers (0xe3f763, model `C_game::m_pPlayer`),
+  he walks out, `PUMP_READY` rewinds the hose and computes the rate, he fuels
+  (animation 0x153), turns (turn1), says his line (+0x84, 301004 in Free Ride),
+  hears the player (0x987165) and walks back; `ChooseNextAction`'s WALKING
+  branch for the start node releases the car (1 m forward, `Reset`,
+  `G_Camera::SetCar`, engine on, `--override`, `LockControls(false)`,
+  `PopMode` 0x5f4220, a no-op on an empty stack).
+- The simulation host runs them. The server hands it a service (`Command`
+  Serve) only after checking the player drives that live car, the attendant
+  is free (not `IsPumping` 0x481810) and the policy and price; the host then
+  does Start's attendant half itself (state, idle animation, greeting, smoking
+  off, m_pCar = its copy of the network car). Its `ChooseNextAction` hook
+  answers the two dialogue states with the served car's driver as the model
+  (the host has no `m_pPlayer`; with no sound driver a line lasts as long as
+  its `tables\dat` lip-sync data), turns him back when a service is given up,
+  and runs the release branch without m_pCar, reporting the end (`Progress`
+  Finished). `EndPumpFuel` reports `Progress` Fuelled and runs with m_pCar
+  cleared: the server fills the network car (`CarService::SetFuel`) and charges
+  `Pumper.setPrice`. A served car that disappears from the host makes him give
+  up (`Progress` Abandoned); he walks back the way he came.
+- It reports every attendant's state, animation and flags, position, direction
+  and served car at 10 Hz, reliably at once on a change (`Pumper::Snapshot`);
+  the server validates and forwards to every spawned player.
+- Players hook `AI`: the host's state, animation, position (followed at 12/s,
+  snapped beyond 3 m) and direction are put on the actor, then the original AI
+  runs in the idle state with a timer that never runs out and +0x258 cleared,
+  which leaves exactly its tail: `SetAnim`, the animation machine and the frame
+  tick with its notify events, so footsteps, the fuel loop, the props and the
+  smoke play locally as retail plays them. The hose is ticked in FUELING. On a
+  replayed state change the client speaks what `Start`/`ChooseNextAction`
+  would have (`DabingSpeak` 0x5f5570 through `DabingGetFreeChanel` 0x5f4ca0 and
+  `DabingSetModel` 0x5f5210), the answers with the served car's driver.
+- The customer: `Start` is hooked; the retail choice becomes a `Request`, and
+  the server's Accepted runs the original `Start` (`CanPump` again) on the
+  local copy, so the car is aligned, locked and filmed as retail does it. The
+  server's Release (the host's Finished, or the service ending) runs the
+  WALKING release branch on the local copy with its replayed state put back.
+  `EndPumpFuel` never fills the local car or touches the score; the car
+  service would undo a local fuel increase anyway.
+- Panic is blocked everywhere: `Collision` 0x47e940 and `Hit` 0x47e9c0 return
+  false and `PumperPanic` 0x480fd0 returns null, because a panic hands a copy of
+  his model to the local pedestrian generator (`AddFreePerson` 0x450f00) and
+  reactivates only 200 m from the active camera, neither of which has a shared
+  meaning here.
+
+## Taxi passengers
+
+Retail (reM, verified in IDA against Game.exe):
+
+- `C_traffic_generator::TickElements` (0x44ef70) ends with the hail countdown
+  (0x44f052-0x44f07c): while the mission script enabled taxi passengers
+  (0x63d72a, `EnableTaxiDriver` 0x44fcf0, `taxidriver_enable`) and C_game's
+  player is in a taxi (0x63d729, `PlayerInTaxi` 0x44f740: C_car's name at
+  +0x218c is one of `taxi`, `hotrodp4`, `hotrodp5`, `tbirdold`, `fordhot`,
+  `phantomtaxi`, `hotrodp2`, `fordapicktaxi`, `blackdragon`), it counts
+  0x63d72c down and calls `GeneratePassengerForTaxi` (0x44f7d0).
+- `GeneratePassengerForTaxi` restarts the countdown at 500 + 524 * rnd(4) ms,
+  then needs: the player's car (+0x98, type 4), the HUD timer off, the
+  player in seat 0 (+0xac), driver speed (C_Vehicle +0x59c) at most 20, taxi
+  points in C_game (+0x1f8/+0x1fc, `LoadTaxiPoints`: `taxi_point*` frames),
+  no officer on the player (`PocetNasranych` 0x49d460 while the police
+  manager, C_game +0x2da0, is on), no passenger (seats 1 and up of the vector
+  at +0xd14), and at most one walker already waving (else +4000 ms). It takes
+  the last walker of the active vector that is not type 1, 3 or 4, active,
+  not panic-blocked (+0x00) or panicking (+0x19e), owned by a generator
+  (+0x04), following no car (+0x1a8), not waving (+0x1fe), walking (current
+  animation +0x160 == 6), fully faded in (+0xbc >= 1), allowed to hail
+  (+0x1ff), 20 to 90 from the taxi and within 0.6283 rad of its heading. It
+  sets +0x1fe, adds 4000 ms, and plays "Mavani01/02/03 HPT.i3d" (rnd(3)) as
+  the animation machine's extended animation at 0.9 with note 0xdca9 at
+  machine +0x10e (0x44fc4d-0x44fcd5).
+- Element `Tick` (0x45334c) runs `MavaNaTaxi` (0x451ff0) on a waving walker
+  while the police manager is on and `PocetNasranych(player)` is 0, else it
+  ends every wave (`ZrusVsechnyMavajici` 0x44fd10). With the police manager
+  off it returns with the walker frozen.
+- `MavaNaTaxi` ends the wave when the player has no car, turns the walker to
+  the taxi (anims 8/9, breath 1), and once the driver speed is below 0.5 within
+  10 (squared 100) of the walker (0x4522ed-0x45232f) duplicates the walker's
+  model into a `C_entity` running `system\taxi_pas.dat` (a9.dta), ends every
+  wave, deactivates the walker and sets the countdown to 20000 (0x452c3f-
+  0x452c4b). It retires a waving walker past its despawn radius.
+- `EndMavaniNaTaxi` (0x452ca0) fades the wave over 4 s when the machine's note
+  is 0xdca9 and clears +0x1fe; panics and hits call it.
+- `taxi_pas.dat`: waits for the cab to stop within 15, locks it, boards seat 3
+  of a car with more than three seats (else seat 1), sets the compass and a
+  countdown of the ride time (60 * ((20 + length / 13.8) / 60 + 1) s, whole
+  minutes, from the road path), shows the destination's camera child for
+  2 s, then rides while the player owns the cab. Stopped within 15 of the
+  destination it pays fare + fare * time left / ride time (fare 200 * (length
+  / 1000 + 1)), the passenger gets out and returns to traffic. If the player
+  leaves the cab the passenger gets out unpaid.
+
+Multiplayer: the simulation host runs the hailing for every player a script
+allows (`Shared::Taxi::Drivers`) with the retail gates per driver and its own
+countdown (`TaxiHost`, features/pedestrian/taxi_host.*): each driver's replica
+and its replicated car stand in for C_game's player and taxi; the speed is the
+car's replicated velocity, since the host's copy of a player's car runs no
+physics. A waving walker ticks with C_game's player swapped to its driver;
+`MavaNaTaxi` runs with the taxi's speed field held at 1.0 so retail never
+makes its own passenger, and the host reports the boarding moment as a
+`Pickup` instead. Hails, their ends and pickups go to the server
+(`TaxiService`), which sets the walker's `taxiWave` so every player's replica
+shows the same wave. A script boards the walker with `Taxi.board`: a scripted
+NPC created on the host where the walker stands (`Npc::Create::walkerKey`; the
+walker retires, players swap it via `sourcePedestrianId`), which enters a
+passenger seat of the player's car with `npc.enterVehicle`. The server accepts
+NPC seats in passenger seats of a player-driven car (no host claim), so the
+passenger sits in that car on every client while the player keeps driving.
+Differences from retail: hails need a script's `Taxi.setHailable`; each
+driver counts only its own waving walkers and its own police record; a
+wanted driver ends only its own waves; the car is not locked while the
+passenger boards (the host waits for it to be nearly still); the passenger is
+removed out of sight instead of returning to traffic.

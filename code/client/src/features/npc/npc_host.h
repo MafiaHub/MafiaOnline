@@ -83,6 +83,11 @@ namespace Mafia1Online::Features::Npc {
         [[nodiscard]] bool Owns(const void *actor) const {
             return _npcs.contains(const_cast<void *>(actor));
         }
+        // One a server script spawned (Npc.spawn, Taxi.board).
+        [[nodiscard]] bool IsScripted(const void *actor) const {
+            const auto found = _npcs.find(const_cast<void *>(actor));
+            return found != _npcs.end() && Shared::Npc::IsScriptedKey(found->second.key);
+        }
         void ForEachTracked(const std::function<void(SDK::Player::NativeActor *, Shared::Entities::NpcKind)> &visit) const;
         // Before the host removes a player's replica: nothing native may keep
         // pointing at it (crime record, police actions, car hunts).
@@ -212,8 +217,17 @@ namespace Mafia1Online::Features::Npc {
         // closer to them.
         void RetargetOfficers(SDK::Police::NativePoliceManager &police);
         // Turns the police manager on for the loaded mission and keeps every
-        // spawned player's replica in its crime records.
+        // spawned player's replica in its crime records, except the police
+        // officers', which it treats as retail treats its own.
         void UpdatePolice(World::WorldService &world);
+        // A replica just turned officer or back: every NPC rates it afresh.
+        void ForgetContacts(SDK::Player::NativeActor *replica);
+        // Script backup orders (Police.sendBackup), each answered.
+        void SendBackups(SDK::Police::NativePoliceManager &police);
+        // Any spawned player's replica, officer or not.
+        [[nodiscard]] bool IsPlayerReplica(const void *actor) const {
+            return _policePersons.contains(const_cast<void *>(actor)) || _policeOfficers.contains(const_cast<void *>(actor));
+        }
 
         World::WorldService *_world = nullptr;
         ScriptedNpcHost _scripted {*this};
@@ -237,6 +251,21 @@ namespace Mafia1Online::Features::Npc {
         };
         std::vector<PendingOrder> _policeOrders;
         bool _policeEnabled = true;
+        // Players on police duty (network ids, from the server) and the
+        // replicas of theirs that are out of the crime records and carry
+        // the police behaviour class.
+        std::unordered_set<uint64_t> _officerIds;
+        std::unordered_set<void *> _policeOfficers;
+        // A police car the server asked for; the suspect's replica may not
+        // be recorded yet (just spawned) and is waited for like an order.
+        // C_shvestky::DalsiChalpiDoPartie looks for its road node about this
+        // far from the suspect; retail's own reinforcements use 200.
+        static constexpr float kBackupRadius = 140.0f;
+        struct PendingBackup {
+            Shared::Npc::PoliceBackup order;
+            std::chrono::steady_clock::time_point received;
+        };
+        std::vector<PendingBackup> _backups;
         // Spawned players' positions, refreshed every Update.
         std::vector<SDK::Player::Vector3> _observers;
         std::chrono::steady_clock::time_point _lastSnapshot;

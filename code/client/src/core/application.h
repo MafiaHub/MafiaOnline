@@ -22,11 +22,13 @@
 #include "features/hud/hud_service.h"
 #include "features/script/script_service.h"
 #include "features/sound/sound_service.h"
+#include "features/fire/fire_service.h"
 #include "features/player/player_service.h"
 #include "features/seat/seat_service.h"
 #include "features/traffic/road_barriers.h"
 #include "features/railway/railway_service.h"
 #include "features/bridge/bridge_service.h"
+#include "features/pumper/pumper_service.h"
 #include "features/props/props_service.h"
 #include "features/traffic/traffic_crew.h"
 #include "features/traffic/traffic_host.h"
@@ -146,6 +148,7 @@ namespace Mafia1Online::Core {
         Features::Traffic::TrafficCrewService _trafficCrew;
         Features::Railway::RailwayService _railways;
         Features::Bridge::BridgeService _bridges;
+        Features::Pumper::PumperService _pumpers;
         Features::Props::PropsService _props;
         Features::Traffic::RoadBarrierService _roadBarriers;
         Features::Car::DebrisService _debris;
@@ -161,6 +164,7 @@ namespace Mafia1Online::Core {
         Features::GameplayMenu::GameplayMenuService _gameplayMenus;
         Features::Environment::EnvironmentService _environment;
         Features::Sound::SoundService _sounds;
+        Features::Fire::FireService _fires;
         Features::Effects::EffectsService _effects;
         Features::Hud::HudService _hud;
         Features::Script::ScriptService _script;

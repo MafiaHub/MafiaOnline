@@ -35,6 +35,7 @@ namespace Mafia1Online::Features::World {
         uint32_t gLoadedRailways                       = 0;
         uint32_t gLoadedBridges                        = 0;
         uint32_t gLoadedPhysicalProps                  = 0;
+        uint32_t gLoadedPumpers                        = 0;
         using MenuExecute                              = uint32_t(__fastcall *)(void *, bool, bool);
         MenuExecute gMenuExecuteOriginal               = nullptr;
         using MissionProgram                           = void(__thiscall *)(void *);
@@ -77,7 +78,7 @@ namespace Mafia1Online::Features::World {
                     ++gSuppressedActors;
                     return nullptr;
                 }
-                ++(type == 6 ? gLoadedDoors : type == 12 ? gLoadedTraffic : type == 8 ? gLoadedRailways : type == 20 ? gLoadedBridges : type == 35 ? gLoadedPhysicalProps : gLoadedGenerators);
+                ++(type == 6 ? gLoadedDoors : type == 12 ? gLoadedTraffic : type == 8 ? gLoadedRailways : type == 20 ? gLoadedBridges : type == 25 ? gLoadedPumpers : type == 35 ? gLoadedPhysicalProps : gLoadedGenerators);
             }
             return gCreateActorOriginal(mission, type);
         }
@@ -285,10 +286,11 @@ namespace Mafia1Online::Features::World {
             gLoadedRailways   = 0;
             gLoadedBridges    = 0;
             gLoadedPhysicalProps = 0;
+            gLoadedPumpers    = 0;
         }
         else {
-            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Suppressed {} mission-file actor spawns; kept {} doors, {} pedestrian generators, {} car traffic, {} railways, {} bridges and {} physical props",
-                                                                        gSuppressedActors, gLoadedDoors, gLoadedGenerators, gLoadedTraffic, gLoadedRailways, gLoadedBridges, gLoadedPhysicalProps);
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Suppressed {} mission-file actor spawns; kept {} doors, {} pedestrian generators, {} car traffic, {} railways, {} bridges, {} gas station attendants and {} physical props",
+                                                                        gSuppressedActors, gLoadedDoors, gLoadedGenerators, gLoadedTraffic, gLoadedRailways, gLoadedBridges, gLoadedPumpers, gLoadedPhysicalProps);
         }
     }
 

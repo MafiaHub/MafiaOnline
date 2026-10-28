@@ -183,7 +183,8 @@ namespace Mafia1Online::SDK::Police {
     inline constexpr uintptr_t kBoardSeesOffender = 0x53D220;
     // char __thiscall DalsiChalpiDoPartie(C_human *, unsigned mode, float
     // radius), ret 0Ch: a police car with two officers from the pools,
-    // hunting the person from a road node about the radius away.
+    // hunting the person from a road node about the radius away (ten tries
+    // for a node farther than 0.66 of it, 0x49efc0-0x49f0c1).
     inline constexpr uintptr_t kSendReinforcements = 0x49EEE0;
     inline constexpr uint32_t kModeKillCar = 0;
     inline constexpr uint32_t kModeArrestCar = 4;
@@ -256,9 +257,11 @@ namespace Mafia1Online::SDK::Police {
             using Call = int32_t(__thiscall *)(NativePoliceManager *, Player::NativeActor *);
             return reinterpret_cast<Call>(kLivingOfficersOn)(this, person);
         }
-        bool SendReinforcements(Player::NativeActor *person, uint32_t mode) {
+        // False when the pool has fewer than two free officers (GetFreeEnemy),
+        // the person has no record or no road node lies far enough away.
+        bool SendReinforcements(Player::NativeActor *person, uint32_t mode, float radius = kReinforcementRadius) {
             using Call = char(__thiscall *)(NativePoliceManager *, Player::NativeActor *, uint32_t, float);
-            return reinterpret_cast<Call>(kSendReinforcements)(this, person, mode, kReinforcementRadius) != 0;
+            return reinterpret_cast<Call>(kSendReinforcements)(this, person, mode, radius) != 0;
         }
 
         bool _active;

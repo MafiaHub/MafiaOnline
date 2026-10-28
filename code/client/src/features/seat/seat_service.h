@@ -29,8 +29,10 @@ namespace Mafia1Online::Features::Seat {
         // Simulation host: its NPCs never get into a player's network car,
         // whose seats only the server assigns and whose physics run on a
         // player's client. Retail AI enters cars through Use_Actor (fight
-        // party, follow link, script).
-        bool BlocksNpcEntry(SDK::Seat::NativeHuman *human, SDK::Seat::NativeCar *car) const;
+        // party, follow link, script). A scripted NPC may take a passenger
+        // seat of a car a player drives (a taxi fare, a patient): the server
+        // records it there and the player keeps the car.
+        bool BlocksNpcEntry(SDK::Seat::NativeHuman *human, SDK::Seat::NativeCar *car, int seat) const;
         // Players: a car the simulation host drives takes the local player
         // only into a seat nobody holds, or the driver's seat of a traffic
         // car as a steal (its driver is thrown out); never a police car's.

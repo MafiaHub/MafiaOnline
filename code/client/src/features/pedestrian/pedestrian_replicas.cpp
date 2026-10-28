@@ -118,6 +118,17 @@ namespace Mafia1Online::Features::Pedestrian {
             if (element->HasUmbrella() && !walker->umbrella) {
                 element->DropUmbrella();
             }
+            // The host's walker waves for a taxi: retail's wave as this
+            // replica's extended animation, faded out as EndMavaniNaTaxi
+            // fades it. The turns and the breath under it come with the
+            // host's animation like any other.
+            if (replica.appliedWave != walker->taxiWave) {
+                if (replica.appliedWave) {
+                    element->EndTaxiWave();
+                }
+                replica.appliedWave = walker->taxiWave;
+                element->ShowTaxiWave(walker->taxiWave);
+            }
             if (walker->animation != element->CurrentAnimation()) {
                 element->PlayAnimation(walker->animation, walker->animationFlag);
                 replica.holding = false;
@@ -216,6 +227,9 @@ namespace Mafia1Online::Features::Pedestrian {
         // Deactivate unregisters what ActivateFree registered and returns the
         // element to its pool; after mission teardown there is nothing left.
         if (replica.element && world.IsReady() && replica.element->IsActive()) {
+            if (replica.appliedWave) {
+                replica.element->EndTaxiWave();
+            }
             replica.element->Deactivate();
         }
         replica.element = nullptr;

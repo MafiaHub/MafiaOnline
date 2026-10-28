@@ -47,6 +47,7 @@ namespace Mafia1Online::Core {
         _cameraFollow.RegisterRPC();
         _railways.RegisterRPC();
         _bridges.RegisterRPC();
+        _pumpers.RegisterRPC();
         _props.RegisterRPC();
         _effects.RegisterRPC(_world);
         _sounds.RegisterRPC(_world);
@@ -113,6 +114,10 @@ namespace Mafia1Online::Core {
             Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->critical("Could not install bridge hooks");
             ExitProcess(1);
         }
+        if (!_pumpers.Install(_world)) {
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->critical("Could not install gas station attendant hooks");
+            ExitProcess(1);
+        }
         if (!_props.Install()) {
             Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->critical("Could not install world prop hooks");
             ExitProcess(1);
@@ -164,6 +169,7 @@ namespace Mafia1Online::Core {
             _trafficCrew.Reset();
             _railways.Reset();
             _bridges.Reset();
+            _pumpers.Reset();
             _props.Reset();
             _roadBarriers.OnMissionClosing();
             _traffic.Reset();
@@ -177,6 +183,7 @@ namespace Mafia1Online::Core {
             _doors.Reset();
             _mapObjects.OnMissionClosing();
             _sounds.OnMissionClosing();
+            _fires.OnMissionClosing();
             _hud.OnMissionClosing();
             _environment.OnMissionClosing();
         });
@@ -206,6 +213,7 @@ namespace Mafia1Online::Core {
         // Railways first: riders are placed on this frame's wagons.
         _railways.Update(_world);
         _bridges.Update(_world);
+        _pumpers.Update(_world);
         _props.Update(_world);
         _players.Update(_world);
         _pedestrians.Update(_world);
@@ -238,6 +246,7 @@ namespace Mafia1Online::Core {
         _environment.Update(_world);
         if (!host) {
             _sounds.Update(_world);
+            _fires.Update(_world);
             _hud.Update(_world);
             _script.Update(_world);
         }
@@ -332,6 +341,7 @@ namespace Mafia1Online::Core {
         _roadBarriers.Reset(_world);
         _railways.Uninstall();
         _bridges.Uninstall();
+        _pumpers.Uninstall();
         _props.Uninstall();
         if (Features::Simulation::IsHost()) {
             _traffic.Uninstall();
@@ -342,6 +352,7 @@ namespace Mafia1Online::Core {
         }
         _script.Reset();
         _sounds.Reset();
+        _fires.Reset();
         _hud.Reset();
         _environment.Reset();
         _pickups.Shutdown();
@@ -381,6 +392,7 @@ namespace Mafia1Online::Core {
         _cameraFollow.Reset();
         _script.Reset();
         _sounds.Reset();
+        _fires.Reset();
         _hud.Reset();
         _environment.Reset();
         _chat.Reset();

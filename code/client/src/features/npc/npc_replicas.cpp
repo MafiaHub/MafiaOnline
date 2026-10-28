@@ -119,6 +119,7 @@ namespace Mafia1Online::Features::Npc {
             }
             auto *actor = world.NativeObjects().Resolve(replica.handle);
             if (actor) {
+                ApplyAnimation(replica, actor, *npc);
                 ApplyPose(replica, actor, npc->alive);
             }
         });
@@ -186,6 +187,10 @@ namespace Mafia1Online::Features::Npc {
         if (human->AnimationState() == SDK::Player::kHumanThrowGrenadeAnimation) {
             return;
         }
+        // A script clip owns the body until it ends or is stopped.
+        if (std::chrono::steady_clock::now() < replica.animatingUntil) {
+            return;
+        }
         // The state at the same render time as the pose.
         std::optional<int16_t> state;
         for (const auto &[at, value] : replica.locomotion) {
@@ -202,6 +207,33 @@ namespace Mafia1Online::Features::Npc {
             human->SetLocomotionAnimation(static_cast<SDK::Player::LocomotionAnimation>(animation.state));
         }
         replica.lastAnimation = animation.state;
+    }
+
+    void NpcReplicaService::ApplyAnimation(Replica &replica, void *native, const Shared::Entities::NpcEntity &npc) {
+        if (replica.animationSynced && replica.animationRevision == npc.animationRevision) {
+            return;
+        }
+        const bool first = !replica.animationSynced;
+        replica.animationSynced = true;
+        replica.animationRevision = npc.animationRevision;
+        auto *human = static_cast<SDK::Player::NativeHuman *>(native);
+        if (!npc.alive) {
+            return;
+        }
+        if (npc.animation.empty()) {
+            if (!first) {
+                human->StopAnimation();
+            }
+            replica.animatingUntil = {};
+            return;
+        }
+        // A one-shot clip that started before this copy existed is over.
+        if (first && !npc.animationLoop) {
+            return;
+        }
+        const uint32_t duration = human->PlayScriptAnimation(npc.animation.c_str(), npc.animationLoop);
+        replica.animatingUntil = npc.animationLoop ? std::chrono::steady_clock::time_point::max()
+                                                   : std::chrono::steady_clock::now() + std::chrono::milliseconds(duration);
     }
 
     void NpcReplicaService::Remove(World::WorldService &world, uint64_t networkId, const Replica &replica) {

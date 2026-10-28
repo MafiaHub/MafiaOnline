@@ -538,7 +538,12 @@ namespace Mafia1Online::Features::Npc {
 
     void NpcService::Update() {
         if (!_simulation->Host()) {
-            Clear();
+            // The host's NPCs went with it. Each retires as if the host had
+            // retired it, so its car seat is freed and scripts holding a
+            // handle (npcRetire) know to make another once a host is back.
+            while (!_npcs.empty()) {
+                Retire(_npcs.begin());
+            }
             return;
         }
         const auto now = std::chrono::steady_clock::now();
@@ -612,6 +617,17 @@ namespace Mafia1Online::Features::Npc {
         return true;
     }
 
+    void NpcService::RemoveOwnedBy(const std::string &owner) {
+        if (owner.empty()) {
+            return;
+        }
+        for (auto &[key, npc] : _npcs) {
+            if (npc.scripted && npc.owner == owner && !npc.removeSent) {
+                npc.removeSent = Remove(npc.state.networkId);
+            }
+        }
+    }
+
     Shared::Entities::NpcEntity *NpcService::Find(uint64_t networkId) const {
         const auto key = _keyByNetworkId.find(networkId);
         if (key == _keyByNetworkId.end()) {
@@ -668,6 +684,7 @@ namespace Mafia1Online::Features::Npc {
         entity->model = request.model;
         entity->missionGeneration = _missionGeneration;
         entity->kind = Shared::Entities::NpcKind::Scripted;
+        entity->sourcePedestrianId = request.walkerId;
         entity->alive = true;
         entity->streaming.range = kStreamRange;
         entity->SetVirtualWorld(request.virtualWorld);
@@ -676,6 +693,7 @@ namespace Mafia1Online::Features::Npc {
         npc.entity = entity;
         npc.scripted = true;
         npc.behaviour = request.behaviour;
+        npc.owner = request.owner;
         npc.createdAt = std::chrono::steady_clock::now();
         npc.lastSeen = npc.createdAt;
         auto &state = npc.state;
@@ -701,6 +719,7 @@ namespace Mafia1Online::Features::Npc {
         create.weaponId = request.weaponId;
         create.loaded = request.loaded;
         create.reserve = request.reserve;
+        create.walkerKey = request.walkerKey;
         Framework::CoreModules::GetNetworkPeer()->SendRPC(create, MafiaNet::ToGuid(*host), MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
         Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->info("Scripted NPC {} ({}, {}) requested", state.networkId, request.model, Shared::Npc::BehaviourName(request.behaviour));
         return entity;
@@ -731,7 +750,14 @@ namespace Mafia1Online::Features::Npc {
                 }
             }
         }
-        if (task.type == Type::EnterVehicle) {
+        if (task.type == Type::EnterVehicle && task.seat != 0 && _vehicles.playerDriven && _vehicles.playerDriven(task.targetId)) {
+            // A passenger seat of a car a player drives: the player keeps it
+            // and its physics; the NPC rides along.
+            const uint64_t previous = npc->claimedCar;
+            npc->claimedCar = 0;
+            ReleaseCar(previous);
+        }
+        else if (task.type == Type::EnterVehicle) {
             // The host drives the car while a scripted NPC boards or sits in
             // it (NpcHost's seat rule: only cars it drives).
             if (npc->claimedCar != task.targetId) {
@@ -753,6 +779,12 @@ namespace Mafia1Online::Features::Npc {
         task.taskId = _nextTaskId++;
         npc->task = {task.taskId, task.type};
         npc->taskRunning = task.type != Type::Stop;
+        // The host stops a script clip when the task begins.
+        if (!npc->entity->animation.empty()) {
+            npc->entity->animation.clear();
+            npc->entity->animationLoop = false;
+            ++npc->entity->animationRevision;
+        }
         ReleaseIfUnused(*npc);
         Framework::CoreModules::GetNetworkPeer()->SendRPC(task, MafiaNet::ToGuid(*host), MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
         return task.taskId;
@@ -767,6 +799,34 @@ namespace Mafia1Online::Features::Npc {
         order.missionGeneration = _missionGeneration;
         order.key = _keyByNetworkId.at(networkId);
         Framework::CoreModules::GetNetworkPeer()->SendRPC(order, MafiaNet::ToGuid(*host), MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
+        return true;
+    }
+
+    bool NpcService::SetAnimation(uint64_t networkId, const std::string &name, bool loop) {
+        auto *npc = FindNetwork(networkId);
+        const auto host = _simulation ? _simulation->Host() : std::nullopt;
+        if (!npc || !npc->scripted || !npc->state.alive || !host || (!name.empty() && !Shared::Npc::AnimationNameValid(name))) {
+            return false;
+        }
+        // Do_PlayAnim replaces the seated pose and Do_StopAnim leaves the
+        // human in the standing idle state: a clip in a car seat (a taxi
+        // fare) would break the seat and its later exit.
+        if (!name.empty() && _vehicles.seatedCar && _vehicles.seatedCar(networkId) != 0) {
+            return false;
+        }
+        Shared::Npc::Animation animation;
+        animation.missionGeneration = _missionGeneration;
+        animation.key = _keyByNetworkId.at(networkId);
+        animation.name = name;
+        animation.loop = loop;
+        if (!name.empty() && npc->taskRunning) {
+            npc->taskRunning = false;
+            ReleaseIfUnused(*npc);
+        }
+        npc->entity->animation = name;
+        npc->entity->animationLoop = !name.empty() && loop;
+        ++npc->entity->animationRevision;
+        Framework::CoreModules::GetNetworkPeer()->SendRPC(animation, MafiaNet::ToGuid(*host), MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
         return true;
     }
 

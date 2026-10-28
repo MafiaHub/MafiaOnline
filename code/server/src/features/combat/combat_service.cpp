@@ -1310,12 +1310,21 @@ namespace Mafia1Online::Features::Combat {
         }
         const ThrowRecord accepted = *record;
         _throws.erase(record);
+        // The blast stays in the thrower's virtual world: a grenade in the
+        // street does not reach a safehouse copy of the same building.
+        const uint32_t world = thrower->GetVirtualWorld();
         if (grenade) {
-            ApplyAreaDamage(accepted.throwerId, accepted.missionGeneration, position, 15.0f, true, 400.0f, 15);
+            ApplyAreaDamage(accepted.throwerId, accepted.missionGeneration, position, 15.0f, true, 400.0f, 15, world);
         }
         else {
-            const auto now = Clock::now();
-            _fires.push_back({accepted.throwerId, uint8_t {5}, accepted.missionGeneration, position, now, {}});
+            FireArea fire;
+            fire.sourceId          = accepted.throwerId;
+            fire.weaponId          = uint8_t {5};
+            fire.missionGeneration = accepted.missionGeneration;
+            fire.position          = position;
+            fire.startedAt         = Clock::now();
+            fire.virtualWorld      = world;
+            _fires.push_back(fire);
         }
         Shared::Combat::Detonation detonation;
         detonation.throwerNetworkId  = accepted.throwerId;
@@ -1329,7 +1338,7 @@ namespace Mafia1Online::Features::Combat {
     }
 
     void CombatService::ApplyAreaDamage(uint64_t sourceId, uint64_t missionGeneration, const glm::vec3 &position, float radius, bool explosion, float damage,
-                                        std::optional<uint8_t> weaponId) {
+                                        std::optional<uint8_t> weaponId, uint32_t virtualWorld) {
         std::vector<Shared::Entities::PlayerEntity *> victims;
         _players->ForEach([&](Shared::Entities::PlayerEntity *player) {
             victims.push_back(player);
@@ -1338,6 +1347,7 @@ namespace Mafia1Online::Features::Combat {
             // Retail explosions and fires never reach a seated human: HitInCar
             // applies only generic and car-impact damage.
             if (!player->spawned || !player->alive || player->missionGeneration != missionGeneration ||
+                !MafiaNet::VirtualWorldsCanSee(player->GetVirtualWorld(), virtualWorld) ||
                 _cars->SeatForPlayer(player->GetNetworkID(), player->spawnGeneration).has_value()) {
                 continue;
             }
@@ -1408,7 +1418,7 @@ namespace Mafia1Online::Features::Combat {
             if (it->lastTick == Clock::time_point {} || now - it->lastTick >= kTick) {
                 it->lastTick = now;
                 const float remaining = std::chrono::duration<float>(it->life - age).count();
-                ApplyAreaDamage(it->sourceId, it->missionGeneration, it->position, it->radius, false, it->damage * remaining, it->weaponId);
+                ApplyAreaDamage(it->sourceId, it->missionGeneration, it->position, it->radius, false, it->damage * remaining, it->weaponId, it->virtualWorld);
             }
             ++it;
         }
@@ -1418,7 +1428,8 @@ namespace Mafia1Online::Features::Combat {
         ApplyAreaDamage(sourceId, missionGeneration, position, radius, true, damage, std::nullopt);
     }
 
-    void CombatService::StartFire(uint64_t sourceId, uint64_t missionGeneration, const glm::vec3 &position, std::chrono::milliseconds life, float radius, float damage) {
+    void CombatService::StartFire(uint64_t sourceId, uint64_t missionGeneration, const glm::vec3 &position, std::chrono::milliseconds life, float radius, float damage,
+                                  uint32_t virtualWorld) {
         FireArea fire;
         fire.sourceId          = sourceId;
         fire.weaponId          = std::nullopt;
@@ -1428,6 +1439,7 @@ namespace Mafia1Online::Features::Combat {
         fire.life              = life;
         fire.radius            = radius;
         fire.damage            = damage;
+        fire.virtualWorld      = virtualWorld;
         _fires.push_back(fire);
     }
 

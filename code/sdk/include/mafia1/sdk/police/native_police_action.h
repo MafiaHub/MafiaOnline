@@ -182,6 +182,18 @@ namespace Mafia1Online::SDK::Police {
         *reinterpret_cast<uint32_t *>(reinterpret_cast<std::byte *>(entity) + kEntityBehaviourClass) = behaviourClass;
     }
 
+    // C_entity::m_Logs (+0xe88) and void __thiscall ai_logs::Destroy(C_actor
+    // *), ret 4: erases the entry for the actor, as C_entity::InvalidateActor
+    // does (0x5288e3). ai_logs::Event rates an actor's class once, when its
+    // entry is created (0x4f6f22), so an entity that changes class is
+    // forgotten to be rated afresh on its next event.
+    inline constexpr uintptr_t kEntityLogs = 0xE88;
+    inline constexpr uintptr_t kLogsDestroy = 0x4F7A90;
+    inline void ForgetContact(Player::NativeActor *entity, Player::NativeActor *other) {
+        using Call = void(__thiscall *)(void *, Player::NativeActor *);
+        reinterpret_cast<Call>(kLogsDestroy)(reinterpret_cast<std::byte *>(entity) + kEntityLogs, other);
+    }
+
     // void __thiscall ai_police_nastenka::PlukovnikuMamZmrdaPlayera(), plain
     // ret, on g_PoliceNastenka (0x646d10): clamps the shift timer (+0x24) to
     // 12000. Once it runs out, C_shvestky::Tick (0x49a3d3) fades out and

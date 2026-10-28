@@ -7,6 +7,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <iterator>
 
 namespace Mafia1Online::SDK::Traffic {
     // Retail pedestrian traffic: C_traffic_generator actors (mission actor
@@ -128,6 +130,66 @@ namespace Mafia1Online::SDK::Traffic {
     inline constexpr uintptr_t kActorSetActState = 0x406DA0;
     inline constexpr int32_t kActStateActive = 0;
 
+    // Retail taxi hailing. TickElements' tail (0x44f052-0x44f07c) runs
+    // GeneratePassengerForTaxi (0x44f7d0) on its own countdown (0x63d72c)
+    // while the mission script enabled taxi passengers (0x63d72a,
+    // EnableTaxiDriver 0x44fcf0) and C_game's player sits in a taxi
+    // (0x63d729, PlayerInTaxi 0x44f740). It picks the last eligible walker in the active-element vector and
+    // starts its wave; element Tick (0x45334c) then runs MavaNaTaxi
+    // (0x451ff0) on a waving walker instead of walking it, while the police
+    // manager is on and has no officer on C_game's player.
+    inline constexpr uintptr_t kElementMavaNaTaxi      = 0x451FF0;
+    // void __thiscall EndMavaniNaTaxi(): fades the wave out over 4 s when
+    // the machine's last extended-animation note is the wave's, and clears
+    // +0x1fe (0x452ca0-0x452cbb).
+    inline constexpr uintptr_t kElementEndMavaniNaTaxi = 0x452CA0;
+    // int __thiscall C_shvestky::PocetNasranych(C_human *), ret 4: officers
+    // on the person. Hailing and waving stop while it is above 0.
+    inline constexpr uintptr_t kPoliceOfficersOn = 0x49D460;
+    // PlayerInTaxi's model names (0x632648-0x6326a8), compared without case
+    // against C_car's name at +0x218c: the model file name without its
+    // "NN.i3d" (C_car Init strips 6 characters).
+    inline constexpr const char *kTaxiModelNames[] {"taxi", "hotrodp4", "hotrodp5", "tbirdold", "fordhot", "phantomtaxi", "hotrodp2", "fordapicktaxi", "blackdragon"};
+    inline constexpr uintptr_t kCarName = 0x218C;
+    inline bool IsTaxiCar(const void *car) {
+        const char *name = static_cast<const char *>(car) + kCarName;
+        for (const char *taxi : kTaxiModelNames) {
+            if (_stricmp(name, taxi) == 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+    // GeneratePassengerForTaxi: the countdown restarts at 500 + 524 * rnd(4)
+    // ms (0x44f7f8); a hail or a second waving walker adds 4000 (0x44f921,
+    // 0x44fc65). Retail's taxi_pas.dat passenger leaves a 20 s countdown.
+    inline constexpr int32_t kTaxiTimerBaseMs = 500;
+    inline constexpr int32_t kTaxiTimerStepMs = 524;
+    inline constexpr int32_t kTaxiTimerVariants = 4;
+    inline constexpr int32_t kTaxiRetryDelayMs = 4000;
+    inline constexpr int32_t kTaxiPassengerCooldownMs = 20000;
+    // The taxi's driver speed (C_Vehicle +0x59c) must not exceed 20; the
+    // walker stands 20 to 90 away (squared 400 and 8100, exclusive), within
+    // 0.6283 rad of the taxi's heading; at most one other walker may wave.
+    inline constexpr float kTaxiHailMaxSpeed = 20.0f;
+    inline constexpr float kTaxiHailMinDistanceSq = 400.0f;
+    inline constexpr float kTaxiHailMaxDistanceSq = 8100.0f;
+    inline constexpr float kTaxiHailAngle = 0.62831855f;
+    inline constexpr int32_t kTaxiMaxOtherWavers = 1;
+    // MavaNaTaxi boards the walker once the driver speed is below 0.5 within
+    // 10 of it (squared 100, 0x4522ed-0x45232f).
+    inline constexpr float kTaxiBoardMaxSpeed = 0.5f;
+    inline constexpr float kTaxiBoardDistanceSq = 100.0f;
+    // The walk animation id a hail requires (+0x160 == 6).
+    inline constexpr int32_t kWalkAnimation = 6;
+    // The wave: "Mavani0N HPT.i3d" at weight 0.9, no fade, looping, with
+    // note 0xdca9 written to the machine's last extended-animation note
+    // (+0x10e, a word) so EndMavaniNaTaxi recognises it (0x44fc73-0x44fcd5).
+    inline constexpr const char *kTaxiWaveAnimations[] {"Mavani01 HPT.i3d", "Mavani02 HPT.i3d", "Mavani03 HPT.i3d"};
+    inline constexpr float kTaxiWaveWeight = 0.9f;
+    inline constexpr uint16_t kTaxiWaveNote = 0xDCA9;
+    inline constexpr uintptr_t kAnimationMachineLastNote = 0x10E;
+
     struct NativeTrafficElement {
         [[nodiscard]] bool IsActive() const { return _active; }
         [[nodiscard]] const Player::Vector3 &Position() const { return _position; }
@@ -243,6 +305,45 @@ namespace Mafia1Online::SDK::Traffic {
             using Call = void(__thiscall *)(NativeTrafficElement *, uint32_t);
             reinterpret_cast<Call>(kElementTick)(this, frameMs);
         }
+
+        // GeneratePassengerForTaxi's walker gates (0x44fae0-0x44fb71): panic
+        // blocked +0x00, the owning generator +0x04, panicking +0x19e, a
+        // followed car +0x1a8, waving +0x1fe, may hail +0x1ff.
+        [[nodiscard]] bool PanicBlocked() const { return *reinterpret_cast<const bool *>(Raw() + 0x00); }
+        [[nodiscard]] bool HasGenerator() const { return *reinterpret_cast<void *const *>(Raw() + 0x04) != nullptr; }
+        [[nodiscard]] bool Panicking() const { return *reinterpret_cast<const bool *>(Raw() + 0x19e); }
+        [[nodiscard]] bool FollowsCar() const { return *reinterpret_cast<void *const *>(Raw() + 0x1a8) != nullptr; }
+        [[nodiscard]] bool TaxiWaving() const { return *reinterpret_cast<const bool *>(Raw() + 0x1fe); }
+        [[nodiscard]] bool CanHailTaxi() const { return *reinterpret_cast<const bool *>(Raw() + 0x1ff); }
+        // GeneratePassengerForTaxi's hail (0x44fc4d-0x44fce5): the wave flag
+        // and the retail wave as the extended animation. variant 1 to 3.
+        void StartTaxiWave(uint8_t variant) {
+            *reinterpret_cast<bool *>(Raw() + 0x1fe) = true;
+            ShowTaxiWave(variant);
+        }
+        // The wave animation alone, for a replica whose host walker waves.
+        void ShowTaxiWave(uint8_t variant) {
+            if (variant == 0 || variant > std::size(kTaxiWaveAnimations) || !_animationMachine) {
+                return;
+            }
+            void *animation = nullptr;
+            using Open = int(__thiscall *)(void *, const char *, void **, int, int);
+            reinterpret_cast<Open>(kAnimationSetCacheOpen)(reinterpret_cast<void *>(kAnimationSetCache), kTaxiWaveAnimations[variant - 1], &animation, 0, 0);
+            if (!animation) {
+                return;
+            }
+            using SetExtendedAnim = void(__thiscall *)(void *, void *, float, float, bool);
+            reinterpret_cast<SetExtendedAnim>(kAnimationMachineSetExtendedAnim)(_animationMachine, animation, kTaxiWaveWeight, 0.0f, false);
+            *reinterpret_cast<uint16_t *>(static_cast<std::byte *>(_animationMachine) + kAnimationMachineLastNote) = kTaxiWaveNote;
+            using Release = int(__stdcall *)(void *);
+            reinterpret_cast<Release>((*static_cast<void ***>(animation))[0])(animation);
+        }
+        void EndTaxiWave() {
+            using Call = void(__thiscall *)(NativeTrafficElement *);
+            reinterpret_cast<Call>(kElementEndMavaniNaTaxi)(this);
+        }
+        [[nodiscard]] const std::byte *Raw() const { return reinterpret_cast<const std::byte *>(this); }
+        [[nodiscard]] std::byte *Raw() { return reinterpret_cast<std::byte *>(this); }
 
         std::byte _unused00[0x08];
         void *_animationMachine;

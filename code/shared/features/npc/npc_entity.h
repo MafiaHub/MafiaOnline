@@ -44,6 +44,7 @@ namespace Mafia1Online::Shared::Entities {
       public:
         static constexpr const char *kTypeName = "Mafia1Online::Npc";
         static constexpr size_t kMaxModelLength = 63;
+        static constexpr size_t kMaxAnimationLength = 59;
         // An NPC has one life; its combat records use this spawn generation.
         static constexpr uint64_t kSpawnGeneration = 1;
 
@@ -67,6 +68,12 @@ namespace Mafia1Online::Shared::Entities {
         // The host's native locomotion state (C_human m_iAnimState), which
         // rides with the pose like a player's.
         int16_t locomotion = 1;
+        // The clip a script plays on it (npc.playAnimation), empty for none.
+        // Each play or stop counts the revision up, so a replayed one-shot
+        // clip starts again on every player's copy.
+        std::string animation;
+        bool animationLoop = false;
+        uint16_t animationRevision = 0;
 
         void SerializeTransform(Framework::Networking::Replication::FieldSerializer &fields) override {
             NetworkEntity::SerializeTransform(fields);
@@ -86,6 +93,7 @@ namespace Mafia1Online::Shared::Entities {
             fields.Field(thrownFromCarId);
             fields.Field(throwAgeMs);
             fields.Field(alive);
+            SerializeAnimation(fields);
             if (!fields.Writing()) {
                 kind = static_cast<NpcKind>(kindValue);
                 if (model.size() > kMaxModelLength) {
@@ -96,6 +104,17 @@ namespace Mafia1Online::Shared::Entities {
 
         void SerializeFields(Framework::Networking::Replication::FieldSerializer &fields) override {
             fields.Field(alive);
+            SerializeAnimation(fields);
+        }
+
+      private:
+        void SerializeAnimation(Framework::Networking::Replication::FieldSerializer &fields) {
+            fields.Field(animation);
+            fields.Field(animationLoop);
+            fields.Field(animationRevision);
+            if (!fields.Writing() && animation.size() > kMaxAnimationLength) {
+                animation.clear();
+            }
         }
     };
 } // namespace Mafia1Online::Shared::Entities

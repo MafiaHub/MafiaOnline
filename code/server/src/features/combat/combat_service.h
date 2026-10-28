@@ -1,5 +1,6 @@
 #pragma once
 
+#include <mafianet/virtual_world.h>
 #include "shared/features/combat/combat_protocol.h"
 #include "shared/features/combat/damage_event.h"
 #include "shared/features/combat/detonation.h"
@@ -125,7 +126,9 @@ namespace Mafia1Online::Features::Combat {
         void ApplyCarExplosion(uint64_t missionGeneration, const glm::vec3 &position) {
             ApplyExplosion(0, missionGeneration, position, 10.0f, 200.0f);
         }
-        void StartFire(uint64_t sourceId, uint64_t missionGeneration, const glm::vec3 &position, std::chrono::milliseconds life, float radius, float damage);
+        // A fire hurts only players in its virtual world (every world by default).
+        void StartFire(uint64_t sourceId, uint64_t missionGeneration, const glm::vec3 &position, std::chrono::milliseconds life, float radius, float damage,
+                       uint32_t virtualWorld = MafiaNet::VIRTUAL_WORLD_GLOBAL);
         // A hit the simulation host's NPC landed on a player's replica, with
         // the native Hit damage before the body part scale. A bullet (hit
         // type 0) is scaled like a player's shot; bodyPart 0 means through
@@ -196,7 +199,7 @@ namespace Mafia1Online::Features::Combat {
         void ApplyVehicleImpact(const Shared::Combat::VehicleImpact &report, MafiaNet::PeerGuid sender,
                                 std::chrono::steady_clock::time_point receivedAt);
         void ApplyAreaDamage(uint64_t sourceId, uint64_t missionGeneration, const glm::vec3 &position, float radius, bool explosion, float damage,
-                             std::optional<uint8_t> weaponId);
+                             std::optional<uint8_t> weaponId, uint32_t virtualWorld = MafiaNet::VIRTUAL_WORLD_GLOBAL);
         void UpdateThrows();
 
         // A thrown grenade or Molotov lives on after its thrower's life ends.
@@ -220,6 +223,7 @@ namespace Mafia1Online::Features::Combat {
             std::chrono::milliseconds life {5000};
             float radius = 2.5f;
             float damage = 50.0f;
+            uint32_t virtualWorld = MafiaNet::VIRTUAL_WORLD_GLOBAL;
         };
         std::deque<ThrowRecord> _throws;
         std::deque<FireArea> _fires;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "taxi_host.h"
 #include "walker_reporter.h"
 
 #include "shared/features/pedestrian/pedestrian_control.h"
@@ -79,6 +80,12 @@ namespace Mafia1Online::Features::Pedestrian {
         }
         void OnWalkerHit(SDK::Traffic::NativeTrafficElement *element, int32_t type, SDK::Player::NativeActor *attacker, float damage, float before, float after);
         void OnTickElements(uint32_t frameMs);
+        // Host: a scripted NPC takes the place of the walker with this key
+        // (Npc.spawn from a pedestrian, a taxi passenger). WalkerPose is
+        // where it stands now, false when it is not an active living walker;
+        // HandOverWalker then retires it.
+        bool WalkerPose(uint32_t key, SDK::Player::Vector3 &position, float &yaw) const;
+        void HandOverWalker(uint32_t key);
 
       private:
         // Players close enough to share walkers. Each cluster spawns on its
@@ -100,6 +107,7 @@ namespace Mafia1Online::Features::Pedestrian {
         // Ids of last update's observers, by index, to carry clusters over.
         std::vector<uint64_t> _previousObserverIds;
         WalkerReporter _reporter;
+        TaxiHost _taxi;
         Shared::Pedestrian::Control _control;
         bool _reportedGenerators = false;
         // Players: last car impact report per walker.

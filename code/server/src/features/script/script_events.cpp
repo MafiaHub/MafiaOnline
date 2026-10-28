@@ -10,11 +10,14 @@
 #include "features/combat/combat_service.h"
 #include "features/combat/weapon_scripting.h"
 #include "features/door/door_scripting.h"
+#include "features/fire/fire_scripting.h"
 #include "features/map_object/map_object_scripting.h"
 #include "features/pickup/pickup_scripting.h"
 #include "features/player/player_scripting.h"
 #include "features/bridge/bridge_scripting.h"
+#include "features/pumper/pumper_scripting.h"
 #include "features/railway/railway_scripting.h"
+#include "features/taxi/taxi_scripting.h"
 #include "features/world/world_scripting.h"
 #include "shared/features/car/car_debris_entity.h"
 #include "shared/features/car/car_entity.h"
@@ -81,11 +84,15 @@ namespace Mafia1Online::Features::Script {
         Scripting::Pedestrian::Register(isolate, global);
         Scripting::Npc::Register(isolate, global);
         Scripting::Police::Register(isolate, global);
+        Scripting::Taxi::Register(isolate, global);
         Scripting::Railway::Register(isolate, global);
         Scripting::Bridge::Register(isolate, global);
+        Scripting::Pumper::Register(isolate, global);
         Scripting::Pickup::Register(isolate, global);
         Scripting::Door::Register(isolate, global);
         Scripting::MapObject::Register(isolate, global);
+        Scripting::Fire::Register(isolate, global);
+        Scripting::WaterJet::Register(isolate, global);
         Scripting::Weapon::Register(isolate, global);
         Scripting::Sound::Register(isolate, global);
         Scripting::World::Register(isolate, global);
@@ -313,6 +320,16 @@ namespace Mafia1Online::Features::Script {
             auto info = v8::Object::New(isolate);
             SetField(isolate, context, info, "level", v8::Uint32::New(isolate, level));
             SetField(isolate, context, info, "previous", v8::Uint32::New(isolate, previous));
+            arguments.push_back(WrapPlayer(isolate, playerId));
+            arguments.push_back(info);
+        });
+    }
+
+    void EmitPoliceBackup(Core::Server &, uint32_t requestId, uint64_t playerId, bool sent) {
+        EmitEvent("policeBackup", [&](v8::Isolate *isolate, v8::Local<v8::Context> context, EventArguments &arguments) {
+            auto info = v8::Object::New(isolate);
+            SetField(isolate, context, info, "id", v8::Uint32::New(isolate, requestId));
+            SetField(isolate, context, info, "sent", v8::Boolean::New(isolate, sent));
             arguments.push_back(WrapPlayer(isolate, playerId));
             arguments.push_back(info);
         });

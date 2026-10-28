@@ -34,3 +34,11 @@ add_executable(Mafia1OnlineMapObjectTests
 )
 target_include_directories(Mafia1OnlineMapObjectTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/.." "${CMAKE_CURRENT_SOURCE_DIR}/../client/src")
 target_link_libraries(Mafia1OnlineMapObjectTests PRIVATE Framework::Framework Mafia1OnlineSDK)
+
+add_executable(Mafia1OnlinePumperReportTests pumper_report_tests.cpp)
+target_include_directories(Mafia1OnlinePumperReportTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+target_link_libraries(Mafia1OnlinePumperReportTests PRIVATE Framework::Framework)
+
+add_executable(Mafia1OnlineTaxiProtocolTests taxi_protocol_tests.cpp)
+target_include_directories(Mafia1OnlineTaxiProtocolTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+target_link_libraries(Mafia1OnlineTaxiProtocolTests PRIVATE Framework::Framework)

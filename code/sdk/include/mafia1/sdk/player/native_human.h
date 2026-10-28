@@ -15,6 +15,9 @@ namespace Mafia1Online::SDK::Player {
     // actors. C_entity's cutscene mode skips its autonomous AI while its
     // C_human animation machine continues to tick.
     inline constexpr uintptr_t kHumanDoPlayAnimation = 0x585E80;
+    // PERSON_STOPANIM: C_human::Do_StopAnim, __thiscall, plain ret. Back to
+    // idle (work state 1, PersonAnim of the stop state) while alive.
+    inline constexpr uintptr_t kHumanDoStopAnimation = 0x57D2E0;
     inline constexpr uintptr_t kHumanResetActions    = 0x58B870;
     inline constexpr uintptr_t kEntityHoldForCutscene = 0x52FF50;
     inline constexpr uintptr_t kHumanDeactivateCollisions = 0x575F60;
@@ -304,6 +307,18 @@ namespace Mafia1Online::SDK::Player {
         uint32_t PlayAnimationOnce(const char *filename) {
             using Call = uint32_t(__thiscall *)(NativeHuman *, const char *, bool, bool);
             return reinterpret_cast<Call>(kHumanDoPlayAnimation)(this, filename, true, true);
+        }
+        // As the retail PERSON_PLAYANIM script command (0x470393) plays a
+        // clip: Do_PlayAnim(name, simple, 1), simple being finite playback,
+        // with the displacement track force-loaded. Returns the clip's length
+        // in milliseconds, 0 when it is missing.
+        uint32_t PlayScriptAnimation(const char *filename, bool loop) {
+            using Call = uint32_t(__thiscall *)(NativeHuman *, const char *, bool, bool);
+            return reinterpret_cast<Call>(kHumanDoPlayAnimation)(this, filename, !loop, true);
+        }
+        // PERSON_STOPANIM.
+        void StopAnimation() {
+            reinterpret_cast<bool(__thiscall *)(NativeHuman *)>(kHumanDoStopAnimation)(this);
         }
         [[nodiscard]] bool IsPlayingAnimation() const {
             return _canWork == kHumanPlayAnimationWorkState;

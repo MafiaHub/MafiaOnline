@@ -62,6 +62,11 @@ namespace Mafia1Online::Shared::Npc {
         uint8_t weaponId = 0;
         uint16_t loaded = 0;
         uint16_t reserve = 0;
+        // The reported walker (Pedestrian::Spawned key) it takes the place
+        // of, or 0: the host makes it where that walker stands and retires
+        // the walker, as retail turns a hailing walker into its taxi
+        // passenger (MavaNaTaxi 0x452335-0x452c46).
+        uint32_t walkerKey = 0;
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {
             auto behaviourValue = static_cast<uint8_t>(behaviour);
@@ -77,6 +82,7 @@ namespace Mafia1Online::Shared::Npc {
             stream->Serialize(write, weaponId);
             stream->Serialize(write, loaded);
             stream->Serialize(write, reserve);
+            stream->Serialize(write, walkerKey);
             if (!write) {
                 behaviour = static_cast<Behaviour>(behaviourValue);
                 if (model.size() > Entities::NpcEntity::kMaxModelLength) {

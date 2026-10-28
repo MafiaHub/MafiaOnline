@@ -129,6 +129,10 @@ namespace Mafia1Online::Scripting {
         events.add_property("doorLockChange", "[door: Door, player: null]", "Dispatched after a script changes a mission door lock.");
         events.add_property("doorInteractionChange", "[door: Door, player: null]", "Dispatched after a script enables or disables native door use.");
         events.add_property("mapObjectMoved", "[object: MapObject]", "Dispatched after a MapObject.moveTo reached its target. A teleport, stop or new move does not dispatch it for the move it replaced.");
+        auto &fireOut = catalog.data_type("FireExtinguishedInfo", "How a fire went out.");
+        fireOut.add_property("reason", "\"doused\" | \"script\" | \"burnedOut\"", "Water or Fire.douse put it out, a script set it out, or its lifetime ran out.");
+        fireOut.add_property("contributors", "{ player: Player | null; amount: number; share: number }[]", "Who put out how much of it, most first; share sums to 1.");
+        events.add_property("fireExtinguished", "[fire: Fire, info: FireExtinguishedInfo]", "Dispatched once a fire's intensity reaches 0. The fire stays, smoking, until destroyed.");
         events.add_property("playerSpawn", "[player: Player]", "Dispatched after Player.spawn started a new life.");
         events.add_property("playerRespawn", "[player: Player]", "Dispatched after Player.respawn started a new life.");
         events.add_property("playerDespawn", "[player: Player]", "Dispatched after Player.despawn ended the current life.");
@@ -218,6 +222,28 @@ namespace Mafia1Online::Scripting {
         events.add_property("playerWantedChange", "[player: Player, info: PlayerWantedInfo]",
             "Dispatched when a player's wanted level changes: the police raise it for a crime, a script sets it, an arrest or Police.clear settles it, the officers lose the player, "
             "or a new simulation host takes over (every record starts again at 0).");
+        auto &backup = catalog.data_type("PoliceBackupInfo", "The simulation host's answer to Police.sendBackup.");
+        backup.add_property("id", "number", "The request id Police.sendBackup returned.");
+        backup.add_property("sent", "boolean", "True when the police car and its two officers set out; false when the pool had too few free officers, no road was far enough away, the player was no longer wanted, or the host or mission changed.");
+        events.add_property("policeBackup", "[player: Player, info: PoliceBackupInfo]",
+            "Dispatched once for each Police.sendBackup request when the simulation host answers it. The player is the one the police car hunts; its officers join the NPCs (npcSpawn, kind police).");
+        auto &hailEnd = catalog.data_type("TaxiHailEndInfo", "Why a walker stopped waving at a taxi.");
+        hailEnd.add_property("reason", "\"boarded\" | \"ended\" | \"gone\"",
+            "boarded: Taxi.board made it the passenger; ended: the wave ended on the host (Taxi.decline, a panic or hit, the taxi drove off or its driver is wanted, the walker walked out of range); gone: the walker or the driver is gone.");
+        events.add_property("taxiHail", "[player: Player, pedestrian: Pedestrian, vehicle: Vehicle]",
+            "Dispatched when a simulation host walker starts waving at the taxi of a player Taxi.setHailable allows, as retail's walkers hail single player's taxi. Every player sees the wave.");
+        events.add_property("taxiHailEnd", "[player: Player, pedestrian: Pedestrian, info: TaxiHailEndInfo]", "Dispatched when that walker stops waving.");
+        events.add_property("taxiPickup", "[player: Player, pedestrian: Pedestrian, vehicle: Vehicle]",
+            "Dispatched once when the taxi stops within 10 m of the waving walker (retail's boarding moment). The walker keeps waving for 15 seconds; Taxi.board makes it the passenger.");
+        events.add_property("taxiPassengerEnter", "[player: Player, passenger: Npc, vehicle: Vehicle]", "Dispatched when a Taxi.board passenger sat down in the player's car.");
+        events.add_property("taxiArrive", "[player: Player, passenger: Npc, vehicle: Vehicle]",
+            "Dispatched once when the taxi stands still (0.5 m/s or less) within the radius of Taxi.setDestination's point with the passenger aboard.");
+        auto &passengerExit = catalog.data_type("TaxiPassengerExitInfo", "How a taxi ride ended.");
+        passengerExit.add_property("reason", "\"dropOff\" | \"driverLeft\" | \"failed\" | \"died\" | \"gone\"",
+            "dropOff: Taxi.dropOff; driverLeft: the player left the driver's seat; failed: it never got in; died; gone: removed, or the host or mission went.");
+        passengerExit.add_property("boarded", "boolean", "Whether it had sat down in the car.");
+        events.add_property("taxiPassengerExit", "[player: Player | null, passenger: Npc | null, vehicle: Vehicle | null, info: TaxiPassengerExitInfo]",
+            "Dispatched when a Taxi.board passenger's ride ends: it got out (it then walks off and is removed out of sight), never got in, died or is gone.");
         auto &arrest = catalog.data_type("PlayerArrestInfo", "How a police officer caught a player.");
         arrest.add_property("kind", "\"arrest\" | \"fine\"", "arrest: the retail arrest, which ends a single-player game; fine: the on-the-spot fine.");
         events.add_property("playerArrest", "[player: Player, officer: Npc, info: PlayerArrestInfo]",
@@ -256,6 +282,28 @@ namespace Mafia1Online::Scripting {
             "Retail bridge phase. A steamer in its request zone moves a closed bridge to signaling (red road lights); it opens once no traffic car is on it.");
         bridge.add_property("angle", "number", "Leaf angle in radians, 0 closed; the retail bridges open to 50 degrees.");
         bridge.add_property("raised", "boolean", "True while opening, open or closing: the leaves are up, and a player on foot who walks into the raised bridge dies, as in retail.");
+        auto &pumper = catalog.data_type("PumperInfo", "A gas station attendant as the simulation host last reported him.");
+        pumper.add_property("index", "number", "Load index within the mission, from 0; stable for the mission generation.");
+        pumper.add_property("position", "{ x: number; y: number; z: number }", "Position of the attendant.");
+        pumper.add_property("state", "\"idle\" | \"smoking\" | \"greeting\" | \"walking\" | \"fueling\" | \"turning\" | \"done\" | \"unknown\"",
+            "What the retail attendant is doing: idle and smoking between cars; greeting, walking, fueling, turning and done (his last line) while he serves one.");
+        pumper.add_property("busy", "boolean", "True while he serves a car or walks back from one; a request is then refused (reason busy).");
+        pumper.add_property("vehicle", "Vehicle | null", "The car the server has him serve, or null.");
+        auto &refuel = catalog.data_type("VehicleRefuelInfo", "A tank an attendant filled.");
+        refuel.add_property("pumper", "number", "The attendant's load index.");
+        refuel.add_property("litres", "number", "Litres put in: what the tank lacked, or what the player's money bought.");
+        refuel.add_property("cost", "number", "Money taken from the player at Pumper.setPrice; 0 when free.");
+        events.add_property("vehicleRefuel", "[vehicle: Vehicle, player: Player | null, info: VehicleRefuelInfo]",
+            "Dispatched when the attendant's fuel animation ends its pumping (retail EndPumpFuel), after the server has set the car's fuel (vehicleFuelChange) and taken "
+            "the money (playerMoneyChange). The car stays locked until he is back at his post.");
+        auto &refused = catalog.data_type("PumperRefusedInfo", "Why the server turned down a player's \"use the pump\".");
+        refused.add_property("pumper", "number", "The attendant's load index.");
+        refused.add_property("reason", "\"disabled\" | \"unavailable\" | \"busy\" | \"full\" | \"money\"",
+            "disabled after Pumper.setEnabled(false); unavailable without a simulation host; busy while he serves another car; full when the tank lacks less than "
+            "half a litre; money when the player cannot pay for one litre.");
+        refused.add_property("cost", "number", "For money, what the full tank would cost; otherwise 0.");
+        events.add_property("pumperRefused", "[player: Player, vehicle: Vehicle, info: PumperRefusedInfo]",
+            "Dispatched when the server refuses the retail \"use the pump\" choice of a driver stopped at a pump. The attendant stays where he is and the car is not locked.");
         auto &railwayHit = catalog.data_type("RailwayHitInfo", "A railway running into a player.");
         railwayHit.add_property("railway", "RailwayInfo | null", "The railway, as last reported.");
         railwayHit.add_property("damage", "number", "Damage applied: retail (|speed| - 2.5) * 4.2.");

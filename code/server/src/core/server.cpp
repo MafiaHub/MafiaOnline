@@ -23,12 +23,14 @@
 
 #include "features/car/vehicle_scripting.h"
 #include "features/door/door_scripting.h"
+#include "features/fire/fire_scripting.h"
 #include "features/map_object/map_object_scripting.h"
 #include "features/npc/npc_scripting.h"
 #include "features/pedestrian/pedestrian_scripting.h"
 #include "features/pickup/pickup_scripting.h"
 #include "features/player/player_scripting.h"
 #include "features/script/script_events.h"
+#include "features/taxi/taxi_scripting.h"
 #include "features/script/script_runtime.h"
 #include "shared/features/traffic/traffic_report.h"
 #include "features/world/world_scripting.h"
@@ -65,6 +67,8 @@ namespace Mafia1Online::Core {
         Framework::Scripting::Builtins::RegisterHandleTransfer<Scripting::Pedestrian>("mafia1online.Pedestrian");
         Framework::Scripting::Builtins::RegisterHandleTransfer<Scripting::Npc>("mafia1online.Npc");
         Framework::Scripting::Builtins::RegisterHandleTransfer<Scripting::MapObject>("mafia1online.MapObject");
+        Framework::Scripting::Builtins::RegisterHandleTransfer<Scripting::Fire>("mafia1online.Fire");
+        Framework::Scripting::Builtins::RegisterHandleTransfer<Scripting::WaterJet>("mafia1online.WaterJet");
         if (auto *scripting = GetScriptingModule(); scripting != nullptr && scripting->GetEngine() != nullptr) {
             scripting->GetEngine()->AddRuntimeDisposingListener([](v8::Isolate *isolate) {
                 Scripting::Player::UnregisterIsolate(isolate);
@@ -75,10 +79,14 @@ namespace Mafia1Online::Core {
                 Scripting::Pedestrian::UnregisterIsolate(isolate);
                 Scripting::Npc::UnregisterIsolate(isolate);
                 Scripting::MapObject::UnregisterIsolate(isolate);
+                Scripting::Fire::UnregisterIsolate(isolate);
+                Scripting::WaterJet::UnregisterIsolate(isolate);
             });
             // A resource's map objects go with it, so a restart builds them anew.
             scripting->GetEngine()->AddRuntimeDisposingListener([this, engine = scripting->GetEngine()](v8::Isolate *isolate) {
                 _mapObjects.DestroyOwnedBy(engine->GetResourceForIsolate(isolate));
+                _fires.DestroyOwnedBy(engine->GetResourceForIsolate(isolate));
+                _npcs.RemoveOwnedBy(engine->GetResourceForIsolate(isolate));
             });
         }
         _mission                               = GetModConfig().Get<std::string>("mission");
@@ -101,6 +109,8 @@ namespace Mafia1Online::Core {
         _players.RegisterRPC();
         _players.ResetForMission(_missionState->generation);
         _worldScript.Init(_players, _cars);
+        _fires.Init(_players, _cars, _combat);
+        Scripting::InstallFireEvents(*this);
         _worldScript.ResetForMission(_missionState->generation);
         Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Door::DoorIntent>([this](const Shared::Door::DoorIntent &intent, MafiaNet::Packet *packet) {
             const auto sender = MafiaNet::ToPeerGuid(packet->guid);
@@ -159,6 +169,13 @@ namespace Mafia1Online::Core {
                 const auto seat = _cars.SeatForPlayer(npcId, Shared::Entities::NpcEntity::kSpawnGeneration);
                 return seat ? seat->carId : 0;
             },
+            // A player in the driver's seat: a scripted NPC boards it as a
+            // passenger and the player keeps driving (TaxiService::Board).
+            [this](uint64_t carId) {
+                const auto *car = _cars.Find(carId);
+                return car && car->missionGeneration == MissionGeneration() && car->terminalState == Shared::Entities::CarEntity::TerminalState::Active &&
+                       car->occupantIds[0] != 0 && _players.FindByNetworkId(car->occupantIds[0]) != nullptr;
+            },
         });
         _pickups.RegisterRPC(_players, _combat, _cars);
         _combat.SetDropCallback([this](uint64_t playerId, uint8_t weaponId, uint16_t loaded, uint16_t reserve, const glm::vec3 &position, float yaw) {
@@ -187,6 +204,9 @@ namespace Mafia1Online::Core {
             }
         });
         _police.RegisterRPC(_simulation, _players);
+        // Retail taxi passengers: the host's hails, scripts' rides.
+        _taxi.RegisterRPC(_simulation, _players, _cars, _pedestrians, _npcs);
+        _taxi.SetEvents(Scripting::Taxi::Events());
         _traffic.RegisterRPC(_simulation, _players, _cars);
         _traffic.SetEvents({
             [this](uint64_t carId, uint64_t playerId, bool stolen) { Features::Script::EmitTrafficTaken(*this, carId, playerId, stolen); },
@@ -195,6 +215,7 @@ namespace Mafia1Online::Core {
         _railways.RegisterRPC(_simulation, _players, _combat);
         _players.SetRailwayCheck([this](uint8_t index, const glm::vec3 &position) { return _railways.IsNear(index, position); });
         _bridges.RegisterRPC(_simulation, _players);
+        _pumpers.RegisterRPC(_simulation, _players, _cars);
         _props.RegisterRPC(_simulation, _players);
         _railways.SetHitCallback([this](uint64_t playerId, uint8_t index, float damage) { Features::Script::EmitRailwayHit(*this, playerId, index, damage); });
         // Host NPCs take and leave seats of the cars the host drives; players
@@ -209,6 +230,7 @@ namespace Mafia1Online::Core {
         _police.SetEvents({
             [this](uint64_t playerId, uint16_t crime) { Features::Script::EmitPlayerCrime(*this, playerId, crime); },
             [this](uint64_t playerId, uint8_t level, uint8_t previous) { Features::Script::EmitPlayerWanted(*this, playerId, level, previous); },
+            [this](uint32_t requestId, uint64_t playerId, bool sent) { Features::Script::EmitPoliceBackup(*this, requestId, playerId, sent); },
         });
         _npcs.SetWalkerLookup([this](uint32_t key) { return _pedestrians.NetworkIdOfKey(key); });
         // The host is trusted with its NPCs' shots, as with their hits on
@@ -498,9 +520,11 @@ namespace Mafia1Online::Core {
         _pedestrians.SetMissionGeneration(_missionState->generation);
         _npcs.SetMissionGeneration(_missionState->generation);
         _police.SetMissionGeneration(_missionState->generation);
+        _taxi.SetMissionGeneration(_missionState->generation);
         _traffic.SetMissionGeneration(_missionState->generation);
         _railways.SetMissionGeneration(_missionState->generation);
         _bridges.SetMissionGeneration(_missionState->generation);
+        _pumpers.SetMissionGeneration(_missionState->generation);
         _props.SetMissionGeneration(_missionState->generation);
         Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->info("Configured Mafia 1 mission: {}", _mission);
     }
@@ -510,6 +534,7 @@ namespace Mafia1Online::Core {
         _pedestrians.Update();
         _npcs.Update();
         _police.Update();
+        _taxi.Update();
         _traffic.Update();
         _mods.Update();
         _players.Update();
@@ -517,6 +542,8 @@ namespace Mafia1Online::Core {
         _worldScript.Update();
         _pickups.Update();
         _mapObjects.Update();
+        _fires.Update();
+        _pumpers.Update();
         UpdateCarControllers();
         _debris.PruneMissingCars(_cars);
         if (!_allReadyNotified && AllPlayersReady()) {
@@ -643,12 +670,14 @@ namespace Mafia1Online::Core {
         _debris.ResetForMission();
         _pickups.ResetForMission();
         _mapObjects.ResetForMission();
+        _fires.ResetForMission();
         _cars.ResetForMission();
         _combat.ResetForMission();
         _worldScript.Shutdown();
         _players.Reset();
         _pedestrians.Clear();
         _npcs.Clear();
+        _taxi.Clear();
         _traffic.Clear();
         _simulation.Reset();
         _missionState = nullptr;
@@ -778,15 +807,18 @@ namespace Mafia1Online::Core {
         _pedestrians.SetMissionGeneration(_missionState->generation);
         _npcs.SetMissionGeneration(_missionState->generation);
         _police.SetMissionGeneration(_missionState->generation);
+        _taxi.SetMissionGeneration(_missionState->generation);
         _traffic.SetMissionGeneration(_missionState->generation);
         _railways.SetMissionGeneration(_missionState->generation);
         _bridges.SetMissionGeneration(_missionState->generation);
+        _pumpers.SetMissionGeneration(_missionState->generation);
         _props.SetMissionGeneration(_missionState->generation);
         _allReadyNotified = false;
         _reportedCarLoadFailures.clear();
         _debris.ResetForMission();
         _pickups.ResetForMission();
         _mapObjects.ResetForMission();
+        _fires.ResetForMission();
         _cars.ResetForMission();
         _combat.ResetForMission();
         _worldScript.ResetForMission(_missionState->generation);

@@ -238,6 +238,10 @@ namespace Mafia1Online::Features::Pedestrian {
                 return false;
             }
         }
+        if (!_taxi.Install()) {
+            Uninstall();
+            return false;
+        }
         return true;
     }
 
@@ -250,6 +254,7 @@ namespace Mafia1Online::Features::Pedestrian {
             MH_DisableHook(reinterpret_cast<void *>(SDK::Traffic::kRecruitPolice));
             MH_RemoveHook(reinterpret_cast<void *>(SDK::Traffic::kRecruitPolice));
         }
+        _taxi.Uninstall();
         Reset();
         gService = nullptr;
     }
@@ -272,6 +277,7 @@ namespace Mafia1Online::Features::Pedestrian {
 
     void PedestrianService::RegisterRPC() {
         auto *network = Framework::CoreModules::GetNetworkPeer();
+        _taxi.RegisterRPC();
         // Host: what server scripts set.
         network->RegisterRPC<Shared::Pedestrian::Control>([this](const Shared::Pedestrian::Control &control, MafiaNet::Packet *) {
             if (!Simulation::IsHost() || !(control.density >= 0.0f && control.density <= 1.0f)) {
@@ -369,6 +375,7 @@ namespace Mafia1Online::Features::Pedestrian {
     void PedestrianService::Reset() {
         gScreamMissionGeneration = 0;
         _reporter.Reset();
+        _taxi.Reset();
         _previousObserverIds.clear();
         _reportedGenerators = false;
         _observers.clear();
@@ -552,10 +559,11 @@ namespace Mafia1Online::Features::Pedestrian {
         // TickElements (0x44ef70) without its camera: each walker measures
         // the nearest observer, and counts as drawn so its skeleton and
         // fading never depend on what the host happens to render. Car theft
-        // and taxi passengers stay off.
-        if (!SDK::Traffic::IsVisible()) {
+        // stays off; taxi hailing runs for every driver (TaxiHost).
+        if (!SDK::Traffic::IsVisible() || !_world) {
             return;
         }
+        _taxi.Prepare(*_world);
         SDK::Traffic::CountDownCollisionCooldown(frameMs);
         const uint32_t renderStamp = SDK::Core::Mission::Get()->RenderStamp();
         auto **begin = SDK::Traffic::ElementsBegin();
@@ -574,10 +582,37 @@ namespace Mafia1Online::Features::Pedestrian {
             if (element->Model()) {
                 element->MarkDrawn(renderStamp);
             }
+            const bool waving = _taxi.BeginTick(element);
             element->Tick(frameMs);
+            if (waving) {
+                _taxi.EndTick();
+            }
             // Deactivation removes the walker and can reorder the vector.
             begin = SDK::Traffic::ElementsBegin();
         }
+        _taxi.Finish(frameMs, [this](SDK::Traffic::NativeTrafficElement *element) { return _reporter.KeyOf(element); });
+    }
+
+    bool PedestrianService::WalkerPose(uint32_t key, SDK::Player::Vector3 &position, float &yaw) const {
+        auto *element = key ? _reporter.ActiveElement(key) : nullptr;
+        if (!element || element->IsDead() || !element->Model()) {
+            return false;
+        }
+        position = element->Model()->WorldPosition();
+        const auto direction = element->Model()->WorldDirection();
+        yaw = std::atan2(direction.x, direction.z);
+        return true;
+    }
+
+    void PedestrianService::HandOverWalker(uint32_t key) {
+        auto *element = key ? _reporter.ActiveElement(key) : nullptr;
+        if (!element) {
+            return;
+        }
+        _taxi.Forget(element);
+        // Its Retired goes out with the reporter's next pass; the NPC's
+        // sourcePedestrianId has players swap it in where it stands.
+        element->Deactivate();
     }
 
     PedestrianService::Stats PedestrianService::GetStats() const {

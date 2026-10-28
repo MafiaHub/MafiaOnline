@@ -5,9 +5,11 @@
 
 #include <networking/rpc/rpc.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace Mafia1Online::Shared::Npc {
     // Simulation host <-> server. A key names one NPC for the whole mission
@@ -452,6 +454,65 @@ namespace Mafia1Online::Shared::Npc {
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {
             stream->Serialize(write, enabled);
+        }
+    };
+
+    // Server -> host: every player a script put on police duty
+    // (Police.setOfficer), sent whole on each change and to a newly attached
+    // host. The host treats their replicas as retail treats its own
+    // officers: no crime record, and the police behaviour class.
+    struct PoliceOfficers {
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::NpcPoliceOfficers");
+        static constexpr uint16_t kMaxOfficers = 256;
+
+        std::vector<uint64_t> playerNetworkIds;
+
+        void Serialize(MafiaNet::BitStream *stream, bool write) {
+            auto count = static_cast<uint16_t>(std::min<size_t>(playerNetworkIds.size(), kMaxOfficers));
+            stream->Serialize(write, count);
+            if (count > kMaxOfficers) {
+                playerNetworkIds.clear();
+                return;
+            }
+            if (!write) {
+                playerNetworkIds.assign(count, 0);
+            }
+            for (uint16_t i = 0; i < count; ++i) {
+                stream->Serialize(write, playerNetworkIds[i]);
+            }
+        }
+    };
+
+    // Server -> host: send a police car the retail way after a wanted
+    // player (C_shvestky::DalsiChalpiDoPartie), for Police.sendBackup.
+    struct PoliceBackup {
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::NpcPoliceBackup");
+
+        uint64_t missionGeneration = 0;
+        uint32_t requestId = 0;
+        uint64_t playerNetworkId = 0;
+        uint64_t playerSpawnGeneration = 0;
+
+        void Serialize(MafiaNet::BitStream *stream, bool write) {
+            stream->Serialize(write, missionGeneration);
+            stream->Serialize(write, requestId);
+            stream->Serialize(write, playerNetworkId);
+            stream->Serialize(write, playerSpawnGeneration);
+        }
+    };
+
+    // Host -> server: whether the police car of a PoliceBackup set out.
+    struct PoliceBackupSent {
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::NpcPoliceBackupSent");
+
+        uint64_t missionGeneration = 0;
+        uint32_t requestId = 0;
+        bool sent = false;
+
+        void Serialize(MafiaNet::BitStream *stream, bool write) {
+            stream->Serialize(write, missionGeneration);
+            stream->Serialize(write, requestId);
+            stream->Serialize(write, sent);
         }
     };
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "shared/features/combat/combat_protocol.h"
+#include "shared/features/npc/npc_animation.h"
 #include "shared/features/npc/npc_create.h"
 #include "shared/features/npc/npc_order.h"
 #include "shared/features/npc/npc_task.h"
@@ -79,6 +80,10 @@ namespace Mafia1Online::Features::Npc {
             std::function<bool(uint64_t)> claim;
             std::function<void(uint64_t)> release;
             std::function<uint64_t(uint64_t)> seatedCar;
+            // playerDriven(carId): a player sits in the driver's seat. A
+            // scripted NPC boards such a car as a passenger without a claim:
+            // the player keeps driving it (a taxi fare, a patient).
+            std::function<bool(uint64_t)> playerDriven;
         };
         struct SpawnRequest {
             std::string model;
@@ -92,6 +97,13 @@ namespace Mafia1Online::Features::Npc {
             // Players see it only in this virtual world (GLOBAL: in every
             // one). The host runs it in its single retail world regardless.
             uint32_t virtualWorld = MafiaNet::VIRTUAL_WORLD_GLOBAL;
+            // A walker it replaces (its Pedestrian::Spawned key and network
+            // id), or 0: the host makes it where that walker stands, and
+            // players swap the walker for it.
+            uint32_t walkerKey = 0;
+            uint64_t walkerId = 0;
+            // The resource that spawned it; it goes when that resource stops.
+            std::string owner;
         };
         struct CurrentTask {
             uint32_t id = 0;
@@ -139,6 +151,9 @@ namespace Mafia1Online::Features::Npc {
 
         // Asks the host to retire the NPC now; npcRetire follows.
         bool Remove(uint64_t networkId);
+        // Every scripted NPC the resource spawned, as Remove (a stopped or
+        // restarted resource leaves none behind).
+        void RemoveOwnedBy(const std::string &owner);
         // A scripted NPC: the entity exists at once, the host creates the
         // retail C_entity and npcSpawn follows its first report. Null when
         // no host is attached, no mission is loaded or the limit is reached.
@@ -147,6 +162,10 @@ namespace Mafia1Online::Features::Npc {
         // id); the task id, or 0 when refused. It replaces the current one.
         uint32_t GiveTask(uint64_t networkId, Shared::Npc::Task task);
         bool SendOrder(uint64_t networkId, Shared::Npc::Order order);
+        // Plays a clip on a scripted NPC (PERSON_PLAYANIM), or stops it with
+        // an empty name; it ends the running task. Every player's copy
+        // replays it from the entity's animation fields.
+        bool SetAnimation(uint64_t networkId, const std::string &name, bool loop);
         bool IsScripted(uint64_t networkId) const;
         std::optional<Shared::Npc::Behaviour> GetBehaviour(uint64_t networkId) const;
         // The task still running, if any.
@@ -178,6 +197,8 @@ namespace Mafia1Online::Features::Npc {
             bool taskRunning = false;
             // The car the host drives for this NPC (enterVehicle), or 0.
             uint64_t claimedCar = 0;
+            // SpawnRequest::owner.
+            std::string owner;
         };
         using Iterator = std::unordered_map<uint32_t, Record>::iterator;
 

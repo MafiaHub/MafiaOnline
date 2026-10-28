@@ -24,6 +24,9 @@ namespace Mafia1Online::Shared::Entities {
         bool animationFlag = false;
         bool umbrella = false;
         uint8_t alpha = 0;
+        // Waving for a taxi (Shared::Taxi::kWave*): the retail "MavaniNN
+        // HPT.i3d" extended animation, 0 for none.
+        uint8_t taxiWave = 0;
 
         void OnSerializeConstruction(Framework::Networking::Replication::FieldSerializer &fields) override {
             fields.Field(model);
@@ -35,6 +38,7 @@ namespace Mafia1Online::Shared::Entities {
             fields.Field(animationFlag);
             fields.Field(umbrella);
             fields.Field(alpha);
+            fields.Field(taxiWave);
             if (!fields.Writing() && model.size() > kMaxModelLength) {
                 model.clear();
             }
@@ -48,6 +52,7 @@ namespace Mafia1Online::Shared::Entities {
             fields.Field(animationFlag);
             fields.Field(umbrella);
             fields.Field(alpha);
+            fields.Field(taxiWave);
         }
     };
 } // namespace Mafia1Online::Shared::Entities

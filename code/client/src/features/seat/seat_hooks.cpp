@@ -30,7 +30,7 @@ namespace Mafia1Online::Features::Seat {
                 return;
             }
             auto *car = target && target->GetType() == NativeActor::Type::Car ? static_cast<NativeCar *>(static_cast<void *>(target)) : nullptr;
-            if (gService && car && action == static_cast<int>(SDK::Seat::UseAction::Enter) && gService->BlocksNpcEntry(human, car)) return;
+            if (gService && car && action == static_cast<int>(SDK::Seat::UseAction::Enter) && gService->BlocksNpcEntry(human, car, seat)) return;
             if (gService && car && action == static_cast<int>(SDK::Seat::UseAction::Enter) && !gService->AllowsTrafficUse(human, car, seat)) return;
             const int originalSeat = action == static_cast<int>(SDK::Seat::UseAction::Exit) ? human->seatId : seat;
             if (!car && action == static_cast<int>(SDK::Seat::UseAction::Exit) && gService) {

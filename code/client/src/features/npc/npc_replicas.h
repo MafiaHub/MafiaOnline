@@ -17,6 +17,9 @@ namespace Mafia1Online::SDK::Scene {
 namespace Mafia1Online::Features::World {
     class WorldService;
 }
+namespace Mafia1Online::Shared::Entities {
+    class NpcEntity;
+}
 
 namespace Mafia1Online::Features::Npc {
     // Players: shows the simulation host's NPCs the server streams here
@@ -46,11 +49,19 @@ namespace Mafia1Online::Features::Npc {
             int16_t lastAnimation = 0;
             // The end of a replayed pull-out (SeatService), if one is playing.
             std::chrono::steady_clock::time_point pullingUntil {};
+            // The script clip (NpcEntity::animation) last applied, and until
+            // when it holds the locomotion stream off (max() for a loop).
+            uint16_t animationRevision = 0;
+            bool animationSynced = false;
+            std::chrono::steady_clock::time_point animatingUntil {};
             bool failed = false;
         };
 
         void Remove(World::WorldService &world, uint64_t networkId, const Replica &replica);
         void ApplyPose(Replica &replica, void *actor, bool alive);
+        // Replays npc.playAnimation / stopAnimation as PERSON_PLAYANIM and
+        // PERSON_STOPANIM do on the host.
+        void ApplyAnimation(Replica &replica, void *actor, const Shared::Entities::NpcEntity &npc);
 
         std::unordered_map<uint64_t, Replica> _replicas;
         // Every human this created, until its destructor hands the frame back.

@@ -6,6 +6,8 @@
 #include "shared/features/car/car_entity.h"
 #include "shared/scripting_catalog.h"
 
+#include <scripting/engine.h>
+
 #include <v8pp/convert.hpp>
 
 #include <cmath>
@@ -107,6 +109,12 @@ namespace Mafia1Online::Scripting {
             return value->IsUndefined() || value->IsObject();
         }
 
+        // The resource whose script calls; its NPCs go when it stops.
+        std::string ResourceOf(v8::Isolate *isolate) {
+            auto *module = GetServer().GetScriptingModule();
+            return module && module->GetEngine() ? module->GetEngine()->GetResourceForIsolate(isolate) : std::string();
+        }
+
         // Npc.spawn(model, position, heading?, options?)
         void JS_NpcSpawn(const v8::FunctionCallbackInfo<v8::Value> &info) {
             auto *isolate = info.GetIsolate();
@@ -163,6 +171,7 @@ namespace Mafia1Online::Scripting {
             if (!worldValue.IsEmpty()) {
                 request.virtualWorld = world;
             }
+            request.owner = ResourceOf(isolate);
             auto *npc = GetServer().Npcs().Spawn(request);
             info.GetReturnValue().Set(npc ? WrapNpc(isolate, npc->GetNetworkID()) : v8::Null(isolate).As<v8::Value>());
         }
@@ -344,6 +353,31 @@ namespace Mafia1Online::Scripting {
             info.GetReturnValue().Set(self && GetServer().Npcs().SendOrder(self->GetId(), order));
         }
 
+        // npc.playAnimation(name, { loop? })
+        void JS_NpcPlayAnimation(const v8::FunctionCallbackInfo<v8::Value> &info) {
+            auto *isolate = info.GetIsolate();
+            constexpr const char *kUsage = "Npc.playAnimation(name, options?) expects a bare .i3d animation of at most 59 bytes and { loop?: boolean }";
+            bool loop = true;
+            const v8::Local<v8::Value> options = info.Length() > 1 ? info[1] : v8::Undefined(isolate).As<v8::Value>();
+            if (info.Length() < 1 || info.Length() > 2 || !info[0]->IsString() || !OptionsOrNothing(options) || !ReadOptionalBool(isolate, options, "loop", loop)) {
+                ScriptArgs::Throw(isolate, kUsage);
+                return;
+            }
+            const auto name = v8pp::from_v8<std::string>(isolate, info[0]);
+            if (!Shared::Npc::AnimationNameValid(name)) {
+                ScriptArgs::Throw(isolate, kUsage);
+                return;
+            }
+            auto *self = SelfNpc(info);
+            info.GetReturnValue().Set(self && GetServer().Npcs().SetAnimation(self->GetId(), name, loop));
+        }
+
+        // npc.stopAnimation()
+        void JS_NpcStopAnimation(const v8::FunctionCallbackInfo<v8::Value> &info) {
+            auto *self = SelfNpc(info);
+            info.GetReturnValue().Set(self && GetServer().Npcs().SetAnimation(self->GetId(), {}, false));
+        }
+
         void JS_NpcGetTask(const v8::FunctionCallbackInfo<v8::Value> &info) {
             auto *isolate = info.GetIsolate();
             auto *self = SelfNpc(info);
@@ -421,6 +455,11 @@ namespace Mafia1Online::Scripting {
         return behaviour ? Shared::Npc::BehaviourName(*behaviour) : std::string {};
     }
 
+    std::string Npc::GetAnimation() const {
+        const auto *npc = ResolveNpc();
+        return npc ? npc->animation : std::string {};
+    }
+
     bool Npc::Remove() {
         return GetServer().Npcs().Remove(_id);
     }
@@ -465,6 +504,8 @@ namespace Mafia1Online::Scripting {
             docs("Vehicle | null", {}, "Returns the car a driver NPC was thrown out of when a player stole it.",
                 "The vehicle, or null for another kind of NPC or once that car is gone."));
         cls.function("remove", &Npc::Remove, docs("boolean", {}, "Asks the simulation host to retire it now; npcRetire follows.", "False when it no longer exists or no host is attached."));
+        cls.property("animation", &Npc::GetAnimation,
+            property_docs("string", "The clip a script plays on it (playAnimation); an empty string for none. A one-shot clip keeps its name until another clip, stopAnimation or a task."));
         cls.property("behaviour", &Npc::GetBehaviour,
             property_docs("string", "A scripted NPC's spawn behaviour, \"neutral\", \"friendly\" or \"hostile\"; an empty string for another kind."));
         const auto task = [](const char *what) {
@@ -480,9 +521,9 @@ namespace Mafia1Online::Scripting {
                                param("options", "{ run?: boolean; radius?: number }", true, "run: run instead of walking; radius: how close it must come, 0.3 to 20 (default 0.5).")},
                 task("Walks over the mission's pedestrian paths to the point (EntityMoveToFrame)."), taskReturns));
         cls.prototype_function("enterVehicle", &JS_NpcEnterVehicle,
-            docs("number", {param("vehicle", "Vehicle", false, "A script's vehicle with no player in it; not a traffic car."), param("seat", "number", true, "Seat index; 0, the driver's, by default."),
+            docs("number", {param("vehicle", "Vehicle", false, "A script's vehicle with no player in it, not a traffic car; or any car a player drives, for a passenger seat."), param("seat", "number", true, "Seat index; 0, the driver's, by default."),
                                param("options", "{ run?: boolean }", true, "run: run to the car.")},
-                task("Walks to the car's door and gets in (Entity_MoveToCar, Enemy_UseCar). The simulation host drives the car while a scripted NPC boards or sits in it, and players cannot get in meanwhile."),
+                task("Walks to the car's door and gets in (Entity_MoveToCar, Enemy_UseCar). The simulation host drives the car while a scripted NPC boards or sits in it, and players cannot get in meanwhile; in a passenger seat of a car a player drives, the player keeps driving and the NPC rides along on every client."),
                 taskReturns));
         cls.prototype_function("exitVehicle", &JS_NpcExitVehicle, docs("number", {}, task("Gets out of its car once the car is nearly still (Enemy_UseCar)."), taskReturns));
         cls.prototype_function("driveTo", &JS_NpcDriveTo,
@@ -503,6 +544,15 @@ namespace Mafia1Online::Scripting {
                 "False when it is not a living scripted NPC or no host is attached."));
         cls.prototype_function("setHealth", &JS_NpcSetHealth,
             docs("boolean", {param("health", "number", false, "Above 0, up to 100000.")}, "Sets a living scripted NPC's health.", "False when it is not a living scripted NPC or no host is attached."));
+        cls.prototype_function("playAnimation", &JS_NpcPlayAnimation,
+            docs("boolean",
+                {param("name", "string", false, "A stock human animation, a bare .i3d filename such as \"x barman stativ.i3d\"."),
+                    param("options", "{ loop?: boolean }", true, "loop: repeat the clip until stopped (default true); false plays it once and it returns to standing.")},
+                "Plays a clip on a scripted NPC the way retail mission scripts do (PERSON_PLAYANIM, C_human::Do_PlayAnim), on the simulation host and on every player's copy, "
+                "including players who see it later. It ends the running task (cancelled); any task stops the clip. A clip the game does not have shows nothing.",
+                "False when it is not a living scripted NPC, it sits in a car or no host is attached."));
+        cls.prototype_function("stopAnimation", &JS_NpcStopAnimation,
+            docs("boolean", {}, "Stops a script clip and returns it to standing (PERSON_STOPANIM).", "False when it is not a living scripted NPC or no host is attached."));
         cls.prototype_function("getTask", &JS_NpcGetTask,
             docs("{ id: number; task: string } | null", {}, "Returns the scripted NPC's running task.", "The task, or null when it runs none."));
         cls.prototype_function("getVehicle", &JS_NpcGetVehicle, docs("Vehicle | null", {}, "Returns the car it sits in.", "The vehicle, or null on foot."));

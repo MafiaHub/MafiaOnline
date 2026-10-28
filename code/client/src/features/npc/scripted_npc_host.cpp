@@ -4,6 +4,8 @@
 
 #include "npc_host.h"
 
+#include "core/application.h"
+#include "features/pedestrian/pedestrian_service.h"
 #include "features/world/world_service.h"
 #include "shared/features/car/car_entity.h"
 
@@ -111,6 +113,17 @@ namespace Mafia1Online::Features::Npc {
             message.task = task;
             queue(std::move(message));
         });
+        network->RegisterRPC<Shared::Npc::Animation>([queue](const Shared::Npc::Animation &animation, MafiaNet::Packet *) {
+            if (!Shared::Npc::IsScriptedKey(animation.key)) {
+                return;
+            }
+            Message message;
+            message.kind = MessageKind::Animation;
+            message.generation = animation.missionGeneration;
+            message.key = animation.key;
+            message.animation = animation;
+            queue(std::move(message));
+        });
         network->RegisterRPC<Shared::Npc::Order>([queue](const Shared::Npc::Order &order, MafiaNet::Packet *) {
             if (!Shared::Npc::IsScriptedKey(order.key)) {
                 return;
@@ -139,17 +152,20 @@ namespace Mafia1Online::Features::Npc {
     void ScriptedNpcHost::Reset() {
         _queue.clear();
         _running.clear();
+        _animating.clear();
         _generation = 0;
     }
 
     void ScriptedNpcHost::Forget(uint32_t key) {
         _running.erase(key);
+        _animating.erase(key);
     }
 
     void ScriptedNpcHost::Update(World::WorldService &world, uint64_t generation) {
         if (generation != _generation) {
             // The mission closed: its NPCs went with it.
             _running.clear();
+            _animating.clear();
             _generation = generation;
         }
         const auto now = std::chrono::steady_clock::now();
@@ -203,6 +219,11 @@ namespace Mafia1Online::Features::Npc {
                 ApplyOrder(npc, message.order);
             }
             return true;
+        case MessageKind::Animation:
+            if (auto *npc = _host.FindByKey(message.key)) {
+                ApplyAnimation(npc, message.animation);
+            }
+            return true;
         }
         return true;
     }
@@ -220,8 +241,19 @@ namespace Mafia1Online::Features::Npc {
             return;
         }
         const std::string name = "Mafia1OnlineScriptedNpc_" + std::to_string(create.key & ~Shared::Npc::kScriptedKeyBit);
-        const SDK::Player::Vector3 position {create.x, create.y, create.z};
-        const SDK::Player::Vector3 direction {std::sin(create.yaw), 0.0f, std::cos(create.yaw)};
+        SDK::Player::Vector3 position {create.x, create.y, create.z};
+        float yaw = create.yaw;
+        // In place of a walker (a taxi passenger): where it stands on the
+        // host now, as retail duplicates the walker's model where it waved
+        // (MavaNaTaxi 0x452335-0x452c46). A walker gone meanwhile leaves no
+        // one to make.
+        auto &pedestrians = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->Pedestrians();
+        if (create.walkerKey && !pedestrians.WalkerPose(create.walkerKey, position, yaw)) {
+            logger->info("Scripted NPC {}: walker {} is gone", create.key, create.walkerKey);
+            _host.ReportRetired(create.key);
+            return;
+        }
+        const SDK::Player::Vector3 direction {std::sin(yaw), 0.0f, std::cos(yaw)};
         auto *npc = SDK::Player::NativeHumanFactory::CreateAiEntity(*SDK::Core::Mission::Get(), name.c_str(), create.model.c_str(), position, direction, [&](NativeActor *entity) {
             // As CreateMafianos sets its gangster up between Init and
             // AddTemporaryActor: behaviour mask, health, morale and
@@ -244,7 +276,10 @@ namespace Mafia1Online::Features::Npc {
             give.reserve = create.reserve;
             ApplyOrder(npc, give);
         }
-        _host.Track(npc, Shared::Entities::NpcKind::Scripted, create.model, 0, 0, create.key);
+        if (create.walkerKey) {
+            pedestrians.HandOverWalker(create.walkerKey);
+        }
+        _host.Track(npc, Shared::Entities::NpcKind::Scripted, create.model, create.walkerKey, 0, create.key);
         logger->info("Scripted NPC {} spawned ({}, {})", create.key, create.model, Shared::Npc::BehaviourName(create.behaviour));
     }
 
@@ -286,6 +321,32 @@ namespace Mafia1Online::Features::Npc {
             return;
         }
         }
+    }
+
+    void ScriptedNpcHost::ApplyAnimation(NativeActor *npc, const Shared::Npc::Animation &animation) {
+        if (Dead(npc)) {
+            return;
+        }
+        auto &human = Human(npc);
+        if (animation.name.empty()) {
+            if (_animating.erase(animation.key)) {
+                human.StopAnimation();
+            }
+            return;
+        }
+        // A task would walk or turn it out of the clip at once; the server
+        // already ended it (GiveTask clears the clip the same way).
+        if (const auto running = _running.find(animation.key); running != _running.end()) {
+            Halt(npc, running->second);
+            Finish(animation.key, running->second, Result::Cancelled);
+            _running.erase(running);
+        }
+        // As PERSON_PLAYANIM (reM C_program_process_000_132.inl 1967,
+        // 0x470393): Do_PlayAnim(name, simple, 1). Without a displacement
+        // track the clip plays on the animation stage and the human stays in
+        // its idle work state, which C_entity's own Do_Breath leaves alone.
+        human.PlayScriptAnimation(animation.name.c_str(), animation.loop);
+        _animating.insert(animation.key);
     }
 
     void ScriptedNpcHost::Destroy(uint32_t key) {
@@ -355,6 +416,11 @@ namespace Mafia1Online::Features::Npc {
         if (Dead(npc)) {
             Finish(key, running, Result::Failed);
             return;
+        }
+        // A script clip (npc.playAnimation) ends with any task, as the
+        // server cleared it for the players' copies.
+        if (_animating.erase(key)) {
+            Human(npc).StopAnimation();
         }
         auto &seat = Seat(npc);
         NativeActor *car = seat.usedActorEnter && seat.usedActorEnter->GetType() == NativeActor::Type::Car ? seat.usedActorEnter : nullptr;

@@ -361,7 +361,10 @@ namespace Mafia1Online::Features::Traffic {
         }
         else {
             auto *car = _cars->Find(seat.carId);
-            if (!car || !car->hostDriven || car->missionGeneration != _missionGeneration || seat.seat >= car->seatCount ||
+            // A passenger seat of a car a player drives counts as well: a
+            // scripted NPC rides with the player (a taxi fare, a patient).
+            const bool playerDriven = car && seat.seat != 0 && car->occupantIds[0] != 0 && _players->FindByNetworkId(car->occupantIds[0]);
+            if (!car || !(car->hostDriven || playerDriven) || car->missionGeneration != _missionGeneration || seat.seat >= car->seatCount ||
                 car->terminalState != CarEntity::TerminalState::Active ||
                 (car->occupantIds[seat.seat] != 0 && car->occupantIds[seat.seat] != npcId)) {
                 Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->debug("NPC {} seat in car {} seat {} refused (car {}, host driven {})", npcId, seat.carId, seat.seat,

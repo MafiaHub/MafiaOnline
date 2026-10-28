@@ -274,8 +274,10 @@ namespace Mafia1Online::Features::MapObject {
             if (!(extent.maxX >= tree.worldMinX && extent.minX <= tree.worldMaxX && extent.maxZ >= tree.worldMinZ && extent.minZ <= tree.worldMaxZ)) {
                 continue;
             }
+            // Clamped as a float: an extent far past the grid overflows the
+            // int conversion.
             const auto cellOf = [](float value, float origin, float size, int32_t count) {
-                return std::clamp(static_cast<int32_t>(std::floor((value - origin) / size)), 0, count - 1);
+                return static_cast<int32_t>(std::clamp(std::floor((value - origin) / size), 0.0f, static_cast<float>(count - 1)));
             };
             const int32_t x0 = cellOf(extent.minX, tree.worldMinX, tree.cellSizeX, tree.width);
             const int32_t x1 = cellOf(extent.maxX, tree.worldMinX, tree.cellSizeX, tree.width);
@@ -303,6 +305,9 @@ namespace Mafia1Online::Features::MapObject {
                 }
             }
         }
+        // Rebuild reads one cell's references at a time; a large or moving
+        // body would otherwise be walked whole for every cell it touches.
+        std::stable_sort(body.refs.begin(), body.refs.end(), [](const CellRef &left, const CellRef &right) { return left.cell < right.cell; });
     }
 
     void StaticCollision::Unlink(uint32_t id, Body &body, std::vector<int32_t> &touched) {
@@ -341,12 +346,11 @@ namespace Mafia1Online::Features::MapObject {
             if (body == _bodies.end()) {
                 continue;
             }
-            for (const auto &ref : body->second.refs) {
-                if (ref.cell != cell) {
-                    continue;
-                }
-                (ref.face ? faces : volumes).push_back(&ref);
-                maxY = std::max(maxY, ref.maxY);
+            const auto &refs = body->second.refs;
+            const auto first = std::lower_bound(refs.begin(), refs.end(), cell, [](const CellRef &ref, int32_t value) { return ref.cell < value; });
+            for (auto ref = first; ref != refs.end() && ref->cell == cell; ++ref) {
+                (ref->face ? faces : volumes).push_back(&*ref);
+                maxY = std::max(maxY, ref->maxY);
             }
         }
         std::stable_sort(faces.begin(), faces.end(), [](const CellRef *left, const CellRef *right) { return left->key < right->key; });
