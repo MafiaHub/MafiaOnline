@@ -59,7 +59,7 @@ function fresh(player) {
     const now = Date.now();
     return {name: player.nickname, money: STARTING_CASH, xp: 0, kills: 0, deaths: 0, bestStreak: 0,
         racesRun: 0, racesWon: 0, raceRecords: 0, deliveries: 0, bountiesClaimed: 0, eventsWon: 0,
-        duelsWon: 0, playMs: 0, model: null, district: null, firstSeen: now, lastSeen: now};
+        duelsWon: 0, exports: 0, fares: 0, arrests: 0, robberies: 0, turfCaptures: 0, stashes: [], speedBest: {}, playMs: 0, model: null, district: null, firstSeen: now, lastSeen: now};
 }
 
 function levelFor(xp) {
@@ -154,10 +154,11 @@ function addXp(player, amount, reason) {
     }
 }
 
+// Counters added in later versions start at zero on older records.
 function bump(player, field, amount = 1) {
     const record = get(player);
-    if (!record || typeof record[field] !== "number") return;
-    record[field] += amount;
+    if (!record || !["number", "undefined"].includes(typeof record[field])) return;
+    record[field] = (record[field] ?? 0) + amount;
     saveSoon();
 }
 

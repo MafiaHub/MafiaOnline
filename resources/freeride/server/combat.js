@@ -74,7 +74,8 @@ function onKill(killer, victim) {
     const record = profiles.get(killer);
     if (record && streak > record.bestStreak) profiles.setField(killer, "bestStreak", streak);
     profiles.publish(killer);
-    if (streak < STREAK_FOR_BOUNTY) return;
+    // An officer on duty is doing the job, not running up a streak.
+    if (streak < STREAK_FOR_BOUNTY || killer.state.get("fr.duty")) return;
     const amount = streak === STREAK_FOR_BOUNTY ? FIRST_BOUNTY : (bounties.get(killer.id)?.amount ?? FIRST_BOUNTY) + BOUNTY_STEP;
     setBounty(killer, amount, "streak");
     feed("bounty", [name(killer, COLORS.red), text(` is on a ${streak}-kill streak · `), text(`${formatMoney(Math.min(MAX_BOUNTY, amount))} bounty`, COLORS.gold)]);

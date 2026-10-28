@@ -1,6 +1,8 @@
 // World markers drawn by this client: race checkpoints, event beacons and
-// crates, bounty labels over wanted players and crewmates across the city.
-// Groups come from the server; nothing drawn here can claim a reward.
+// crates, door arrows, turf rings, bounty labels over wanted players and
+// crewmates across the city. Groups come from the server; nothing drawn here
+// can claim a reward. An item may carry `range` (hidden farther away),
+// `ring` (a ground circle of that radius), `beacon`, `model` and `primary`.
 const MARKER_RESOURCE = "freeride";
 const BEACON_HEIGHT = 40;
 const BEACON_RANGE = 3000;
@@ -9,6 +11,7 @@ const BOUNTY_RANGE = 350;
 const CREW_RANGE = 1500;
 const CREW_NEAR = 35;
 const MODEL_RETRY_MS = 2000;
+const RING_SEGMENTS = 32;
 
 const groups = new Map();
 const models = new Map();
@@ -50,6 +53,21 @@ function drawBeacon(base, color, distance) {
     Draw.line(bottom.x, bottom.y, top.x, top.y, width, argb(color, 0.55));
 }
 
+function hideModel(group, item) {
+    models.get(`${group}/${item.id}`)?.frame?.setVisible(false);
+}
+
+function drawRing(center, radius, color) {
+    let previous = null;
+    for (let step = 0; step <= RING_SEGMENTS; step++) {
+        const angle = step / RING_SEGMENTS * Math.PI * 2;
+        const point = Scene.projectWorld({x: center.x + Math.cos(angle) * radius, y: center.y + 0.4, z: center.z + Math.sin(angle) * radius}, false);
+        const visible = point && point.x !== null;
+        if (visible && previous) Draw.line(previous.x, previous.y, point.x, point.y, 3, argb(color, 0.6));
+        previous = visible ? point : null;
+    }
+}
+
 function drawModel(group, item, position, now) {
     const key = `${group}/${item.id}`;
     let record = models.get(key);
@@ -63,6 +81,7 @@ function drawModel(group, item, position, now) {
         record.frame = Scene.createModelFrame(item.model) ?? Scene.createModelFrame("9money.i3d");
         if (record.frame === null) return;
     }
+    record.frame.setVisible(true);
     const angle = now * 0.001;
     record.frame.setWorldPosition({x: position.x, y: position.y + 0.25 + 0.12 * Math.sin(now * 0.003), z: position.z});
     record.frame.setRotation({w: Math.cos(angle / 2), x: 0, y: Math.sin(angle / 2), z: 0});
@@ -74,7 +93,12 @@ function drawItems(eye, now) {
             const position = itemPosition(item);
             if (!position) continue;
             const distance = flatDistance(eye, position);
+            if (item.range && distance > item.range) {
+                if (item.model) hideModel(group, item);
+                continue;
+            }
             if (item.model) drawModel(group, item, position, now);
+            if (item.ring && distance < item.ring * 6) drawRing(position, item.ring, item.color);
             if (item.beacon && distance < BEACON_RANGE) drawBeacon(position, item.color, distance);
             if (distance > (item.primary ? BEACON_RANGE : LABEL_RANGE)) continue;
             const label = Scene.projectWorld({x: position.x, y: position.y + (item.vehicleId ? 2.6 : 3), z: position.z}, false);

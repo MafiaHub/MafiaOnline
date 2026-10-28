@@ -1,12 +1,11 @@
 const {onStart, onStop} = require("./lib/util.js");
 const {toastAll} = require("./lib/notify.js");
 
-// Free Ride changes with the host's local clock. A map transition only
-// happens at dawn/dusk; it keeps the correct stock sky and lighting together.
+// Free Ride always plays the stock day map. The night map is loaded only if
+// a server is configured with it; this module then moves to day, so the
+// sky, lighting and the gamemode's recorded positions stay together.
 const DAY_MAP = "freeride";
 const NIGHT_MAP = "freeridenoc";
-const DAWN_HOUR = 6;
-const DUSK_HOUR = 19;
 const UPDATE_MS = 60_000;
 const WEATHER_FRONT_HOURS = 2;
 
@@ -40,13 +39,9 @@ function weatherAt(date) {
 
 function updateAmbience() {
     const now = new Date();
-    const hour = now.getHours();
-    const expectedMap = hour >= DAWN_HOUR && hour < DUSK_HOUR ? DAY_MAP : NIGHT_MAP;
-    const mission = World.getMission();
-    if ([DAY_MAP, NIGHT_MAP].includes(mission) && mission !== expectedMap) {
-        toastAll(expectedMap === NIGHT_MAP ? "Night falls over Lost Heaven. The city reloads in its evening light."
-            : "Dawn breaks over Lost Heaven. The city reloads in daylight.", {title: "The light is changing", tone: "gold", seconds: 8});
-        if (!World.changeMission(expectedMap)) console.error(`[freeride] Could not load ${expectedMap}`);
+    if (World.getMission() === NIGHT_MAP) {
+        toastAll("Lost Heaven moves to daylight.", {title: "Free Ride", tone: "gold", seconds: 6});
+        if (!World.changeMission(DAY_MAP)) console.error(`[freeride] Could not load ${DAY_MAP}`);
     }
 
     const weather = weatherAt(now);

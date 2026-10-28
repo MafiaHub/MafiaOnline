@@ -242,7 +242,7 @@ function openRace(host, route) {
     }
     for (const player of World.getPlayers()) {
         if (player.id === host.id || !player.spawned) continue;
-        toast(player, `${host.nickname} opened a street race: ${route.name}, ${lengthText(route)}. Type /race join or use F1.`,
+        toast(player, `${host.nickname} opened a street race: ${route.name}, ${lengthText(route)}. Type /race join or use F2.`,
             {title: "Race invitation", tone: "gold", seconds: 9});
     }
     feed("race", [name(host, COLORS.gold), text(" opened a race on "), text(route.name, COLORS.white)]);

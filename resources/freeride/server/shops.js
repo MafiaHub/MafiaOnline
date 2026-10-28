@@ -253,3 +253,5 @@ commands.register({name: "courier", usage: "/courier [cancel]", help: "Check or 
 
 menu.provide("places", () => SHOPS.map((shop) => ({id: shop.id, name: shop.name, tagline: shop.tagline,
     offers: shop.offers.map((offer) => offer.name)})));
+
+module.exports = {SHOPS};

@@ -7,6 +7,7 @@ const profiles = require("./lib/profiles.js");
 const life = require("./lib/life.js");
 const menu = require("./lib/menu.js");
 const nametag = require("./lib/nametag.js");
+const devmode = require("./lib/devmode.js");
 const {toast, toastAll, feed, name, text, COLORS} = require("./lib/notify.js");
 
 const {RESOURCE, onClient, distance, playable, vehicleById, formatMoney, headingOf, speedOf} = util;
@@ -55,7 +56,13 @@ let tipIndex = 0;
 let leaderboardCache = null;
 
 const TIPS = [
-    "Hold F2 for the scoreboard; F1 opens the city menu.",
+    "F2 opens the city menu: jobs, races, crews, events and everyone in town.",
+    "Lucas Bertone pays for particular traffic cars. /export shows his list.",
+    "Go on police duty with /duty and take down wanted players for pay.",
+    "Thirty cash stashes hide at the roadside. They show only up close.",
+    "Crews can take over street corners with turf wars. /turf shows who holds what.",
+    "Speed traps sit on the longest roads. /speedtraps shows the records.",
+    "Feeling lucky? /dice <player> <bet>. Feeling bold? /rob a shop counter with a gun drawn.",
     "Open a street race with /race and race anyone who joins. Routes follow the real city roads.",
     "Three kills in a row put a price on your head. Anyone who drops you collects it.",
     "Challenge someone with /duel <name>. Duels run in a private copy of the city.",
@@ -168,7 +175,7 @@ function welcome(player) {
         : `Welcome to Lost Heaven, ${player.nickname}. You start with ${formatMoney(player.money)}.`,
     {title: "Free Ride", tone: "gold", seconds: 7});
     setTimeout(() => {
-        if (player.spawned) toast(player, "F1 opens the city menu · Hold F2 for the scoreboard · /help lists commands.", {seconds: 8});
+        if (player.spawned) toast(player, "F2 opens the city menu · F1 shows who is in town · /help lists commands.", {seconds: 8});
     }, 2500);
 }
 
@@ -282,15 +289,6 @@ onClient("fr:menu:command", (player, request) => {
     if (!cooldown(player, "menuCommand", MENU_COMMAND_INTERVAL_MS)) commands.runText(player, request?.text);
 });
 
-onClient("fr:scoreboard:request", (player) => {
-    if (cooldown(player, "scoreboard", 400)) return;
-    util.emit(player, "fr:scoreboard", {
-        mission: World.getMission(),
-        weather: World.getWeather().weather,
-        players: World.getPlayers().map((other) => ({id: other.id, ping: other.ping})),
-    });
-});
-
 menu.provide("leaderboard", () => {
     if (!leaderboardCache || Date.now() - leaderboardCache.at > LEADERBOARD_CACHE_MS) {
         leaderboardCache = {at: Date.now(), board: {
@@ -310,7 +308,7 @@ commands.register({name: "help", aliases: ["commands"], usage: "/help", help: "L
         if (!byCategory.has(entry.category)) byCategory.set(entry.category, []);
         byCategory.get(entry.category).push(`/${entry.name}`);
     }
-    player.sendMessage("Free Ride · F1 city menu · F2 scoreboard · F9 radio", 0xe8c57d);
+    player.sendMessage("Free Ride · F2 city menu · F1 players · F9 radio", 0xe8c57d);
     for (const [category, names] of byCategory) player.sendMessage(`${category}: ${names.join(" ")}`, 0xd9cdb4);
 });
 
@@ -391,9 +389,12 @@ Events.on("consoleCommand", (command, args) => {
         const amount = Number(rest[1]);
         if (target && Number.isInteger(amount) && target.giveMoney(amount)) console.log(`[freeride] ${target.nickname} now has ${formatMoney(target.money)}`);
         else console.log("[freeride] Usage: fr money <player> <whole dollars>");
+    } else if (action === "dev" && ["on", "off"].includes(rest[0])) {
+        devmode.set(rest[0] === "on");
+        console.log(`[freeride] Development commands ${devmode.isOn() ? "on" : "off"}`);
     } else if (action === "say" && rest.length) {
         toastAll(rest.join(" "), {title: "City Hall", tone: "gold", seconds: 8});
     } else if (action !== "event") {
-        console.log("[freeride] Console: fr save | fr money <player> <amount> | fr say <text> | fr event <supply|hotcar>");
+        console.log("[freeride] Console: fr save | fr money <player> <amount> | fr say <text> | fr dev on|off | fr event <supply|hotcar>");
     }
 });

@@ -1,10 +1,10 @@
 // Development commands for testing combat, cars and the HUD. They are off on
-// a public server; start the server with FREERIDE_DEV=1 to enable /dev.
+// a public server; see lib/devmode.js for turning them on.
 const commands = require("./lib/commands.js");
+const devmode = require("./lib/devmode.js");
 const {toast} = require("./lib/notify.js");
 const {emit, playable, findPlayer, vehicleById} = require("./lib/util.js");
 
-const ENABLED = process.env.FREERIDE_DEV === "1";
 
 function testKit(player, big) {
     const large = big === "shotgun" ? {weaponId: 11, loaded: 8, reserve: 32} : big === "thompson" ? {weaponId: 10, loaded: 50, reserve: 150} : {weaponId: 4};
@@ -69,8 +69,8 @@ const actions = {
 };
 
 commands.register({name: "dev", usage: "/dev weapons|fists|drop|model|wanted|hud|opacity|carstate|cardamage|money",
-    help: "Development tools (FREERIDE_DEV=1).", category: "Dev", hidden: !ENABLED}, (player, [action, ...args]) => {
-    if (!ENABLED) {
+    help: "Development tools (FREERIDE_DEV=1 or console: fr dev on).", category: "Dev", hidden: true}, (player, [action, ...args]) => {
+    if (!devmode.isOn()) {
         toast(player, "Development commands are off on this server.", {tone: "bad"});
         return;
     }

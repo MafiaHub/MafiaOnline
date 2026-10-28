@@ -150,8 +150,9 @@ function crossingAround(origin, minimum, maximum) {
 }
 
 // A spot on a road and the heading along it, for parking a car or a crate.
-function roadside(index) {
-    const road = adjacency[index][Math.floor(Math.random() * adjacency[index].length)];
+// `random` picks the road; pass a seeded one for repeatable spots.
+function roadside(index, random = Math.random) {
+    const road = adjacency[index][Math.floor(random() * adjacency[index].length)];
     const line = [crossings[index], ...road.points, crossings[road.to]];
     return pointAlong(line, Math.min(25, lineLength(line) / 2));
 }

@@ -1,4 +1,4 @@
-// One command table for chat and the F1 city menu. A menu button sends the
+// One command table for chat and the F2 city menu. A menu button sends the
 // same text a player could type, so both paths share every server check.
 const {toast} = require("./notify.js");
 
@@ -21,7 +21,7 @@ function resolve(name) {
 function run(player, command, args) {
     const entry = resolve(command);
     if (!entry) {
-        toast(player, `Unknown command /${command}. Press F1 for the city menu or type /help.`, {tone: "bad"});
+        toast(player, `Unknown command /${command}. Press F2 for the city menu or type /help.`, {tone: "bad"});
         return;
     }
     try {

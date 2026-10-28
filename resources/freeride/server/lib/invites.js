@@ -19,7 +19,7 @@ function showCard(player) {
     const list = listFor(player);
     card(player, "invites", list.length ? {
         title: list.length === 1 ? "Invitation" : `${list.length} invitations`,
-        subtitle: "Type /accept or /decline, or use the F1 menu",
+        subtitle: "Type /accept or /decline, or use the F2 menu",
         rows: list.map((invite) => [invite.fromName, invite.summary]), tone: "gold",
     } : null);
 }

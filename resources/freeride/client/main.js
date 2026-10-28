@@ -46,6 +46,12 @@ Events.on("fr:race:countdown", ({seconds}) => {
 
 Events.on("fr:race:checkpoint", () => Sound.play(CHECKPOINT_SOUND, {volume: 0.8}));
 
+// Walking through a door: the server moves the player while the screen is dark.
+Events.on("fr:fade", ({out, seconds}) => {
+    if (out) Fade.out(seconds ?? 0.4);
+    else Fade.in(seconds ?? 0.6);
+});
+
 Events.on("fr:announce", ({text, seconds, sound}) => {
     if (typeof text === "string") Hud.announce(text, seconds ?? 2);
     if (typeof sound === "string") Sound.play(sound, {volume: 0.8});

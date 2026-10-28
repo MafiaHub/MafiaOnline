@@ -1,4 +1,4 @@
-// Sections of the F1 city menu. Each module provides its own section and the
+// Sections of the F2 city menu. Each module provides its own section and the
 // menu collects them when a player opens it.
 const providers = new Map();
 

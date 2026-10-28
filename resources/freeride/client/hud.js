@@ -1,10 +1,9 @@
 // The Free Ride HUD: one transparent web view for toasts, the kill feed,
-// activity cards, the race panel, the scoreboard and the F1 city menu. The
-// server decides everything shown here; this script only relays its events,
+// activity cards, the race panel and the F2 city menu. F1 stays the mod's own
+// player list and Tab the retail map. The server decides everything shown here; this script only relays its events,
 // reads the replicated state bags and arbitrates the single native compass.
 const HUD_PAGE = "fw://resources/freeride/client/hud.html";
 const HUD_RESOURCE = "freeride";
-const SCOREBOARD_REFRESH_MS = 1000;
 const MENU_REFRESH_MS = 3000;
 const COMPASS_CHECK_MS = 500;
 
@@ -14,9 +13,8 @@ const hud = {
     queue: [],
     menuOpen: false,
     menuTab: "city",
-    scoreboardOpen: false,
-    scoreboardTimer: null,
     menuTimer: null,
+    carNames: null,
     pickerOpen: false,
     lastPlayerState: "",
     compass: new Map(),
@@ -63,7 +61,6 @@ function openView() {
 
 function closeView() {
     closeMenu();
-    closeScoreboard();
     if (hud.view !== null) Web.destroyView(hud.view);
     hud.view = null;
     hud.pageReady = false;
@@ -94,33 +91,6 @@ function closeMenu() {
     hud.menuTimer = null;
     post("menu:close");
     if (hud.view !== null) Web.focusView(hud.view, false);
-}
-
-function scoreboardRows(pings) {
-    return World.getPlayers().map((player) => ({
-        id: player.id, name: player.nickname, you: player.isLocal, ping: pings.get(player.id) ?? null,
-        level: player.state.get("fr.level") ?? 1, rank: player.state.get("fr.rank") ?? "",
-        kills: player.state.get("fr.kills") ?? 0, deaths: player.state.get("fr.deaths") ?? 0,
-        crew: player.state.get("fr.crew") ?? null, activity: player.state.get("fr.activity") ?? null,
-        bounty: player.state.get("fr.bounty") ?? null, alive: player.alive,
-    }));
-}
-
-function openScoreboard() {
-    if (hud.scoreboardOpen || hud.menuOpen || !World.isReady() || !LocalPlayer) return;
-    openView();
-    hud.scoreboardOpen = true;
-    post("scoreboard", {open: true, players: scoreboardRows(new Map())});
-    Events.emitServer("fr:scoreboard:request", {});
-    hud.scoreboardTimer = setInterval(() => Events.emitServer("fr:scoreboard:request", {}), SCOREBOARD_REFRESH_MS);
-}
-
-function closeScoreboard() {
-    if (!hud.scoreboardOpen) return;
-    hud.scoreboardOpen = false;
-    clearInterval(hud.scoreboardTimer);
-    hud.scoreboardTimer = null;
-    post("scoreboard", {open: false});
 }
 
 // Several systems want the compass; the highest priority with a target the
@@ -157,7 +127,7 @@ relay("fr:feed");
 relay("fr:card");
 relay("fr:xp");
 relay("fr:voice");
-relay("fr:menu:data");
+
 relay("fr:race:state", "race");
 
 Events.on("fr:profile", (profile) => post("profile", profile));
@@ -167,10 +137,13 @@ Events.on("fr:levelup", (data) => {
     Hud.announce(data.promoted ? data.rank.toUpperCase() : `LEVEL ${data.level}`, 3);
 });
 Events.on("fr:menu:open", (request) => openMenu(request?.tab));
-Events.on("fr:scoreboard", (data) => {
-    if (!hud.scoreboardOpen || !Array.isArray(data?.players)) return;
-    const pings = new Map(data.players.map((entry) => [entry.id, entry.ping]));
-    post("scoreboard", {open: true, mission: data.mission, weather: data.weather, players: scoreboardRows(pings)});
+// The export list names models by file; the stock catalog has their names.
+Events.on("fr:menu:data", (data) => {
+    if (hud.carNames === null || !hud.carNames.size) {
+        hud.carNames = new Map(Scene.getCarCatalog().map((entry) => [entry.model.toLowerCase(), entry.name]));
+    }
+    for (const entry of data?.export?.models ?? []) entry.name = hud.carNames.get(entry.model) ?? entry.model.replace(/00\.i3d$/i, "");
+    post("menu:data", data);
 });
 Events.on("fr:compass", (request) => {
     if (typeof request?.source !== "string") return;
@@ -186,14 +159,9 @@ Events.onLocal("fr:car:picker", ({open}) => {
     post("visibility", {hidden: hud.pickerOpen});
 });
 
-Key.bind("f1", () => {
+Key.bind("f2", () => {
     if (hud.menuOpen) closeMenu();
     else openMenu();
-});
-// Tab is the retail map, so the scoreboard sits on F2.
-Key.bind("f2", "both", (_key, state) => {
-    if (state === "down") openScoreboard();
-    else closeScoreboard();
 });
 
 Events.on("browserDocumentReady", ({viewId}) => {
@@ -212,7 +180,6 @@ Events.on("missionReady", () => {
 });
 Events.on("missionUnload", () => {
     closeMenu();
-    closeScoreboard();
     hud.compass.clear();
     hud.compassKey = null;
     post("reset");
@@ -229,7 +196,5 @@ Events.on("render", () => {
         post("player", {spawned: Boolean(player?.spawned), alive: Boolean(player?.alive), id: player?.id ?? null});
         if (!player?.alive) closeMenu();
     }
-    // Chat or a menu can swallow the F2 release.
-    if (hud.scoreboardOpen && !Key.isDown("f2")) closeScoreboard();
     updateCompass(false);
 });

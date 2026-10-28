@@ -1,18 +1,48 @@
 {
   "name": "freeride",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Mafia1Online",
-  "description": "Free Ride, the default Mafia1Online gamemode: street races, bounties, duels, crews, city events, shops and a persistent career",
+  "description": "Free Ride, the default Mafia1Online gamemode: street races, bounties, duels, crews, turf wars, jobs, hold-ups, interiors, city events and a persistent career",
   "mafiahub": {
     "serverScripts": [
-      "server/main.js", "server/selector.js", "server/ambience.js", "server/shops.js", "server/races.js",
-      "server/combat.js", "server/duels.js", "server/crews.js", "server/world_events.js", "server/social.js",
-      "server/police.js", "server/props.js", "server/doors.js", "server/dev.js"
+      "server/main.js",
+      "server/selector.js",
+      "server/ambience.js",
+      "server/shops.js",
+      "server/races.js",
+      "server/combat.js",
+      "server/duels.js",
+      "server/crews.js",
+      "server/world_events.js",
+      "server/social.js",
+      "server/interiors.js",
+      "server/export.js",
+      "server/police_duty.js",
+      "server/taxi.js",
+      "server/turf.js",
+      "server/stashes.js",
+      "server/speed_traps.js",
+      "server/robbery.js",
+      "server/police.js",
+      "server/props.js",
+      "server/doors.js",
+      "server/dev.js"
     ],
     "clientScripts": [
-      "client/hud.js", "client/markers.js", "client/main.js", "client/selector.js", "client/shops.js",
-      "client/radio.js", "client/car_picker.js", "client/police.js"
+      "client/hud.js",
+      "client/markers.js",
+      "client/main.js",
+      "client/selector.js",
+      "client/shops.js",
+      "client/radio.js",
+      "client/car_picker.js",
+      "client/police.js"
     ],
-    "files": ["client/hud.html", "client/selector.html", "client/radio.html", "client/car_picker.html"]
+    "files": [
+      "client/hud.html",
+      "client/selector.html",
+      "client/radio.html",
+      "client/car_picker.html"
+    ]
   }
 }

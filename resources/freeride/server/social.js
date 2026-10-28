@@ -4,8 +4,8 @@ const life = require("./lib/life.js");
 const invites = require("./lib/invites.js");
 const menu = require("./lib/menu.js");
 const commands = require("./lib/commands.js");
-const {toast} = require("./lib/notify.js");
-const {MAIN_WORLD, playable, findPlayer, headingOf} = require("./lib/util.js");
+const {toast, feed, name, text, COLORS} = require("./lib/notify.js");
+const {MAIN_WORLD, distance, playable, findPlayer, headingOf, formatMoney} = require("./lib/util.js");
 
 const GOTO_COOLDOWN_MS = 60_000;
 const RECENT_DAMAGE_MS = 15_000;
@@ -63,6 +63,63 @@ commands.register({name: "goto", aliases: ["tp"], usage: "/goto <player>", help:
     invites.offer(target, {kind: "goto", from: player, summary: "Wants to come to you",
         text: `${player.nickname} wants to come to you.`, accept: (host, traveller) => bring(traveller, host)});
     toast(player, `Asked ${target.nickname} for a ride.`);
+});
+
+const DICE_REACH = 15;
+const MIN_BET = 10;
+const MAX_BET = 1000;
+
+function roll() {
+    return 2 + Math.floor(Math.random() * 6) + Math.floor(Math.random() * 6);
+}
+
+// Both players put the bet down; the server rolls two dice for each.
+function playDice(challenger, opponent, bet) {
+    const near = playable(challenger) && playable(opponent) && distance(challenger.position, opponent.position) <= DICE_REACH;
+    if (!near) {
+        toast(challenger, "You need to be at the same table.", {tone: "bad"});
+        toast(opponent, "You need to be at the same table.", {tone: "bad"});
+        return;
+    }
+    if (!challenger.trySpendMoney(bet)) {
+        toast(opponent, `${challenger.nickname} cannot cover the bet.`, {tone: "bad"});
+        return;
+    }
+    if (!opponent.trySpendMoney(bet)) {
+        challenger.giveMoney(bet);
+        toast(challenger, `${opponent.nickname} cannot cover the bet.`, {tone: "bad"});
+        return;
+    }
+    const a = roll();
+    const b = roll();
+    const line = `${challenger.nickname} rolls ${a}, ${opponent.nickname} rolls ${b}.`;
+    if (a === b) {
+        challenger.giveMoney(bet);
+        opponent.giveMoney(bet);
+        for (const player of [challenger, opponent]) toast(player, `${line} A push; bets back.`, {title: "Dice"});
+        return;
+    }
+    const [winner, loser] = a > b ? [challenger, opponent] : [opponent, challenger];
+    winner.giveMoney(bet * 2);
+    toast(winner, `${line} You take ${formatMoney(bet * 2)}.`, {title: "Dice", tone: "good"});
+    toast(loser, `${line} ${winner.nickname} takes the pot.`, {title: "Dice", tone: "bad"});
+    feed("dice", [name(winner, COLORS.gold), text(` won ${formatMoney(bet * 2)} at dice from `), name(loser)]);
+}
+
+commands.register({name: "dice", usage: "/dice <player> <bet>", help: "Bet someone nearby on a roll of the dice.", category: "Social"}, (player, args) => {
+    const target = findPlayer(args[0]);
+    const bet = Math.floor(Number(args[1]));
+    if (!target || target.id === player.id || !Number.isFinite(bet) || bet < MIN_BET || bet > MAX_BET) {
+        toast(player, `Use /dice <player> <bet from ${MIN_BET} to ${MAX_BET}>.`, {tone: "bad"});
+        return;
+    }
+    if (player.money < bet) {
+        toast(player, "You cannot cover that bet.", {tone: "bad"});
+        return;
+    }
+    invites.offer(target, {kind: "dice", from: player, summary: `Dice for ${formatMoney(bet)}`,
+        text: `${player.nickname} bets you ${formatMoney(bet)} on a roll of the dice.`, accept: (opponent, challenger) => playDice(challenger, opponent, bet)});
+    toast(player, `Bet offered to ${target.nickname}.`);
 });
 
 commands.register({name: "pm", aliases: ["msg", "w"], usage: "/pm <player> <message>", help: "Send a private message.", category: "Social"}, (player, args) => {

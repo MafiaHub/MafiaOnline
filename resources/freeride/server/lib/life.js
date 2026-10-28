@@ -42,7 +42,7 @@ function setRespawnProvider(handler) {
     provider = handler;
 }
 
-// override: {spawn(player) -> {position, heading} | null, kit?, delayMs?}
+// override: {spawn?(player) -> {position, heading} | null, kit?, delayMs?}
 function setOverride(player, override) {
     overrides.set(player.id, override);
 }
@@ -85,7 +85,7 @@ function teleport(player, position, heading = 0, loadout = loadoutOf(player)) {
 // or the native spawn hint.
 function spotFor(player) {
     const suggested = player.getSuggestedSpawn();
-    return overrides.get(player.id)?.spawn(player) ?? provider(player) ??
+    return overrides.get(player.id)?.spawn?.(player) ?? provider(player) ??
         (suggested ? {position: suggested, heading: 0} : null);
 }
 

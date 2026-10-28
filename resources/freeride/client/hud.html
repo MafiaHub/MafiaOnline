@@ -96,25 +96,18 @@
     #gain { position: fixed; left: 50%; bottom: clamp(56px, 8vh, 80px); transform: translateX(-50%); color: var(--gold); font: 700 15px/1 var(--sans); letter-spacing: .06em; opacity: 0; transition: opacity .3s, transform .3s; }
     #gain.show { opacity: 1; transform: translate(-50%, -6px); }
 
-    /* Scoreboard */
-    #scoreboard { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0, 0, 0, .25); }
-    .board { width: min(860px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow: hidden; display: flex; flex-direction: column; background: var(--night); border: 1px solid var(--line); box-shadow: 0 26px 70px rgba(0, 0, 0, .65), inset 0 0 0 4px rgba(255, 255, 255, .03); }
-    .board header { display: flex; align-items: center; gap: 14px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+    /* Shared by the menu */
     .seal { display: grid; place-items: center; flex: none; width: 42px; height: 42px; border: 2px solid var(--gold); border-radius: 50%; color: var(--gold); font: 700 12px/1 var(--serif); transform: rotate(-12deg); }
-    .board h2, .menu h2 { margin: 0; font: 26px/1 var(--serif); font-weight: normal; letter-spacing: -.02em; }
+    .menu h2 { margin: 0; font: 26px/1 var(--serif); font-weight: normal; letter-spacing: -.02em; }
     .eyebrow { margin: 0 0 4px; color: var(--gold); font: 700 10px/1.2 var(--sans); letter-spacing: .22em; text-transform: uppercase; }
-    .board .count { margin-left: auto; color: var(--muted); font: 12px/1.3 var(--sans); text-align: right; }
     table { width: 100%; border-collapse: collapse; }
-    .board .table { overflow-y: auto; }
     th { padding: 9px 12px; color: var(--gold); font: 700 10px/1 var(--sans); letter-spacing: .16em; text-align: left; text-transform: uppercase; border-bottom: 1px solid rgba(196, 160, 98, .3); }
     td { padding: 8px 12px; border-bottom: 1px solid rgba(255, 255, 255, .05); font: 13px/1.3 var(--sans); }
     td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
     tr.you td { background: rgba(226, 184, 102, .1); }
-    tr.dead td { opacity: .55; }
     .tag { font-weight: 700; margin-right: 6px; }
     .lvl { display: inline-block; min-width: 26px; margin-right: 6px; padding: 2px 4px; border: 1px solid var(--line); color: var(--gold); font: 700 10px/1 var(--sans); text-align: center; }
     .bounty { color: var(--red); font-weight: 700; }
-    .ping-good { color: var(--green); } .ping-ok { color: var(--gold); } .ping-bad { color: var(--red); }
 
     /* City menu */
     #menu { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0, 0, 0, .35); pointer-events: auto; }
@@ -190,11 +183,10 @@
     <span class="numbers" id="xp-numbers">0 / 100 XP</span>
   </section>
   <div id="gain"></div>
-  <section id="scoreboard" class="hidden"></section>
   <section id="menu" class="hidden"></section>
 
   <script>
-    const TABS = [["city", "City"], ["races", "Races"], ["players", "Players"], ["crew", "Crew"], ["leaders", "Leaders"], ["help", "Help"]];
+    const TABS = [["city", "City"], ["jobs", "Jobs"], ["races", "Races"], ["players", "Players"], ["crew", "Crew"], ["leaders", "Leaders"], ["help", "Help"]];
     const state = {player: {spawned: false, alive: false, id: null}, hidden: false, profile: null, cards: new Map(), race: null,
       raceAt: 0, speakers: new Map(), menuOpen: false, tab: "city", data: null, compose: null};
 
@@ -327,27 +319,7 @@
     on("visibility", ({hidden}) => { state.hidden = Boolean(hidden); applyVisibility(); });
     on("reset", () => { state.cards.clear(); state.race = null; state.speakers.clear(); renderCards(); renderRace(); document.getElementById("voice").replaceChildren(); });
 
-    /* Scoreboard */
-    function pingClass(ping) { return ping === null ? "" : ping < 80 ? "ping-good" : ping < 160 ? "ping-ok" : "ping-bad"; }
     function crewTag(crew) { return crew ? el("span", {class: "tag", style: `color:${crew.color}`}, `[${crew.tag}]`) : null; }
-    on("scoreboard", ({open, players, mission, weather}) => {
-      const box = document.getElementById("scoreboard");
-      box.classList.toggle("hidden", !open);
-      if (!open) return;
-      const rows = [...(players ?? [])].sort((a, b) => (b.kills - a.kills) || (b.level - a.level) || a.name.localeCompare(b.name));
-      box.replaceChildren(el("div", {class: "board"},
-        el("header", {}, el("span", {class: "seal"}, "LH"),
-          el("div", {}, el("p", {class: "eyebrow"}, `Lost Heaven · ${mission === "freeridenoc" ? "Night" : "Day"}${weather && weather !== "default" ? ` · ${weather}` : ""}`), el("h2", {}, "Free Ride")),
-          el("span", {class: "count"}, `${rows.length} in town`, el("br"), "Hold F2")),
-        el("div", {class: "table"}, el("table", {},
-          el("thead", {}, el("tr", {}, el("th", {}, "Player"), el("th", {}, "Rank"), el("th", {class: "num"}, "Kills"), el("th", {class: "num"}, "Deaths"), el("th", {}, "Doing"), el("th", {class: "num"}, "Ping"))),
-          el("tbody", {}, rows.map((row) => el("tr", {class: `${row.you ? "you" : ""} ${row.alive ? "" : "dead"}`},
-            el("td", {}, crewTag(row.crew), row.name, row.bounty ? el("span", {class: "bounty"}, `  ${money(row.bounty)}`) : null),
-            el("td", {}, el("span", {class: "lvl"}, row.level), row.rank),
-            el("td", {class: "num"}, row.kills), el("td", {class: "num"}, row.deaths),
-            el("td", {class: "muted"}, row.activity ?? (row.alive ? "Free roaming" : "Respawning")),
-            el("td", {class: `num ${pingClass(row.ping)}`}, row.ping === null ? "…" : `${row.ping} ms`))))))));
-    });
 
     /* City menu */
     function button(label, text, primary = false, disabled = false) {
@@ -381,6 +353,42 @@
         panel("Bounties", bounties.length ? bounties.map((bounty) => line(bounty.name, bounty.reason === "police" ? "Wanted by the police" : "Kill streak",
           el("span", {class: "pill red"}, money(bounty.amount)), bounty.id === state.player.id ? null : button("Hunt", `/hunt #${bounty.id}`))) : empty("Nobody has a price on their head.")),
         panel("Around town", (data.places ?? []).map((place) => line(place.name, place.offers.join(" · ")))));
+    }
+
+    function jobsPage(data) {
+      const exportList = data.export;
+      const duty = data.duty ?? {};
+      const taxi = data.taxi ?? {};
+      const stashes = data.stashes ?? {found: 0, total: 30};
+      return el("div", {class: "grid"},
+        panel("Lucas's export list", exportList
+          ? [el("p", {}, `Take these from the city's traffic and bring them to the export yard. ${money(exportList.pay)} each, a bonus for the full list. New list in ${exportList.minutesLeft} min.`),
+            exportList.models.map((entry) => line(entry.name ?? entry.model, entry.deliveredBy ? `Delivered by ${entry.deliveredBy}` : "Wanted",
+              entry.deliveredBy ? el("span", {class: "pill green"}, "Done") : el("span", {class: "pill gold"}, money(exportList.pay))))]
+          : empty("Lucas is drawing up a list.")),
+        panel("Police duty",
+          el("p", {}, "Put on the uniform, take a squad car and bring down wanted players and bounty targets. Shoot a citizen and you lose the badge."),
+          el("p", {}, `${duty.officers ?? 0} on duty · ${duty.suspects ?? 0} suspect${duty.suspects === 1 ? "" : "s"} in town`),
+          button(duty.onDuty ? "Clock off" : "Go on duty", "/duty", !duty.onDuty)),
+        panel("Taxi",
+          el("p", {}, "Take calls from street corners and drive fares across town. Quick drivers earn tips."),
+          taxi.active ? el("p", {}, `On shift · ${taxi.fares} fare${taxi.fares === 1 ? "" : "s"}`) : null,
+          button(taxi.active ? "End shift" : "Start a shift", "/taxi", !taxi.active)),
+        panel("Courier", el("p", {}, "Salieri's back window has sealed envelopes for Yellow Pete. Eight minutes, $180."), button("Check my run", "/courier")),
+        panel("Hold-ups", el("p", {}, "Draw a gun at a shop counter and /rob it. The police come at once; keep the counter fifteen seconds."),
+          (data.robbery ?? []).map((shop) => line(shop.name, shop.readyInSeconds ? `Till empty · ${minutes(shop.readyInSeconds)}` : "Till full"))),
+        panel("Turf", el("p", {}, "Crews take street corners by holding them for a minute. Each corner pays its crew every three minutes."),
+          (data.turf ?? []).map((turf) => line(`Turf ${turf.id}`, turf.contested ? "Contested" : turf.owner ? turf.owner.name : "Open",
+            turf.owner ? el("span", {class: "tag", style: `color:${turf.owner.color}`}, `[${turf.owner.tag}]`) : null))),
+        panel("Speed traps", (data.speedtraps ?? []).map((trap) => line(`Trap ${trap.id}`,
+          trap.record ? `Record ${trap.record.kmh} km/h by ${trap.record.name}` : "No record yet",
+          el("span", {class: "pill gold"}, trap.best ? `You ${trap.best}` : "—")))),
+        panel("Cash stashes", el("p", {class: "big"}, `${stashes.found} / ${stashes.total}`),
+          el("div", {class: "meter"}, el("span", {style: `width:${Math.round(stashes.found / Math.max(1, stashes.total) * 100)}%`})),
+          el("p", {}, "Hidden at the roadside all over town. They only show up close.")),
+        panel("Buildings", (data.interiors ?? []).length
+          ? data.interiors.map((interior) => line(interior.name, `${interior.kind === "safehouse" ? "Private safehouse" : "Open to everyone"} · ${interior.distance} m`))
+          : empty("No doors are open yet. Look for the arrows by building entrances.")));
     }
 
     function racesPage(data) {
@@ -418,7 +426,8 @@
           el("td", {}, player.activity ?? (player.spawned ? "Free roaming" : "Choosing a character")),
           el("td", {class: "num"}, `${player.ping} ms`),
           el("td", {}, player.you ? null : el("div", {class: "actions", style: "justify-content:flex-end"},
-            button("Go to", `/goto #${player.id}`), button("Duel", `/duel #${player.id} 3`), button("Watch", `/spectate #${player.id}`),
+            button("Go to", `/goto #${player.id}`), button("Duel", `/duel #${player.id} 3`), button("Dice $50", `/dice #${player.id} 50`),
+            button("Watch", `/spectate #${player.id}`),
             el("button", {class: "btn", type: "button", onclick: () => startCompose(player)}, "Message"),
             crew && !player.crew ? button("Invite", `/crew invite #${player.id}`) : null)))))),
         el("p", {class: "empty", style: "margin-top:12px"}, "Duels run in a private copy of the city. Stop watching with /spectate off."));
@@ -463,7 +472,8 @@
       }
       return el("div", {class: "grid"},
         panel("Controls", el("div", {class: "keys"},
-          el("kbd", {}, "F1"), el("span", {}, "City menu"), el("kbd", {}, "F2"), el("span", {}, "Scoreboard (hold)"),
+          el("kbd", {}, "F2"), el("span", {}, "City menu"), el("kbd", {}, "F1"), el("span", {}, "Who is in town (hold)"),
+          el("kbd", {}, "Tab"), el("span", {}, "City map"),
           el("kbd", {}, "T"), el("span", {}, "Chat"), el("kbd", {}, "N / B"), el("span", {}, "Browse and buy at a shop counter"),
           el("kbd", {}, "F9"), el("span", {}, "Car radio on or off"), el("kbd", {}, "K"), el("span", {}, "Siren, in a police car"))),
         [...byCategory].map(([category, entries]) => panel(category, entries.map((entry) => el("div", {class: "cmd"}, el("code", {}, entry.usage), el("span", {}, entry.help))))));
@@ -482,7 +492,7 @@
       document.body.classList.toggle("menu-open", state.menuOpen);
       if (!state.menuOpen) return;
       const data = state.data ?? {};
-      const pages = {city: cityPage, races: racesPage, players: playersPage, crew: crewPage, leaders: leadersPage, help: helpPage};
+      const pages = {city: cityPage, jobs: jobsPage, races: racesPage, players: playersPage, crew: crewPage, leaders: leadersPage, help: helpPage};
       const keepScroll = box.querySelector(".page")?.scrollTop ?? 0;
       const active = document.activeElement;
       const activeId = active?.id;
@@ -500,7 +510,7 @@
               if (event.key === "Enter") sendCompose();
             }}), el("button", {class: "btn primary", type: "button", onclick: sendCompose}, "Send"),
             el("button", {class: "btn", type: "button", onclick: () => { composeTarget = null; renderMenu(); }}, "Cancel"))
-          : [el("span", {}, "Every button runs the same command you could type in chat."), el("span", {style: "margin-left:auto"}, "Esc or F1 to close")])));
+          : [el("span", {}, "Every button runs the same command you could type in chat."), el("span", {style: "margin-left:auto"}, "Esc or F2 to close")])));
       const page = box.querySelector(".page");
       if (page) page.scrollTop = keepScroll;
       if (activeId) {
@@ -530,7 +540,7 @@
     });
     document.addEventListener("keydown", (event) => {
       if (!state.menuOpen) return;
-      if (event.key === "Escape" || event.key === "F1") { event.preventDefault(); send("hud:close"); return; }
+      if (event.key === "Escape" || event.key === "F2") { event.preventDefault(); send("hud:close"); return; }
       if (document.activeElement?.tagName === "INPUT") return;
       const index = Number(event.key) - 1;
       if (Number.isInteger(index) && TABS[index]) selectTab(TABS[index][0]);
