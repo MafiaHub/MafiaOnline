@@ -9,7 +9,7 @@ const menu = require("./lib/menu.js");
 const nametag = require("./lib/nametag.js");
 const {toast, toastAll, feed, name, text, COLORS} = require("./lib/notify.js");
 
-const {RESOURCE, distance, playable, vehicleById, formatMoney, headingOf, speedOf} = util;
+const {RESOURCE, onClient, distance, playable, vehicleById, formatMoney, headingOf, speedOf} = util;
 const CAR_CHOICE_COOLDOWN_MS = 750;
 const REPAIR_COOLDOWN_MS = 45_000;
 const FLIP_COOLDOWN_MS = 10_000;
@@ -259,7 +259,7 @@ Events.on("playerSpawn", (player) => { if (!life.isTransit(player)) welcome(play
 Events.on("vehiclePlayerEntered", (vehicle, player) => lastVehicles.set(player.id, vehicle.id));
 Events.on("vehiclePlayerExited", (vehicle, player) => lastVehicles.set(player.id, vehicle.id));
 
-Events.onClient("fr:car:choose", (player, request) => {
+onClient("fr:car:choose", (player, request) => {
     if (!request || request.generation !== World.getMissionGeneration() || !Number.isInteger(request.id)) return;
     const model = CAR_MODELS_BY_ID[request.id];
     if (!model || cooldown(player, "car", CAR_CHOICE_COOLDOWN_MS)) return;
@@ -268,7 +268,7 @@ Events.onClient("fr:car:choose", (player, request) => {
     if (result.ok) toast(player, result.message, {tone: "good"});
 });
 
-Events.onClient("fr:menu:request", (player) => {
+onClient("fr:menu:request", (player) => {
     if (cooldown(player, "menu", MENU_REQUEST_INTERVAL_MS)) return;
     util.emit(player, "fr:menu:data", {
         ...menu.collect(player),
@@ -278,11 +278,11 @@ Events.onClient("fr:menu:request", (player) => {
 });
 
 // Menu buttons skip the chat rate limit, so they get their own.
-Events.onClient("fr:menu:command", (player, request) => {
+onClient("fr:menu:command", (player, request) => {
     if (!cooldown(player, "menuCommand", MENU_COMMAND_INTERVAL_MS)) commands.runText(player, request?.text);
 });
 
-Events.onClient("fr:scoreboard:request", (player) => {
+onClient("fr:scoreboard:request", (player) => {
     if (cooldown(player, "scoreboard", 400)) return;
     util.emit(player, "fr:scoreboard", {
         mission: World.getMission(),

@@ -107,7 +107,7 @@ function scoreboardRows(pings) {
 }
 
 function openScoreboard() {
-    if (hud.scoreboardOpen || hud.menuOpen || !World.isReady()) return;
+    if (hud.scoreboardOpen || hud.menuOpen || !World.isReady() || !LocalPlayer) return;
     openView();
     hud.scoreboardOpen = true;
     post("scoreboard", {open: true, players: scoreboardRows(new Map())});

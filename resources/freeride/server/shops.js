@@ -9,7 +9,7 @@ const life = require("./lib/life.js");
 const menu = require("./lib/menu.js");
 const commands = require("./lib/commands.js");
 const {toast, card, compass} = require("./lib/notify.js");
-const {inFreeRide, distance, emit, onStart, onStop, formatMoney, formatMinutes} = require("./lib/util.js");
+const {inFreeRide, distance, emit, onClient, onStart, onStop, formatMoney, formatMinutes} = require("./lib/util.js");
 
 const WEAPON = Object.freeze({BAT: 4, COLT: 6, THOMPSON: 10, SHOTGUN: 11, GRENADE: 15});
 const START_FUEL_FRACTION = 0.12;
@@ -238,8 +238,8 @@ Events.on("playerDisconnect", (player) => {
     lastPurchase.delete(player.id);
     courier.delete(player.id);
 });
-Events.onClient("fr:shop:buy", buy);
-Events.onClient("fr:shop:deliver", deliver);
+onClient("fr:shop:buy", buy);
+onClient("fr:shop:deliver", deliver);
 
 commands.register({name: "courier", usage: "/courier [cancel]", help: "Check or abandon your courier run.", category: "City"}, (player, args) => {
     const job = courier.get(player.id);

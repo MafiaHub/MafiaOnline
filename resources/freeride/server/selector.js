@@ -5,7 +5,7 @@
 // walks into their preview.
 const profiles = require("./lib/profiles.js");
 const life = require("./lib/life.js");
-const {MAIN_WORLD, inFreeRide, distance, emit, onStart, onStop} = require("./lib/util.js");
+const {MAIN_WORLD, inFreeRide, distance, emit, onClient, onStart, onStop} = require("./lib/util.js");
 
 // emeth_1 is also the native start the spawn hint names, a short walk from
 // the stock Salieri_save frame. The positions are the frames in each
@@ -111,7 +111,7 @@ onStop(() => {
     leavePreviewWorlds();
 });
 
-Events.onClient("fr:selector:ready", (player, report) => {
+onClient("fr:selector:ready", (player, report) => {
     isolatePreview(player);
     if (!reportedReady.has(player.id)) {
         reportedReady.add(player.id);
@@ -133,7 +133,7 @@ Events.onClient("fr:selector:ready", (player, report) => {
     sendOpen(player, selection);
 });
 
-Events.onClient("fr:selector:spawn", (player, request) => {
+onClient("fr:selector:spawn", (player, request) => {
     const selection = selections.get(player.id);
     if (!inFreeRide() || !selection || !request || player.spawned || !World.isReady() ||
         selection.generation !== World.getMissionGeneration() || request.generation !== selection.generation) return;

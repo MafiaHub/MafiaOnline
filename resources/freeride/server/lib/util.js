@@ -87,6 +87,14 @@ function broadcast(name, data) {
     Events.emitAllClients(name, data ?? {});
 }
 
+// Client requests from a connection that is not a player (the simulation
+// host runs the client scripts too) carry no sender and are dropped.
+function onClient(name, handler) {
+    Events.onClient(name, (player, data) => {
+        if (player) handler(player, data);
+    });
+}
+
 function onStart(handler) {
     Events.on("resourceStart", (name) => { if (name === RESOURCE) handler(); });
 }
@@ -103,5 +111,5 @@ module.exports = {
     RESOURCE, MAIN_WORLD, FREE_RIDE_MISSIONS,
     inFreeRide, distance, flatDistance, speedOf, plain, formatMoney, formatDuration, formatMinutes,
     headingOf, headingFrom, playable, playerById, vehicleById, findPlayer, emit, broadcast,
-    onStart, onStop, pick,
+    onClient, onStart, onStop, pick,
 };
