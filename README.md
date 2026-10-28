@@ -63,8 +63,9 @@ mission callbacks, is documented in
 The [Mafia Online Docs](https://github.com/MafiaHub/MafiaOnlineDocs) repository
 builds the generated API reference alongside the authored guides.
 The [Free Ride guide](docs/freeride.md) covers the multiplayer street races,
-bounties, private duels, crews, city events, shops, persistent careers, the
-day/night missions and weather, the car radio and synchronized doors.
+bounties, private duels, crews and turf wars, the export, police, taxi and
+hold-up jobs, building entrances, city events, cash stashes, speed traps,
+shops, persistent careers, weather, the car radio and synchronized doors.
 
 [LHRP — Lost Heaven Roleplay](gamemodes/real-life/README.md) is a separate,
 minimal TypeScript gamemode with a cinematic city login, Preact/StyleX UI,
