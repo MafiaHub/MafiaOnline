@@ -31,13 +31,10 @@ function isAdmin(player) {
     return Boolean(key && admins.has(key));
 }
 
-function set(player, admin) {
-    const key = profiles.keyOf(player);
-    if (!key) return false;
+function set(key, admin) {
     if (admin) admins.add(key);
     else admins.delete(key);
     save();
-    return true;
 }
 
 load();

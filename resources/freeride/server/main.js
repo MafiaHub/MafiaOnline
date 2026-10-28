@@ -400,9 +400,16 @@ Events.on("consoleCommand", (command, args) => {
         if (target && Number.isInteger(amount) && target.giveMoney(amount)) console.log(`[freeride] ${target.nickname} now has ${formatMoney(target.money)}`);
         else console.log("[freeride] Usage: fr money <player> <whole dollars>");
     } else if (action === "admin" && ["add", "remove"].includes(rest[0]) && rest[1]) {
-        const target = util.findPlayer(rest.slice(1).join(" "));
-        if (target && admin.set(target, rest[0] === "add")) console.log(`[freeride] ${target.nickname} ${rest[0] === "add" ? "is now" : "is no longer"} an admin`);
-        else console.log("[freeride] Usage: fr admin add|remove <connected player>");
+        // A connected player's own record, or every saved record by that name.
+        const query = rest.slice(1).join(" ");
+        const target = util.findPlayer(query);
+        const keys = target && profiles.keyOf(target) ? [profiles.keyOf(target)] : profiles.keysNamed(query);
+        if (!keys.length) {
+            console.log(`[freeride] No player record named "${query}"; connected: ${World.getPlayers().map((player) => player.nickname).join(", ") || "nobody"}`);
+        } else {
+            for (const key of keys) admin.set(key, rest[0] === "add");
+            console.log(`[freeride] ${keys.join(", ")} ${rest[0] === "add" ? "now admin" : "no longer admin"}`);
+        }
     } else if (action === "admin") {
         console.log(`[freeride] Admins: ${admin.list().join(", ") || "none"}`);
     } else if (action === "dev" && ["on", "off"].includes(rest[0])) {

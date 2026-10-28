@@ -81,6 +81,13 @@ function keyOf(player) {
     return sessions.get(player.id)?.key ?? null;
 }
 
+// Record keys whose last nickname matches, for console commands about
+// players who are not connected.
+function keysNamed(nickname) {
+    const wanted = String(nickname).trim().toLowerCase();
+    return [...records].filter(([, record]) => String(record.name).toLowerCase() === wanted).map(([key]) => key);
+}
+
 function get(player) {
     const session = sessions.get(player.id);
     return session ? records.get(session.key) : null;
@@ -218,5 +225,5 @@ Events.on("playerSpawn", publish);
 
 load();
 
-module.exports = {get, keyOf, attach, save: writeNow, detach, publish, setPublic, addXp, bump, setField, progress, leaderboard,
+module.exports = {get, keyOf, keysNamed, attach, save: writeNow, detach, publish, setPublic, addXp, bump, setField, progress, leaderboard,
     levelFor, rankFor, STARTING_CASH, DATA_DIR};
