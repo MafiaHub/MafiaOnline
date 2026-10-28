@@ -51,8 +51,8 @@ Events.on("playerRespawn", (player) => sendPolice(player, {action: "wanted", lev
 // by the highest level the player reached on this case.
 const caseLevel = new Map();
 
-// A fine costs cash. An arrest is a jail sentence (jail.js); where a map has
-// no cell for the player, it costs bail and a fresh start instead.
+// A fine costs cash. An arrest is a jail sentence (jail.js); while the jail
+// is not built (no map objects yet), it costs bail and a fresh start instead.
 Events.on("playerArrest", (player, _officer, {kind}) => {
     if (kind === "fine") {
         const charge = Math.min(player.money, FINE);

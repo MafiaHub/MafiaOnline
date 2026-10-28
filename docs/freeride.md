@@ -274,21 +274,61 @@ bill $50. The mod builds the hospital as an outer shell with doors and
 windows, so it has no rooms to walk into.
 
 An arrest is a jail sentence: 45 seconds, plus 30 for each wanted level above
-minor that the case reached. The police keep the prisoner's weapons. On Lost
-Heaven Extended the cell is the motel's storeroom, `&& sklad` in the mod's
-`motel.4ds` (550.7, 32.9, 2035.7), in a private copy of the map; elsewhere the
-player is held where they would respawn. The prisoner's client stands a guard in the
-cell doorway and shows the countdown. A prisoner who strays more than 3 m is
-walked back within a quarter second, a door a prisoner opens is shut and
-locked, `/kill` is refused, and `/bail` pays $5 per second left. At the end
-the guard walks them out: the screen fades and they stand at the ridge with
-the starting kit. A sentence survives a reconnect. A fine
-still costs $100.
+minor that the case reached. The police keep the prisoner's weapons, the
+screen fades, and the prisoner wakes in a locked cell of the county jail
+(`server/lib/prison.js`). The jail is built from stock map objects 150 m under
+the empty fields north of the city, at (−400, −150, 1500), more than 500 m from
+the nearest road on every map, and only exists in its own virtual world
+(`0x50000000`), so nobody on the street receives it. Its hall is 24 by 8.1 m
+and 2.5 m high: white walls over a green dado (`xzed`), a floor of weathered
+boards (`plotdrev`), a bare concrete ceiling (`plotcihly3`), bare brick and
+stained plaster on the end walls (`plotcihly1`, `plotcihly4`), and bare bulbs
+on cords (`2zarc`, from Norman's cell). Three 7.24 by 3 m cells line one side,
+each with a front of steel bars (`plot08`), a plank bunk on chains, a toilet
+and a stain on the floor (`xpostel 3`, `xv zachod1`, `xv spina2`, furniture
+of the stock `MISE17-VEZENI` scene). No stock model is a tiled floor on its
+own: the tiled floors in `models/` belong to whole rooms or buildings, and the
+prison scene's floor is part of its mission `scene.4ds`. The warden's desk
+(`stulprac`, `xzidle 01`) stands at one end; the other end is the visiting
+area, with a bench, a boiler and the way out (`xlavicka`, `xbojler`,
+`plotdrev7`, a steel door with an EXIT arrow). A fourth prisoner shares a
+cell.
+
+The client shows the countdown. A prisoner who gets out of the cell is walked
+back within a quarter second, `/kill` is refused, and `/bail` pays $5 per
+second left. The warden, a policeman the simulation host runs
+(`server/lib/warden.js`, `Npc.spawn`), stands at his desk while anyone is in
+the jail, and leaves 15 seconds after the last person does. When the time is
+up or bail is paid he walks to the cell door (`npc.walkTo`); `walkTo` follows
+the mission's pedestrian paths, which the jail lacks, so when the host fails
+the walk he turns to the door from where he stands instead. He works the lock,
+the barred door slides aside after 1.5 seconds, and he goes back to the desk.
+Without a simulation host the door opens on its own after the same pause. The
+prisoner then walks down the corridor to the EXIT arrow; the screen fades and
+they stand at the map's release point (`jail.release` in `lib/maps.js`) with
+the starting kit. In the city that is the street outside the gate of the stock
+prison building (`vezeni.4ds`, placed by `cache.bin` at (−1105.68, −6.12,
+311.77); its gate spans x −1102.31 to −1094.44 at z 296.14, facing the road),
+in the countryside the crossroads. A cell door closes again once its freed
+prisoner has stepped out, so a cellmate stays locked in; a freed prisoner who
+has not walked out after two minutes, or who dies, is shown out. A sentence
+survives a reconnect and a map change. While the jail cannot be built (no map
+objects), an arrest costs $250 bail and a fresh start instead. A fine still
+costs $100.
+
+Visiting hours (`server/jail_visits.js`): in the city, an arrow outside that
+gate (−1098.4, −6.0, 294.6) leads into the visiting area, on the corridor side
+of the bars, where visitors see and talk to the prisoners. The guard holds a
+visitor's weapons at the door and hands them back at the EXIT arrow, which
+leads back to the street. Anyone the police want, or busy with a race, duel
+or job, is turned away; police duty is welcome. A visitor who walks into an
+open cell is put back in the corridor, and visitors open no cells.
 
 ## Buildings
 
-Arrows by building doors lead inside: walk into one, the screen fades and you
-arrive inside; the arrow by the arrival point leads back out with your weapons
+Arrows by building doors lead inside (the stock `sipka` arrow, which points
+down and spins about the vertical like the retail mission arrows): walk into
+one, the screen fades and you arrive inside; the arrow by the arrival point leads back out with your weapons
 and health. Public interiors are shared. A safehouse is private to your crew
 (or to you, without one), dresses your wounds and tops up your magazines.
 Doors stay shut while the police are after you, and during races and duels.
@@ -361,8 +401,12 @@ the synchronized stock doors near you.
 
 Start the server with `FREERIDE_DEV=1`, or type `fr dev on` in the server
 console, to enable `/dev weapons|fists|drop|model|wanted|hud|opacity|carstate|
-cardamage|money` for combat, car and HUD testing, and `/entrance` for
-recording interiors. They are off by default.
+cardamage|jail|object|money` for combat, car, HUD, jail and map object testing
+(`/dev jail [level]` locks you up at once; `/dev object <model.4ds>` places a
+map object four metres ahead, `off` removes it), and `/entrance` for
+recording interiors. They are off by default. The server console runs any of
+them on a player with `fr as <player> <action> ...`, whether or not
+development mode is on.
 
 ## How it is put together
 
@@ -370,16 +414,16 @@ recording interiors. They are off by default.
 | --- | --- |
 | `server/main.js` | Player lifecycle, profiles on join, the admin motor pool, `/repair`, `/help`, menu requests, console commands. |
 | `server/dealership.js`, `economy.js` | The car lot, the garage and car locks; `/pay` and the street wage. |
-| `server/lib/` | Shared rules: the database (`store.js`), commands, profiles and ranks, respawn and activities, invitations, notifications, nametags, the road graph, admins and car prices. |
+| `server/lib/` | Shared rules: the database (`store.js`), commands, profiles and ranks, respawn and activities, invitations, notifications, nametags, the road graph, admins, car prices, and the county jail building and its warden (`prison.js`, `warden.js`). |
 | `server/selector.js`, `ambience.js`, `shops.js`, `police.js`, `props.js`, `doors.js` | Entering the city, clock and weather, shops and courier, police outcomes, prop repair, the door lab. |
 | `server/races.js`, `combat.js`, `duels.js`, `crews.js`, `world_events.js`, `social.js` | Races, bounties, duels, crews, city events, rides, messages and dice. |
 | `server/export.js`, `police_duty.js`, `taxi.js`, `robbery.js` | The jobs. |
 | `server/turf.js`, `stashes.js`, `speed_traps.js`, `interiors.js` | Turf, cash stashes, speed traps and building entrances, each per map. |
 | `server/map_vote.js`, `bootleg.js`, `lib/maps.js` | The default map, map votes, the bootleg run and the map registry. |
-| `server/championship.js`, `jail.js`, `hospital.js` | The Autodrom championship, jail sentences and hospital respawns. |
+| `server/championship.js`, `jail.js`, `jail_visits.js`, `hospital.js` | The Autodrom championship, jail sentences, jail visits and hospital respawns. |
 | `client/hud.js`, `client/hud.html` | One transparent web view for toasts, feed, activity cards, race panel, level strip and the city menu; it also arbitrates the single native compass by priority. |
 | `client/markers.js` | Beacons, checkpoint and crate markers, door arrows, turf rings, bounty and crewmate labels. |
-| `client/selector.js`, `shops.js`, `car_picker.js`, `radio.js`, `police.js`, `jail.js`, `main.js` | The selector, shop staff, the car lot, garage and motor pool, radio, police HUD, the jail guard and countdown, fades and race countdown. |
+| `client/selector.js`, `shops.js`, `car_picker.js`, `radio.js`, `police.js`, `jail.js`, `main.js` | The selector, shop staff, the car lot, garage and motor pool, radio, police HUD, the jail countdown, fades and race countdown. |
 
 Gameplay requests use `Events.emitServer` and are checked again on the
 server; the server answers with `player.emit` or `Events.emitAllClients` and

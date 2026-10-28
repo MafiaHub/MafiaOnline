@@ -120,6 +120,19 @@ const COUNTRY_ROUTES = [
     {id: "farm-sprint", name: "Farm Sprint", description: "The crossroads to the lowlands.", via: ["crossroads", "lowlands"]},
 ];
 
+// The county jail (lib/prison.js) in the city: its way out leads to the
+// street outside the gate of the stock prison building, models/vezeni.4ds,
+// which cache.bin places at (-1105.68, -6.12, 311.77) turned a quarter about
+// y. Its gate (texture 0VRATA1S) spans x -1102.31..-1094.44 on the south
+// wall at z 296.14, ground y -6.12, facing the road at z 284. The visitors'
+// entrance is the arrow outside that gate; prisoners and visitors come out
+// 5 m into the street, facing the road. In the countryside the way out
+// leads to the crossroads and there is no visitors' entrance.
+const CITY_JAIL = {
+    release: {position: {x: -1098.4, y: -5.0, z: 291.0}, heading: Math.PI},
+    visit: {position: {x: -1098.4, y: -6.0, z: 294.6}},
+};
+
 const MAPS = {
     freeride: {
         id: "freeride", title: "Lost Heaven", roads: require("../data/roads_freeride.js"), shops: true,
@@ -127,6 +140,7 @@ const MAPS = {
         districts: CITY_DISTRICTS, routes: CITY_ROUTES,
         places: ["salieri", "pete", "pump", "dispensary"],
         exportYard: {name: "the export yard", position: {x: -1141.0, y: -7.1, z: -709.9}},
+        jail: CITY_JAIL,
     },
     freeride_extended: {
         id: "freeride_extended", title: "Lost Heaven Extended", roads: require("../data/roads_freeride_extended.js"), shops: true,
@@ -142,13 +156,7 @@ const MAPS = {
         // unrotated; its doors sit at local z -15.5, beside the stock
         // "lekarna" frame where the Dispensary's attendant stands (y 14.81).
         hospital: {name: "Lost Heaven Hospital", door: {x: -759.4, y: 14.9, z: 761.5}, spawn: {position: {x: -759.4, y: 14.9, z: 759.5}, heading: Math.PI}},
-        // The motel's storeroom: sector "&& sklad" in models/motel.4ds, on the
-        // ground floor (y 32.9) beside the lobby and office.
-        // The guard stands in the storeroom's doorway ("&& futro07", 2.6 m
-        // from the room's origin), facing the prisoner.
-        jail: {name: "the motel lock-up", cell: {position: {x: 550.7, y: 33.1, z: 2035.7}, heading: 0},
-            guard: {position: {x: 552.6, y: 32.9, z: 2036.3}, direction: {x: -0.95, y: 0, z: -0.3}},
-            release: {position: LANDMARKS.ridge.position, heading: 29 * Math.PI / 180}},
+        jail: CITY_JAIL,
         // Sarah's apartment, models/quarters_sr.4ds: the street door frame
         // "&& futro out" and the corridor "&& chodba" behind it.
         interiors: [{id: "b:sarah", name: "Sarah's Apartment", kind: "safehouse",
@@ -161,6 +169,7 @@ const MAPS = {
         districts: COUNTRY_DISTRICTS, routes: COUNTRY_ROUTES,
         places: ["crossroads", "lowlands", "hills", "ridge"],
         exportYard: LANDMARKS.lowlands,
+        jail: {release: {position: LANDMARKS.crossroads.position, heading: 17 * Math.PI / 180}},
     },
 };
 // The stock night map plays only until Free Ride moves it to the default.

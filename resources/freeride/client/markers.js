@@ -12,6 +12,7 @@ const CREW_RANGE = 1500;
 const CREW_NEAR = 35;
 const MODEL_RETRY_MS = 2000;
 const RING_SEGMENTS = 32;
+const ARROW_MODEL = "sipka.i3d";
 
 const groups = new Map();
 const models = new Map();
@@ -82,9 +83,21 @@ function drawModel(group, item, position, now) {
         if (record.frame === null) return;
     }
     record.frame.setVisible(true);
-    const angle = now * 0.001;
+    const spin = now * 0.001;
+    if (record.model === ARROW_MODEL) {
+        // sipka.4ds is a flat arrow standing in its x-y plane with the tip
+        // 1.13 m out along +x. LS3D turns a frame by the conjugate of the
+        // stored quaternion, so this stores conj(spin about y * quarter turn
+        // about z), which tips it point down and spins it about the vertical,
+        // as retail mission arrows do. Its tip then hovers 0.3 m up.
+        const c = Math.cos(spin / 2) * Math.SQRT1_2;
+        const s = Math.sin(spin / 2) * Math.SQRT1_2;
+        record.frame.setWorldPosition({x: position.x, y: position.y + 1.45 + 0.12 * Math.sin(now * 0.003), z: position.z});
+        record.frame.setRotation({w: c, x: s, y: -s, z: c});
+        return;
+    }
     record.frame.setWorldPosition({x: position.x, y: position.y + 0.25 + 0.12 * Math.sin(now * 0.003), z: position.z});
-    record.frame.setRotation({w: Math.cos(angle / 2), x: 0, y: Math.sin(angle / 2), z: 0});
+    record.frame.setRotation({w: Math.cos(spin / 2), x: 0, y: Math.sin(spin / 2), z: 0});
 }
 
 function drawItems(eye, now) {
