@@ -7,6 +7,7 @@
 #include "features/seat/seat_service.h"
 #include "features/world/world_service.h"
 
+#include "shared/features/npc/npc_seized.h"
 #include "shared/features/player/player_climb.h"
 #include "shared/features/player/player_entity.h"
 #include "shared/features/player/player_movement.h"
@@ -17,6 +18,7 @@
 #include <logging/logger.h>
 #include <mafia1/sdk/player/native_human.h>
 #include <mafia1/sdk/player/native_human_factory.h>
+#include <mafia1/sdk/police/native_police_action.h>
 #include <mafia1/sdk/seat/native_seat.h>
 #include <networking/network_peer.h>
 #include <networking/replication/replication_manager.h>
@@ -38,6 +40,8 @@ namespace Mafia1Online::Features::Player {
         constexpr float kDiagonalComponent = 0.38f;
         // Holds the pose stream off a pull-out whose track never ends.
         constexpr auto kPullLimit          = std::chrono::seconds(5);
+        // Bounds a police arrest or fine animation (both last a few seconds).
+        constexpr auto kSeizedLimit        = std::chrono::seconds(15);
 
         bool IsFinite(const Framework::Utils::TransformSnapshot &snapshot) {
             return std::isfinite(snapshot.position.x) && std::isfinite(snapshot.position.y) && std::isfinite(snapshot.position.z) && std::isfinite(snapshot.velocity.x) && std::isfinite(snapshot.velocity.y) && std::isfinite(snapshot.velocity.z)
@@ -99,6 +103,8 @@ namespace Mafia1Online::Features::Player {
             return;
         }
         ReplayClimbs(world);
+        ReplaySeizures(world);
+        ReleaseLocalSeized(world, false);
 
         Shared::Entities::PlayerEntity *controlled = nullptr;
         const auto myGuid                          = static_cast<uint64_t>(replication->GetMyGUID());
@@ -424,6 +430,65 @@ namespace Mafia1Online::Features::Player {
             _climbs.push_back({climb.networkId, climb.spawnGeneration, glm::vec3(climb.x, climb.y, climb.z), glm::vec3(climb.directionX, 0.0f, climb.directionZ),
                                std::chrono::steady_clock::now()});
         });
+        Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Npc::Seized>([this](const Shared::Npc::Seized &seized, MafiaNet::Packet *) {
+            if (_seizures.size() >= 32) {
+                return;
+            }
+            _seizures.push_back({seized.missionGeneration, seized.targetNetworkId, seized.targetSpawnGeneration, seized.outcome == Shared::Npc::Caught::Outcome::Fine,
+                                 std::chrono::steady_clock::now()});
+        });
+    }
+
+    void PlayerService::HoldSeized(uint64_t networkId) {
+        _seizedUntil[networkId] = std::chrono::steady_clock::now() + kSeizedLimit;
+    }
+
+    void PlayerService::ReplaySeizures(World::WorldService &world) {
+        const auto now = std::chrono::steady_clock::now();
+        while (!_seizures.empty()) {
+            const auto seized = _seizures.front();
+            _seizures.pop_front();
+            if (now - seized.received > std::chrono::seconds(2) || seized.missionGeneration != world.LoadedMissionGeneration()) {
+                continue;
+            }
+            const auto current = _currentById.find(seized.networkId);
+            const auto owned = current == _currentById.end() ? _ownedByNative.end() : _ownedByNative.find(current->second);
+            if (owned == _ownedByNative.end() || owned->second.spawnGeneration != seized.spawnGeneration) {
+                continue;
+            }
+            auto *actor = static_cast<SDK::Player::NativeActor *>(world.NativeObjects().Resolve(owned->second.handle));
+            if (!actor || !actor->IsAlive()) {
+                continue;
+            }
+            auto *human = static_cast<SDK::Player::NativeHuman *>(static_cast<void *>(actor));
+            if (!human->PlayAnimationOnce(Shared::Npc::SeizedAnimation(seized.fine ? Shared::Npc::Caught::Outcome::Fine : Shared::Npc::Caught::Outcome::Arrest))) {
+                continue;
+            }
+            if (owned->second.local) {
+                // Retail locks its player at the grab (0x515d1f) and unlocks
+                // it when the fine ends (0x5172a8).
+                SDK::Police::LockPlayerControls(actor, true);
+                _localSeizedUntil = now + kSeizedLimit;
+            }
+            else {
+                HoldSeized(seized.networkId);
+            }
+        }
+    }
+
+    void PlayerService::ReleaseLocalSeized(World::WorldService &world, bool force) {
+        if (_localSeizedUntil == std::chrono::steady_clock::time_point {}) {
+            return;
+        }
+        auto *actor = static_cast<SDK::Player::NativeActor *>(world.NativeObjects().Resolve(_local));
+        const auto *human = static_cast<const SDK::Player::NativeHuman *>(static_cast<const void *>(actor));
+        if (!force && actor && human->IsPlayingAnimation() && std::chrono::steady_clock::now() < _localSeizedUntil) {
+            return;
+        }
+        if (actor) {
+            SDK::Police::LockPlayerControls(actor, false);
+        }
+        _localSeizedUntil = {};
     }
 
     void PlayerService::OnLocalClimb(World::WorldService &world, const glm::vec3 &start, const glm::vec3 &direction) {
@@ -545,6 +610,14 @@ namespace Mafia1Online::Features::Player {
                 return;
             }
             _climbingUntil.erase(climbing);
+        }
+        if (const auto seized = _seizedUntil.find(networkId); seized != _seizedUntil.end()) {
+            const auto held = _ownedByNative.find(current->second);
+            auto *human = held == _ownedByNative.end() ? nullptr : static_cast<SDK::Player::NativeHuman *>(world.NativeObjects().Resolve(held->second.handle));
+            if (human && human->IsPlayingAnimation() && std::chrono::steady_clock::now() < seized->second) {
+                return;
+            }
+            _seizedUntil.erase(seized);
         }
         const auto owned = _ownedByNative.find(current->second);
         if (owned == _ownedByNative.end()) {
@@ -691,6 +764,9 @@ namespace Mafia1Online::Features::Player {
     }
 
     void PlayerService::ReleaseLocal(World::WorldService &world) {
+        if (world.IsReady()) {
+            ReleaseLocalSeized(world, true);
+        }
         if (!_local.networkId) {
             return;
         }
@@ -719,11 +795,14 @@ namespace Mafia1Online::Features::Player {
         _missionGeneration = 0;
         _sequence          = 0;
         _lastSent          = {};
+        _localSeizedUntil  = {};
     }
 
     void PlayerService::Reset(World::WorldService &world) {
         _climbs.clear();
         _climbingUntil.clear();
+        _seizures.clear();
+        _seizedUntil.clear();
         std::vector<uint64_t> current;
         current.reserve(_currentById.size());
         for (const auto &[id, native] : _currentById) {

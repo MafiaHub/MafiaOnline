@@ -2,6 +2,7 @@
 
 #include <mafia1/sdk/core/mission.h>
 #include <mafia1/sdk/player/native_actor.h>
+#include <mafia1/sdk/seat/native_seat.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -19,6 +20,24 @@ namespace Mafia1Online::SDK::Police {
     // this list.
     inline constexpr uintptr_t kTickDoRiciActors = 0x49EA80;
     inline constexpr float kDoRiciKeepDistanceSq = 22500.0f;
+    // The exception is a living entity whose behaviour (C_human +0x5fc) is
+    // 4, DoesntReactOnWeapon, which FizlosNamakatDoAkce gives every recruited
+    // officer: the pass ignores its distance and retires it exactly when its
+    // case is over, the police reset bit (0x08) of C_entity's state priority
+    // (+0xf48) set (0x49eb8f-0x49eba7). Only a seated one still keeps its
+    // car near the camera (0x49ebad-0x49ebf9). The police state sets that
+    // bit as it drops to its idle substate, which only breathes (SEARCH_FOOT
+    // after an arrest or fine, a call-off, a case gone).
+    inline constexpr uintptr_t kHumanBehaviour        = 0x5FC;
+    inline constexpr uint32_t kBehaviourIgnoresWeapons = 4;
+    inline bool RetiresByDistance(const Player::NativeActor *actor) {
+        if (actor->GetType() != Player::NativeActor::Type::Entity || actor->IsDead() ||
+            *reinterpret_cast<const uint32_t *>(reinterpret_cast<const std::byte *>(actor) + kHumanBehaviour) != kBehaviourIgnoresWeapons) {
+            return true;
+        }
+        const auto *vehicle = static_cast<const Seat::NativeHuman *>(static_cast<const void *>(actor))->usedActorEnter;
+        return vehicle && vehicle->GetType() == Player::NativeActor::Type::Car;
+    }
     // void __thiscall C_shvestky::AddDoRiciActor(C_actor *), ret 4: appends
     // the actor unless the list already holds it.
     inline constexpr uintptr_t kAddDoRiciActor = 0x49E820;

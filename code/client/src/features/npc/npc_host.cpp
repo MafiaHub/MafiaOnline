@@ -7,8 +7,10 @@
 
 #include "features/combat/combat_hooks.h"
 #include "features/death/death_service.h"
+#include "core/application.h"
 #include "features/world/world_service.h"
 #include "shared/features/car/car_entity.h"
+#include "shared/features/npc/npc_seized.h"
 #include "shared/features/player/player_entity.h"
 
 #include <MinHook.h>
@@ -530,7 +532,9 @@ namespace Mafia1Online::Features::Npc {
     char NpcHost::TickRetirement(SDK::Police::NativePoliceManager *police, TickDoRiciActors original) {
         // Every actor near a player leaves the list for this pass; the native
         // pass then runs from far away, so it retires exactly the rest with
-        // its own sequence, and the kept actors return afterwards.
+        // its own sequence, and the kept actors return afterwards. A
+        // recruited officer stays in it: the native pass ignores its distance
+        // and retires it once its case is over, and its walker walks on.
         auto **begin = police->RetirementBegin();
         const size_t count = police->RetirementCount();
         std::vector<NativeActor *> kept;
@@ -539,7 +543,7 @@ namespace Mafia1Online::Features::Npc {
             NativeActor *actor = begin[i];
             const auto tracked = _npcs.find(actor);
             const bool removeRequested = tracked != _npcs.end() && tracked->second.removeRequested;
-            if (!removeRequested && NearObserver(actor->Frame()->WorldPosition())) {
+            if (!removeRequested && SDK::Police::RetiresByDistance(actor) && NearObserver(actor->Frame()->WorldPosition())) {
                 kept.push_back(actor);
             }
             else {
@@ -810,11 +814,49 @@ namespace Mafia1Online::Features::Npc {
             }
             return true;
         });
+        QuietGrabbed(police);
         if (_policeEnabled) {
             return;
         }
         // Crimes the detectors found since the last evaluation raise nothing.
         ClearPlayerCrimes(police);
+    }
+
+    void NpcHost::QuietGrabbed(SDK::Police::NativePoliceManager &police) {
+        // Retail's grab drops its player's weapon, settles the record and
+        // stops new dispatches for it until the catch ends (0x515d49-
+        // 0x515d68, VasekSelChlastatNaOslavu's m_bCountPlayerOffenses test).
+        // A replica keeps the weapon its client holds, so weaponSeen would
+        // raise the record again and PanoveZmenaZatkneteHoZmrda would send
+        // GO_ARREST to the grabbing officer, whose car case only winds down
+        // at the grab (HosiKoncime keeps a car case's members): a new police
+        // action replaces the arrest mid-animation.
+        const auto now = std::chrono::steady_clock::now();
+        for (auto &[native, tracked] : _npcs) {
+            if (!tracked.grabbed) {
+                continue;
+            }
+            if (!Arresting(tracked, now) || static_cast<NativeActor *>(native)->IsDead() || !_policePersons.contains(tracked.grabbed)) {
+                tracked.grabbed = nullptr;
+                continue;
+            }
+            if (auto *record = police.FindRecord(tracked.grabbed)) {
+                record->ClearCrimes();
+                record->SetPendingLevel(SDK::Police::NativeCrimeRecord::kLevelNone);
+            }
+        }
+    }
+
+    void NpcHost::OnGrab(NativeActor *officer, NativeActor *target) {
+        const auto found = _npcs.find(officer);
+        if (found == _npcs.end() || !_policePersons.contains(target)) {
+            return;
+        }
+        found->second.grabbed = target;
+        found->second.policeState = SDK::Police::NativePoliceAction::kStateArrestWalk;
+        found->second.policeTickAt = std::chrono::steady_clock::now();
+        // Unpunished, as OnCaught explains.
+        SDK::Police::PoliceManager(SDK::Core::Mission::Get()->Game())->SettleRecord(target, false);
     }
 
     void NpcHost::ClearPlayerCrimes(SDK::Police::NativePoliceManager &police) {
@@ -873,6 +915,7 @@ namespace Mafia1Online::Features::Npc {
     }
 
     void NpcHost::AfterPoliceTick(SDK::Police::NativePoliceManager &police, bool evaluated) {
+        QuietGrabbed(police);
         if (!_policeEnabled) {
             // The evaluation's own detectors (armed, speeding, red lights)
             // set crime bits again every period; with the police off they
@@ -929,6 +972,29 @@ namespace Mafia1Online::Features::Npc {
         Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("NPC {} threw player {} out of car {} seat {}", kick.key, victimId, carId, seat);
     }
 
+    void NpcHost::OnSeized(NativeActor *officer, NativeActor *target, Shared::Npc::Caught::Outcome outcome) {
+        const auto found = _npcs.find(officer);
+        if (found == _npcs.end() || !_world) {
+            return;
+        }
+        const auto victim = _world->NativeObjects().FindByNative(target);
+        auto *replication = Framework::CoreModules::GetReplication();
+        auto *player = victim.networkId && replication ? replication->GetEntity<Shared::Entities::PlayerEntity>(victim.networkId) : nullptr;
+        if (!player) {
+            return;
+        }
+        // The replica plays its half natively right after this; the pose
+        // stream stays off it until the track ends.
+        static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->Players().HoldSeized(victim.networkId);
+        Shared::Npc::Seized seized;
+        seized.missionGeneration = _missionGeneration;
+        seized.key = found->second.key;
+        seized.targetNetworkId = victim.networkId;
+        seized.targetSpawnGeneration = player->spawnGeneration;
+        seized.outcome = outcome;
+        Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(seized, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
+    }
+
     void NpcHost::OnCaught(NativeActor *officer, NativeActor *target, Shared::Npc::Caught::Outcome outcome) {
         const auto found = _npcs.find(officer);
         if (found == _npcs.end() || !target || !_world) {
@@ -941,9 +1007,10 @@ namespace Mafia1Online::Features::Npc {
             return;
         }
         // The grab settles a native player's record (C_entity.cpp arrest
-        // grab); a replica's is settled here, once the catch is complete.
-        // Unpunished: a punished settle counts an offense for everyone but
-        // C_game's player, so repeated catches would escalate on their own.
+        // grab); a replica's is settled at the grab too (OnGrab) and again
+        // here, once the catch is complete. Unpunished: a punished settle
+        // counts an offense for everyone but C_game's player, so repeated
+        // catches would escalate on their own.
         SDK::Police::PoliceManager(SDK::Core::Mission::Get()->Game())->SettleRecord(target, false);
         Shared::Npc::Caught caught;
         caught.missionGeneration = _missionGeneration;

@@ -16,8 +16,11 @@ namespace Mafia1Online::SDK::Police {
     // +0x34 drives the jump table at 0x5153a9; the target at +0x58 and the
     // mode at +0x44 (reM ai_action_manager.h asserts 0x58).
     struct NativePoliceAction {
-        // State 11 plays the arrest or fine animations on both humans, then
-        // switches to 12 (0x517265); state 12 finishes once they end.
+        // The grab (0x515c95) enters 10, where the officer walks the target
+        // into place. State 11 plays the arrest or fine animations on both
+        // humans, then switches to 12 (0x517265); state 12 finishes once
+        // they end.
+        static constexpr uint32_t kStateArrestWalk = 10;
         static constexpr uint32_t kStateAlign = 11;
         static constexpr uint32_t kStateDone  = 12;
         // Mode 0 plays PolicajtZatykajici/PolicajtZatykany and calls
@@ -195,6 +198,10 @@ namespace Mafia1Online::SDK::Police {
     // C_player field +0xada first (0x595f0c); on a C_entity that byte lies
     // past C_human (0xa9c bytes) inside the entity's own state.
     inline constexpr uintptr_t kPlayerLockControls = 0x595F00;
+    // C_game's own player only (a C_player); the grab locks it (0x515d1f).
+    inline void LockPlayerControls(Player::NativeActor *player, bool locked) {
+        reinterpret_cast<bool(__thiscall *)(Player::NativeActor *, bool)>(kPlayerLockControls)(player, locked);
+    }
 
     // void __thiscall G_Camera::CumNaNe(C_human *, C_human *), ret 8: pushes
     // the camera into its arrest lock mode. The arrest calls it for every

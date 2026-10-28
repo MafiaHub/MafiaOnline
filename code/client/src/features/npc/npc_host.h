@@ -4,6 +4,7 @@
 #include "shared/features/npc/npc_report.h"
 
 #include <mafia1/sdk/player/native_actor.h>
+#include <mafia1/sdk/police/native_police_action.h>
 
 #include <chrono>
 #include <cstdint>
@@ -106,6 +107,12 @@ namespace Mafia1Online::Features::Npc {
                    SDK::Player::NativeActor *attacker, uint32_t bodyPart, float healthBefore);
         // Retail threw a player's replica out of its network car seat.
         void OnKick(SDK::Player::NativeActor *thrower, uint64_t carId, uint8_t seat, uint64_t victimId, uint64_t victimSpawnGeneration);
+        // A police officer grabbed a player's replica for an arrest or a fine
+        // (police_host.cpp), the moment retail settles its own player.
+        void OnGrab(SDK::Player::NativeActor *officer, SDK::Player::NativeActor *target);
+        // The arrest or fine animations start on a player's replica
+        // (police_host.cpp).
+        void OnSeized(SDK::Player::NativeActor *officer, SDK::Player::NativeActor *target, Shared::Npc::Caught::Outcome outcome);
         // A police officer finished an arrest or a fine on a player's replica
         // (police_host.cpp).
         void OnCaught(SDK::Player::NativeActor *officer, SDK::Player::NativeActor *target, Shared::Npc::Caught::Outcome outcome);
@@ -143,10 +150,13 @@ namespace Mafia1Online::Features::Npc {
             bool removeRequested = false;
             // Last time a hit turned this officer on another player.
             std::chrono::steady_clock::time_point lastRedirect;
-            // Its police action's state and when it last ticked: states 11
-            // and 12 play an arrest or fine, which nothing may interrupt.
+            // Its police action's state and when it last ticked: states 10
+            // to 12 run an arrest or fine past the grab, which nothing may
+            // interrupt.
             uint32_t policeState = 0;
             std::chrono::steady_clock::time_point policeTickAt;
+            // The replica it grabbed, while the arrest or fine runs.
+            SDK::Player::NativeActor *grabbed = nullptr;
             // The anger PickTarget lent a player's log entry (actor, its own
             // value, the value written), restored before the next pick.
             struct LentAnger {
@@ -170,11 +180,14 @@ namespace Mafia1Online::Features::Npc {
         bool NearObserver(const SDK::Player::Vector3 &position) const;
         // Retail's police block for its own player, run for every player.
         void RunPlayerPolicePass(SDK::Police::NativePoliceManager &police);
-        // In an arrest or fine (police action states 11 and 12, ticked
+        // In an arrest or fine (police action states 10 to 12, ticked
         // within the last second).
         static bool Arresting(const Tracked &tracked, std::chrono::steady_clock::time_point now) {
-            return (tracked.policeState == 11 || tracked.policeState == 12) && now - tracked.policeTickAt < std::chrono::seconds(1);
+            return tracked.policeState >= SDK::Police::NativePoliceAction::kStateArrestWalk && tracked.policeState <= SDK::Police::NativePoliceAction::kStateDone &&
+                   now - tracked.policeTickAt < std::chrono::seconds(1);
         }
+        // Keeps the records of the replicas being arrested or fined settled.
+        void QuietGrabbed(SDK::Police::NativePoliceManager &police);
         // Police off: every player's crime bits and pending level go.
         void ClearPlayerCrimes(SDK::Police::NativePoliceManager &police);
         // Moves an officer from its case to a new one on this player, with

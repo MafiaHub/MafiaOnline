@@ -66,7 +66,15 @@ them all: `NpcHost` on the simulation host, `NpcService` on the server (entity,
   The host removes every actor near a player from the list, runs the pass
   from far away and re-adds them, so the native retire sequence runs only for
   actors far from every player. `C_human::GameDone` 0x5757c0 reactivates the
-  source walker at the gangster's last pose.
+  source walker at the gangster's last pose. A living entity of behaviour 4
+  (`DoesntReactOnWeapon`, C_human +0x5fc, every recruited officer) is retired
+  by its case instead (0x49eb8f-0x49eba7): never while on one, and at once,
+  wherever the camera is, when the police reset bit (0x08 of state priority
+  +0xf48) is set; only a seated one keeps its car near the camera. The bit
+  comes with the police state's idle substate, which only breathes (after an
+  arrest or fine, a call-off, a case gone). The host leaves those officers in
+  the pass, so one near a player turns back into its walker as in retail
+  instead of standing frozen.
 - Players aim at a replica that trails the host's gangster, so their own
   client detects hits (HitReport) and the server validates them like hits on
   players; the host applies them as the native Hit by that player's replica and
@@ -117,7 +125,16 @@ them all: `NpcHost` on the simulation host, `NpcService` on the server (entity,
   The host skips the shift timer clamp and reports both as `Npc::Caught` when
   they finish (server event `playerArrest`): the arrest at that `MakamSefe`, the
   fine at its `LockControls`. An officer killed or called off during the
-  animations caught nobody. It settles the record (`DobreMiPokuril_MuzeJitDom`
+  animations caught nobody. Retail's grab (0x515cfa-0x515d68) settles its own
+  player's record, locks it and blocks new dispatches for it; for a replica the
+  host settles it at the grab and keeps its crimes and pending level clear
+  until the catch ends, since the replica keeps its weapon and a car case's
+  members (the grabber included) would otherwise get GO_ARREST and a new action
+  mid-animation. At state 11 the host reports `Npc::Seized`; the server relays
+  it to everyone but the host, the arrested client plays `PolicajtZatykany` /
+  `PolicajtPokutovany` on its ped with controls locked, the others on its
+  replica, and every client (the host natively) holds the pose stream off the
+  replica until the track ends. It settles the record (`DobreMiPokuril_MuzeJitDom`
   0x49f850, field resets only), and skips `LockControls` on non-players and
   `G_Camera::CumNaNe` 0x5f3a70.
 - `AI_ACTION_KICK_DRIVER` (type 35, police mode 0 and gangster fights) calls

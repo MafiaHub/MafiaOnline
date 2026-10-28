@@ -44,6 +44,10 @@ namespace Mafia1Online::Features::Player {
         bool ReplayingClimb() const {
             return _replayingClimb;
         }
+        // A police arrest or fine animation plays on this replica (on the
+        // simulation host natively, elsewhere from Npc::Seized): the pose
+        // stream stays off it until the track ends.
+        void HoldSeized(uint64_t networkId);
         bool SampleRemote(uint64_t networkId, Framework::Utils::TransformSnapshot &out) const;
         void Reset(World::WorldService &world);
         SDK::Scene::NativeFrame *OnNativeDestroyed(World::WorldService &world, void *actor);
@@ -111,5 +115,20 @@ namespace Mafia1Online::Features::Player {
         std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> _climbingUntil;
         bool _replayingClimb = false;
         void ReplayClimbs(World::WorldService &world);
+        // Npc::Seized: the target's half of a police arrest or fine.
+        struct PendingSeized {
+            uint64_t missionGeneration;
+            uint64_t networkId;
+            uint64_t spawnGeneration;
+            bool fine;
+            std::chrono::steady_clock::time_point received;
+        };
+        std::deque<PendingSeized> _seizures;
+        // Replicas held off the pose stream while the animation plays.
+        std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> _seizedUntil;
+        // The local player's controls stay locked until its animation ends.
+        std::chrono::steady_clock::time_point _localSeizedUntil {};
+        void ReplaySeizures(World::WorldService &world);
+        void ReleaseLocalSeized(World::WorldService &world, bool force);
     };
 } // namespace Mafia1Online::Features::Player

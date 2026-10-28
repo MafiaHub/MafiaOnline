@@ -142,10 +142,16 @@ namespace Mafia1Online::Features::Npc {
         // the shift timer alone, so no game-failed screen follows.
         void __fastcall BoardArrestedHook(void *) {}
 
-        // State 12 of the police action, both animations over: an arrest is
-        // complete here, as the fine is at the LockControls that follows.
-        // An officer killed or called off before then arrested nobody.
+        // The grab raises the flag (0x515cf5) with the action already in
+        // state 10. State 12 of the police action, both animations over,
+        // clears it: an arrest is complete here, as the fine is at the
+        // LockControls that follows. An officer killed or called off before
+        // then arrested nobody.
         char __fastcall BoardBusyHook(void *board, void *, bool busy) {
+            if (busy && gPoliceTick.action && gPoliceTick.action->State() == NativePoliceAction::kStateArrestWalk &&
+                gPoliceTick.action->Target()->GetType() != NativeActor::Type::Player) {
+                gHost->OnGrab(gPoliceTick.officer, gPoliceTick.action->Target());
+            }
             if (!busy && gPoliceTick.action && gPoliceTick.action->Mode() == NativePoliceAction::kModeArrest &&
                 gPoliceTick.action->State() == NativePoliceAction::kStateDone) {
                 gHost->OnCaught(gPoliceTick.officer, gPoliceTick.action->Target(), Shared::Npc::Caught::Outcome::Arrest);
@@ -166,8 +172,16 @@ namespace Mafia1Online::Features::Npc {
             return false;
         }
 
-        // The host's camera is its free debug view; an arrest would lock it.
-        void __fastcall CameraArrestViewHook(void *, void *, NativeActor *, NativeActor *) {}
+        // State 11 calls it for every target just before both halves of the
+        // animation start (0x5171c1). The host's camera is its free debug
+        // view, which an arrest would lock; a player's replica gets its half
+        // on the player's own client.
+        void __fastcall CameraArrestViewHook(void *, void *, NativeActor *officer, NativeActor *target) {
+            if (gPoliceTick.action && target->GetType() != NativeActor::Type::Player) {
+                gHost->OnSeized(officer, target,
+                                gPoliceTick.action->Mode() == NativePoliceAction::kModeFine ? Shared::Npc::Caught::Outcome::Fine : Shared::Npc::Caught::Outcome::Arrest);
+            }
+        }
 
         // Script orders go in before the evaluation, record changes go out
         // after it.

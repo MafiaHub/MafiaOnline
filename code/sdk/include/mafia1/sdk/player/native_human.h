@@ -48,6 +48,9 @@ namespace Mafia1Online::SDK::Player {
     // sequences (6) own their tracks until the native state machine ends them.
     inline constexpr int32_t kHumanIdleWorkState = 1;
     inline constexpr int32_t kHumanLocomotionWorkState = 2;
+    // Do_PlayAnim's track (0x585e80); C_human::Update returns it to idle
+    // once the track ends.
+    inline constexpr int32_t kHumanPlayAnimationWorkState = 4;
     inline constexpr int32_t kHumanTimedActionWorkState = 5;
     inline constexpr int32_t kHumanAnimationSequenceWorkState = 6;
     // bool __thiscall(C_human*), plain ret: probes the wall and ledge ahead of
@@ -295,6 +298,15 @@ namespace Mafia1Online::SDK::Player {
             // The second bool is retail's force-load flag, not a loop flag.
             // The first bool selects finite playback; false loops the clip.
             return reinterpret_cast<Call>(kHumanDoPlayAnimation)(this, filename, !loop, false) != 0;
+        }
+        // As the police arrest plays its two halves (0x5171e4-0x51721c):
+        // force-loaded, once. Returns the track's length in milliseconds.
+        uint32_t PlayAnimationOnce(const char *filename) {
+            using Call = uint32_t(__thiscall *)(NativeHuman *, const char *, bool, bool);
+            return reinterpret_cast<Call>(kHumanDoPlayAnimation)(this, filename, true, true);
+        }
+        [[nodiscard]] bool IsPlayingAnimation() const {
+            return _canWork == kHumanPlayAnimationWorkState;
         }
         void HoldEntityForCutscene() {
             using Call = void(__thiscall *)(NativeHuman *, bool);

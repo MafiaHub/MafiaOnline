@@ -7,6 +7,7 @@
 #include "shared/features/combat/damage_event.h"
 #include "shared/features/npc/npc_entity.h"
 #include "shared/features/npc/npc_report.h"
+#include "shared/features/npc/npc_seized.h"
 #include "shared/features/player/player_entity.h"
 
 #include <core_modules.h>
@@ -348,6 +349,22 @@ namespace Mafia1Online::Features::Npc {
             if (_events.caught) {
                 _events.caught(*npc->entity, caught.targetNetworkId, caught.outcome == Shared::Npc::Caught::Outcome::Fine);
             }
+        });
+        network->RegisterRPC<Shared::Npc::Seized>([this](const Shared::Npc::Seized &seized, MafiaNet::Packet *packet) {
+            const auto sender = MafiaNet::ToPeerGuid(packet->guid);
+            if (!FromHost(sender, seized.missionGeneration) ||
+                (seized.outcome != Shared::Npc::Caught::Outcome::Arrest && seized.outcome != Shared::Npc::Caught::Outcome::Fine)) {
+                return;
+            }
+            auto *npc = FindKey(seized.key);
+            auto *player = _players->FindByNetworkId(seized.targetNetworkId);
+            if (!npc || !npc->state.alive || npc->entity->kind != Shared::Entities::NpcKind::Police || !player || !player->spawned || !player->alive ||
+                player->missionGeneration != _missionGeneration || player->spawnGeneration != seized.targetSpawnGeneration) {
+                return;
+            }
+            // The host plays the animation natively; everyone else replays it.
+            auto relay = seized;
+            Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(relay, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered, MafiaNet::ToGuid(sender));
         });
         network->RegisterRPC<Shared::Npc::Damaged>([this](const Shared::Npc::Damaged &damaged, MafiaNet::Packet *packet) {
             if (!FromHost(MafiaNet::ToPeerGuid(packet->guid), damaged.missionGeneration) || !std::isfinite(damaged.damage) || !std::isfinite(damaged.healthBefore) ||
