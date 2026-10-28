@@ -242,6 +242,8 @@ Events.on("playerCommand", (player, command, args) => {
         player.sendMessage("/car opens the car catalog; /repair, /opacity 0-1, /engine, /carstate, /cardamage");
         player.sendMessage("/weapons bat|shotgun|thompson, /fists, /drop [id], /model [file], /follow [name|off]");
         player.sendMessage("/hud [sound|countdown|watch|score|compass|clear|fade|swing], /suicide");
+        player.sendMessage("/wanted shows your police record; /wanted 0-3 sets your wanted level.");
+        player.sendMessage("Broken booths, hydrants and bins stay down for everyone until the city crew comes (traffic signs only for you); /props, /repairprops (anyone, once a minute).");
         return;
     }
     if (action === "follow") {
