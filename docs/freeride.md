@@ -120,6 +120,29 @@ between its checkpoints; its grid lines up behind the start on the road the
 author drove in on. Each author may keep five routes and record one every five
 minutes; `/race delete <name>` removes one.
 
+## The Autodrom and its championship
+
+Lost Heaven Extended has the official race circuit: the mod places the stock
+`MISE06-AUTODROM` track model at its `anchr` frame (−3736.52, 10.52, −1005.79),
+rotated about 161.5°. Its 16-car grid and 3.2 km lap come from that mission's
+`start0`–`start15` frames and the 26 trackside nodes of its `check.bin`
+(type 8, linked into the racing line), transformed the way LS3D's
+`S_quat::RotationMatrix` does; the mod's tunnel lights fall on the circuit's
+south-west corner under that transform, and nowhere near it under the
+opposite rotation.
+
+The route book has an Autodrom Sprint (one lap) and an Autodrom Grand Prix
+(three laps). Circuit races need no car and no drive out: when entries close,
+every entrant on the street with a clean record is put on the grid in an
+identical Speedster, and ten seconds after leaving the race is returned to
+where they were.
+
+`/championship start` (or F2 → Races) runs a season of three rounds of one,
+two and three laps, with a minute to enter each round and a short break
+between them. Finishes score 25-18-15-12-10-8-6-4-2-1. After the last round
+the top three take $3,000, $1,500 and $750, the champion gains experience, and
+the champion is remembered in `data/freeride/championship.json`.
+
 ## Bounties and the kill feed
 
 Every death appears in the kill feed with the weapon or the cause. Three kills
@@ -178,8 +201,8 @@ life, mission generation and money before any purchase.
 
 The courier job pays $180 for delivering to Yellow Pete's within eight minutes
 (`/courier` shows the time left). Personal cars start with little fuel so the
-pump has a use. Police fines cost $100 and an arrest costs $250 bail and a
-fresh start.
+pump has a use. Police fines cost $100; an arrest is a jail sentence (see
+below).
 
 ## Jobs
 
@@ -227,6 +250,23 @@ persists.
 - **Dice.** `/dice <player> <bet>` bets someone within 15 m $10–$1,000; the
   server rolls two dice for each and the pot goes to the higher roll.
 
+## Hospital and jail
+
+On Lost Heaven Extended the dead wake up at the doors of Lost Heaven Hospital,
+the mod's `9medic` building (placed by its `cache.bin` at (−759.22, 11.56,
+778.99); its doors open beside the stock Dispensary counter), and the doctors
+bill $50. The mod builds the hospital as an outer shell with doors and
+windows, so it has no rooms to walk into.
+
+An arrest is a jail sentence: 45 seconds, plus 30 for each wanted level above
+minor that the case reached. The police keep the prisoner's weapons. On Lost
+Heaven Extended the cell is the motel's storeroom, `&& sklad` in the mod's
+`motel.4ds` (550.7, 32.9, 2035.7), in a private copy of the map; elsewhere the
+player is held where they would respawn. A prisoner who strays is walked back,
+`/car` and `/kill` are refused, and `/bail` pays $5 per second left. Release
+is at the ridge with the starting kit. A sentence survives a reconnect. A fine
+still costs $100.
+
 ## Buildings
 
 Arrows by building doors lead inside: walk into one, the screen fades and you
@@ -235,8 +275,10 @@ and health. Public interiors are shared. A safehouse is private to your crew
 (or to you, without one), dresses your wounds and tops up your magazines.
 Doors stay shut while the police are after you, and during races and duels.
 
-No interiors ship with the gamemode, because none can be verified outside the
-game. Record them in development mode: stand on the street at the door facing
+Lost Heaven Extended ships one: Sarah's apartment in Little Italy, a
+safehouse whose street door (`&& futro out`) and corridor (`&& chodba`) come
+from the mod's `quarters_sr.4ds`. Other interiors are not shipped, because
+their street side cannot be told from the model data. Record them in development mode: stand on the street at the door facing
 it and type `/entrance add <name> [public|safehouse]`, walk to where players
 should arrive, face the way they should look and type `/entrance inside`.
 `/entrance list` and `/entrance delete <name>` manage them; they are saved to
@@ -289,6 +331,7 @@ recording interiors. They are off by default.
 | `server/export.js`, `police_duty.js`, `taxi.js`, `robbery.js` | The jobs. |
 | `server/turf.js`, `stashes.js`, `speed_traps.js`, `interiors.js` | Turf, cash stashes, speed traps and building entrances, each per map. |
 | `server/map_vote.js`, `bootleg.js`, `lib/maps.js` | The default map, map votes, the bootleg run and the map registry. |
+| `server/championship.js`, `jail.js`, `hospital.js` | The Autodrom championship, jail sentences and hospital respawns. |
 | `client/hud.js`, `client/hud.html` | One transparent web view for toasts, feed, activity cards, race panel, level strip and the city menu; it also arbitrates the single native compass by priority. |
 | `client/markers.js` | Beacons, checkpoint and crate markers, door arrows, turf rings, bounty and crewmate labels. |
 | `client/selector.js`, `shops.js`, `car_picker.js`, `radio.js`, `police.js`, `main.js` | The selector, shop staff, motor pool, radio, police HUD, fades and race countdown. |
