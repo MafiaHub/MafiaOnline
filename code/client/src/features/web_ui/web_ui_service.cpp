@@ -492,8 +492,18 @@ namespace Mafia1Online::Features::WebUi {
         }
         const auto current   = _instance->GetCurrentState();
         std::string nickname = menu.nickname;
+        std::string host     = menu.host;
+        uint16_t port        = menu.port;
         if (!quick.enabled && !_settings.Nickname().empty()) {
             nickname = _settings.Nickname();
+        }
+        // Without quick join the form starts at the last server the player
+        // connected to, which the settings file remembers across launches.
+        if (!quick.enabled) {
+            if (const auto *last = _settings.LastServer()) {
+                host = last->host;
+                port = last->port;
+            }
         }
 
         const nlohmann::json state = {
@@ -514,7 +524,7 @@ namespace Mafia1Online::Features::WebUi {
               {"filesTotal", download.filesTotal},
               {"bytesDownloaded", download.bytesDownloaded},
               {"bytesTotal", download.bytesTotal}}},
-            {"defaults", {{"nickname", nickname}, {"host", menu.host}, {"port", menu.port}}},
+            {"defaults", {{"nickname", nickname}, {"host", host}, {"port", port}}},
             {"settings", _settings.ToJson()},
         };
         std::string encoded = state.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
