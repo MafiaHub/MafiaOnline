@@ -5,6 +5,7 @@
 // Commands: /doors, /door status|open|openback|close|ajar|lock|unlock|enable|disable.
 // All actions find a registered door by its actual mission hinge position; no
 // assumed city coordinates or frame names are baked into this example.
+const commands = require("./lib/commands.js");
 
 const FREE_RIDE_MISSIONS = new Set(["freeitaly", "freeride", "freeridenoc", "freekrajina"]);
 const COMMAND_REACH = 4.5;
@@ -33,24 +34,27 @@ function describe(door) {
     return `${door.frameName}: ${pose}, ${control}`;
 }
 
-Events.on("playerCommand", (player, command, args) => {
-    if (command !== "doors" && command !== "door") return;
-    if (!inFreeRide() || !player.spawned || !player.alive) {
-        player.sendMessage("Door controls are available on foot in Free Ride.");
-        return;
-    }
+function available(player) {
+    if (inFreeRide() && player.spawned && player.alive) return true;
+    player.sendMessage("Door controls are available on foot in Free Ride.");
+    return false;
+}
 
-    if (command === "doors") {
-        const nearby = nearbyDoors(player, LIST_REACH);
-        if (!nearby.length) {
-            player.sendMessage("No synchronized door nearby. Use a stock door once, then try /doors.");
-            return;
-        }
-        for (const {door, distance} of nearby.slice(0, 4)) {
-            player.sendMessage(`${describe(door)} (${distance.toFixed(1)} m)`);
-        }
+commands.register({name: "doors", usage: "/doors", help: "List synchronized doors nearby.", category: "Showcase"}, (player) => {
+    if (!available(player)) return;
+    const nearby = nearbyDoors(player, LIST_REACH);
+    if (!nearby.length) {
+        player.sendMessage("No synchronized door nearby. Use a stock door once, then try /doors.");
         return;
     }
+    for (const {door, distance} of nearby.slice(0, 4)) {
+        player.sendMessage(`${describe(door)} (${distance.toFixed(1)} m)`);
+    }
+});
+
+commands.register({name: "door", usage: "/door status|open|openback|close|ajar|lock|unlock|enable|disable",
+    help: "Control the nearest synchronized door.", category: "Showcase"}, (player, args) => {
+    if (!available(player)) return;
 
     const nearest = nearbyDoors(player, COMMAND_REACH)[0];
     if (!nearest) {

@@ -1,7 +1,7 @@
 // Shows what server/police.js decides: the retail police lines, the wanted
-// badge, the fine and the arrest fade.
-
-Events.on("sample:police", (data) => {
+// badge and the arrest fade. Fines and bail come out of the cash balance,
+// which the score counter mirrors.
+Events.on("fr:police", (data) => {
     switch (data?.action) {
     case "text":
         Hud.showGameText(data.textId);
@@ -10,7 +10,7 @@ Events.on("sample:police", (data) => {
         Hud.setWanted(data.level ?? 0);
         break;
     case "fine":
-        Hud.addScore(-(data.points ?? 0));
+        Sound.play("01b_srdce.wav", {volume: 0.5});
         break;
     case "arrest":
         Hud.setWanted(0);

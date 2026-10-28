@@ -2,7 +2,8 @@
 // preview and camera. Only the server can turn the choice into a player life.
 const FREE_RIDE_FRAMES = ["emeth_1", "emeth_2", "emeth_3", "emeth_4"];
 const SELECTOR_MISSIONS = new Set(["freeridenoc", "freeride"]);
-const SELECTOR_PAGE = "fw://resources/mafia1online-sample/client/selector.html";
+const SELECTOR_PAGE = "fw://resources/freeride/client/selector.html";
+const SELECTOR_RESOURCE = "freeride";
 const NAVIGATION_SOUND = "00_kompas.wav";
 const READY_RETRY_MS = 500;
 const CAMERA_RECHECK_MS = 200;
@@ -17,6 +18,7 @@ const picker = {
     generation: 0,
     anchors: [],
     locations: [],
+    characters: [],
     locationIndex: 0,
     modelIndex: 0,
     preview: null,
@@ -29,7 +31,6 @@ const picker = {
     reportedReady: false,
     nextBeginAt: 0,
     missingStartsReported: false,
-    modelByLocation: new Map(),
     message: "Finding your place in Lost Heaven…",
 };
 
@@ -49,14 +50,14 @@ function freePreview() {
 function sendToPage() {
     if (!picker.pageReady || picker.view === null) return;
     const location = picker.locations[picker.locationIndex];
-    const model = location?.models[picker.modelIndex];
+    const model = picker.characters[picker.modelIndex];
     Web.emit(picker.view, "selector:state", {
         location: location ? {name: location.name, subtitle: location.subtitle} : null,
         locationIndex: picker.locationIndex,
         locationCount: picker.locations.length,
         model: model ? {name: model.name, role: model.role} : null,
         modelIndex: picker.modelIndex,
-        modelCount: location?.models.length ?? 0,
+        modelCount: picker.characters.length,
         ready: picker.ready,
         pending: picker.pending,
         cameraSide: picker.cameraSide,
@@ -85,15 +86,15 @@ function showChoice() {
 
     // Native humans require more than a file that merely opens. The scripting
     // probe uses the same full-skeleton check as the player's model swap.
-    let attempts = location.models.length;
+    let attempts = picker.characters.length;
     while (attempts-- > 0) {
-        const model = location.models[picker.modelIndex];
+        const model = picker.characters[picker.modelIndex];
         picker.preview = Scene.createHumanFrame(model.file, location.position, location.direction);
         if (picker.preview !== null) break;
-        picker.modelIndex = (picker.modelIndex + 1) % location.models.length;
+        picker.modelIndex = (picker.modelIndex + 1) % picker.characters.length;
     }
     if (picker.preview === null) {
-        picker.message = "The costumes for this district could not be loaded.";
+        picker.message = "The costumes could not be loaded.";
         sendToPage();
         return;
     }
@@ -116,8 +117,7 @@ function begin() {
         picker.nextBeginAt = Date.now() + BEGIN_RETRY_MS;
         if (!picker.missingStartsReported) {
             picker.missingStartsReported = true;
-            console.warn("[mafia1online-sample] Waiting for Free Ride start frames");
-            Hud.showMessage("Finding Free Ride's start points…", 0xe8c070);
+            console.warn("[freeride] Waiting for Free Ride start frames");
         }
         return;
     }
@@ -129,13 +129,13 @@ function begin() {
     picker.generation = World.getMissionGeneration();
     picker.anchors = anchors;
     picker.locations = [];
+    picker.characters = [];
     picker.locationIndex = 0;
     picker.modelIndex = 0;
     picker.message = "Finding your place in Lost Heaven…";
     picker.pageReady = false;
     picker.reportedReady = false;
     picker.missingStartsReported = false;
-    picker.modelByLocation.clear();
     picker.view = Web.createView(SELECTOR_PAGE, {visible: true, focus: false, zIndex: 90});
     picker.nextReadyAt = 0;
     Hud.hideWatch();
@@ -143,7 +143,6 @@ function begin() {
     Camera.setFov(54);
     // Keep the map visible while the server confirms its native spawn hint.
     cameraFor(anchors.find((anchor) => anchor.frame === "emeth_3") ?? anchors[0], 0);
-    console.log(`[mafia1online-sample] Picker found ${anchors.length} native starts: ${JSON.stringify(anchors)}`);
 }
 
 function end() {
@@ -157,25 +156,20 @@ function end() {
     picker.pending = false;
     picker.accepted = false;
     picker.locations = [];
-    picker.modelByLocation.clear();
+    picker.characters = [];
     Camera.unlock();
 }
 
 function moveLocation(step) {
     if (!picker.ready || picker.pending || picker.locations.length < 2) return;
-    picker.modelByLocation.set(picker.locations[picker.locationIndex].id, picker.modelIndex);
     picker.locationIndex = (picker.locationIndex + step + picker.locations.length) % picker.locations.length;
-    picker.modelIndex = picker.modelByLocation.get(picker.locations[picker.locationIndex].id) ?? 0;
     playTick();
     showChoice();
 }
 
 function moveModel(step) {
-    if (!picker.ready || picker.pending) return;
-    const models = picker.locations[picker.locationIndex]?.models;
-    if (!models || models.length < 2) return;
-    picker.modelIndex = (picker.modelIndex + step + models.length) % models.length;
-    picker.modelByLocation.set(picker.locations[picker.locationIndex].id, picker.modelIndex);
+    if (!picker.ready || picker.pending || picker.characters.length < 2) return;
+    picker.modelIndex = (picker.modelIndex + step + picker.characters.length) % picker.characters.length;
     playTick();
     showChoice();
 }
@@ -191,16 +185,14 @@ function rotateCamera() {
 function enterCity() {
     if (!picker.ready || picker.pending || picker.preview === null) return;
     const location = picker.locations[picker.locationIndex];
-    const model = location.models[picker.modelIndex];
+    const model = picker.characters[picker.modelIndex];
     picker.pending = true;
     picker.accepted = false;
     picker.pendingSince = Date.now();
     picker.message = "Your story begins…";
     playTick();
     sendToPage();
-    Events.emitServer("sample:selector:spawn", {
-        generation: picker.generation, locationId: location.id, model: model.file,
-    });
+    Events.emitServer("fr:selector:spawn", {generation: picker.generation, locationId: location.id, model: model.file});
 }
 
 Key.bind("up", () => moveLocation(-1));
@@ -212,11 +204,11 @@ Key.bind("c", rotateCamera);
 
 Events.on("missionReady", begin);
 Events.on("resourceStart", (name) => {
-    if (name === "mafia1online-sample" && World.isReady()) begin();
+    if (name === SELECTOR_RESOURCE && World.isReady()) begin();
 });
 Events.on("missionUnload", end);
 Events.on("resourceStop", (name) => {
-    if (name === "mafia1online-sample") end();
+    if (name === SELECTOR_RESOURCE) end();
 });
 Events.on("playerSpawn", (player) => {
     if (player.isLocal) end();
@@ -227,34 +219,34 @@ Events.on("browserDocumentReady", (event) => {
     sendToPage();
 });
 
-Events.on("sample:selector:open", (state) => {
-    if (!picker.active || state?.generation !== picker.generation || state.mission !== World.getMission() || !Array.isArray(state.locations)) return;
-    picker.locations = state.locations.map((location) => ({
-        ...location,
-        models: location.models.filter((model) => Scene.canUseHumanModel(model.file)),
-    })).filter((location) => location.models.length > 0);
-    if (picker.locations.length < 2) {
-        picker.message = "At least two starts with human models are required.";
+Events.on("fr:selector:open", (state) => {
+    if (!picker.active || state?.generation !== picker.generation || state.mission !== World.getMission() ||
+        !Array.isArray(state.locations) || !Array.isArray(state.characters)) return;
+    picker.locations = state.locations;
+    picker.characters = state.characters.filter((model) => Scene.canUseHumanModel(model.file));
+    if (picker.locations.length < 2 || !picker.characters.length) {
+        picker.message = "The city has no starting places or characters for this mission.";
         sendToPage();
         return;
     }
+    // Returning players start on the district and character they last chose.
     picker.ready = true;
-    picker.locationIndex = 0;
-    picker.modelIndex = 0;
+    picker.locationIndex = Math.max(0, picker.locations.findIndex((location) => location.id === state.preferred?.locationId));
+    picker.modelIndex = Math.max(0, picker.characters.findIndex((model) => model.file === state.preferred?.model));
     showChoice();
 });
 
-Events.on("sample:selector:accepted", () => {
+Events.on("fr:selector:accepted", () => {
     if (picker.active && picker.pending) {
         picker.accepted = true;
         picker.message = "The city is opening. One moment…";
     }
     sendToPage();
 });
-Events.on("sample:selector:error", (message) => {
+Events.on("fr:selector:error", (error) => {
     picker.pending = false;
     picker.accepted = false;
-    picker.message = typeof message === "string" ? message : "That entrance is unavailable. Try again.";
+    picker.message = typeof error?.message === "string" ? error.message : "That entrance is unavailable. Try again.";
     sendToPage();
 });
 
@@ -271,9 +263,9 @@ Events.on("render", () => {
     if (!picker.ready && now >= picker.nextReadyAt) {
         if (!picker.reportedReady) {
             picker.reportedReady = true;
-            console.log(`[mafia1online-sample] Requesting selector choices for mission generation ${picker.generation}`);
+            console.log(`[freeride] Requesting selector choices for mission generation ${picker.generation}`);
         }
-        Events.emitServer("sample:selector:ready", {generation: picker.generation, anchors: picker.anchors});
+        Events.emitServer("fr:selector:ready", {generation: picker.generation, anchors: picker.anchors});
         picker.nextReadyAt = now + READY_RETRY_MS;
     }
     if (picker.pending && now - picker.pendingSince > SPAWN_TIMEOUT_MS) {

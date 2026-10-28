@@ -4,15 +4,21 @@
 //   MISE19-MESTO: "1dvere u peteho" (Pete's doorway)
 //   FREERIDE and FREERIDENOC: "_pumpa2", "lekarna", "Salieri_save".
 // Both selected Free Ride scenes contain the same latter three positions.
-const SHOP_MISSIONS = new Set(["freeride", "freeridenoc"]);
+const profiles = require("./lib/profiles.js");
+const life = require("./lib/life.js");
+const menu = require("./lib/menu.js");
+const commands = require("./lib/commands.js");
+const {toast, card, compass} = require("./lib/notify.js");
+const {inFreeRide, distance, emit, onStart, onStop, formatMoney, formatMinutes} = require("./lib/util.js");
+
 const WEAPON = Object.freeze({BAT: 4, COLT: 6, THOMPSON: 10, SHOTGUN: 11, GRENADE: 15});
-const STARTING_CASH = 300;
 const START_FUEL_FRACTION = 0.12;
 const SHOP_REACH = 3.5;
 const CAR_REACH = 9;
 const PURCHASE_COOLDOWN_MS = 450;
 const COURIER_TIME_MS = 8 * 60_000;
 const COURIER_REWARD = 180;
+const COURIER_XP = 60;
 const LOW_FUEL_RETRY_MS = 500;
 const LOW_FUEL_RETRY_COUNT = 30;
 
@@ -42,34 +48,26 @@ const SHOPS = [
         ]},
 ];
 
-const funded = new Set();
 const lastVehicle = new Map();
 const lastPurchase = new Map();
 const courier = new Map();
 const lowFuelPending = new Map();
 let fuelTimer = null;
-
-function inFreeRide() { return SHOP_MISSIONS.has(World.getMission()); }
-function distance(a, b) { return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z); }
+let courierTimer = null;
 
 function shopState(player) {
     if (!inFreeRide()) return;
-    player.emit("sample:shops:state", JSON.stringify({
-        generation: World.getMissionGeneration(),
-        shops: SHOPS,
-        courier: courier.has(player.id),
-        money: player.money,
-    }));
+    emit(player, "fr:shops:state", {generation: World.getMissionGeneration(), shops: SHOPS, courier: courier.has(player.id)});
 }
 
 function chargeAndApply(player, cost, apply) {
     if (!player.trySpendMoney(cost)) {
-        player.sendMessage(`You need $${cost}; you have $${player.money}.`);
+        toast(player, `You need ${formatMoney(cost)}; you have ${formatMoney(player.money)}.`, {tone: "bad"});
         return false;
     }
     if (apply()) return true;
     player.giveMoney(cost);
-    player.sendMessage("The transaction could not be completed; your money was returned.");
+    toast(player, "The deal fell through; your money was returned.", {tone: "bad"});
     return false;
 }
 
@@ -80,29 +78,30 @@ function buyWeapon(player, offer) {
         ? player.giveAmmo(WEAPON.SHOTGUN, 24) : player.giveWeapon(WEAPON.SHOTGUN, 8, 24, true);
     if (offer.id === "thompson") return player.hasWeapon(WEAPON.THOMPSON)
         ? player.giveAmmo(WEAPON.THOMPSON, 100) : player.giveWeapon(WEAPON.THOMPSON, 50, 100, true);
+    // A throwable's count is its loaded value; addItem adds to it.
     if (offer.id === "grenades") return player.hasWeapon(WEAPON.GRENADE)
-        ? player.giveAmmo(WEAPON.GRENADE, 3) : player.giveWeapon(WEAPON.GRENADE, 3, 0, true);
+        ? player.addItem(WEAPON.GRENADE, 3) : player.giveWeapon(WEAPON.GRENADE, 3, 0, true);
     return false;
 }
 
 function buyFuel(player) {
     const vehicle = player.getVehicle() ?? lastVehicle.get(player.id);
     if (!vehicle || !vehicle.model || distance(vehicle.position, SHOPS[1].position) > CAR_REACH) {
-        player.sendMessage("Bring your car close to the pump, then come back to the attendant.");
+        toast(player, "Bring your car up to the pump, then talk to the attendant.", {tone: "bad"});
         return;
     }
     if (!vehicle.dynamicsValid || vehicle.fuelTankCapacity <= 0) {
-        player.sendMessage("The attendant is waiting for your fuel gauge to settle.");
+        toast(player, "The attendant is waiting for your fuel gauge to settle.");
         return;
     }
     const litres = Math.min(25, Math.max(0, vehicle.fuelTankCapacity - vehicle.fuel));
     if (litres < 0.5) {
-        player.sendMessage("Your tank is full enough already.");
+        toast(player, "Your tank is full enough already.");
         return;
     }
     const price = Math.ceil(litres * 3);
     if (chargeAndApply(player, price, () => vehicle.setFuel(Math.min(vehicle.fuelTankCapacity, vehicle.fuel + litres)))) {
-        player.sendMessage(`The attendant pumped ${litres.toFixed(1)} litres for $${price}.`);
+        toast(player, `The attendant pumped ${litres.toFixed(1)} litres for ${formatMoney(price)}.`, {tone: "good"});
     }
 }
 
@@ -110,12 +109,46 @@ function buyHealth(player, offer) {
     const healing = offer.id === "bandage" ? 45 : 18;
     const health = Math.min(100, player.health + healing);
     if (health <= player.health) {
-        player.sendMessage("You are in good shape already.");
+        toast(player, "You are in good shape already.");
         return;
     }
     if (chargeAndApply(player, offer.price, () => player.setHealth(health))) {
-        player.sendMessage(`${offer.name}: health ${Math.round(player.health)}/100, balance $${player.money}.`);
+        toast(player, `${offer.name}: health ${Math.round(player.health)}/100.`, {tone: "good"});
     }
+}
+
+function courierCard(player) {
+    const job = courier.get(player.id);
+    card(player, "courier", job ? {
+        title: "Courier run", subtitle: "Deliver the envelope to Yellow Pete",
+        rows: [["Pay", formatMoney(COURIER_REWARD)], ["Time left", formatMinutes(job.startedAt + COURIER_TIME_MS - Date.now())]],
+        progress: Math.max(0, 1 - (Date.now() - job.startedAt) / COURIER_TIME_MS), tone: "gold",
+    } : null);
+}
+
+function endCourier(player, message, tone = "bad") {
+    if (!courier.delete(player.id)) return;
+    life.end(player, "courier");
+    courierCard(player);
+    compass(player, "courier", 60, null);
+    shopState(player);
+    if (message) toast(player, message, {tone});
+}
+
+function startCourier(player) {
+    if (courier.has(player.id)) {
+        toast(player, "You already have an envelope to deliver.");
+        return;
+    }
+    if (!life.begin(player, "courier", "Courier run")) {
+        toast(player, life.busyMessage(player), {tone: "bad"});
+        return;
+    }
+    courier.set(player.id, {startedAt: Date.now()});
+    toast(player, `Take the sealed envelope to Yellow Pete. Eight minutes, ${formatMoney(COURIER_REWARD)}.`, {title: "Courier run", tone: "gold"});
+    compass(player, "courier", 60, {position: SHOPS[0].position});
+    courierCard(player);
+    shopState(player);
 }
 
 function buy(player, request) {
@@ -130,19 +163,10 @@ function buy(player, request) {
     lastPurchase.set(player.id, now);
 
     if (offer.id === "petrol") return buyFuel(player);
-    if (offer.id === "courier") {
-        if (courier.has(player.id)) {
-            player.sendMessage("You already have an envelope to deliver.");
-            return;
-        }
-        courier.set(player.id, {startedAt: now});
-        player.sendMessage(`Take the sealed envelope to Yellow Pete. You have eight minutes; the fee is $${COURIER_REWARD}.`);
-        shopState(player);
-        return;
-    }
+    if (offer.id === "courier") return startCourier(player);
     if (offer.id === "bandage" || offer.id === "coffee") return buyHealth(player, offer);
     if (chargeAndApply(player, offer.price, () => buyWeapon(player, offer))) {
-        player.sendMessage(`${offer.name} bought for $${offer.price}. Pete counts the bills twice.`);
+        toast(player, `${offer.name} for ${formatMoney(offer.price)}. Pete counts the bills twice.`, {tone: "good"});
     }
 }
 
@@ -150,23 +174,31 @@ function deliver(player) {
     const job = courier.get(player.id);
     if (!job || !inFreeRide() || !player.spawned || !player.alive ||
         distance(player.position, SHOPS[0].position) > SHOP_REACH) return;
-    courier.delete(player.id);
     if (Date.now() - job.startedAt > COURIER_TIME_MS) {
-        player.sendMessage("The envelope arrived too late. Nobody at Pete's will take it.");
+        endCourier(player, "The envelope arrived too late. Nobody at Pete's will take it.");
+        return;
     }
-    else {
-        player.giveMoney(COURIER_REWARD);
-        player.sendMessage(`Pete takes the envelope without a word. Courier fee: $${COURIER_REWARD}.`);
-    }
-    shopState(player);
+    player.giveMoney(COURIER_REWARD);
+    profiles.bump(player, "deliveries");
+    profiles.addXp(player, COURIER_XP, "Courier run");
+    endCourier(player, `Pete takes the envelope without a word. ${formatMoney(COURIER_REWARD)} earned.`, "good");
 }
 
-Events.on("resourceStart", (name) => {
-    if (name !== "mafia1online-sample") return;
+function tickCouriers() {
+    for (const player of World.getPlayers()) {
+        const job = courier.get(player.id);
+        if (!job) continue;
+        if (Date.now() - job.startedAt > COURIER_TIME_MS) endCourier(player, "The courier run expired. Salieri will not be pleased.");
+        else courierCard(player);
+    }
+}
+
+onStart(() => {
     fuelTimer = setInterval(() => {
         for (const [id, entry] of lowFuelPending) {
             const vehicle = World.getVehicles().find((candidate) => candidate.id === id);
-            if (!vehicle || entry.generation !== World.getMissionGeneration() || ++entry.retries > LOW_FUEL_RETRY_COUNT) {
+            if (!vehicle || vehicle.state.get("fr.fullTank") || entry.generation !== World.getMissionGeneration() ||
+                ++entry.retries > LOW_FUEL_RETRY_COUNT) {
                 lowFuelPending.delete(id);
                 continue;
             }
@@ -175,42 +207,49 @@ Events.on("resourceStart", (name) => {
             if (vehicle.setFuel(startingFuel)) lowFuelPending.delete(id);
         }
     }, LOW_FUEL_RETRY_MS);
+    courierTimer = setInterval(tickCouriers, 5000);
 });
-Events.on("resourceStop", (name) => {
-    if (name !== "mafia1online-sample") return;
-    if (fuelTimer !== null) clearInterval(fuelTimer);
-    fuelTimer = null;
+onStop(() => {
+    clearInterval(fuelTimer);
+    clearInterval(courierTimer);
     lowFuelPending.clear();
     courier.clear();
-    funded.clear();
     lastVehicle.clear();
     lastPurchase.clear();
 });
-Events.on("missionChange", () => lowFuelPending.clear());
+
+Events.on("missionChange", () => {
+    lowFuelPending.clear();
+    for (const player of World.getPlayers()) endCourier(player, null);
+});
+// Personal cars start nearly dry so the pump has a use; race and event cars
+// mark themselves full with the "fr.fullTank" state key.
 Events.on("vehicleSpawn", (vehicle) => {
-    if (inFreeRide()) lowFuelPending.set(vehicle.id, {generation: World.getMissionGeneration(), retries: 0});
+    if (inFreeRide() && !vehicle.traffic) lowFuelPending.set(vehicle.id, {generation: World.getMissionGeneration(), retries: 0});
 });
 Events.on("vehicleDestroy", (vehicle) => lowFuelPending.delete(vehicle.id));
 Events.on("vehiclePlayerEntered", (vehicle, player) => lastVehicle.set(player.id, vehicle));
 Events.on("vehiclePlayerExited", (vehicle, player) => lastVehicle.set(player.id, vehicle));
-Events.on("playerSpawn", (player) => {
-    if (!inFreeRide()) return;
-    if (!funded.has(player.id)) {
-        funded.add(player.id);
-        if (player.money === 0) player.setMoney(STARTING_CASH);
-        player.sendMessage(`You have $${player.money}. Pete, the pump and the dispensary take cash.`);
-    }
-    shopState(player);
-});
+Events.on("playerSpawn", shopState);
 Events.on("playerRespawn", shopState);
+Events.on("playerDeath", (player) => endCourier(player, "You dropped the envelope when you went down."));
 Events.on("playerDisconnect", (player) => {
-    funded.delete(player.id);
     lastVehicle.delete(player.id);
     lastPurchase.delete(player.id);
     courier.delete(player.id);
 });
-Events.onClient("sample:shop:buy", buy);
-Events.onClient("sample:shop:deliver", deliver);
-Events.on("playerCommand", (player, command) => {
-    if (command === "deliver") deliver(player);
+Events.onClient("fr:shop:buy", buy);
+Events.onClient("fr:shop:deliver", deliver);
+
+commands.register({name: "courier", usage: "/courier [cancel]", help: "Check or abandon your courier run.", category: "City"}, (player, args) => {
+    const job = courier.get(player.id);
+    if (args[0]?.toLowerCase() === "cancel") {
+        if (job) endCourier(player, "You burned the envelope. No pay today.");
+        return;
+    }
+    toast(player, job ? `Deliver to Yellow Pete: ${formatMinutes(job.startedAt + COURIER_TIME_MS - Date.now())} left.`
+        : "Salieri's back window has courier work. Press N there to pick the envelope, B to take it.");
 });
+
+menu.provide("places", () => SHOPS.map((shop) => ({id: shop.id, name: shop.name, tagline: shop.tagline,
+    offers: shop.offers.map((offer) => offer.name)})));

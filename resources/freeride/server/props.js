@@ -4,8 +4,10 @@
 // the city cache, fall only for the player who hit them and stay down until
 // the mission changes. Here the city crew comes round a few minutes after
 // the first damage; /props shows the damage and /repairprops calls the crew
-// at once. The sample has no admins, so anyone may call the crew, at most
-// once a minute.
+// at once. Anyone may call the crew, at most once a minute.
+const commands = require("./lib/commands.js");
+const {toast, toastAll} = require("./lib/notify.js");
+const {onStart, onStop} = require("./lib/util.js");
 
 const REPAIR_AFTER_MS = 5 * 60_000;
 const CHECK_MS = 15_000;
@@ -24,9 +26,7 @@ function describe({broken, moved}) {
 function repair(reason) {
     const restored = World.repairProps();
     damagedSince = null;
-    if (restored > 0) {
-        for (const player of World.getPlayers()) player.sendMessage(`The city crew ${reason}: ${restored} prop${restored === 1 ? "" : "s"} back in place.`);
-    }
+    if (restored > 0) toastAll(`The city crew ${reason}: ${restored} prop${restored === 1 ? "" : "s"} back in place.`, {title: "City crew"});
     return restored;
 }
 
@@ -40,14 +40,12 @@ function checkDamage() {
     if (Date.now() - damagedSince >= REPAIR_AFTER_MS) repair("came round");
 }
 
-Events.on("resourceStart", (name) => {
-    if (name !== "mafia1online-sample") return;
+onStart(() => {
     damagedSince = null;
     timer = setInterval(checkDamage, CHECK_MS);
 });
 
-Events.on("resourceStop", (name) => {
-    if (name !== "mafia1online-sample" || timer === null) return;
+onStop(() => {
     clearInterval(timer);
     timer = null;
 });
@@ -57,21 +55,17 @@ Events.on("missionChange", () => {
     damagedSince = null;
 });
 
-Events.on("playerCommand", (player, command) => {
-    const action = command.toLowerCase();
-    if (action === "props") {
-        const damage = World.getPropDamage();
-        const due = damagedSince === null ? "" : `; the crew comes in ${Math.max(0, Math.ceil((damagedSince + REPAIR_AFTER_MS - Date.now()) / 60_000))} min`;
-        player.sendMessage(`City props: ${describe(damage)}${due}. Traffic signs are not tracked.`);
+commands.register({name: "props", usage: "/props", help: "How much of the city lies broken.", category: "Showcase"}, (player) => {
+    const due = damagedSince === null ? "" : `; the crew comes in ${Math.max(0, Math.ceil((damagedSince + REPAIR_AFTER_MS - Date.now()) / 60_000))} min`;
+    toast(player, `City props: ${describe(World.getPropDamage())}${due}. Traffic signs are not tracked.`);
+});
+
+commands.register({name: "repairprops", usage: "/repairprops", help: "Call the city crew to fix every broken prop.", category: "Showcase"}, (player) => {
+    const wait = lastCall + CALL_COOLDOWN_MS - Date.now();
+    if (wait > 0) {
+        toast(player, `The city crew was just called; try again in ${Math.ceil(wait / 1000)} s.`, {tone: "bad"});
         return;
     }
-    if (action === "repairprops") {
-        const wait = lastCall + CALL_COOLDOWN_MS - Date.now();
-        if (wait > 0) {
-            player.sendMessage(`The city crew was just called; try again in ${Math.ceil(wait / 1000)} s.`);
-            return;
-        }
-        lastCall = Date.now();
-        if (repair(`was called by ${player.nickname}`) === 0) player.sendMessage("Nothing to repair: every prop is in place.");
-    }
+    lastCall = Date.now();
+    if (repair(`was called by ${player.nickname}`) === 0) toast(player, "Nothing to repair: every prop is in place.");
 });

@@ -1,6 +1,6 @@
 // The car radio is a client-only HTML audio view. The directory page is not
 // an audio source; radio.html plays the station's direct live MP3 stream.
-const RADIO_PAGE = "fw://resources/mafia1online-sample/client/radio.html";
+const RADIO_PAGE = "fw://resources/freeride/client/radio.html";
 const STREAM_TIMEOUT_MS = 12_000;
 
 const receiver = {vehicleId: null, view: null, online: false, startedAt: 0, reportedFailure: false, enabled: true};
@@ -32,7 +32,7 @@ function startRadio(vehicle) {
         receiver.view = Web.createView(RADIO_PAGE, {width: 1, height: 1, x: 0, y: 0, zIndex: -100, visible: true, focus: false});
     }
     catch (error) {
-        console.warn(`[mafia1online-sample] Web radio view unavailable: ${error}`);
+        console.warn(`[freeride] Web radio view unavailable: ${error}`);
         reportFailure();
         return;
     }
@@ -66,7 +66,7 @@ Events.on("browserDocumentReady", ({viewId}) => {
 });
 Events.on("missionUnload", stopRadio);
 Events.on("playerDeath", (player) => { if (player.isLocal) stopRadio(); });
-Events.on("resourceStop", (name) => { if (name === "mafia1online-sample") stopRadio(); });
+Events.on("resourceStop", (name) => { if (name === "freeride") stopRadio(); });
 
 Events.on("render", () => {
     const player = LocalPlayer;

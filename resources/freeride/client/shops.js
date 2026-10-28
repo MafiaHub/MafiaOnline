@@ -64,7 +64,7 @@ function placeActors() {
         if (handle === null) continue;
         market.actors.set(shop.id, handle);
         if (shop.animation && !Scene.playHumanAnimation(handle, shop.animation, true)) {
-            console.warn(`[mafia1online-sample] Could not play ${shop.animation} for ${shop.name}`);
+            console.warn(`[freeride] Could not play ${shop.animation} for ${shop.name}`);
         }
     }
 }
@@ -78,7 +78,7 @@ function buyNearest() {
     const shop = nearestShop(LocalPlayer);
     if (!shop) return;
     const offer = selectedOffer(shop);
-    Events.emitServer("sample:shop:buy", {
+    Events.emitServer("fr:shop:buy", {
         generation: market.generation, shopId: shop.id, offerId: offer.id,
     });
 }
@@ -115,7 +115,7 @@ function drawShopCard(shop, player) {
 Key.bind("b", buyNearest);
 Key.bind("n", nextOffer);
 
-Events.on("sample:shops:state", (state) => {
+Events.on("fr:shops:state", (state) => {
     if (!state || state.generation !== World.getMissionGeneration() || !Array.isArray(state.shops)) return;
     const changed = market.generation !== state.generation;
     if (changed) clearActors();
@@ -126,7 +126,7 @@ Events.on("sample:shops:state", (state) => {
 });
 
 Events.on("missionUnload", clearMarket);
-Events.on("resourceStop", (name) => { if (name === "mafia1online-sample") clearMarket(); });
+Events.on("resourceStop", (name) => { if (name === "freeride") clearMarket(); });
 
 Events.on("render", () => {
     const player = LocalPlayer;
@@ -148,6 +148,6 @@ Events.on("render", () => {
     drawShopCard(shop, player);
     if (shop.id === "pete" && market.courier && now - market.lastDelivery > SHOP_DELIVERY_RETRY_MS) {
         market.lastDelivery = now;
-        Events.emitServer("sample:shop:deliver", {});
+        Events.emitServer("fr:shop:deliver", {});
     }
 });

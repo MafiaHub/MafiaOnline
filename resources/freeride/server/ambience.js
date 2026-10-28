@@ -1,3 +1,6 @@
+const {onStart, onStop} = require("./lib/util.js");
+const {toastAll} = require("./lib/notify.js");
+
 // Free Ride changes with the host's local clock. A map transition only
 // happens at dawn/dusk; it keeps the correct stock sky and lighting together.
 const DAY_MAP = "freeride";
@@ -41,8 +44,9 @@ function updateAmbience() {
     const expectedMap = hour >= DAWN_HOUR && hour < DUSK_HOUR ? DAY_MAP : NIGHT_MAP;
     const mission = World.getMission();
     if ([DAY_MAP, NIGHT_MAP].includes(mission) && mission !== expectedMap) {
-        for (const player of World.getPlayers()) player.sendMessage("The light is changing. Lost Heaven is turning to its other hour…");
-        if (!World.changeMission(expectedMap)) console.error(`[mafia1online-sample] Could not load ${expectedMap}`);
+        toastAll(expectedMap === NIGHT_MAP ? "Night falls over Lost Heaven. The city reloads in its evening light."
+            : "Dawn breaks over Lost Heaven. The city reloads in daylight.", {title: "The light is changing", tone: "gold", seconds: 8});
+        if (!World.changeMission(expectedMap)) console.error(`[freeride] Could not load ${expectedMap}`);
     }
 
     const weather = weatherAt(now);
@@ -53,15 +57,13 @@ function updateAmbience() {
     lastWeather = signature;
 }
 
-Events.on("resourceStart", (name) => {
-    if (name !== "mafia1online-sample") return;
+onStart(() => {
     World.setCityMusic(false); // The car radio owns the music in this gamemode.
     updateAmbience();
     timer = setInterval(updateAmbience, UPDATE_MS);
 });
 
-Events.on("resourceStop", (name) => {
-    if (name !== "mafia1online-sample" || timer === null) return;
-    clearInterval(timer);
+onStop(() => {
+    if (timer !== null) clearInterval(timer);
     timer = null;
 });

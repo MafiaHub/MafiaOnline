@@ -1,6 +1,8 @@
 /cache/
 /logs/
 /server.json
+# Free Ride player records, crews and race routes written by the server.
+/data/
 /build/
 /.vite/
 /docs/reference/

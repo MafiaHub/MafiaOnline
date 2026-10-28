@@ -1,7 +1,7 @@
 // A focused CEF catalog surrounds a native LS3D model preview. The page
 // supplies its actual CSS rectangle; the preview uses backbuffer pixels.
-const CAR_PICKER_PAGE = "fw://resources/mafia1online-sample/client/car_picker.html";
-const CAR_PICKER_RESOURCE = "mafia1online-sample";
+const CAR_PICKER_PAGE = "fw://resources/freeride/client/car_picker.html";
+const CAR_PICKER_RESOURCE = "freeride";
 const CAR_PICKER_TIMEOUT_MS = 10_000;
 
 const carPicker = {
@@ -45,7 +45,7 @@ function closeCarPicker() {
     carPicker.selectedId = null;
     carPicker.pending = false;
     carPicker.message = "";
-    if (wasOpen) Events.emit("sample:car:pickerClosed");
+    if (wasOpen) Events.emitLocal("fr:car:picker", {open: false});
 }
 
 function selectCarModel(id) {
@@ -72,7 +72,7 @@ function chooseCarModel() {
     carPicker.pendingSince = Date.now();
     carPicker.message = "Taking the wheel…";
     sendCarPickerState();
-    Events.emitServer("sample:car:choose", {generation: carPicker.generation, id: carPicker.selectedId});
+    Events.emitServer("fr:car:choose", {generation: carPicker.generation, id: carPicker.selectedId});
 }
 
 function openCarPicker(request) {
@@ -87,13 +87,13 @@ function openCarPicker(request) {
     try {
         carPicker.view = Web.createView(CAR_PICKER_PAGE, {visible: true, focus: true, zIndex: 110});
     } catch (error) {
-        console.warn(`[mafia1online-sample] Car picker could not open: ${error}`);
+        console.warn(`[freeride] Car picker could not open: ${error}`);
         Hud.showMessage("The car picker could not open.", 0xe8c57d);
         closeCarPicker();
         return;
     }
     const view = carPicker.view;
-    Events.emit("sample:car:pickerOpened");
+    Events.emitLocal("fr:car:picker", {open: true});
     Web.on(view, "car:select", (choice) => { if (view === carPicker.view) selectCarModel(choice?.id); });
     Web.on(view, "car:choose", () => { if (view === carPicker.view) chooseCarModel(); });
     Web.on(view, "car:close", () => { if (view === carPicker.view) closeCarPicker(); });
@@ -114,8 +114,8 @@ function openCarPicker(request) {
     selectCarModel(carPicker.models.find((entry) => entry.model.toLowerCase() === "thunderbird00.i3d")?.id ?? carPicker.models[0].id);
 }
 
-Events.on("sample:car:open", openCarPicker);
-Events.on("sample:car:result", (result) => {
+Events.on("fr:car:open", openCarPicker);
+Events.on("fr:car:result", (result) => {
     if (carPicker.view === null || !carPicker.pending || result?.id !== carPicker.selectedId) return;
     if (result.ok) {
         closeCarPicker();
