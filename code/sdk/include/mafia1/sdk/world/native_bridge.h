@@ -203,7 +203,9 @@ namespace Mafia1Online::SDK::World {
             if (void *collision = Field<void *>(kDynamicCollisionOffset)) {
                 const bool raised = phase >= Phase::Opening && phase <= Phase::Closing;
                 using Call = void(__thiscall *)(void *, void *);
-                reinterpret_cast<Call>(raised ? kDynInsert : kDynErase)(reinterpret_cast<void *>(kCollision), collision);
+                // Qualified: the class's own kCollision (the hook target) hides
+                // the namespace's g_collision instance.
+                reinterpret_cast<Call>(raised ? kDynInsert : kDynErase)(reinterpret_cast<void *>(World::kCollision), collision);
             }
             Field<Phase>(kPhaseOffset) = phase;
         }
