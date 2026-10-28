@@ -12,6 +12,7 @@ const menu = require("./lib/menu.js");
 const commands = require("./lib/commands.js");
 const prison = require("./lib/prison.js");
 const warden = require("./lib/warden.js");
+const interiors = require("./interiors.js");
 const {toast, card, feed, markers, name, text, COLORS} = require("./lib/notify.js");
 const {MAIN_WORLD, emit, formatMoney, formatMinutes, onStart, onStop} = require("./lib/util.js");
 
@@ -54,7 +55,8 @@ function assignCell() {
 }
 
 // Fade out, move, fade in, as an entrance does; the move is skipped if the
-// life ended meanwhile.
+// life ended meanwhile. A move refused (a client still loading the mission)
+// leaves the player in their world; then() learns whether it happened.
 function transfer(player, pose, world, loadout, then) {
     const {spawnGeneration} = player;
     moving.add(player.id);
@@ -62,10 +64,12 @@ function transfer(player, pose, world, loadout, then) {
     setTimeout(() => {
         moving.delete(player.id);
         if (!online(player.id) || !player.alive || player.spawnGeneration !== spawnGeneration) return;
+        const previous = player.virtualWorld;
         player.setVirtualWorld(world);
-        if (!life.teleport(player, pose.position, pose.heading ?? 0, loadout)) player.setVirtualWorld(MAIN_WORLD);
+        const moved = life.teleport(player, pose.position, pose.heading ?? 0, loadout);
+        if (!moved) player.setVirtualWorld(previous);
         emit(player, "fr:fade", {out: false, seconds: 0.6});
-        then?.();
+        then?.(moved);
     }, FADE_MS);
 }
 
@@ -74,9 +78,14 @@ function lockUp(player, until) {
     if (player.getVehicle()) player.removeFromVehicle();
     life.end(player);
     life.begin(player, "jail", "In jail");
+    interiors.release(player);
     const cell = prisoners.get(player.id)?.cell ?? assignCell();
     prisoners.set(player.id, {until, cell, stage: "locked", freedAt: 0});
     profiles.setField(player, "jailUntil", until);
+    // The police kept the guns and settled the record: "where you left off"
+    // gives neither back once the sentence is over.
+    const resume = profiles.get(player)?.resume;
+    if (resume) profiles.setField(player, "resume", {...resume, weapons: [], selected: 0, wanted: 0});
     markers(player, "jail", []);
     transfer(player, prison.spawnOf(cell), prison.WORLD, {weapons: [], selected: 0, health: player.health}, () => {
         // The game's own countdown watch runs on the prisoner's client.
@@ -111,7 +120,9 @@ function unlock(player, message) {
 function walkOut(player) {
     const prisoner = prisoners.get(player.id);
     if (!prisoner || moving.has(player.id)) return;
-    transfer(player, releasePoint(player), MAIN_WORLD, {...life.STARTER_KIT, health: 100}, () => {
+    transfer(player, releasePoint(player), MAIN_WORLD, {...life.STARTER_KIT, health: 100}, (moved) => {
+        // Still in the hall: the guard tries again.
+        if (!moved) return;
         prisoners.delete(player.id);
         card(player, "jail", null);
         markers(player, "jail", []);
@@ -129,8 +140,9 @@ function sentence(player, level) {
     return true;
 }
 
+// Never below zero: the tick may unlock up to a second late.
 function bail(player) {
-    return Math.ceil((prisoners.get(player.id).until - Date.now()) / 1000) * BAIL_PER_SECOND;
+    return Math.max(0, Math.ceil((prisoners.get(player.id).until - Date.now()) / 1000) * BAIL_PER_SECOND);
 }
 
 function tick() {
@@ -208,10 +220,11 @@ menu.provide("jail", (player) => {
     return {secondsLeft: Math.ceil((prisoner.until - Date.now()) / 1000), bail: bail(player), stage: prisoner.stage};
 });
 
-// A player who left mid-sentence finishes it when they come back; the jail
-// may still be going up after a mission change.
-Events.on("playerSpawn", (player) => {
-    if (prisoners.has(player.id) || life.isTransit(player)) return;
+// A player who left mid-sentence finishes it when they come back, as does
+// one in the city when this resource starts again; the jail may still be
+// going up after a mission change.
+function resumeSentence(player) {
+    if (prisoners.has(player.id)) return;
     const until = profiles.get(player)?.jailUntil ?? 0;
     if (until <= Date.now()) return;
     const {spawnGeneration} = player;
@@ -221,11 +234,19 @@ Events.on("playerSpawn", (player) => {
         if (prison.available()) setTimeout(tryLockUp, SPAWN_RETRY_MS);
     };
     setTimeout(tryLockUp, 0);
+}
+
+Events.on("playerSpawn", (player) => {
+    if (!life.isTransit(player)) resumeSentence(player);
 });
 // A prisoner who dies comes back to the cell, or, once freed, to the city.
 Events.on("playerRespawn", (player) => {
     const prisoner = prisoners.get(player.id);
-    if (!prisoner) return;
+    // Dead when this resource started: the sentence carries on now.
+    if (!prisoner) {
+        if (!life.isTransit(player)) resumeSentence(player);
+        return;
+    }
     setTimeout(() => {
         if (!prisoners.has(player.id)) return;
         if (prisoner.stage === "locked") lockUp(player, prisoner.until);
@@ -236,7 +257,17 @@ Events.on("playerDisconnect", (player) => {
     prisoners.delete(player.id);
     moving.delete(player.id);
 });
+// The mission change took the jail down. Whoever was inside leaves its world
+// and the activity; a sentence still running starts again at the next spawn.
 Events.on("missionChange", () => {
+    for (const id of prisoners.keys()) {
+        const player = online(id);
+        if (!player) continue;
+        life.end(player, "jail");
+        if (player.virtualWorld === prison.WORLD) player.setVirtualWorld(MAIN_WORLD);
+        card(player, "jail", null);
+        markers(player, "jail", []);
+    }
     prisoners.clear();
     moving.clear();
     warden.forget();
@@ -248,6 +279,7 @@ onStart(() => {
     warden.start();
     timer = setInterval(tick, TICK_MS);
     guard = setInterval(watch, GUARD_MS);
+    for (const player of World.getPlayers()) if (player.alive) resumeSentence(player);
 });
 onStop(() => {
     clearInterval(timer);

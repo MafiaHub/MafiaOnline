@@ -67,7 +67,10 @@ Events.on("playerArrest", (player, _officer, {kind}) => {
     Police.clear(player);
     sendPolice(player, {action: "arrest"});
     setTimeout(() => {
-        if (!player.alive || player.missionGeneration !== missionGeneration || player.spawnGeneration !== spawnGeneration) return;
+        // A door or a ride taken during the fade (the record is clear by
+        // now) is a new life too, but no way out of the sentence.
+        if (!player.alive || player.missionGeneration !== missionGeneration ||
+            (player.spawnGeneration !== spawnGeneration && !life.isTransit(player))) return;
         if (jail.sentence(player, level)) return;
         const charge = Math.min(player.money, BAIL);
         if (charge > 0) player.giveMoney(-charge);

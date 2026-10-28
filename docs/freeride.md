@@ -57,9 +57,11 @@ first start and left in place.
 | F1 (hold) | The mod's own list of who is in town. |
 | Tab | The retail city map. |
 | T | Chat. Every command below can also be typed. |
-| N / B | At a shop counter: next offer / buy or accept it. |
+| N / B | At a shop or bar counter: next offer / buy or accept it. |
 | F9 | Car radio on or off. |
 | K | Siren, in a police car. |
+| U | At a telephone booth, on police duty: call for backup. |
+| G | On fire duty: hold to spray the hose (or the truck's roof cannon from its wheel), press next to a trapped civilian to lead them out. On ambulance duty: hold next to a patient to treat them. Down and waiting for a medic: press to give up and wake at the hospital. |
 
 Every button in the city menu sends the same command a player could type, so
 chat and menu share one set of server checks (`server/lib/commands.js`).
@@ -82,7 +84,8 @@ spot on this map's streets where they last stood, with the health, weapons
 and ammunition and the wanted level they had. The server saves it every five
 seconds while they are on the street and not busy with a race, a duel, a job
 or a sentence, so those never become the place to come back to; a player
-with time left to serve goes back to jail instead. After a death they come
+with time left to serve goes back to jail instead, and an arrest takes the
+guns and the wanted level out of the saved spot. After a death they come
 back at their usual district.
 
 Each life starts with a baseball bat; guns are bought at Yellow Pete's. Dead players come back where
@@ -203,14 +206,16 @@ near a random player:
 
 ## Places and jobs
 
-The four staff members are solid, client-only `C_entity` humans. Their
-positions come from stock mission scene frames; the server checks distance,
-life, mission generation and money before any purchase.
+Pete, the dispensary clerk and Salieri's barman are solid, client-only
+`C_entity` humans; the pump is minded by the stock gas station attendants,
+whom every player sees the same (`Pumper`). Their positions come from stock
+mission scene frames; the server checks distance, life, mission generation and
+money before any purchase.
 
 | Place | Stock anchor | Purpose |
 | --- | --- | --- |
 | Yellow Pete's doorway | `MISE19-MESTO`: `1dvere u peteho` | Buy a Colt, shotgun, Thompson or grenades. |
-| The Night Pump | `FREERIDE`: `_pumpa2` | Buy up to 25 litres for a nearby car. |
+| The Night Pump | `FREERIDE`: `_pumpa2` | Stop at a pump with the engine off and press the exit key: the attendant fills the tank at $3 a litre, or as far as your money goes. |
 | The Dispensary | `FREERIDE`: `lekarna` | Restore health with bandages. |
 | Salieri's Back Window | `FREERIDE`: `Salieri_save` | Buy coffee and pie or take a courier envelope. |
 
@@ -233,9 +238,84 @@ The Jobs tab of the city menu shows every one of these with its live state.
   shooting a citizen costs the badge and a $250 fine. Officers on duty do not
   run up bounty streaks. `/duty` again clocks off and gives back the old
   clothes and weapons.
-- **Taxi.** `/taxi` starts a shift in your cab, or brings one. Dispatch sends
-  you to street corners; stop by the fare, then drive them across town.
-  Arriving inside the tip window adds 30%.
+
+  On duty the city's police take you for one of their own
+  (`Police.setOfficer`): the simulation host keeps no crime record for you,
+  as retail keeps none for its officers, so speeding with the siren on,
+  shooting at suspects or a weapon in hand raise no wanted level, and no
+  officer chases, fines or arrests you. The host's NPCs rate you as a
+  policeman. Off duty you are a citizen again with a clean record.
+
+  **Calling for backup.** Every telephone booth in the city (the stock
+  `PHbox01` booths, 127 of them, listed in `server/data/phone_booths.js`) is
+  a call box on an officer's map. Stand at one and press U, or type
+  `/backup` in your squad car to use its radio. The call goes after the
+  nearest wanted player or bounty target within 300 m, else armed gangsters
+  within 70 m, else it sends cover for you:
+  - A wanted player gets the retail police's own reinforcements: a police
+    car with two officers from the police pool sets out from a road about
+    140 m away and hunts them as their wanted level says.
+  - Anything else, or when the pool has no car free, gets a squad car
+    spawned on a road out of sight. Its two officers board it, drive to the
+    scene (following a suspect who moves on), get out and fight the suspect,
+    or cover you for 90 seconds. They are friends to every officer on duty;
+    anyone else who shoots them is wanted.
+
+  The compass points at the arriving car, a whistle sounds when it is on
+  scene, and officers on duty within 800 m hear the call on the radio with
+  the scene marked on their map. Units stand down when the suspect is
+  caught, dead or gone, when you clock off, or after three minutes; a
+  squad drives off and is removed out of sight. One call at a time per
+  officer, 90 seconds between calls, two squad cars in the city at once.
+- **Taxi.** Drive a cab (`taxi00`, `fordapicktaxi00`, `phantomtaxi00`) and
+  people wave you down, as in single player: a walker up the street turns
+  to the cab and waves (everyone sees it), and a HAILING marker shows them.
+  Stop next to them and they get into the back seat; that starts a shift if
+  you are not busy with something else. They name a corner across town: the
+  compass and a DROP-OFF marker lead there, and the card shows the meter
+  ($8 plus 12 cents a metre, up to one and a half times the quote), the
+  distance and the tip window (retail's ride time). Stop there to be paid
+  the meter, a speed tip (up to 40% of the quote for the time left) and a
+  smooth-ride tip (20% with no crash); then they get out and walk off. A
+  crash gets a complaint and loses the smooth tip; the third one, or leaving
+  the driver's seat, and they get out without paying. `/taxi` starts or ends
+  a shift and brings a cab. With no walkers about (no simulation host, the
+  countryside) or no hail for 45 seconds, dispatch sends you to a fare
+  waiting at a street corner instead. Any number of cabs work at once.
+- **Fire brigade** (`/fire`, the city maps). Report to the fire station in
+  the Works Quarter (the stock `9hasic` building the city scenes place at
+  (-1158.6, -5.9, 306.5), its garage doors on the street at z 296.5; a FIRE
+  STATION marker shows it), put on the stock fireman's clothes (`Hasic01`)
+  and take the stock truck (`fire00`) from the apron. Fires break out on the
+  road graph every four minutes while anyone is on duty (every eleven
+  otherwise, then burning themselves out after nine): a house front (flames
+  up the facade), a burning car that explodes after four minutes, or a crash
+  with one or two people lying in the road; a resident may crouch at a
+  burning house's door. Everyone sees the fires on the map and in the feed.
+  Hold G within 35 m of your truck to spray the hose onto the nearest fire in
+  front of you (24 m reach), or at the truck's wheel to use its roof cannon
+  (32 m): the water arcs onto the flames, the fire shrinks as it goes down and
+  grows back slowly if left alone, and every hose on it counts, so a crew is
+  quicker. A house takes one firefighter about 45 seconds. The fire pays
+  $420 (house), $320 (crash) or $260 (car), split by the water each
+  firefighter put on it (at least $25 each). G next to a trapped person gets
+  them up to follow you; 12 m clear of the fire they are safe ($120); with a
+  medic on duty they become an ambulance call. `/fires` lists the fires.
+- **Ambulance** (`/medic`, the city maps). Report to Lost Heaven Hospital
+  (the stock `9medic` building at (-759.2, 11.6, 779.0); an AMBULANCE marker
+  at the steps) and take the stock ambulance (`ambulance00`) from the street.
+  Calls come in every three minutes while a medic is on duty: someone dazed
+  on the pavement or someone badly hurt lying there, plus the fire brigade's
+  smoke victims. Hold G beside the patient for five seconds to treat them.
+  The dazed get up and walk off ($140, 40% more if you got there within four
+  minutes); the badly hurt get into the ambulance's front seat (or onto the
+  stretcher, out of sight, when they cannot) and must reach the hospital's
+  street front: $220 plus 25 cents a metre, and a 40% tip inside the time on
+  the card. While a medic is on duty a player who goes down outside a duel or
+  race waits up to a minute for one instead of respawning: a medic who holds
+  G beside them for four seconds brings them back where they fell with 60
+  health and the starting kit, no hospital bill ($200 to the medic); G gives
+  up and respawns as usual.
 - **Courier.** Salieri's back window, as before.
 - **Bootleg run** (`/bootleg`, Lost Heaven Extended). Drive to the still in
   the hills, wait eight seconds while the crates are loaded (the police are
@@ -312,7 +392,7 @@ prison building (`vezeni.4ds`, placed by `cache.bin` at (−1105.68, −6.12,
 in the countryside the crossroads. A cell door closes again once its freed
 prisoner has stepped out, so a cellmate stays locked in; a freed prisoner who
 has not walked out after two minutes, or who dies, is shown out. A sentence
-survives a reconnect and a map change. While the jail cannot be built (no map
+survives a reconnect, a map change and a restart of the resource. While the jail cannot be built (no map
 objects), an arrest costs $250 bail and a fresh start instead. A fine still
 costs $100.
 
@@ -333,14 +413,66 @@ and health. Public interiors are shared. A safehouse is private to your crew
 (or to you, without one), dresses your wounds and tops up your magazines.
 Doors stay shut while the police are after you, and during races and duels.
 
-Lost Heaven Extended ships one: Sarah's apartment in Little Italy, a
+Lost Heaven Extended ships two: Sarah's apartment in Little Italy, a
 safehouse whose street door (`&& futro out`) and corridor (`&& chodba`) come
-from the mod's `quarters_sr.4ds`. Other interiors are not shipped, because
+from the mod's `quarters_sr.4ds`, and Morello's bar (see Bars below). Stock
+Lost Heaven's arrow at Salieri's door leads into its back-room bar. Other
+interiors are not shipped, because
 their street side cannot be told from the model data. Record them in development mode: stand on the street at the door facing
 it and type `/entrance add <name> [public|safehouse]`, walk to where players
 should arrive, face the way they should look and type `/entrance inside`.
 `/entrance list` and `/entrance delete <name>` manage them; they are saved to
 the database and work at once.
+
+## Bars
+
+`/bar` points the compass at the nearest bar. At the counter, N picks a
+drink and B orders it; the barman turns to you and pours.
+
+| Drink | Price | Drunkenness | Health |
+| --- | --- | --- | --- |
+| Beer | $4 | +10 | +2 |
+| Red wine | $6 | +14 | +3 |
+| Bathtub gin | $7 | +18 | +3 |
+| Canadian whiskey | $10 | +22 | +5 |
+| The house grappa | $15 | +32 | +6 |
+| Black coffee | $3 | −15 | +4 |
+| A round for the house | $4 a head | a beer for everyone inside | +2 each |
+
+On Lost Heaven Extended the mod places Salieri's bar of the story missions
+(`salierybar.4ds`) behind the stock front, with working doors: walk in
+through the front door or the side door off the alley. Morello's bar
+(`morellobar.4ds`, the bar of the mission Molotov Party) has a fixed door, so
+an arrow on the pavement in front of its windows leads in. Stock Lost Heaven
+has no rooms behind Salieri's door; its arrow leads to a back room built
+from stock models (`server/lib/bar_room.js`) 150 m under the fields beside
+the county jail, in its own virtual world: brick walls, board floor, a
+counter with five bar stools, cupboards of bottles, a radio, tables and
+chairs from Salieri's bar.
+
+The people are scripted NPCs, there while anyone is inside and gone 20
+seconds after the last guest. Their places, models and clips are the story
+missions' own, played with `npc.playAnimation`: Luigi stands behind
+Salieri's counter and wipes it or rinses glasses (`x barman stativ`,
+`x barman stul`, `x barman umyvani`), three of Salieri's men sit in the
+booths, a woman leans on the end of the counter with a glass and drinks, and
+a sailor waits in the billiard room; in Morello's bar his barman cleans up
+while Morello's men talk and smoke. When someone buys a round, the drinkers
+raise their glasses.
+
+**Drunkenness.** Each drink adds to your level (0 to 100), which wears off at
+15 a minute; a coffee takes 15 off. The HUD card shows how drunk you are and
+when you will be sober. From Tipsy (20) the world sways with the retail boat
+swing, from 25 the view breathes in and out, and a warm haze and dark edges
+close in. Wasted (70) on foot, your view lurches every few seconds. At 100
+you black out: the screen goes dark, somebody helps themselves to 15% of
+your cash ($20 to $400), and you come round on the pavement outside the bar
+with a hangover (35). The level survives a reconnect, less what wore off.
+
+From 30 a driver's car lurches off its line every few seconds; from 45 a
+policeman, a squad car or an officer on duty within 35 m who sees you weave
+may book you for drunk driving (wanted, minor). Officers on duty are not
+booked.
 
 ## Getting together
 
@@ -403,8 +535,8 @@ Start the server with `FREERIDE_DEV=1`, or type `fr dev on` in the server
 console, to enable `/dev weapons|fists|drop|model|wanted|hud|opacity|carstate|
 cardamage|jail|object|money` for combat, car, HUD, jail and map object testing
 (`/dev jail [level]` locks you up at once; `/dev object <model.4ds>` places a
-map object four metres ahead, `off` removes it), and `/entrance` for
-recording interiors. They are off by default. The server console runs any of
+map object four metres ahead, `off` removes it), `/entrance` for
+recording interiors and `/drunk <0-100>` to set your drunkenness. They are off by default. The server console runs any of
 them on a player with `fr as <player> <action> ...`, whether or not
 development mode is on.
 
@@ -417,13 +549,16 @@ development mode is on.
 | `server/lib/` | Shared rules: the database (`store.js`), commands, profiles and ranks, respawn and activities, invitations, notifications, nametags, the road graph, admins, car prices, and the county jail building and its warden (`prison.js`, `warden.js`). |
 | `server/selector.js`, `ambience.js`, `shops.js`, `police.js`, `props.js`, `doors.js` | Entering the city, clock and weather, shops and courier, police outcomes, prop repair, the door lab. |
 | `server/races.js`, `combat.js`, `duels.js`, `crews.js`, `world_events.js`, `social.js` | Races, bounties, duels, crews, city events, rides, messages and dice. |
-| `server/export.js`, `police_duty.js`, `taxi.js`, `robbery.js` | The jobs. |
+| `server/export.js`, `police_duty.js`, `police_backup.js`, `taxi.js`, `robbery.js` | The jobs; `police_backup.js` is police duty's call boxes and backup. |
+| `server/firefighters.js`, `ambulance.js`, `lib/jobkey.js`, `client/rescue.js` | The fire brigade and the ambulance, and their job key (G) and prompt. |
 | `server/turf.js`, `stashes.js`, `speed_traps.js`, `interiors.js` | Turf, cash stashes, speed traps and building entrances, each per map. |
+| `server/bars.js`, `drunk.js`, `lib/bar_room.js` | Bars, their staff and drink counters; drunkenness, blackouts and drunk driving; the stock map's back-room bar. |
 | `server/map_vote.js`, `bootleg.js`, `lib/maps.js` | The default map, map votes, the bootleg run and the map registry. |
 | `server/championship.js`, `jail.js`, `jail_visits.js`, `hospital.js` | The Autodrom championship, jail sentences, jail visits and hospital respawns. |
 | `client/hud.js`, `client/hud.html` | One transparent web view for toasts, feed, activity cards, race panel, level strip and the city menu; it also arbitrates the single native compass by priority. |
 | `client/markers.js` | Beacons, checkpoint and crate markers, door arrows, turf rings, bounty and crewmate labels. |
 | `client/selector.js`, `shops.js`, `car_picker.js`, `radio.js`, `police.js`, `jail.js`, `main.js` | The selector, shop staff, the car lot, garage and motor pool, radio, police HUD, the jail countdown, fades and race countdown. |
+| `client/bars.js`, `client/drunk.js` | The drink menu at a bar counter; the sway, view wobble, haze and blackout of a drunk player. |
 
 Gameplay requests use `Events.emitServer` and are checked again on the
 server; the server answers with `player.emit` or `Events.emitAllClients` and

@@ -87,7 +87,7 @@ function anchorHeading(anchor) {
 // the previous spot is kept through them.
 function saveResume(player) {
     if (!inFreeRide() || !player.spawned || !player.alive || player.missionGeneration !== World.getMissionGeneration() ||
-        player.virtualWorld !== MAIN_WORLD || life.activity(player) || life.isTransit(player)) return;
+        player.virtualWorld !== MAIN_WORLD || life.activity(player)) return;
     const position = plain(player.position);
     if (![position.x, position.y, position.z].every(Number.isFinite)) return;
     const {weapons, selected} = life.loadoutOf(player);

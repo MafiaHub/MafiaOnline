@@ -379,6 +379,8 @@
       const exportList = data.export;
       const duty = data.duty ?? {};
       const taxi = data.taxi ?? {};
+      const fire = data.fire ?? {};
+      const medic = data.medic ?? {};
       const stashes = data.stashes ?? {found: 0, total: 30};
       return el("div", {class: "grid"},
         panel("Lucas's export list", exportList
@@ -394,6 +396,14 @@
           el("p", {}, "Take calls from street corners and drive fares across town. Quick drivers earn tips."),
           taxi.active ? el("p", {}, `On shift · ${taxi.fares} fare${taxi.fares === 1 ? "" : "s"}`) : null,
           button(taxi.active ? "End shift" : "Start a shift", "/taxi", !taxi.active)),
+        fire.available ? panel("Fire brigade",
+          el("p", {}, "Report to the fire station in the Works Quarter, take the truck and put out fires across the city with the hose (hold G). Lead trapped people out. The pay for a fire is split by the water each firefighter put on it."),
+          el("p", {}, `${fire.crew ?? 0} on duty · ${fire.fires ?? 0} fire${fire.fires === 1 ? "" : "s"} burning${fire.onDuty ? ` · ${money(fire.earned ?? 0)} this shift` : ""}`),
+          button(fire.onDuty ? "Clock off" : "Go on duty", "/fire", !fire.onDuty), button("Where is it burning?", "/fires")) : null,
+        medic.available ? panel("Ambulance",
+          el("p", {}, "Report to Lost Heaven Hospital and take the ambulance. Hold G beside a patient to treat them, and drive the badly hurt in quickly for a tip. Players who go down wait a minute for you."),
+          el("p", {}, `${medic.medics ?? 0} on duty · ${medic.calls ?? 0} call${medic.calls === 1 ? "" : "s"} waiting${medic.onDuty ? ` · ${money(medic.earned ?? 0)} this shift` : ""}`),
+          button(medic.onDuty ? "Clock off" : "Go on duty", "/medic", !medic.onDuty)) : null,
         panel("Courier", el("p", {}, "Salieri's back window has sealed envelopes for Yellow Pete. Eight minutes, $180."), button("Check my run", "/courier")),
         data.bootleg?.available ? panel("Bootleg run",
           el("p", {}, `Drive out to the still in the hills, wait while the crates go in, then bring the whisky to Salieri's within ten minutes. ${money(data.bootleg.pay)}. Loading tips off the police.`),

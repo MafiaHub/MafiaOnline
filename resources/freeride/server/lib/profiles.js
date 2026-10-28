@@ -21,6 +21,7 @@ const records = new Map();
 const sessions = new Map();
 const dirty = new Set();
 let saveTimer = null;
+let stopped = false;
 
 function load() {
     for (const [key, record] of store.loadPlayers()) records.set(key, record);
@@ -34,8 +35,12 @@ function writeNow() {
     dirty.clear();
 }
 
+// Once the resource is stopping, every change is written at once: the
+// modules that stop after this one still store parked cars and resume spots,
+// and a restart reads the database straight away.
 function saveSoon() {
-    if (saveTimer === null) saveTimer = setTimeout(writeNow, SAVE_DELAY_MS);
+    if (stopped) writeNow();
+    else if (saveTimer === null) saveTimer = setTimeout(writeNow, SAVE_DELAY_MS);
 }
 
 // Marks a connected player's record for the next write.
@@ -218,6 +223,7 @@ onStop(() => {
             dirty.add(session.key);
         }
     }
+    stopped = true;
     writeNow();
 });
 

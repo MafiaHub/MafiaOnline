@@ -28,6 +28,8 @@ const BLOCKING_ACTIVITIES = new Set(["race", "race-lobby", "duel"]);
 
 let interiors = [];
 const inside = new Map();
+// player id -> the virtual world the interior put them in
+const worlds = new Map();
 const armed = new Map();
 const pending = new Map();
 const recording = new Map();
@@ -86,9 +88,12 @@ function transfer(player, pose, world, then) {
     setTimeout(() => {
         pending.delete(player.id);
         if (!player.alive || player.spawnGeneration !== spawnGeneration) return;
+        // A move refused (a client still loading the mission) leaves the
+        // player where and in the world they were.
+        const previous = player.virtualWorld;
         player.setVirtualWorld(world);
         if (!life.teleport(player, pose.position, pose.heading)) {
-            player.setVirtualWorld(MAIN_WORLD);
+            player.setVirtualWorld(previous);
             emit(player, "fr:fade", {out: false, seconds: 0.3});
             return;
         }
@@ -98,15 +103,18 @@ function transfer(player, pose, world, then) {
 }
 
 function enter(player, interior) {
-    const problem = blocked(player);
+    // A room built from map objects (interior.open) may not stand yet.
+    const problem = interior.open && !interior.open() ? "The door is locked." : blocked(player);
     if (problem) {
         toast(player, problem, {tone: "bad", seconds: 3});
         armed.set(`${player.id}:${interior.id}:outside`, false);
         return;
     }
-    const world = interior.kind === "safehouse" ? safehouseWorld(player) : MAIN_WORLD;
+    // A public interior shares the street world unless it is built apart.
+    const world = interior.kind === "safehouse" ? safehouseWorld(player) : interior.world ?? MAIN_WORLD;
     transfer(player, interior.inside, world, () => {
         inside.set(player.id, interior.id);
+        worlds.set(player.id, world);
         armed.set(`${player.id}:${interior.id}:inside`, false);
         markers(player, "exit", [{id: "exit", position: interior.inside.position, label: "EXIT", color: COLORS.green, model: "sipka.i3d", range: 30}]);
         if (interior.kind === "safehouse") {
@@ -120,6 +128,7 @@ function enter(player, interior) {
 function leave(player, interior) {
     transfer(player, interior.outside, MAIN_WORLD, () => {
         inside.delete(player.id);
+        worlds.delete(player.id);
         armed.set(`${player.id}:${interior.id}:outside`, false);
         markers(player, "exit", []);
     });
@@ -146,6 +155,7 @@ function tick() {
 
 function forget(player) {
     inside.delete(player.id);
+    worlds.delete(player.id);
     pending.delete(player.id);
     recording.delete(player.id);
     for (const key of [...armed.keys()]) if (key.startsWith(`${player.id}:`)) armed.delete(key);
@@ -221,22 +231,45 @@ onStart(() => {
     publishEntrances();
     timer = setInterval(tick, TICK_MS);
 });
+// Out the door before the rooms go: a room built apart stands under the
+// fields, where the street world has no floor.
 onStop(() => {
     clearInterval(timer);
-    for (const player of World.getPlayers()) if (inside.has(player.id)) player.setVirtualWorld(MAIN_WORLD);
+    for (const player of World.getPlayers()) {
+        const interior = here().find((entry) => entry.id === inside.get(player.id));
+        if (!interior) continue;
+        if (player.virtualWorld === worlds.get(player.id)) player.setVirtualWorld(MAIN_WORLD);
+        if (player.alive) life.teleport(player, interior.outside.position, interior.outside.heading);
+    }
 });
 Events.on("playerSpawn", (player) => {
     if (!life.isTransit(player)) publishEntrances(player);
 });
-// A death inside sends the player back to the street world for the respawn.
+// A death inside sends the player back to the street world for the respawn,
+// whatever they were busy with (a job keeps going).
 Events.on("playerDeath", (player) => {
     if (!inside.has(player.id)) return;
     inside.delete(player.id);
     markers(player, "exit", []);
-    if (player.virtualWorld !== MAIN_WORLD && !life.activity(player)) player.setVirtualWorld(MAIN_WORLD);
+    if (player.virtualWorld === worlds.get(player.id)) player.setVirtualWorld(MAIN_WORLD);
+    worlds.delete(player.id);
 });
+// The mission change emptied the rooms; nobody stays in their world.
 Events.on("missionChange", () => {
+    for (const player of World.getPlayers()) if (inside.has(player.id) && player.virtualWorld === worlds.get(player.id)) player.setVirtualWorld(MAIN_WORLD);
     inside.clear();
+    worlds.clear();
     pending.clear();
 });
 Events.on("playerDisconnect", forget);
+
+// Another module moved the player out (server/bars.js after a blackout):
+// the interior no longer holds them.
+function release(player) {
+    if (!inside.delete(player.id)) return;
+    worlds.delete(player.id);
+    pending.delete(player.id);
+    markers(player, "exit", []);
+}
+
+module.exports = {release, insideOf: (player) => here().find((interior) => interior.id === inside.get(player.id)) ?? null};

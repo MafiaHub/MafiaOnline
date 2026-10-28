@@ -12,6 +12,8 @@ const activities = new Map();
 const overrides = new Map();
 const transit = new Map();
 const pending = new Set();
+// Deaths whose respawn waits, until a time: a medic is on the way.
+const holds = new Map();
 let provider = () => null;
 let hospital = () => null;
 
@@ -127,6 +129,10 @@ Events.on("playerDeath", (player, _killer, {missionGeneration, spawnGeneration})
         if (player.alive || player.spawnGeneration !== spawnGeneration ||
             World.getMissionGeneration() !== missionGeneration ||
             !World.getPlayers().some((other) => other.id === player.id)) return;
+        if ((holds.get(player.id) ?? 0) > Date.now()) {
+            setTimeout(tryRespawn, 1000);
+            return;
+        }
         const spot = World.isReady() ? spotFor(player) : null;
         if (spot && player.respawn(spot.position, spot.heading ?? 0)) return;
         setTimeout(tryRespawn, 1000);
@@ -134,7 +140,33 @@ Events.on("playerDeath", (player, _killer, {missionGeneration, spawnGeneration})
     setTimeout(tryRespawn, delay);
 });
 
+// Keeps a dead player down until `until` (a Date.now() time), or lets the
+// usual respawn go ahead again with null.
+function holdRespawn(player, until) {
+    if (until) holds.set(player.id, until);
+    else holds.delete(player.id);
+}
+
+// A dead player brought back where they lie, as a medic does: a transit
+// life (no hospital bill), the starting kit and the given health.
+function revive(player, position, heading = 0, health = 60) {
+    if (player.alive) return false;
+    holds.delete(player.id);
+    pending.add(player.id);
+    const revived = player.respawn(position, heading);
+    pending.delete(player.id);
+    if (!revived) return false;
+    transit.set(player.id, player.spawnGeneration);
+    giveKit(player, overrides.get(player.id)?.kit ?? STARTER_KIT);
+    if (health < 100) player.setHealth(Math.max(1, health));
+    return true;
+}
+
+Events.on("playerSpawn", (player) => holds.delete(player.id));
+Events.on("playerRespawn", (player) => holds.delete(player.id));
+
 Events.on("playerDisconnect", (player) => {
+    holds.delete(player.id);
     activities.delete(player.id);
     overrides.delete(player.id);
     transit.delete(player.id);
@@ -144,7 +176,8 @@ Events.on("playerDisconnect", (player) => {
 Events.on("missionChange", () => {
     overrides.clear();
     transit.clear();
+    holds.clear();
 });
 
 module.exports = {begin, end, activity, busyMessage, setRespawnProvider, setHospital, setOverride, clearOverride,
-    equip, giveKit, loadoutOf, teleport, restart, spotFor, isTransit, STARTER_KIT, RESPAWN_DELAY_MS};
+    equip, giveKit, loadoutOf, teleport, restart, spotFor, isTransit, holdRespawn, revive, STARTER_KIT, RESPAWN_DELAY_MS};

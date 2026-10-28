@@ -107,7 +107,10 @@ Events.on("playerDisconnect", (player) => {
     testObjects.get(player.id)?.destroy();
     testObjects.delete(player.id);
 });
-onStop(() => testObjects.clear());
+onStop(() => {
+    for (const object of testObjects.values()) object.destroy();
+    testObjects.clear();
+});
 
 // The server console runs any action on a player: fr as <player> <action> ...
 function run(player, action, args) {

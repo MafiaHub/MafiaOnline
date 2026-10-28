@@ -1,11 +1,15 @@
 // Police duty: a player can put on the uniform, take a squad car and hunt the
 // players the city's police want or who carry a bounty. Taking down a suspect
-// pays by wanted level; shooting a citizen costs the badge and a fine.
+// pays by wanted level; shooting a citizen costs the badge and a fine. On duty
+// the city's own police count the player as one of theirs (Police.setOfficer):
+// no crime of theirs is recorded, so they are never chased, fined or arrested,
+// and they can call for backup (police_backup.js).
 const profiles = require("./lib/profiles.js");
 const life = require("./lib/life.js");
 const nametag = require("./lib/nametag.js");
 const menu = require("./lib/menu.js");
 const commands = require("./lib/commands.js");
+const backup = require("./police_backup.js");
 const {toast, card, compass, feed, name, text, COLORS} = require("./lib/notify.js");
 const {MAIN_WORLD, distance, playable, headingOf, vehicleById, formatMoney, onStart, onStop} = require("./lib/util.js");
 
@@ -31,6 +35,8 @@ function endDuty(player, message, tone = "info") {
     const duty = officers.get(player.id);
     if (!duty) return;
     officers.delete(player.id);
+    Police.setOfficer(player, false);
+    backup.stop(player);
     life.clearOverride(player);
     life.end(player, "duty");
     profiles.setPublic(player, "fr.duty", null);
@@ -39,7 +45,8 @@ function endDuty(player, message, tone = "info") {
     card(player, "duty", null);
     if (World.getPlayers().some((other) => other.id === player.id)) {
         player.setModel(duty.model);
-        if (player.alive) life.equip(player, duty.loadout.weapons, duty.loadout.selected);
+        // Not into a cell: the jail took the player off duty and their guns.
+        if (player.alive && !life.activity(player)) life.equip(player, duty.loadout.weapons, duty.loadout.selected);
     }
     const car = vehicleById(duty.carId);
     if (car && car.getOccupants().every((occupant) => occupant === null || occupant.id === player.id)) setTimeout(() => {
@@ -61,6 +68,7 @@ function startDuty(player) {
     }
     const duty = {model: player.model, loadout: life.loadoutOf(player), carId: null, pay: 0};
     officers.set(player.id, duty);
+    Police.setOfficer(player, true);
     player.setModel(UNIFORM);
     life.giveKit(player, KIT);
     life.setOverride(player, {kit: KIT});
@@ -77,9 +85,11 @@ function startDuty(player) {
         car.setRadarMarker(true, 0x6fa8ff);
         player.putInVehicle(car, 0);
     }
+    backup.start(player);
     feed("police", [name(player, "#8fb4d8"), text(" went on police duty")]);
-    toast(player, "On duty. Wanted players and bounty targets show on your compass. Leave citizens alone. /duty to clock off.",
-        {title: "Police duty", tone: "gold", seconds: 9});
+    toast(player, "On duty. The city's police take you for one of their own. Wanted players and bounty targets show on your compass; " +
+        "call boxes on your map put backup a phone call away (U at a booth, or /backup in your squad car). Leave citizens alone. /duty to clock off.",
+        {title: "Police duty", tone: "gold", seconds: 10});
 }
 
 function tick() {
@@ -90,6 +100,12 @@ function tick() {
             officers.delete(id);
             continue;
         }
+        // Another module took the player off duty (the jail): badge, car and
+        // backup go back.
+        if (life.activity(officer)?.kind !== "duty") {
+            endDuty(officer, "Your shift is over.");
+            continue;
+        }
         if (!officer.spawned) continue;
         const ranked = suspects.map((entry) => ({...entry, distance: distance(officer.position, entry.player.position)}))
             .sort((a, b) => a.distance - b.distance);
@@ -97,7 +113,7 @@ function tick() {
         card(officer, "duty", {title: "Police duty", subtitle: ranked.length ? "Nearest suspect on your compass" : "Quiet streets. Patrol.",
             rows: ranked.slice(0, 3).map((entry) => [entry.player.nickname,
                 `${entry.level ? `wanted ${entry.level}` : formatMoney(entry.bounty)} · ${Math.round(entry.distance)} m`])
-                .concat([["Earned this shift", formatMoney(duty.pay)]]), tone: "info"});
+                .concat([["Backup", backup.status(officer)], ["Earned this shift", formatMoney(duty.pay)]]), tone: "info"});
     }
 }
 
@@ -140,6 +156,12 @@ onStop(() => {
 Events.on("playerDisconnect", (player) => endDuty(player, null));
 Events.on("missionChange", () => {
     for (const player of World.getPlayers()) endDuty(player, "Your shift ended with the city reloading.");
+});
+
+backup.configure({
+    onDuty: (player) => officers.has(player.id),
+    carOf: (player) => vehicleById(officers.get(player.id)?.carId),
+    suspects: () => World.getPlayers().map(suspect).filter(Boolean),
 });
 
 module.exports = {onDuty: (player) => officers.has(player.id)};

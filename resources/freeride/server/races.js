@@ -434,8 +434,18 @@ function concludeRace(race) {
     races.delete(race.id);
 }
 
+// Another activity took the racer over (an arrest puts them in jail).
+function takenAway(racer) {
+    const kind = life.activity(racer.player)?.kind;
+    return kind !== undefined && kind !== "race" && kind !== "race-lobby";
+}
+
 function tickLobby(race, now) {
     for (const racer of racerList(race)) {
+        if (takenAway(racer)) {
+            leaveRace(race, racer, null);
+            continue;
+        }
         if (!playable(racer.player)) continue;
         if (now - race.lastStateAt >= 1000) lobbyCard(race, racer);
     }
@@ -461,6 +471,10 @@ function tickRunning(race, now) {
     const cps = race.route.checkpoints;
     for (const racer of racerList(race)) {
         if (racer.finishedMs !== null) continue;
+        if (takenAway(racer)) {
+            leaveRace(race, racer, null);
+            continue;
+        }
         if (!playable(racer.player)) {
             leaveRace(race, racer, "You dropped out of the race.");
             continue;

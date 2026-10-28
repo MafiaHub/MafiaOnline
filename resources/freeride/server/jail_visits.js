@@ -49,7 +49,9 @@ function refused(player) {
     return null;
 }
 
-// Fade out, move, fade in; skipped if the life ended meanwhile.
+// Fade out, move, fade in; skipped if the life ended meanwhile. A move
+// refused (a client still loading the mission) leaves the player where and
+// in the world they were.
 function transfer(player, pose, world, loadout, then) {
     const {spawnGeneration} = player;
     moving.add(player.id);
@@ -57,9 +59,10 @@ function transfer(player, pose, world, loadout, then) {
     setTimeout(() => {
         moving.delete(player.id);
         if (!World.getPlayers().some((other) => other.id === player.id) || !player.alive || player.spawnGeneration !== spawnGeneration) return;
+        const previous = player.virtualWorld;
         player.setVirtualWorld(world);
         if (!life.teleport(player, pose.position, pose.heading ?? 0, loadout)) {
-            player.setVirtualWorld(MAIN_WORLD);
+            player.setVirtualWorld(previous);
             emit(player, "fr:fade", {out: false, seconds: 0.3});
             return;
         }
@@ -157,7 +160,14 @@ Events.on("playerDisconnect", (player) => {
     armed.delete(player.id);
     moving.delete(player.id);
 });
+// The mission change took the jail down: its visitors leave its world and
+// the visit.
 Events.on("missionChange", () => {
+    for (const player of World.getPlayers()) {
+        if (!visitors.has(player.id)) continue;
+        forget(player);
+        if (player.virtualWorld === prison.WORLD) player.setVirtualWorld(MAIN_WORLD);
+    }
     visitors.clear();
     moving.clear();
     publish();

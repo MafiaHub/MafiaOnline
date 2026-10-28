@@ -59,7 +59,7 @@ function shopFacing(shop) {
 function placeActors() {
     if (!World.isReady() || market.generation !== World.getMissionGeneration()) return;
     for (const shop of market.shops) {
-        if (market.actors.has(shop.id) || !Scene.canUseHumanModel(shop.model)) continue;
+        if (!shop.model || market.actors.has(shop.id) || !Scene.canUseHumanModel(shop.model)) continue;
         const handle = Scene.createHuman(shop.model, shop.position, shopFacing(shop), true);
         if (handle === null) continue;
         market.actors.set(shop.id, handle);
@@ -139,7 +139,7 @@ Events.on("render", () => {
     } else if ((market.lastMoney !== player.money || Hud.getScore() !== player.money || Hud.isScoreVisible() !== true)
         && Hud.setScore(player.money)) market.lastMoney = player.money;
     const now = Date.now();
-    if (market.actors.size < market.shops.length && now - market.lastModelAttempt > 2_000) {
+    if (market.actors.size < market.shops.filter((shop) => shop.model).length && now - market.lastModelAttempt > 2_000) {
         market.lastModelAttempt = now;
         placeActors();
     }

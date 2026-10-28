@@ -58,12 +58,17 @@ function busy(player) {
     return current && BLOCKED.has(current.kind) ? life.busyMessage(player) : null;
 }
 
-// Puts the car that is out back into the garage with its condition.
-function store(player) {
+// Puts the car that is out back into the garage with its condition. Someone
+// else sitting in it stops that, unless the owner is leaving the server: then
+// they are put out, so the car never stays on the street while it is also
+// in the garage.
+function store(player, {force = false} = {}) {
     const entry = out.get(player.id);
     if (!entry) return true;
     const vehicle = vehicleById(entry.vehicleId);
-    if (vehicle && vehicle.getOccupants().some((occupant) => occupant !== null && occupant.id !== player.id)) return false;
+    const others = vehicle ? vehicle.getOccupants().filter((occupant) => occupant !== null && occupant.id !== player.id) : [];
+    if (others.length && !force) return false;
+    for (const occupant of others) occupant.removeFromVehicle();
     const list = garage(player).slice();
     if (vehicle && list[entry.slot]) {
         const state = vehicle.saveState();
@@ -79,13 +84,14 @@ function store(player) {
 }
 
 function deliver(player, slot, {fee}) {
-    const list = garage(player);
-    const owned = list[slot];
-    if (!owned || owned.totaled) return false;
+    if (!garage(player)[slot] || garage(player)[slot].totaled) return false;
     if (!store(player)) {
         toast(player, "Someone is still sitting in your other car.", {tone: "bad"});
         return false;
     }
+    // Read after store(): calling round the car that is out brings it back
+    // as it was put away, not as it was last parked.
+    const owned = garage(player)[slot];
     const graph = roads.current();
     const spot = graph.nearestRoadPoint(player.position);
     if (!spot || spot.gap > 120) {
@@ -288,13 +294,13 @@ menu.provide("garage", (player) => ({lot: lot()?.name ?? null, near: nearLot(pla
     cars: garage(player).map((owned, slot) => ({slot: slot + 1, model: owned.model, totaled: Boolean(owned.totaled), out: out.get(player.id)?.slot === slot}))}));
 
 Events.on("playerDisconnect", (player) => {
-    store(player);
+    store(player, {force: true});
     out.delete(player.id);
     lastDelivery.delete(player.id);
 });
 Events.on("missionChange", () => out.clear());
 onStop(() => {
-    for (const player of World.getPlayers()) store(player);
+    for (const player of World.getPlayers()) store(player, {force: true});
 });
 
 module.exports = {choose};

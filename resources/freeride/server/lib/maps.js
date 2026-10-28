@@ -5,6 +5,7 @@
 // landmarks races, jobs and events use. Positions come from the stock a1.dta
 // scenes and the mod's scene2.bin; road graphs from tools/export_road_graph.py.
 const DEFAULT_MAP = process.env.FREERIDE_MAP || "freeride_extended";
+const barRoom = require("./bar_room.js");
 
 const LANDMARKS = {
     salieri: {name: "Salieri's bar", position: {x: -1774.5, y: -4.5, z: 5.2}},
@@ -141,6 +142,11 @@ const MAPS = {
         places: ["salieri", "pete", "pump", "dispensary"],
         exportYard: {name: "the export yard", position: {x: -1141.0, y: -7.1, z: -709.9}},
         jail: CITY_JAIL,
+        // Salieri's door (the stock "Salieri_save" frame, -1774.52, 5.25)
+        // leads into the back-room bar built from map objects
+        // (lib/bar_room.js); the stock scene has no rooms behind it.
+        interiors: [{id: "b:salieri-bar", name: "Salieri's Bar", kind: "public", world: barRoom.WORLD, open: barRoom.isBuilt,
+            outside: {position: {x: -1776.3, y: -5.5, z: 3.9}, heading: Math.PI}, inside: barRoom.arrival()}],
     },
     freeride_extended: {
         id: "freeride_extended", title: "Lost Heaven Extended", roads: require("../data/roads_freeride_extended.js"), shops: true,
@@ -161,7 +167,15 @@ const MAPS = {
         // "&& futro out" and the corridor "&& chodba" behind it.
         interiors: [{id: "b:sarah", name: "Sarah's Apartment", kind: "safehouse",
             outside: {position: {x: -1770.6, y: -5.2, z: 171.5}, heading: -1.54},
-            inside: {position: {x: -1759.4, y: -3.3, z: 171.8}, heading: 1.6}}],
+            inside: {position: {x: -1759.4, y: -3.3, z: 171.8}, heading: 1.6}},
+        // Morello's bar, models/morellobar.4ds: its room ("Sect podl", floor
+        // y 17.31) behind the shop windows on the south front (z 451.5),
+        // whose bins stand on the pavement at z 450. Its door off the yard
+        // is a fixed mesh, so the arrow on the pavement leads in. Salieri's
+        // bar (models/salierybar.4ds) has working doors and needs no arrow.
+        {id: "b:morello", name: "Morello's Bar", kind: "public",
+            outside: {position: {x: -411.5, y: 17.45, z: 449.9}, heading: Math.PI},
+            inside: {position: {x: -414.7, y: 17.36, z: 454.2}, heading: Math.PI / 2}}],
     },
     freekrajina: {
         id: "freekrajina", title: "The Countryside", roads: require("../data/roads_freekrajina.js"), shops: false,

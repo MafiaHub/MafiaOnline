@@ -1,5 +1,6 @@
-// Four places with a reason to visit: Pete sells weapons, the pump sells fuel,
-// the pharmacy patches wounds, and Salieri's back window starts a courier run.
+// Four places with a reason to visit: Pete sells weapons, the pump's
+// attendants sell fuel, the pharmacy patches wounds, and Salieri's back window
+// starts a courier run.
 // Positions were read from the stock a1.dta mission scene2.bin frames:
 //   MISE19-MESTO: "1dvere u peteho" (Pete's doorway)
 //   FREERIDE and FREERIDENOC: "_pumpa2", "lekarna", "Salieri_save".
@@ -19,8 +20,9 @@ function shopsOpen() {
 
 const WEAPON = Object.freeze({BAT: 4, COLT: 6, THOMPSON: 10, SHOTGUN: 11, GRENADE: 15});
 const START_FUEL_FRACTION = 0.12;
+// The retail attendants (Pumper) fuel the car at this price per litre.
+const FUEL_PRICE_PER_LITRE = 3;
 const SHOP_REACH = 3.5;
-const CAR_REACH = 9;
 const PURCHASE_COOLDOWN_MS = 450;
 const COURIER_TIME_MS = 8 * 60_000;
 const COURIER_REWARD = 180;
@@ -39,9 +41,11 @@ const SHOPS = [
             {id: "thompson", name: "Thompson & drums", price: 320, note: "A loud answer to a bad question"},
             {id: "grenades", name: "Three grenades", price: 95, note: "Keep them out of the glovebox"},
         ]},
+    // The stock attendants serve the cars here; no scripted one stands in.
     {id: "pump", name: "The Night Pump", tagline: "A full tank buys a little more time", position: {x: -110.6361, y: 8.4794, z: -135.5433},
-        model: "pumpar01.i3d", animation: "pumpar.i3d", offers: [
-            {id: "petrol", name: "Up to 25 litres", price: null, note: "$3 per litre · your car must be nearby"},
+        model: null, animation: null, offers: [
+            {id: "petrol", name: "A full tank", price: null,
+                note: `$${FUEL_PRICE_PER_LITRE} per litre · stop at a pump, engine off, and ask the attendant`},
         ]},
     {id: "pharmacy", name: "The Dispensary", tagline: "The city keeps its own hours", position: {x: -761.3176, y: 14.813, z: 762.4796},
         model: "recep.i3d", animation: null, offers: [
@@ -54,16 +58,22 @@ const SHOPS = [
         ]},
 ];
 
-const lastVehicle = new Map();
 const lastPurchase = new Map();
 const courier = new Map();
 const lowFuelPending = new Map();
 let fuelTimer = null;
 let courierTimer = null;
 
+// On Lost Heaven Extended Salieri's front door opens into his bar (bars.js),
+// where the clerk would stand in the doorway; the window keeps serving
+// without him.
+function shownShops() {
+    return maps.current()?.id === "freeride_extended" ? SHOPS.map((shop) => shop.id === "salieri" ? {...shop, model: null} : shop) : SHOPS;
+}
+
 function shopState(player) {
     if (!shopsOpen()) return;
-    emit(player, "fr:shops:state", {generation: World.getMissionGeneration(), shops: SHOPS, courier: courier.has(player.id)});
+    emit(player, "fr:shops:state", {generation: World.getMissionGeneration(), shops: shownShops(), courier: courier.has(player.id)});
 }
 
 function chargeAndApply(player, cost, apply) {
@@ -90,26 +100,18 @@ function buyWeapon(player, offer) {
     return false;
 }
 
+// The attendant fuels the car himself (Pumper, server-charged); the counter
+// only tells how.
 function buyFuel(player) {
-    const vehicle = player.getVehicle() ?? lastVehicle.get(player.id);
-    if (!vehicle || !vehicle.model || distance(vehicle.position, SHOPS[1].position) > CAR_REACH) {
-        toast(player, "Bring your car up to the pump, then talk to the attendant.", {tone: "bad"});
-        return;
-    }
-    if (!vehicle.dynamicsValid || vehicle.fuelTankCapacity <= 0) {
-        toast(player, "The attendant is waiting for your fuel gauge to settle.");
-        return;
-    }
-    const litres = Math.min(25, Math.max(0, vehicle.fuelTankCapacity - vehicle.fuel));
-    if (litres < 0.5) {
-        toast(player, "Your tank is full enough already.");
-        return;
-    }
-    const price = Math.ceil(litres * 3);
-    if (chargeAndApply(player, price, () => vehicle.setFuel(Math.min(vehicle.fuelTankCapacity, vehicle.fuel + litres)))) {
-        toast(player, `The attendant pumped ${litres.toFixed(1)} litres for ${formatMoney(price)}.`, {tone: "good"});
-    }
+    toast(player, "Drive up to a pump, switch the engine off and press the exit key: the attendant comes to you.");
 }
+
+const PUMPER_REFUSALS = {
+    disabled: "The pumps are closed.",
+    unavailable: "Nobody is minding the pumps right now.",
+    busy: "The attendant is busy with another car. Wait your turn.",
+    full: "Your tank is full already.",
+};
 
 function buyHealth(player, offer) {
     const healing = offer.id === "bandage" ? 45 : 18;
@@ -200,6 +202,7 @@ function tickCouriers() {
 }
 
 onStart(() => {
+    Pumper.setPrice(FUEL_PRICE_PER_LITRE);
     fuelTimer = setInterval(() => {
         for (const [id, entry] of lowFuelPending) {
             const vehicle = World.getVehicles().find((candidate) => candidate.id === id);
@@ -220,7 +223,6 @@ onStop(() => {
     clearInterval(courierTimer);
     lowFuelPending.clear();
     courier.clear();
-    lastVehicle.clear();
     lastPurchase.clear();
 });
 
@@ -234,13 +236,21 @@ Events.on("vehicleSpawn", (vehicle) => {
     if (shopsOpen() && !vehicle.traffic) lowFuelPending.set(vehicle.id, {generation: World.getMissionGeneration(), retries: 0});
 });
 Events.on("vehicleDestroy", (vehicle) => lowFuelPending.delete(vehicle.id));
-Events.on("vehiclePlayerEntered", (vehicle, player) => lastVehicle.set(player.id, vehicle));
-Events.on("vehiclePlayerExited", (vehicle, player) => lastVehicle.set(player.id, vehicle));
+Events.on("vehicleRefuel", (vehicle, player, info) => {
+    if (player && info.litres > 0) {
+        toast(player, `The attendant put in ${info.litres.toFixed(1)} litres for ${formatMoney(info.cost)}.`, {tone: "good"});
+    }
+    else if (player) toast(player, "The attendant pumped, but you had nothing to pay with.", {tone: "bad"});
+});
+Events.on("pumperRefused", (player, vehicle, info) => {
+    toast(player, info.reason === "money"
+        ? `A full tank costs ${formatMoney(info.cost)}; you have ${formatMoney(player.money)}.`
+        : PUMPER_REFUSALS[info.reason] ?? "The attendant waves you off.", {tone: "bad"});
+});
 Events.on("playerSpawn", shopState);
 Events.on("playerRespawn", shopState);
 Events.on("playerDeath", (player) => endCourier(player, "You dropped the envelope when you went down."));
 Events.on("playerDisconnect", (player) => {
-    lastVehicle.delete(player.id);
     lastPurchase.delete(player.id);
     courier.delete(player.id);
 });
