@@ -126,8 +126,11 @@ function available() {
     return typeof MapObject !== "undefined" && typeof MapObject.create === "function";
 }
 
+// Hanging bulbs and floor stains are decoration: walking through them is right.
+const PASSABLE = new Set(["2zarc.i3d", "xv spina2.i3d"]);
+
 function place(model, local, yaw, flat) {
-    return MapObject.create(model, toWorld(local), {x: flat ? QUARTER : 0, y: yaw, z: 0}, {virtualWorld: WORLD, collision: true});
+    return MapObject.create(model, toWorld(local), {x: flat ? QUARTER : 0, y: yaw, z: 0}, {virtualWorld: WORLD, collision: !PASSABLE.has(model)});
 }
 
 function clear() {
