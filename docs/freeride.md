@@ -7,6 +7,37 @@ run crews and fight over their street corners, work jobs on both sides of
 the law, fight over city events with the police on their tail, and keep a
 career between sessions. The server owns every outcome; clients present it.
 
+## Maps
+
+| Map | Mission | What it has |
+| --- | --- | --- |
+| Lost Heaven Extended (default) | `freeride_extended` | The Freeride Extended mod: the city and the countryside in one map, with the container docks and Lucas Bertone's garage. Seven districts, ten race routes, the bootleg run. |
+| Lost Heaven | `freeride` | The stock city. Three districts, five race routes. |
+| The Countryside | `freekrajina` | The stock countryside. Four districts, three race routes, no shops. |
+
+At start the server moves from stock `freeride` (or its night map) to the
+default map, `freeride_extended` unless `FREERIDE_MAP` names another. A map
+that is not installed is skipped. `/map` (or F2 → City → Map) lets players
+vote; a majority of those in town switches the map after 15 seconds, at most
+every five minutes.
+
+Lost Heaven Extended needs the mod packed into `mods/`, from an extracted
+Freeride Extended 3.1 folder:
+
+```bash
+python3 tools/package_mod.py "<extracted mod folder>" mods/freeride-extended.zip --mission freeride:freeride_extended
+```
+
+Clients download it when they join. Each map's districts, landmarks and
+routes are in `server/lib/maps.js`; its road graph is `server/data/roads_<map>.js`,
+exported by [`tools/export_road_graph.py`](../tools/export_road_graph.py) from
+the stock `a1.dta` (`--mission FREEKRAJINA`) or from the mod's loose
+`missions/FREERIDE/road.bin`. The Extended map's city districts use its own
+`emeth_*` frames; its countryside districts are the stock `FREEKRAJINA` frames,
+whose ground the mod's countryside shares at the same heights. Bertone's
+garage is the crossing beside the mod's `sector moto2` frames that carry his
+name, and the container docks the crossing among its new container frames.
+
 Run the server with this project directory as its working directory. It
 discovers the resource and writes its records to `data/freeride/`
 (`profiles.json`, `crews.json`, `races.json`, `turf.json`, `speedtraps.json`,
@@ -156,8 +187,8 @@ The Jobs tab of the city menu shows every one of these with its live state.
 
 - **Export list.** Lucas Bertone wants three particular models this hour,
   chosen from the cars actually driving in this server's traffic. Steal one
-  from traffic (a motor pool car does not count) and stop it at the export
-  yard: $400 each, $600 more for closing the list. `/export` shows it.
+  from traffic (a motor pool car does not count) and stop it at the map's
+  yard (Lucas Bertone's garage on Lost Heaven Extended): $400 each, $600 more for closing the list. `/export` shows it.
 - **Police duty.** `/duty` puts on the uniform, issues a Colt, a shotgun and
   a squad car, and points the compass at the nearest wanted player or bounty
   target. Taking one down pays $150 per wanted level and clears their record;
@@ -168,6 +199,10 @@ The Jobs tab of the city menu shows every one of these with its live state.
   you to street corners; stop by the fare, then drive them across town.
   Arriving inside the tip window adds 30%.
 - **Courier.** Salieri's back window, as before.
+- **Bootleg run** (`/bootleg`, Lost Heaven Extended). Drive to the still in
+  the hills, wait eight seconds while the crates are loaded (the police are
+  tipped off), then reach Salieri's bar within ten minutes in the same car:
+  $700.
 - **Hold-ups.** Draw a firearm at a shop counter and `/rob`. The police are
   called at once (wanted for arrest); keep the counter for 15 seconds to take
   $250–$450 and leave wanted dead or alive. A till takes ten minutes to refill.
@@ -224,8 +259,8 @@ seconds, `/flip` puts it back on its wheels and `/engine` starts or stops it.
 
 ## The living city
 
-Free Ride always plays the stock day map, `freeride`; a server configured with
-`freeridenoc` moves to day once the resource starts. A two-hour weather front, chosen from the date, brings rain,
+Free Ride plays by day; the night map gives way to the default map. A
+two-hour weather front, chosen from the date, brings rain,
 or sometimes snow in winter, that grows and fades over the front. City music
 is off; the car radio plays the
 [Jazz Club Bandstand](https://www.internet-radio.com/station/bandstand/) live
@@ -252,7 +287,8 @@ recording interiors. They are off by default.
 | `server/selector.js`, `ambience.js`, `shops.js`, `police.js`, `props.js`, `doors.js` | Entering the city, clock and weather, shops and courier, police outcomes, prop repair, the door lab. |
 | `server/races.js`, `combat.js`, `duels.js`, `crews.js`, `world_events.js`, `social.js` | Races, bounties, duels, crews, city events, rides, messages and dice. |
 | `server/export.js`, `police_duty.js`, `taxi.js`, `robbery.js` | The jobs. |
-| `server/turf.js`, `stashes.js`, `speed_traps.js`, `interiors.js` | Turf, cash stashes, speed traps and building entrances. |
+| `server/turf.js`, `stashes.js`, `speed_traps.js`, `interiors.js` | Turf, cash stashes, speed traps and building entrances, each per map. |
+| `server/map_vote.js`, `bootleg.js`, `lib/maps.js` | The default map, map votes, the bootleg run and the map registry. |
 | `client/hud.js`, `client/hud.html` | One transparent web view for toasts, feed, activity cards, race panel, level strip and the city menu; it also arbitrates the single native compass by priority. |
 | `client/markers.js` | Beacons, checkpoint and crate markers, door arrows, turf rings, bounty and crewmate labels. |
 | `client/selector.js`, `shops.js`, `car_picker.js`, `radio.js`, `police.js`, `main.js` | The selector, shop staff, motor pool, radio, police HUD, fades and race countdown. |
