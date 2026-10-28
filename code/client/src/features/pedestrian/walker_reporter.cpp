@@ -101,15 +101,12 @@ namespace Mafia1Online::Features::Pedestrian {
             const auto pool = std::find_if(generators.begin(), generators.end(), [&](auto *generator) {
                 return generator->OwnsElement(element);
             });
-            if (pool == generators.end()) {
-                continue;
-            }
             const auto position = element->Model()->WorldPosition();
             Shared::Pedestrian::Spawned spawned;
             spawned.missionGeneration = missionGeneration;
             spawned.key = _nextKey++;
             spawned.model = std::string(model);
-            spawned.generator = static_cast<uint8_t>(pool - generators.begin());
+            spawned.generator = pool == generators.end() ? Shared::Pedestrian::Spawned::kNoGenerator : static_cast<uint8_t>(pool - generators.begin());
             spawned.walkStyle = static_cast<uint8_t>(element->WalkStyle());
             spawned.umbrella = element->HasUmbrella();
             spawned.x = position.x;

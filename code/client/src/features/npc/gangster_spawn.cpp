@@ -4,7 +4,10 @@
 
 #include "npc_host.h"
 
+#include "core/application.h"
+
 #include <MinHook.h>
+#include <core_modules.h>
 #include <mafia1/sdk/core/mission.h>
 #include <mafia1/sdk/police/native_police_manager.h>
 #include <mafia1/sdk/traffic/native_gangster.h>
@@ -30,10 +33,11 @@ namespace Mafia1Online::Features::Npc {
             if (const auto slash = model.find_last_of("\\/"); slash != std::string::npos) {
                 model.erase(0, slash + 1);
             }
+            const uint32_t walkerKey = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->Pedestrians().WalkerKey(element);
             gCreateMafianosOriginal(element, hitType, position, bodyType, attacker, damage);
             // A successful Init ends with AddDoRiciActor of the new entity.
             if (police->RetirementCount() == before + 1) {
-                gHost->Track(police->RetirementEnd()[-1], Shared::Entities::NpcKind::Gangster, model);
+                gHost->Track(police->RetirementEnd()[-1], Shared::Entities::NpcKind::Gangster, model, walkerKey);
             }
         }
     } // namespace

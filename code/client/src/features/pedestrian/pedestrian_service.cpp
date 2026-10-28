@@ -48,8 +48,7 @@ namespace Mafia1Online::Features::Pedestrian {
         WalkerCollision gWalkerCollisionOriginal     = nullptr;
         PedestrianService *gService                  = nullptr;
         constexpr uintptr_t kHookAddresses[] {SDK::Traffic::kGeneratorGameInit, SDK::Traffic::kGeneratorAI, SDK::Traffic::kTickElements,
-                                              SDK::Traffic::kElementHit, SDK::Traffic::kWalkerCollision, SDK::Traffic::kElementNewScream,
-                                              SDK::Traffic::kRecruitPolice};
+                                              SDK::Traffic::kElementHit, SDK::Traffic::kWalkerCollision, SDK::Traffic::kElementNewScream};
 
         // Retail selects the nearest distance-selected generator with no
         // range limit: the search starts at 1e30 (C_game::Tick 0x5a5962).
@@ -160,8 +159,9 @@ namespace Mafia1Online::Features::Pedestrian {
             Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(scream, MafiaNet::Priority::High, MafiaNet::Reliability::Unreliable);
         }
 
-        // Police recruitment makes C_entity officers nobody else sees; off
-        // until police are replicated.
+        // Police recruitment makes C_entity officers nobody else sees. Only
+        // the simulation host recruits them (Npc::InstallPoliceSpawn); a
+        // player's police manager stays off, so this guards stray calls.
         void __fastcall RecruitPoliceHook(void *, uint32_t, void *, bool, float, bool) {}
 
         // A car's physics runs only on its driver's client, which reports the
@@ -222,8 +222,13 @@ namespace Mafia1Online::Features::Pedestrian {
             MH_CreateHook(reinterpret_cast<void *>(SDK::Traffic::kTickElements), reinterpret_cast<void *>(&TickElementsHook), reinterpret_cast<void **>(&gTickElementsOriginal)) != MH_OK ||
             MH_CreateHook(reinterpret_cast<void *>(SDK::Traffic::kElementHit), reinterpret_cast<void *>(&ElementHitHook), reinterpret_cast<void **>(&gElementHitOriginal)) != MH_OK ||
             MH_CreateHook(reinterpret_cast<void *>(SDK::Traffic::kWalkerCollision), reinterpret_cast<void *>(&WalkerCollisionHook), reinterpret_cast<void **>(&gWalkerCollisionOriginal)) != MH_OK ||
-            MH_CreateHook(reinterpret_cast<void *>(SDK::Traffic::kElementNewScream), reinterpret_cast<void *>(&ElementNewScreamHook), reinterpret_cast<void **>(&gElementNewScreamOriginal)) != MH_OK ||
-            MH_CreateHook(reinterpret_cast<void *>(SDK::Traffic::kRecruitPolice), reinterpret_cast<void *>(&RecruitPoliceHook), reinterpret_cast<void **>(&gRecruitPoliceOriginal)) != MH_OK) {
+            MH_CreateHook(reinterpret_cast<void *>(SDK::Traffic::kElementNewScream), reinterpret_cast<void *>(&ElementNewScreamHook), reinterpret_cast<void **>(&gElementNewScreamOriginal)) != MH_OK) {
+            Uninstall();
+            return false;
+        }
+        if (!Simulation::IsHost() &&
+            (MH_CreateHook(reinterpret_cast<void *>(SDK::Traffic::kRecruitPolice), reinterpret_cast<void *>(&RecruitPoliceHook), reinterpret_cast<void **>(&gRecruitPoliceOriginal)) != MH_OK ||
+             MH_EnableHook(reinterpret_cast<void *>(SDK::Traffic::kRecruitPolice)) != MH_OK)) {
             Uninstall();
             return false;
         }
@@ -240,6 +245,10 @@ namespace Mafia1Online::Features::Pedestrian {
         for (const uintptr_t address : kHookAddresses) {
             MH_DisableHook(reinterpret_cast<void *>(address));
             MH_RemoveHook(reinterpret_cast<void *>(address));
+        }
+        if (!Simulation::IsHost()) {
+            MH_DisableHook(reinterpret_cast<void *>(SDK::Traffic::kRecruitPolice));
+            MH_RemoveHook(reinterpret_cast<void *>(SDK::Traffic::kRecruitPolice));
         }
         Reset();
         gService = nullptr;

@@ -3,6 +3,7 @@
 #include "features/car/car_hooks.h"
 #include "features/car/car_mesh_capture.h"
 #include "features/seat/seat_service.h"
+#include "features/simulation/simulation_config.h"
 #include "features/world/world_service.h"
 
 #include "shared/features/car/car_engine_state.h"
@@ -39,6 +40,20 @@ namespace Mafia1Online::Features::Car {
     namespace {
         constexpr auto kMovementSendInterval = std::chrono::milliseconds(33);
         constexpr float kFuelSyncTolerance = 0.01f;
+        // A velocity change faster than this in one physics step (m/s², about
+        // 2.5 g) is a collision impulse on a car another client drives.
+        constexpr float kImpactAcceleration = 25.0f;
+        // Its controller's poses dated this long after the impact carry its
+        // own collision (it predicts this car to the present too).
+        constexpr double kImpactResponseMs = 150.0;
+        // At most this long the local impulse outweighs the controller.
+        constexpr double kImpactHoldMs = 1000.0;
+        // Car centres this close are touching: two stock cars end to end are
+        // about 4.5 m apart, side by side about 2 m.
+        constexpr float kImpactContactDistance = 6.0f;
+        // Impacts closer together than this belong to one contact.
+        constexpr double kImpactEpisodeGapMs = 500.0;
+        constexpr float kYieldCorrectionSeconds = 1.0f;
 
         glm::quat FrameRotation(SDK::Scene::NativeFrame &frame) {
             const auto basis = frame.GetWorldBasis();
@@ -141,7 +156,9 @@ namespace Mafia1Online::Features::Car {
                 stream.sequence               = 0;
                 stream.engineReportSequence   = 0;
                 stream.appliedDynamicsCommandRevision = 0;
-                stream.controllerDynamicsInitialized = false;
+                // A hand-over rebuilds an observed car's physics; an adopted
+                // car was never observed and keeps its retail driver's.
+                stream.controllerDynamicsInitialized = simulationController && IsAdopted(id);
                 stream.hasReportedEngineState = false;
                 stream.hasAppliedEngineState  = false;
                 stream.explosionReported      = false;
@@ -154,7 +171,9 @@ namespace Mafia1Online::Features::Car {
                 stream.meshReportSequence     = 0;
                 stream.meshDirty              = simulationController;
                 stream.hasReportedMesh        = false;
-                if (simulationController) {
+                // An adopted car is where its own native physics put it; the
+                // pose the server holds is older.
+                if (simulationController && !IsAdopted(id)) {
                     Framework::Utils::TransformSnapshot authoritative {car->position, car->velocity, car->rotation};
                     if (IsFinite(authoritative) && glm::length(authoritative.rotation) >= 0.0001f) {
                         ApplyPose(world, id, authoritative);
@@ -224,7 +243,9 @@ namespace Mafia1Online::Features::Car {
             }
             else {
                 if (!_nativeById.contains(it->first) && !it->second.creationFailed) {
-                    if (auto *car = replication->GetEntity<Shared::Entities::CarEntity>(it->first)) {
+                    // The simulation host's own cars are adopted from the
+                    // retail world, never created beside it.
+                    if (auto *car = replication->GetEntity<Shared::Entities::CarEntity>(it->first); car && !(car->hostDriven && it->second.simulationController)) {
                         // Retail explosion can deactivate and eventually destroy
                         // the original car while keeping its wreckage in the
                         // mission. A terminal replica only needs a native car
@@ -752,9 +773,16 @@ namespace Mafia1Online::Features::Car {
             auto *hitFrame = SDK::Core::Mission::Get()->GetScene()->TestColHierarchy(
                 {rayStart.x, rayStart.y, rayStart.z}, {worldDirection.x, worldDirection.y, worldDirection.z},
                 car->Vehicle().ModelFrame(), collision);
+            // The simulation host's traffic answers its attacker natively
+            // (a rammed police car books the crime, a mafia crew turns on
+            // the shooter); a player's own car never needed the attacker.
+            SDK::Player::NativeActor *attacker = nullptr;
+            if (Simulation::IsHost() && hit.shooterId) {
+                attacker = static_cast<SDK::Player::NativeActor *>(world.NativeObjects().Resolve(world.NativeObjects().FindByNetwork(hit.shooterId)));
+            }
             if (!ApplyAuthoritativeCarHit(car, {worldDirection.x, worldDirection.y, worldDirection.z},
                                           {worldHit.x, worldHit.y, worldHit.z}, {normal.x, normal.y, normal.z}, hit.damage,
-                                          hitFrame)) {
+                                          hitFrame, attacker)) {
                 return;
             }
             stream.lastAppliedHitSequence = hit.serverSequence;
@@ -988,7 +1016,10 @@ namespace Mafia1Online::Features::Car {
             if (std::isfinite(state->fuel) && vehicle.Fuel() > state->fuel + kFuelSyncTolerance) {
                 vehicle.SetFuel(std::clamp(state->fuel, 0.0f, vehicle.FuelTankCapacity()));
             }
-            ApplySiren(vehicle, *state);
+            // The host's police AI switches its sirens itself and reports them.
+            if (!state->hostDriven) {
+                ApplySiren(vehicle, *state);
+            }
             return;
         }
         if (std::isfinite(state->steeringInput) && std::abs(state->steeringInput) <= 2.0f) {
@@ -1025,7 +1056,8 @@ namespace Mafia1Online::Features::Car {
     void CarService::SyncRadar(World::WorldService &world, uint64_t networkId) {
         const auto native = _nativeById.find(networkId);
         const auto *state = Framework::CoreModules::GetReplication()->GetEntity<Shared::Entities::CarEntity>(networkId);
-        if (native == _nativeById.end() || native->second.removalQueued || !state) {
+        // An adopted car keeps the blip retail gave it.
+        if (native == _nativeById.end() || native->second.removalQueued || !state || native->second.origin != Origin::Created) {
             return;
         }
         auto *car = world.NativeObjects().Resolve(native->second.handle);
@@ -1212,6 +1244,10 @@ namespace Mafia1Online::Features::Car {
         if (handle.networkId == 0) {
             return true;
         }
+        // The retail game owns an adopted car's lifetime.
+        if (IsAdopted(handle.networkId)) {
+            return true;
+        }
         const auto *state = Framework::CoreModules::GetReplication()->GetEntity<Shared::Entities::CarEntity>(handle.networkId);
         return !state || state->terminalState != Shared::Entities::CarEntity::TerminalState::Active;
     }
@@ -1333,6 +1369,11 @@ namespace Mafia1Online::Features::Car {
             return;
         }
         auto *actor = static_cast<SDK::Player::NativeActor *>(world.NativeObjects().Resolve(it->second.handle));
+        if (it->second.origin == Origin::Pool) {
+            // The traffic pool keeps its car; the host only stops driving it.
+            ReleaseAdopted(world, networkId);
+            return;
+        }
         world.NativeObjects().InvalidateNetwork(networkId);
         it->second.removalQueued = true;
         if (actor && world.IsReady()) {
@@ -1432,21 +1473,61 @@ namespace Mafia1Online::Features::Car {
         if (record == _nativeById.end()) {
             return nullptr;
         }
-        auto *frame = record->second.frame;
+        // A car the retail game created deletes its own frame.
+        auto *frame = record->second.origin == Origin::Created ? record->second.frame : nullptr;
         _nativeById.erase(record);
         if (auto stream = _streams.find(networkId); stream != _streams.end()) {
-            stream->second.appliedDamageRevision = 0;
-            stream->second.lastDamageApply = {};
-            stream->second.hasReportedDamage = false;
-            stream->second.pendingDamageReports.clear();
-            stream->second.appliedMeshRevision = 0;
-            stream->second.checkpointSourceGuid = 0;
-            stream->second.lastMeshRequest = {};
-            stream->second.hasReportedMesh = false;
-            stream->second.meshDirty = stream->second.simulationController;
-            stream->second.pendingHits.clear();
+            ResetNativeState(stream->second);
         }
         return frame;
+    }
+
+    void CarService::ResetNativeState(Stream &stream) {
+        stream.appliedDamageRevision = 0;
+        stream.lastDamageApply = {};
+        stream.hasReportedDamage = false;
+        stream.pendingDamageReports.clear();
+        stream.appliedMeshRevision = 0;
+        stream.checkpointSourceGuid = 0;
+        stream.lastMeshRequest = {};
+        stream.hasReportedMesh = false;
+        stream.meshDirty = stream.simulationController;
+        stream.pendingHits.clear();
+    }
+
+    bool CarService::Adopt(World::WorldService &world, uint64_t networkId, SDK::Car::NativeCar *car, Origin origin) {
+        if (!car || !car->Frame() || _nativeById.contains(networkId) || _idByNative.contains(car) || world.NativeObjects().FindByNative(car).networkId != 0) {
+            return false;
+        }
+        const auto handle = world.NativeObjects().Bind(car, networkId);
+        NativeCar record {handle, car->Frame(), false};
+        record.origin = origin;
+        _nativeById.emplace(networkId, record);
+        _idByNative.emplace(car, networkId);
+        auto &stream = _streams[networkId];
+        ResetNativeState(stream);
+        // Its pedals and physics are the retail driver's: no hand-over reset.
+        stream.controllerDynamicsInitialized = true;
+        stream.creationFailed = false;
+        return true;
+    }
+
+    void CarService::ReleaseAdopted(World::WorldService &world, uint64_t networkId) {
+        const auto record = _nativeById.find(networkId);
+        if (record == _nativeById.end() || record->second.origin == Origin::Created) {
+            return;
+        }
+        world.NativeObjects().InvalidateNetwork(networkId);
+        _idByNative.erase(record->second.handle.object);
+        _nativeById.erase(record);
+        if (auto stream = _streams.find(networkId); stream != _streams.end()) {
+            ResetNativeState(stream->second);
+        }
+    }
+
+    bool CarService::IsAdopted(uint64_t networkId) const {
+        const auto record = _nativeById.find(networkId);
+        return record != _nativeById.end() && record->second.origin != Origin::Created;
     }
 
     bool CarService::Sample(uint64_t networkId, Framework::Utils::TransformSnapshot &out) const {
@@ -1597,6 +1678,7 @@ namespace Mafia1Online::Features::Car {
         // this client simulates would hit it like a wall. Near one, run it on
         // native physics with correction, so an impact shoves it at once;
         // the owner's result then arrives through the corrected pose.
+        float nearestSimulated = std::numeric_limits<float>::max();
         {
             const auto center = vehicle.WorldCenter();
             const auto velocity = vehicle.LinearVelocity();
@@ -1605,10 +1687,10 @@ namespace Mafia1Online::Features::Car {
             for (const auto &[otherPosition, otherVelocity] : _simulatedCars) {
                 const glm::vec3 offset = position - otherPosition;
                 const float distance = glm::length(offset);
+                nearestSimulated = std::min(nearestSimulated, distance);
                 const float closing = distance > 0.001f ? glm::dot(otherVelocity - motion, offset / distance) : 0.0f;
                 if (distance < std::min(20.0f, 7.0f + std::max(0.0f, closing) * 0.5f)) {
                     stream.contactUntil = _frameClock + 1500.0;
-                    break;
                 }
             }
         }
@@ -1616,16 +1698,36 @@ namespace Mafia1Online::Features::Car {
             // Native physics runs on the replicated pedals and steering, then
             // is pulled toward the pose predicted to the present, still
             // before C_car::Update and the camera read it.
+            const auto before = vehicle.LinearVelocity();
             native(car, frameMs);
+            const auto after = vehicle.LinearVelocity();
+            // Pedals and brakes stay near 1 g; a collision impulse does not.
+            // Only a car this client simulates touching it counts: a kerb or
+            // wall it hits here, it hits on its controller as well.
+            if (const float jump = std::hypot(after.x - before.x, after.y - before.y, after.z - before.z);
+                std::isfinite(jump) && jump / dt > kImpactAcceleration && nearestSimulated < kImpactContactDistance) {
+                // One episode per contact: pushing it keeps impacting, but the
+                // controller has its answer for the first one by then.
+                if (_frameClock - stream.lastImpactAt > kImpactEpisodeGapMs) {
+                    stream.impactAt = _frameClock;
+                }
+                stream.lastImpactAt = _frameClock;
+            }
             if (!SamplePose(stream, _frameClock, pose)) {
                 return true;
             }
+            // Until the controller's poses carry its own answer to the
+            // impact, the prediction still runs along the pre-impact path:
+            // pulling to it drives the car back into what it hit. Ease
+            // toward it slowly and keep the local impulse meanwhile.
+            const bool yielding = stream.impactAt > 0.0 && _frameClock - stream.impactAt < kImpactHoldMs &&
+                                  stream.poses.back().time < stream.impactAt + kImpactResponseMs;
             const auto current = frame->WorldPosition();
             const glm::vec3 position(current.x, current.y, current.z);
             const glm::quat rotation = FrameRotation(*frame);
             const glm::vec3 error = pose.position - position;
             const bool snap = glm::length(error) > 5.0f || std::abs(glm::dot(rotation, pose.rotation)) < 0.92f;
-            const float blend = snap ? 1.0f : 1.0f - std::exp(-dt / 0.2f);
+            const float blend = snap ? 1.0f : 1.0f - std::exp(-dt / (yielding ? kYieldCorrectionSeconds : 0.2f));
             const glm::vec3 corrected = position + error * blend;
             const glm::quat turned = glm::slerp(rotation, glm::dot(rotation, pose.rotation) < 0.0f ? -pose.rotation : pose.rotation, blend);
             WriteFrame(*frame, corrected, turned);
@@ -1633,7 +1735,7 @@ namespace Mafia1Online::Features::Car {
                 ResetNativePhysics(*car, networkId);
             }
             const auto nativeVelocity = vehicle.LinearVelocity();
-            const float velocityBlend = snap ? 1.0f : 1.0f - std::exp(-dt / 0.15f);
+            const float velocityBlend = snap ? 1.0f : yielding ? 0.0f : 1.0f - std::exp(-dt / 0.15f);
             const glm::vec3 velocity = glm::mix(glm::vec3(nativeVelocity.x, nativeVelocity.y, nativeVelocity.z), pose.velocity, velocityBlend);
             const auto nativeAngular = vehicle.AngularVelocity();
             const glm::vec3 angular = glm::mix(glm::vec3(nativeAngular.x, nativeAngular.y, nativeAngular.z), pose.angularVelocity, velocityBlend);

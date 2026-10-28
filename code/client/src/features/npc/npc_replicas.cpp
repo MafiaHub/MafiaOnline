@@ -2,6 +2,7 @@
 
 #include "npc_replicas.h"
 
+#include "core/application.h"
 #include "features/player/player_service.h"
 #include "features/simulation/simulation_config.h"
 #include "features/world/world_service.h"
@@ -12,11 +13,13 @@
 #include <mafia1/sdk/core/mission.h>
 #include <mafia1/sdk/player/native_human.h>
 #include <mafia1/sdk/player/native_human_factory.h>
+#include <mafia1/sdk/seat/native_seat.h>
 #include <networking/replication/replication_manager.h>
 
 #include <glm/geometric.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <optional>
 #include <string>
@@ -28,6 +31,28 @@ namespace Mafia1Online::Features::Npc {
         bool Finite(const Framework::Utils::TransformSnapshot &pose) {
             return std::isfinite(pose.position.x) && std::isfinite(pose.position.y) && std::isfinite(pose.position.z) && std::isfinite(pose.rotation.w) &&
                 std::isfinite(pose.rotation.x) && std::isfinite(pose.rotation.y) && std::isfinite(pose.rotation.z) && glm::length(pose.rotation) >= 0.0001f;
+        }
+        // Holds the pose stream off a pull-out whose track never ends.
+        constexpr auto kPullLimit = std::chrono::seconds(5);
+
+        // A driver constructed here later than this into its throw-out stands
+        // where the host's is: replaying the throw would pull it back to the
+        // seat while the host's one is already out.
+        constexpr uint16_t kThrowReplayAgeMs = 1000;
+
+        // A stolen traffic car's driver, constructed while its throw-out runs.
+        // Retail's Corovacka branch of Do_ThrowCocotFromCar seats the new
+        // C_entity (Intern_UseCar) and throws it out (intern_ThrowMeFromCar).
+        void ReplayThrowOut(World::WorldService &world, void *actor, uint64_t carId) {
+            auto *native = static_cast<SDK::Player::NativeActor *>(world.NativeObjects().Resolve(world.NativeObjects().FindByNetwork(carId)));
+            if (!native || native->GetType() != SDK::Player::NativeActor::Type::Car) {
+                return;
+            }
+            auto *car = static_cast<SDK::Seat::NativeCar *>(static_cast<void *>(native));
+            auto *human = static_cast<SDK::Seat::NativeHuman *>(actor);
+            if (!car->GetOwner(0) && human->PlaceInCar(car, 0)) {
+                human->ThrowOutOfSeat();
+            }
         }
     } // namespace
 
@@ -52,6 +77,18 @@ namespace Mafia1Online::Features::Npc {
             snapshot.rotation = glm::normalize(snapshot.rotation);
             auto &replica = _replicas[id];
             const MafiaNet::Time transformTime = npc->GetLastTransformTime() ? npc->GetLastTransformTime() : networkNow;
+            std::optional<Framework::Utils::TransformSnapshot> handedOff;
+            if (!replica.frame && !replica.failed && replica.lastTransformTime == 0 && npc->sourcePedestrianId) {
+                // The walker this NPC was: start where it stands on this
+                // screen, a render delay behind, and ease into the host's
+                // stream instead of jumping to its newer pose.
+                handedOff = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->PedestrianReplicas().HandOff(world, npc->sourcePedestrianId);
+                if (handedOff) {
+                    const auto delay = static_cast<MafiaNet::Time>(replica.snapshots.EffectiveDelayMs());
+                    const MafiaNet::Time renderTime = networkNow > delay ? networkNow - delay : 1;
+                    replica.snapshots.Push(*handedOff, std::min(renderTime, transformTime > 1 ? transformTime - 1 : 1));
+                }
+            }
             if (replica.lastTransformTime != transformTime) {
                 replica.snapshots.Push(snapshot, transformTime);
                 replica.locomotion.emplace_back(transformTime, npc->locomotion);
@@ -61,11 +98,12 @@ namespace Mafia1Online::Features::Npc {
                 replica.lastTransformTime = transformTime;
             }
             if (!replica.frame && !replica.failed) {
-                const auto direction = glm::mat3_cast(snapshot.rotation) * glm::vec3(0.0f, 0.0f, 1.0f);
+                const auto &spawn = handedOff ? *handedOff : snapshot;
+                const auto direction = glm::mat3_cast(spawn.rotation) * glm::vec3(0.0f, 0.0f, 1.0f);
                 const std::string name = "Mafia1OnlineNpc_" + std::to_string(id);
                 auto *actor = SDK::Player::NativeHumanFactory::CanLoadHumanModel(npc->model)
                     ? SDK::Player::NativeHumanFactory::CreateTemporary(*SDK::Core::Mission::Get(), SDK::Player::NativeActor::Type::Entity, name.c_str(), npc->model.c_str(),
-                                                                       {snapshot.position.x, snapshot.position.y, snapshot.position.z}, {direction.x, direction.y, direction.z})
+                                                                       {spawn.position.x, spawn.position.y, spawn.position.z}, {direction.x, direction.y, direction.z})
                     : nullptr;
                 if (!actor) {
                     replica.failed = true;
@@ -75,6 +113,9 @@ namespace Mafia1Online::Features::Npc {
                 replica.handle = world.NativeObjects().Bind(actor, id);
                 replica.frame = actor->Frame();
                 _frames[actor] = replica.frame;
+                if (npc->kind == Shared::Entities::NpcKind::Driver && npc->thrownFromCarId && npc->alive && npc->throwAgeMs < kThrowReplayAgeMs) {
+                    ReplayThrowOut(world, actor, npc->thrownFromCarId);
+                }
             }
             auto *actor = world.NativeObjects().Resolve(replica.handle);
             if (actor) {
@@ -108,13 +149,32 @@ namespace Mafia1Online::Features::Npc {
         if (!alive) {
             return;
         }
+        // Seated, or in a door animation: the car carries it and the seat
+        // replay animates it.
+        if (const auto *seated = static_cast<const SDK::Seat::NativeHuman *>(native); seated->usedActorEnter || seated->usedActorLeave) {
+            return;
+        }
+        auto *human = static_cast<SDK::Player::NativeHuman *>(native);
+        // A replayed throw placed the NPC at the door and plays its pull-out;
+        // the stream would stand it idle there before the player is out.
+        if (human->IsPullingFromCar()) {
+            const auto now = std::chrono::steady_clock::now();
+            if (replica.pullingUntil == std::chrono::steady_clock::time_point {}) {
+                replica.pullingUntil = now + kPullLimit;
+            }
+            if (now < replica.pullingUntil) {
+                return;
+            }
+        }
+        else {
+            replica.pullingUntil = {};
+        }
         const auto direction = glm::mat3_cast(pose.rotation) * glm::vec3(0.0f, 0.0f, 1.0f);
         replica.frame->SetWorldPosition({pose.position.x, pose.position.y, pose.position.z});
         replica.frame->SetDirection({direction.x, direction.y, direction.z});
         replica.frame->Update();
         actor->SetStoredTransform({pose.position.x, pose.position.y, pose.position.z}, {direction.x, direction.y, direction.z});
 
-        auto *human = static_cast<SDK::Player::NativeHuman *>(native);
         // Leave retail's hit reactions, reloads and timed actions to
         // C_human::Movement, which restores locomotion when they finish.
         const auto melee = human->Melee();

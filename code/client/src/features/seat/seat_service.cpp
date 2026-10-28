@@ -1,14 +1,21 @@
 #include "seat_service.h"
 
+#include "core/application.h"
+#include "features/simulation/simulation_config.h"
 #include "features/world/world_service.h"
 #include "shared/features/car/car_entity.h"
+#include "shared/features/npc/npc_entity.h"
 #include "shared/features/player/player_entity.h"
+#include "shared/features/traffic/traffic_report.h"
 
 #include <core_modules.h>
+#include <logging/logger.h>
 #include <mafia1/sdk/player/native_human.h>
 #include <mafia1/sdk/seat/native_seat.h>
 #include <networking/network_peer.h>
 #include <networking/replication/replication_manager.h>
+
+#include <glm/geometric.hpp>
 
 #include <cstddef>
 
@@ -22,6 +29,9 @@ namespace Mafia1Online::Features::Seat {
         constexpr auto kLocalAcknowledgementLimit = std::chrono::seconds(2);
         constexpr auto kTransientEventLimit = std::chrono::seconds(5);
         constexpr auto kRemoteExitGrace = std::chrono::milliseconds(500);
+        // A steal the server neither took nor refused by then (reliable, so
+        // a lost connection) no longer blocks a new try.
+        constexpr auto kStealAnswerLimit = std::chrono::seconds(5);
         // C_car::SetOwner, bool __thiscall(C_car*, C_actor*, int seat, float),
         // ret 0c. A null owner clears the seat, as C_game::InvalidateActor does.
         constexpr uintptr_t kCarSetOwner = 0x41d810;
@@ -107,6 +117,15 @@ namespace Mafia1Online::Features::Seat {
                 }
             }
         });
+        Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Traffic::StealRefused>([this](const Shared::Traffic::StealRefused &refused, MafiaNet::Packet *) {
+            if (!_world || refused.missionGeneration != _world->LoadedMissionGeneration() || !_pendingSteals.erase(refused.carId)) {
+                return;
+            }
+            // The car stays the host's with its driver: show the crew model
+            // again rather than after the steal hide runs out.
+            static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->TrafficCrew().CancelStealHide(refused.carId);
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Steal of traffic car {} refused by the server", refused.carId);
+        });
     }
 
     void SeatService::Reset() {
@@ -115,6 +134,7 @@ namespace Mafia1Online::Features::Seat {
         _events.clear();
         _animations.clear();
         _seatSequences.clear();
+        _pendingSteals.clear();
         _lastServerSequence = 0;
         _localSequence = 0;
     }
@@ -139,12 +159,22 @@ namespace Mafia1Online::Features::Seat {
             _events.clear();
             _animations.clear();
             _seatSequences.clear();
+            _pendingSteals.clear();
             return;
         }
         PollLocal(world);
         const auto now = std::chrono::steady_clock::now();
         for (auto it = _animations.begin(); it != _animations.end();) {
             it = now >= it->second.until ? _animations.erase(it) : ++it;
+        }
+        // Taken: the takeover ends host driving. Gone or wrecked: nothing to
+        // wait for.
+        if (auto *replication = Framework::CoreModules::GetReplication()) {
+            for (auto it = _pendingSteals.begin(); it != _pendingSteals.end();) {
+                const auto *state = replication->GetEntity<Shared::Entities::CarEntity>(it->first);
+                const bool settled = !state || !state->hostDriven || state->terminalState != Shared::Entities::CarEntity::TerminalState::Active;
+                it = settled || now >= it->second ? _pendingSteals.erase(it) : ++it;
+            }
         }
         Replay(world);
         Reconcile(world);
@@ -205,8 +235,15 @@ namespace Mafia1Online::Features::Seat {
         }
     }
 
-    void SeatService::OnNativeSteal(NativeHuman *human, NativeCar *car, int seat) {
-        if (!_world || !_world->IsReady() || !human || !car || &human->actor != SDK::Player::CurrentPlayer() || seat < 0 || seat >= Shared::Entities::CarEntity::kMaxSeats) {
+    void SeatService::OnNativeSteal(NativeHuman *human, NativeCar *car, int seat, NativeActor *victim) {
+        if (Simulation::IsHost()) {
+            OnNpcSteal(human, car, seat, victim);
+            return;
+        }
+        // No native victim: a traffic steal (AllowsTrafficUse), which the
+        // server takes as a StealIntent instead.
+        if (!_world || !_world->IsReady() || !human || !car || !victim || &human->actor != SDK::Player::CurrentPlayer() || seat < 0 ||
+            seat >= Shared::Entities::CarEntity::kMaxSeats) {
             return;
         }
         const auto actor = _world->NativeObjects().FindByNative(human);
@@ -222,6 +259,123 @@ namespace Mafia1Online::Features::Seat {
                 _pending.spawnGeneration = player->spawnGeneration;
             }
         }
+    }
+
+    bool SeatService::BlocksNpcEntry(NativeHuman *human, NativeCar *car) const {
+        if (!Simulation::IsHost() || !_world) {
+            return false;
+        }
+        auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
+        if (!application->Npcs().Owns(&human->actor)) {
+            return false;
+        }
+        const auto vehicle = _world->NativeObjects().FindByNative(car);
+        if (vehicle.networkId == 0) {
+            return false;
+        }
+        // The cars the host drives are for its NPCs to use.
+        auto *replication = Framework::CoreModules::GetReplication();
+        const auto *state = replication ? replication->GetEntity<Shared::Entities::CarEntity>(vehicle.networkId) : nullptr;
+        return !state || !state->hostDriven || state->simulationControllerGuid != static_cast<uint64_t>(replication->GetMyGUID());
+    }
+
+    bool SeatService::AllowsTrafficUse(NativeHuman *human, NativeCar *car, int seat) {
+        if (Simulation::IsHost() || !_world || !_world->IsReady() || !human || &human->actor != SDK::Player::CurrentPlayer()) {
+            return true;
+        }
+        auto *replication = Framework::CoreModules::GetReplication();
+        const auto vehicle = _world->NativeObjects().FindByNative(car);
+        const auto self = _world->NativeObjects().FindByNative(&human->actor);
+        auto *state = vehicle.networkId && replication ? replication->GetEntity<Shared::Entities::CarEntity>(vehicle.networkId) : nullptr;
+        auto *player = self.networkId && replication ? replication->GetEntity<Shared::Entities::PlayerEntity>(self.networkId) : nullptr;
+        if (!state || !state->hostDriven) {
+            return true;
+        }
+        using Crew = Shared::Entities::CarEntity::CrewState;
+        // Retail: traffic police cars are SetPlayerUseDisabled.
+        if (!player || state->trafficKind == Shared::Entities::CarEntity::TrafficKind::Police || seat < 0 || seat >= Shared::Entities::CarEntity::kMaxSeats) {
+            return false;
+        }
+        for (uint8_t occupied = 0; occupied < state->seatCount && occupied < Shared::Entities::CarEntity::kMaxSeats; ++occupied) {
+            if (state->occupantIds[occupied] && replication->GetEntity<Shared::Entities::NpcEntity>(state->occupantIds[occupied])) {
+                return false;
+            }
+        }
+        const bool driverIn = state->driverState == Crew::Seated || state->driverState == Crew::Dead;
+        const bool passengerIn = state->passengerState == Crew::Seated || state->passengerState == Crew::Dead;
+        if (seat != 0 && (driverIn || (seat == 1 && passengerIn))) {
+            return false;
+        }
+        if (seat == 0 && driverIn) {
+            // Retail offers a seat its driver holds as a steal (C_player::
+            // Do_AB_OwnerNULL 2009 -> Do_ThrowCocotFromCar). Here the driver
+            // is a crew model, so the game offers an entry; play the steal
+            // instead. With no native owner Corovacka finds no pool car, so
+            // only the thief animates; the host throws the driver, who comes
+            // back as its NPC. As in retail, the next use gets in. The
+            // server's own checks come first, so a pull-out it would refuse
+            // does not play; a race it loses still gets a StealRefused.
+            const auto *seated = static_cast<const SDK::Seat::NativeHuman *>(static_cast<const void *>(&human->actor));
+            if (_pendingSteals.contains(vehicle.networkId) || !player->spawned || !player->alive || seated->usedActorEnter || seated->usedActorLeave ||
+                state->terminalState != Shared::Entities::CarEntity::TerminalState::Active ||
+                glm::distance(player->position, state->position) > Shared::Traffic::kStealReach || !(glm::length(state->velocity) <= Shared::Traffic::kStealMaxSpeed) ||
+                !human->TrySteal(car, 0)) {
+                return false;
+            }
+            _pendingSteals[vehicle.networkId] = std::chrono::steady_clock::now() + kStealAnswerLimit;
+            Shared::Traffic::StealIntent intent;
+            intent.missionGeneration = state->missionGeneration;
+            intent.carId = vehicle.networkId;
+            intent.playerId = self.networkId;
+            intent.spawnGeneration = player->spawnGeneration;
+            Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(intent);
+            static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->TrafficCrew().HideDriverForSteal(vehicle.networkId);
+            return false;
+        }
+        // A free seat: the server hands the car over on the entry.
+        return true;
+    }
+
+    bool SeatService::AllowsNativeSteal(NativeHuman *human, NativeCar *car, NativeActor *victim) const {
+        // No native victim: the traffic driver steal AllowsTrafficUse starts.
+        if (Simulation::IsHost() || !victim || !human || !car || !_world || !_world->IsReady() || &human->actor != SDK::Player::CurrentPlayer()) {
+            return true;
+        }
+        const auto vehicle = _world->NativeObjects().FindByNative(car);
+        auto *replication = Framework::CoreModules::GetReplication();
+        const auto *state = vehicle.networkId && replication ? replication->GetEntity<Shared::Entities::CarEntity>(vehicle.networkId) : nullptr;
+        if (!state || !state->hostDriven) {
+            return true;
+        }
+        // The host's NPC: the server takes the throw (TrafficService::
+        // CheckSeatIntent) and the host replays it on its own NPC. The same
+        // checks come first here, so a throw the server would refuse does
+        // not play: never a police car's crew, the car nearly still.
+        const auto thrown = _world->NativeObjects().FindByNative(victim);
+        const auto self = _world->NativeObjects().FindByNative(&human->actor);
+        const auto *player = self.networkId ? replication->GetEntity<Shared::Entities::PlayerEntity>(self.networkId) : nullptr;
+        return thrown.networkId && replication->GetEntity<Shared::Entities::NpcEntity>(thrown.networkId) && player &&
+               state->trafficKind != Shared::Entities::CarEntity::TrafficKind::Police && state->terminalState == Shared::Entities::CarEntity::TerminalState::Active &&
+               glm::length(state->velocity) <= Shared::Traffic::kStealMaxSpeed && glm::distance(player->position, state->position) <= Shared::Traffic::kStealReach;
+    }
+
+    void SeatService::OnNpcSteal(NativeHuman *human, NativeCar *car, int seat, NativeActor *victim) {
+        auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
+        if (!_world || !_world->IsReady() || !human || !car || !victim || seat < 0 || seat >= Shared::Entities::CarEntity::kMaxSeats ||
+            !application->Npcs().Owns(&human->actor)) {
+            return;
+        }
+        const auto vehicle = _world->NativeObjects().FindByNative(car);
+        const auto thrown = _world->NativeObjects().FindByNative(victim);
+        auto *replication = Framework::CoreModules::GetReplication();
+        auto *player = thrown.networkId && replication ? replication->GetEntity<Shared::Entities::PlayerEntity>(thrown.networkId) : nullptr;
+        if (!vehicle.networkId || !player) {
+            return;
+        }
+        // Keep reconciliation from seating the replica again before the
+        // server frees the seat.
+        _animations[thrown.networkId] = {std::chrono::steady_clock::now() + std::chrono::seconds(3), vehicle.networkId, static_cast<uint8_t>(seat)};
+        application->Npcs().OnKick(&human->actor, vehicle.networkId, static_cast<uint8_t>(seat), thrown.networkId, player->spawnGeneration);
     }
 
     void SeatService::PollLocal(World::WorldService &world) {
@@ -301,13 +455,20 @@ namespace Mafia1Online::Features::Seat {
                 continue;
             }
             auto *player = replication->GetEntity<Shared::Entities::PlayerEntity>(event.playerId);
+            // A simulation host NPC throws a player out (Npc::Kick); it never
+            // takes the seat itself.
+            auto *npc = player ? nullptr : replication->GetEntity<Shared::Entities::NpcEntity>(event.playerId);
             auto *carState = replication->GetEntity<Shared::Entities::CarEntity>(event.carId);
-            if (!player || !carState) {
+            if ((!player && !npc) || !carState) {
                 _events.push_back(queuedEvent);
                 continue;
             }
-            if (player->spawnGeneration != event.spawnGeneration || event.seat >= carState->seatCount ||
-                player->controllerGuid == static_cast<uint64_t>(replication->GetMyGUID())) {
+            // Host NPCs throw players out (StealBegin) and take and leave the
+            // seats of the cars the host drives (Enter, Exit).
+            const bool npcAction = event.action == Action::StealBegin || event.action == Action::Enter || event.action == Action::Exit;
+            if (event.seat >= carState->seatCount ||
+                (player && (player->spawnGeneration != event.spawnGeneration || player->controllerGuid == static_cast<uint64_t>(replication->GetMyGUID()))) ||
+                (npc && (!npcAction || event.spawnGeneration != Shared::Entities::NpcEntity::kSpawnGeneration || (event.action != Action::Exit && !npc->alive)))) {
                 continue;
             }
             auto *human = Human(world, event.playerId);
@@ -326,10 +487,13 @@ namespace Mafia1Online::Features::Seat {
                     }
                 }
                 break;
-            case Action::StealBegin:
+            case Action::StealBegin: {
+                bool thrown = false;
+                NativeActor *victim = car->GetOwner(event.seat);
                 if (car->GetOwner(event.seat) && car->GetOwner(event.seat) != &human->actor) {
                     const auto displaced = world.NativeObjects().FindByNative(car->GetOwner(event.seat));
-                    if (human->TrySteal(car, event.seat)) {
+                    thrown = human->TrySteal(car, event.seat);
+                    if (thrown) {
                         const auto until = now + std::chrono::seconds(3);
                         _animations[event.playerId] = {until, event.carId, event.seat};
                         // Native throw can clear the old seat owner before the
@@ -340,6 +504,26 @@ namespace Mafia1Online::Features::Seat {
                         }
                     }
                 }
+                if (!thrown && Simulation::IsHost() && victim && victim != &human->actor) {
+                    // The server already freed the seat of the host's NPC; a
+                    // throw the native refuses leaves it seated here, so its
+                    // seat goes to the server again and players re-seat it.
+                    static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->Npcs().ResendSeat(victim);
+                }
+                if (!thrown) {
+                    // Reconciliation then takes the victim out without the
+                    // animation (Can_DropOutFromCar_Free can reject the door).
+                    Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->warn("Could not replay {} {} throwing out of car {} seat {} ({})", npc ? "NPC" : "player", event.playerId,
+                                                                               event.carId, event.seat, car->GetOwner(event.seat) ? "native throw refused" : "seat already empty");
+                }
+                break;
+            }
+            case Action::StealTraffic:
+                // The host plays this in its takeover, with the real driver.
+                // The driver arrives as the host's NPC (NpcEntity::throwAgeMs).
+                if (!Simulation::IsHost() && !car->GetOwner(event.seat) && human->TrySteal(car, event.seat)) {
+                    _animations[event.playerId] = {now + std::chrono::seconds(3), event.carId, event.seat};
+                }
                 break;
             case Action::Steal:
                 _animations.erase(event.playerId);
@@ -348,6 +532,16 @@ namespace Mafia1Online::Features::Seat {
                 if (human->IsSeatedIn(car, event.seat)) {
                     human->UseCar(car, SDK::Seat::UseAction::Exit, event.seat);
                     _animations[event.playerId] = {now + std::chrono::seconds(2), event.carId, event.seat};
+                    // Use_Actor exit animates with the car in +0x9c; a refused
+                    // door (Can_DropOutFromCar) ends in ForceExitCar instead.
+                    if (npc && human->usedActorLeave != static_cast<NativeActor *>(car)) {
+                        Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->warn("NPC {} left car {} seat {} without the door animation ({})", event.playerId, event.carId,
+                                                                                   event.seat, human->IsSeatedIn(car, event.seat) ? "still seated" : "popped out");
+                    }
+                }
+                else if (npc) {
+                    Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->warn("NPC {} exit from car {} seat {} not replayed: its replica is not seated there", event.playerId,
+                                                                               event.carId, event.seat);
                 }
                 break;
             case Action::ExitBlocked: break;
@@ -423,8 +617,13 @@ namespace Mafia1Online::Features::Seat {
                 }
                 const uint64_t expectedId = state->occupantIds[seat];
                 auto *player = expectedId ? replication->GetEntity<Shared::Entities::PlayerEntity>(expectedId) : nullptr;
-                auto *expected = player && player->spawned && player->alive && player->missionGeneration == world.LoadedMissionGeneration() &&
-                                         player->spawnGeneration == state->occupantGenerations[seat]
+                // A host NPC sits in a car the host drives, alive or slumped
+                // dead where it was shot.
+                auto *npc = expectedId && !player ? replication->GetEntity<Shared::Entities::NpcEntity>(expectedId) : nullptr;
+                auto *expected = (player && player->spawned && player->alive && player->missionGeneration == world.LoadedMissionGeneration() &&
+                                  player->spawnGeneration == state->occupantGenerations[seat]) ||
+                                         (npc && npc->missionGeneration == world.LoadedMissionGeneration() &&
+                                          state->occupantGenerations[seat] == Shared::Entities::NpcEntity::kSpawnGeneration)
                                      ? Human(world, expectedId)
                                      : nullptr;
                 auto *owner = car->GetOwner(seat);
@@ -475,6 +674,10 @@ namespace Mafia1Online::Features::Seat {
                         if (state->seatResult == Shared::Entities::CarEntity::SeatResult::Cleared &&
                             state->seatActorId == ownerHandle.networkId && state->seatIndex == seat) {
                             continue;
+                        }
+                        if (replication->GetEntity<Shared::Entities::NpcEntity>(ownerHandle.networkId)) {
+                            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->warn("NPC {} taken out of car {} seat {} by reconciliation (no animated exit arrived)",
+                                                                                       ownerHandle.networkId, state->GetNetworkID(), seat);
                         }
                         nativeOwner->ForceExitCar();
                     }

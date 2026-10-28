@@ -17,6 +17,7 @@
 #include <mafia1/sdk/core/system.h>
 #include <mafia1/sdk/menu/native_menu.h>
 #include <mafia1/sdk/traffic/native_traffic.h>
+#include <mafia1/sdk/traffic/native_traffic_car.h>
 #include <networking/network_peer.h>
 #include <networking/replication/replication_manager.h>
 
@@ -167,9 +168,11 @@ namespace Mafia1Online::Features::World {
 
             game->SetTrafficVisible(false);
             if (Features::Simulation::IsHost()) {
-                // The host runs pedestrians; traffic cars and the police
-                // freeze that SetTrafficVisible also switched stay off.
+                // The host runs pedestrians and car traffic for every
+                // player; the police freeze SetTrafficVisible also switched
+                // stays off.
                 SDK::Traffic::SetVisible(true);
+                SDK::Traffic::SetCarsDisabled(false);
             }
             const auto *nativePlayer = game->Player();
             Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info(

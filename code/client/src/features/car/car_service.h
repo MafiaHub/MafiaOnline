@@ -54,6 +54,21 @@ namespace Mafia1Online::Features::Car {
         // Switches observers between interpolation of the replicated path
         // and native physics corrected toward the pose predicted to now.
         bool ToggleSyncMode();
+
+        // Simulation host: a car the retail game owns (a traffic pool car, or
+        // a temporary car it created) is this network car's native car. The
+        // host never creates a car of its own for a car it drives, and never
+        // deletes a pool car; a temporary one goes with RemoveTemporaryActor
+        // when the network car does.
+        enum class Origin : uint8_t {
+            Created,
+            Pool,
+            Temporary,
+        };
+        bool Adopt(World::WorldService &world, uint64_t networkId, SDK::Car::NativeCar *car, Origin origin);
+        // Unbinds the adopted car, which stays in the retail world.
+        void ReleaseAdopted(World::WorldService &world, uint64_t networkId);
+        [[nodiscard]] bool IsAdopted(uint64_t networkId) const;
         void OnSimulated(SDK::Car::NativeCar *car, unsigned int frameMs);
 
       private:
@@ -83,6 +98,10 @@ namespace Mafia1Online::Features::Car {
             // Until this local clock time the car runs on corrected native
             // physics because a locally simulated car is close.
             double contactUntil = 0.0;
+            // Local clock times of the first and the latest impact of the
+            // current contact a locally simulated car gave it here.
+            double impactAt = 0.0;
+            double lastImpactAt = 0.0;
             MafiaNet::Time lastPacketTime        = 0;
             uint64_t poseClockSource             = 0;
             uint32_t poseClockMs                 = 0;
@@ -136,6 +155,7 @@ namespace Mafia1Online::Features::Car {
             SDK::Scene::NativeFrame *frame = nullptr;
             bool removalQueued             = false;
             uint32_t radarColor            = 0;
+            Origin origin                  = Origin::Created;
             float appliedOpacity           = 1.0f;
             uint64_t opacityDamageRevision = 0;
             bool hasAppliedOpacity         = false;
@@ -143,6 +163,8 @@ namespace Mafia1Online::Features::Car {
 
         void CreateNativeCar(World::WorldService &world, uint64_t networkId, const char *model, const Framework::Utils::TransformSnapshot &pose);
         void ReportLoadFailure(World::WorldService &world, uint64_t networkId);
+        // The damage, mesh and hit state a new native car has to rebuild.
+        static void ResetNativeState(Stream &stream);
         void ReportMovement(World::WorldService &world, uint64_t networkId, Stream &stream);
         void SyncDynamics(World::WorldService &world, uint64_t networkId, Stream &stream);
         void SyncEngine(World::WorldService &world, uint64_t networkId, Stream &stream);

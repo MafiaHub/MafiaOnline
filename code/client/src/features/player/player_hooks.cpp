@@ -22,6 +22,7 @@ namespace Mafia1Online::Features::Player {
             auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
             application->Debris().OnNativeDestroyed(application->World(), actor);
             application->Npcs().OnNativeDestroyed(actor);
+            application->RoadBarriers().OnNativeDestroyed(actor);
             auto *frame       = application->Players().OnNativeDestroyed(application->World(), actor);
             if (auto *npcFrame = application->NpcReplicas().OnNativeDestroyed(application->World(), actor)) {
                 frame = npcFrame;

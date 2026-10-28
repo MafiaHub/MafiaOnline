@@ -19,10 +19,19 @@ namespace Mafia1Online::Features::Seat {
         UseCall gUseOriginal = nullptr;
         StealCall gStealOriginal = nullptr;
         SeatService *gService = nullptr;
+        RailwayUseHandler gRailwayUse = nullptr;
 
         void __fastcall UseHook(NativeHuman *human, void *, NativeActor *target, int action, int seat, int animationSpeedState) {
             if (gService && !gService->AllowsNativeUse(human)) return;
+            if (target && target->GetType() == NativeActor::Type::Railway) {
+                if (!gRailwayUse || gRailwayUse(human, target, action, seat, animationSpeedState)) {
+                    gUseOriginal(human, target, action, seat, animationSpeedState);
+                }
+                return;
+            }
             auto *car = target && target->GetType() == NativeActor::Type::Car ? static_cast<NativeCar *>(static_cast<void *>(target)) : nullptr;
+            if (gService && car && action == static_cast<int>(SDK::Seat::UseAction::Enter) && gService->BlocksNpcEntry(human, car)) return;
+            if (gService && car && action == static_cast<int>(SDK::Seat::UseAction::Enter) && !gService->AllowsTrafficUse(human, car, seat)) return;
             const int originalSeat = action == static_cast<int>(SDK::Seat::UseAction::Exit) ? human->seatId : seat;
             if (!car && action == static_cast<int>(SDK::Seat::UseAction::Exit) && gService) {
                 car = gService->CurrentNetworkCar(human);
@@ -34,13 +43,28 @@ namespace Mafia1Online::Features::Seat {
         }
 
         bool __fastcall StealHook(NativeHuman *human, void *, NativeCar *car, int seat) {
+            // intern_ThrowMeFromCar clears the seat during the call.
+            NativeActor *victim = car && seat >= 0 ? car->GetOwner(seat) : nullptr;
+            if (gService && !gService->AllowsNativeSteal(human, car, victim)) {
+                return false;
+            }
             const bool started = gStealOriginal(human, car, seat);
             if (started && gService) {
-                gService->OnNativeSteal(human, car, seat);
+                gService->OnNativeSteal(human, car, seat, victim);
             }
             return started;
         }
     } // namespace
+
+    void SetRailwayUseHandler(RailwayUseHandler handler) {
+        gRailwayUse = handler;
+    }
+
+    void UseActorNative(NativeHuman *human, NativeActor *target, int action, int seat, int animationSpeedState) {
+        if (gUseOriginal) {
+            gUseOriginal(human, target, action, seat, animationSpeedState);
+        }
+    }
 
     bool InstallSeatHooks(SeatService &service) {
         gService = &service;

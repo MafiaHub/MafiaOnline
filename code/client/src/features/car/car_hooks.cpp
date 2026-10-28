@@ -3,6 +3,7 @@
 #include "car_hooks.h"
 
 #include "core/application.h"
+#include "features/simulation/simulation_config.h"
 #include "shared/features/car/car_entity.h"
 #include "shared/features/car/car_hit_report.h"
 #include "shared/features/combat/vehicle_impact.h"
@@ -21,6 +22,7 @@
 
 #include <cmath>
 #include <chrono>
+#include <optional>
 #include <unordered_map>
 
 namespace Mafia1Online::Features::Car {
@@ -84,19 +86,20 @@ namespace Mafia1Online::Features::Car {
             return false;
         }
 
-        void ReportLocalCarHit(Core::Application &application, SDK::Car::NativeCar &car, uint64_t carId,
-                               const SDK::Player::Vector3 &direction, const SDK::Player::Vector3 &position,
-                               const SDK::Player::Vector3 &normal, SDK::Player::NativeActor *attacker) {
-            if (!application.World().IsReady() || attacker != SDK::Player::CurrentPlayer() || !car.Frame()) {
-                return;
-            }
-            const auto shooter = application.World().NativeObjects().FindByNative(attacker);
-            const auto *shooterState = application.Combat().GetLocalState(application.World());
-            if (!shooterState || shooter.networkId == 0 || shooter.networkId != shooterState->networkId ||
-                !shooterState->spawned || !shooterState->alive) {
-                return;
-            }
+        struct CarLocalHit {
+            glm::vec3 hit;
+            glm::vec3 direction;
+        };
+
+        // The impact in the car's own frame, which the controller replays on
+        // its copy; nothing for a broken basis or a shot that is not a unit
+        // vector near the car.
+        std::optional<CarLocalHit> LocalCarHit(SDK::Car::NativeCar &car, const SDK::Player::Vector3 &direction,
+                                               const SDK::Player::Vector3 &position) {
             auto *frame = car.Frame();
+            if (!frame) {
+                return std::nullopt;
+            }
             const auto center = frame->WorldPosition();
             const auto basis = frame->GetWorldBasis();
             const glm::vec3 right(basis.right.x, basis.right.y, basis.right.z);
@@ -111,11 +114,30 @@ namespace Mafia1Online::Features::Car {
                 !std::isfinite(up.x) || !std::isfinite(up.y) || !std::isfinite(up.z) ||
                 !std::isfinite(forward.x) || !std::isfinite(forward.y) || !std::isfinite(forward.z) ||
                 glm::length(right) < 0.8f || glm::length(up) < 0.8f || glm::length(forward) < 0.8f) {
-                return;
+                return std::nullopt;
             }
             const glm::vec3 localHit(glm::dot(hit, right), glm::dot(hit, up), glm::dot(hit, forward));
             const glm::vec3 localDirection(glm::dot(shot, right), glm::dot(shot, up), glm::dot(shot, forward));
             if (glm::length(localHit) > 15.0f || glm::length(localDirection) < 0.8f || glm::length(localDirection) > 1.2f) {
+                return std::nullopt;
+            }
+            return CarLocalHit {localHit, localDirection};
+        }
+
+        void ReportLocalCarHit(Core::Application &application, SDK::Car::NativeCar &car, uint64_t carId,
+                               const SDK::Player::Vector3 &direction, const SDK::Player::Vector3 &position,
+                               const SDK::Player::Vector3 &normal, SDK::Player::NativeActor *attacker) {
+            if (!application.World().IsReady() || attacker != SDK::Player::CurrentPlayer()) {
+                return;
+            }
+            const auto shooter = application.World().NativeObjects().FindByNative(attacker);
+            const auto *shooterState = application.Combat().GetLocalState(application.World());
+            if (!shooterState || shooter.networkId == 0 || shooter.networkId != shooterState->networkId ||
+                !shooterState->spawned || !shooterState->alive) {
+                return;
+            }
+            const auto local = LocalCarHit(car, direction, position);
+            if (!local) {
                 return;
             }
             const auto pellet = application.Combat().MatchLocalPellet(direction.x, direction.y, direction.z,
@@ -139,12 +161,12 @@ namespace Mafia1Online::Features::Car {
             report.normalX = normal.x;
             report.normalY = normal.y;
             report.normalZ = normal.z;
-            report.localHitX = localHit.x;
-            report.localHitY = localHit.y;
-            report.localHitZ = localHit.z;
-            report.localDirectionX = localDirection.x;
-            report.localDirectionY = localDirection.y;
-            report.localDirectionZ = localDirection.z;
+            report.localHitX = local->hit.x;
+            report.localHitY = local->hit.y;
+            report.localHitZ = local->hit.z;
+            report.localDirectionX = local->direction.x;
+            report.localDirectionY = local->direction.y;
+            report.localDirectionZ = local->direction.z;
             Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(report);
         }
 
@@ -165,6 +187,14 @@ namespace Mafia1Online::Features::Car {
 
         void __fastcall CarDestructorHook(void *car, void *) {
             auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
+            // A host traffic car's network car moves on or goes; a player's
+            // crew models leave before the frame they hang from.
+            if (Simulation::IsHost()) {
+                application->Traffic().OnNativeCarDestroyed(car);
+            }
+            else {
+                application->TrafficCrew().OnNativeCarDestroyed(car);
+            }
             auto *frame = application->Cars().OnNativeDestroyed(application->World(), car);
             auto *scene = frame ? SDK::Core::Mission::Get()->GetScene() : nullptr;
             application->World().NativeObjects().InvalidateNative(car);
@@ -176,6 +206,12 @@ namespace Mafia1Online::Features::Car {
 
         void __fastcall CarExplosionHook(SDK::Car::NativeCar *car, void *, unsigned int flags) {
             auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
+            // A host traffic car not yet a network car explodes once it is,
+            // through the server, so players see it: a burning car asks again
+            // each tick.
+            if (Simulation::IsHost() && application->Traffic().AwaitsBinding(car)) {
+                return;
+            }
             if (application->Cars().OnNativeExplosion(application->World(), car)) {
                 gCarExplosionOriginal(car, flags);
             }
@@ -220,6 +256,15 @@ namespace Mafia1Online::Features::Car {
                 }
                 return true;
             }
+            if (frame && !Simulation::IsHost() && application->TrafficCrew().IsCrewFrame(car, frame)) {
+                // A traffic crew model is the host's to kill: its re-ray of
+                // the reported impact hits the host's own crew model, and
+                // retail's DostalJsemRanuKachlou does the rest.
+                if (state && state->missionGeneration == application->World().LoadedMissionGeneration() && direction && position && normal) {
+                    ReportLocalCarHit(*application, *car, handle.networkId, *direction, *position, *normal, attacker);
+                }
+                return true;
+            }
             if (frame && !IsCarBodyFrame(*car, frame)) {
                 // Retail forwards this hit to a child actor or handles a
                 // separate model without changing this car's damage state.
@@ -227,7 +272,18 @@ namespace Mafia1Online::Features::Car {
             }
             if (state && state->missionGeneration == application->World().LoadedMissionGeneration() &&
                 direction && position && normal) {
-                ReportLocalCarHit(*application, *car, handle.networkId, *direction, *position, *normal, attacker);
+                if (!Simulation::IsHost()) {
+                    ReportLocalCarHit(*application, *car, handle.networkId, *direction, *position, *normal, attacker);
+                }
+                else if (attacker && application->Npcs().Owns(attacker)) {
+                    // The host has no player of its own; its NPCs' bullets
+                    // reach a player's car only through the server.
+                    if (const auto local = LocalCarHit(*car, *direction, *position)) {
+                        application->Npcs().OnHitCar(handle.networkId, *direction, *position, *normal, damage, attacker,
+                                                     {local->hit.x, local->hit.y, local->hit.z},
+                                                     {local->direction.x, local->direction.y, local->direction.z});
+                    }
+                }
             }
             return true;
         }
@@ -252,6 +308,18 @@ namespace Mafia1Online::Features::Car {
             // are ghosted: their replicated pose cannot yield to a car's
             // native impulse, so treating one as a rigid body stops the car.
             const auto *dynamic = static_cast<const SDK::Car::NativeDynamicCollision *>(collision);
+            if ((dynamic->packed & SDK::Car::NativeDynamicCollision::kDynamicTypeMask) != 0 && dynamic->ownerActor &&
+                dynamic->ownerActor->GetType() == SDK::Player::NativeActor::Type::Barrier) {
+                // A road block's spike strip: Collision_Filter_Body flattens a
+                // tyre it crosses (C_irenka::ZapichameSi, VEHICLE_WHEEL_SPARE).
+                // Only a car's simulation controller rolls over it; the flat
+                // reaches every other copy with the car's damage state.
+                auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
+                if (IsRemoteNetworkCar(*application, &car->Vehicle())) {
+                    return nullptr;
+                }
+                return gCollisionFilterBodyOriginal(car, collision, position, normal);
+            }
             if ((dynamic->packed & SDK::Car::NativeDynamicCollision::kDynamicTypeMask) == 0 || !dynamic->ownerActor ||
                 dynamic->ownerActor->GetType() != SDK::Player::NativeActor::Type::Entity) {
                 return gCollisionFilterBodyOriginal(car, collision, position, normal);
@@ -284,6 +352,8 @@ namespace Mafia1Online::Features::Car {
                 if (!std::isfinite(speed) || speed < 3.0f) {
                     // Retail uses this contact for a low speed pedestrian
                     // side jump. Keep the original filter in that case.
+                    // C_human::Collision 0x5784a0 hits only above 3 (damage
+                    // (|v| - 2.5) * 4.2), the server's impact gate as well.
                     return gCollisionFilterBodyOriginal(car, collision, position, normal);
                 }
                 const auto angular = car->Vehicle().AngularVelocity();
@@ -316,6 +386,9 @@ namespace Mafia1Online::Features::Car {
                     report.contactY = position.y;
                     report.contactZ = position.z;
                     Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(report);
+                    // Retail C_human::Collision hits the human in this same
+                    // contact; the server's answer is a round trip away.
+                    application->Death().PredictVehicleImpact(carHandle.networkId, targetHandle.networkId, velocity);
                 }
             }
             return nullptr;
@@ -409,7 +482,7 @@ namespace Mafia1Online::Features::Car {
 
     bool ApplyAuthoritativeCarHit(SDK::Car::NativeCar *car, const SDK::Player::Vector3 &direction,
                                   const SDK::Player::Vector3 &position, const SDK::Player::Vector3 &normal, float damage,
-                                  SDK::Scene::NativeFrame *frame) {
-        return gCarHitOriginal(car, 0, &direction, &position, &normal, damage, nullptr, 0, frame);
+                                  SDK::Scene::NativeFrame *frame, SDK::Player::NativeActor *attacker) {
+        return gCarHitOriginal(car, 0, &direction, &position, &normal, damage, attacker, 0, frame);
     }
 } // namespace Mafia1Online::Features::Car

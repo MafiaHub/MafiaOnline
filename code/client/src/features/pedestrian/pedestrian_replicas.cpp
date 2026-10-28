@@ -79,12 +79,17 @@ namespace Mafia1Online::Features::Pedestrian {
         SDK::Traffic::CountDownScreamCooldown(frameMs);
         const auto generators = MissionGenerators();
         std::unordered_set<uint64_t> seen;
+        std::unordered_set<uint64_t> handedOff;
         const MafiaNet::Time networkNow = MafiaNet::GetTime();
         replication->ForEach<Shared::Entities::PedestrianEntity>([&](Shared::Entities::PedestrianEntity *walker) {
             if (walker->missionGeneration != world.LoadedMissionGeneration() || walker->model.empty()) {
                 return;
             }
             const uint64_t id = walker->GetNetworkID();
+            if (_handedOff.contains(id)) {
+                handedOff.insert(id);
+                return;
+            }
             seen.insert(id);
             auto &replica = _replicas[id];
             Framework::Utils::TransformSnapshot snapshot {walker->position, walker->velocity, walker->rotation};
@@ -137,6 +142,8 @@ namespace Mafia1Online::Features::Pedestrian {
             }
         });
 
+        _handedOff = std::move(handedOff);
+
         for (auto it = _replicas.begin(); it != _replicas.end();) {
             if (seen.contains(it->first)) {
                 ++it;
@@ -145,6 +152,23 @@ namespace Mafia1Online::Features::Pedestrian {
             Release(world, it->second);
             it = _replicas.erase(it);
         }
+    }
+
+    std::optional<Framework::Utils::TransformSnapshot> PedestrianReplicaService::HandOff(World::WorldService &world, uint64_t walkerId) {
+        const auto found = _replicas.find(walkerId);
+        if (found == _replicas.end() || !found->second.element || !found->second.element->IsActive() || !found->second.element->Model()) {
+            return std::nullopt;
+        }
+        auto *model = found->second.element->Model();
+        const auto position = model->WorldPosition();
+        const auto direction = model->WorldDirection();
+        Framework::Utils::TransformSnapshot pose {};
+        pose.position = {position.x, position.y, position.z};
+        pose.rotation = glm::angleAxis(std::atan2(direction.x, direction.z), glm::vec3(0.0f, 1.0f, 0.0f));
+        Release(world, found->second);
+        _replicas.erase(found);
+        _handedOff.insert(walkerId);
+        return pose;
     }
 
     SDK::Traffic::NativeTrafficElement *PedestrianReplicaService::Borrow(const std::vector<SDK::Traffic::NativeTrafficGenerator *> &generators,
@@ -200,6 +224,7 @@ namespace Mafia1Online::Features::Pedestrian {
             Release(world, replica);
         }
         _replicas.clear();
+        _handedOff.clear();
         _lastUpdate = {};
     }
 } // namespace Mafia1Online::Features::Pedestrian

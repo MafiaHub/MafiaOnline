@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 
 #include <fstream>
+#include <random>
 #include <stdexcept>
 
 namespace Mafia1Online::Features::Simulation {
@@ -50,8 +51,11 @@ namespace Mafia1Online::Features::Simulation {
             if (const auto density = settings->find("pedestrianDensity"); density != settings->end()) {
                 configured.pedestrianDensity = density->get<float>();
             }
+            if (const auto scale = settings->find("trafficPoolScale"); scale != settings->end()) {
+                configured.trafficPoolScale = scale->get<uint32_t>();
+            }
             if (configured.token.empty() || configured.token.size() > 256 || configured.tickHz < 15 || configured.tickHz > 60 ||
-                configured.pedestrianPoolScale < 1 || configured.pedestrianPoolScale > 16 || !(configured.pedestrianDensity >= 0.0f && configured.pedestrianDensity <= 1.0f)) {
+                configured.pedestrianPoolScale < 1 || configured.pedestrianPoolScale > 16 || configured.trafficPoolScale < 1 || configured.trafficPoolScale > 8 || !(configured.pedestrianDensity >= 0.0f && configured.pedestrianDensity <= 1.0f)) {
                 throw std::invalid_argument("invalid simulation value");
             }
             if (!QuickJoin::GetConfig().enabled) {
@@ -77,5 +81,16 @@ namespace Mafia1Online::Features::Simulation {
         case RenderMode::Headless: return "headless";
         }
         return "unknown";
+    }
+    uint32_t HostSession() {
+        static const uint32_t session = [] {
+            std::random_device device;
+            uint32_t value = 0;
+            while (value == 0) {
+                value = device();
+            }
+            return value;
+        }();
+        return session;
     }
 } // namespace Mafia1Online::Features::Simulation

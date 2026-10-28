@@ -73,6 +73,10 @@ namespace Mafia1Online::Features::Pedestrian {
 
         void OnGeneratorAI(SDK::Traffic::NativeTrafficGenerator *generator, uint32_t frameMs);
         // Host: retail Hit ran on a walker; scripts hear it as pedestrianDamage.
+        // The key the host reported this walker under, or 0.
+        uint32_t WalkerKey(SDK::Traffic::NativeTrafficElement *element) const {
+            return _reporter.KeyOf(element);
+        }
         void OnWalkerHit(SDK::Traffic::NativeTrafficElement *element, int32_t type, SDK::Player::NativeActor *attacker, float damage, float before, float after);
         void OnTickElements(uint32_t frameMs);
 

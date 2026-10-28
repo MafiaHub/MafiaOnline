@@ -38,12 +38,16 @@ namespace Mafia1Online::Core {
         _pedestrians.RegisterRPC();
         if (Features::Simulation::IsHost()) {
             _npcs.RegisterRPC(_world);
+            _traffic.RegisterRPC(_world);
         }
         _combat.RegisterRPC();
         _death.RegisterRPC();
         _seats.RegisterRPC();
         _players.RegisterRPC();
         _cameraFollow.RegisterRPC();
+        _railways.RegisterRPC();
+        _bridges.RegisterRPC();
+        _props.RegisterRPC();
         _effects.RegisterRPC(_world);
         _sounds.RegisterRPC(_world);
         if (!Features::World::InstallWorldHooks()) {
@@ -97,6 +101,22 @@ namespace Mafia1Online::Core {
             Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->critical("Could not install NPC hooks");
             ExitProcess(1);
         }
+        if (Features::Simulation::IsHost() && !_traffic.Install(_cars, _npcs)) {
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->critical("Could not install traffic car hooks");
+            ExitProcess(1);
+        }
+        if (!_railways.Install()) {
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->critical("Could not install railway hooks");
+            ExitProcess(1);
+        }
+        if (!_bridges.Install(_death)) {
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->critical("Could not install bridge hooks");
+            ExitProcess(1);
+        }
+        if (!_props.Install()) {
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->critical("Could not install world prop hooks");
+            ExitProcess(1);
+        }
         if (!_cameraFollow.InstallTickHook()) {
             Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->critical("Could not install native camera tick hook");
             ExitProcess(1);
@@ -136,6 +156,13 @@ namespace Mafia1Online::Core {
             ExitProcess(1);
         }
         _world.SetMissionClosingCallback([this] {
+            // Crew models leave C_game's driver list while it still exists.
+            _trafficCrew.Reset();
+            _railways.Reset();
+            _bridges.Reset();
+            _props.Reset();
+            _roadBarriers.OnMissionClosing();
+            _traffic.Reset();
             _pedestrianReplicas.Reset(_world);
             _pedestrians.Reset();
             _npcReplicas.Reset(_world);
@@ -171,14 +198,24 @@ namespace Mafia1Online::Core {
             _seats.Reset();
             _debris.Reset(_world);
         }
+        // Railways first: riders are placed on this frame's wagons.
+        _railways.Update(_world);
+        _bridges.Update(_world);
+        _props.Update(_world);
         _players.Update(_world);
         _pedestrians.Update(_world);
+        // NPC replicas first: one that replaces a walker takes that walker's
+        // replica over before the walker's removal is applied.
+        _npcReplicas.Update(_world);
         _pedestrianReplicas.Update(_world);
         if (Features::Simulation::IsHost()) {
             _npcs.Update(_world);
+            // Binds its cars before CarService first sees them.
+            _traffic.Update(_world);
         }
-        _npcReplicas.Update(_world);
         _cars.Update(_world);
+        _trafficCrew.Update(_world);
+        _roadBarriers.Update(_world);
         const bool host = Features::Simulation::IsHost();
         if (!host && _world.IsReady() && !SDK::UI::NativeIndicators::Get().MapEnabled()) {
             // Held TAB shows the city map; retail enables it only from the
@@ -285,7 +322,13 @@ namespace Mafia1Online::Core {
         _pedestrianReplicas.Reset(_world);
         _pedestrians.Uninstall();
         _npcReplicas.Reset(_world);
+        _trafficCrew.Reset();
+        _roadBarriers.Reset(_world);
+        _railways.Uninstall();
+        _bridges.Uninstall();
+        _props.Uninstall();
         if (Features::Simulation::IsHost()) {
+            _traffic.Uninstall();
             _npcs.Uninstall();
         }
         if (Features::Simulation::IsHost()) {
@@ -318,6 +361,9 @@ namespace Mafia1Online::Core {
     }
 
     void Application::OnConnectionClosed() {
+        _trafficCrew.Reset();
+        _roadBarriers.Reset(_world);
+        _traffic.Reset();
         _pedestrianReplicas.Reset(_world);
         _pedestrians.Reset();
         _npcReplicas.Reset(_world);

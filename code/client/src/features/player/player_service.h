@@ -70,6 +70,10 @@ namespace Mafia1Online::Features::Player {
             bool local                     = false;
             bool removalQueued             = false;
             int16_t lastAnimation          = 0;
+            // The end of a replayed pull-out (SeatService), if one is playing.
+            std::chrono::steady_clock::time_point pullingUntil {};
+            // Since when a door animation holds the pose stream off (diagnostic).
+            std::chrono::steady_clock::time_point doorSince {};
         };
         std::optional<RemoteAnimation> RemoteLocomotion(const RemoteStream &stream) const;
 

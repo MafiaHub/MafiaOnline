@@ -1,5 +1,7 @@
 #include "player_service.h"
 
+#include "core/application.h"
+
 #include "features/simulation/simulation_config.h"
 
 #include "features/seat/seat_service.h"
@@ -9,6 +11,7 @@
 #include "shared/features/player/player_entity.h"
 #include "shared/features/player/player_movement.h"
 #include "shared/features/player/player_native_pose.h"
+#include "shared/features/railway/railway_report.h"
 
 #include <core_modules.h>
 #include <logging/logger.h>
@@ -33,6 +36,8 @@ namespace Mafia1Online::Features::Player {
         constexpr float kIdleSpeed         = 0.22f;
         constexpr float kRunSpeed          = 3.0f;
         constexpr float kDiagonalComponent = 0.38f;
+        // Holds the pose stream off a pull-out whose track never ends.
+        constexpr auto kPullLimit          = std::chrono::seconds(5);
 
         bool IsFinite(const Framework::Utils::TransformSnapshot &snapshot) {
             return std::isfinite(snapshot.position.x) && std::isfinite(snapshot.position.y) && std::isfinite(snapshot.position.z) && std::isfinite(snapshot.velocity.x) && std::isfinite(snapshot.velocity.y) && std::isfinite(snapshot.velocity.z)
@@ -261,6 +266,16 @@ namespace Mafia1Online::Features::Player {
         movement.z                 = position.z;
         movement.yaw               = yaw;
         movement.locomotion        = static_cast<int16_t>(static_cast<SDK::Player::NativeHuman *>(static_cast<void *>(actor))->AnimationState());
+        // Aboard a railway the position rides on the wagon: observers place
+        // it on their copy rather than trail it through the world.
+        if (const auto ride = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->Railways().RideOf(actor)) {
+            movement.railway     = ride->index;
+            movement.railwayPart = ride->part;
+            movement.railwayX    = ride->local.x;
+            movement.railwayY    = ride->local.y;
+            movement.railwayZ    = ride->local.z;
+            movement.railwayYaw  = ride->yaw;
+        }
         Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(movement, MafiaNet::Priority::High, MafiaNet::Reliability::Unreliable);
         _lastSent = now;
     }
@@ -354,6 +369,13 @@ namespace Mafia1Online::Features::Player {
                 camera.SetPlayer(nullptr);
             }
             Seat::ReleaseHumanSeat(static_cast<SDK::Seat::NativeHuman *>(static_cast<void *>(actor)));
+            // Aboard a railway its frame is a wagon's child and its
+            // collisions are in the wagon's list.
+            static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->Railways().DetachRider(actor);
+            if (Simulation::IsHost()) {
+                // Hunts and police actions aimed at it would outlive it.
+                static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->Npcs().ForgetHuman(actor);
+            }
             auto *game = SDK::Core::Mission::Get()->Game();
             if (owned->second.local) {
                 game->ClearPlayer(actor);
@@ -534,13 +556,55 @@ namespace Mafia1Online::Features::Player {
         }
         const auto *seated = static_cast<const SDK::Seat::NativeHuman *>(static_cast<const void *>(actor));
         if ((seated->usedActorEnter && world.NativeObjects().FindByNative(seated->usedActorEnter).networkId != 0) || (seated->usedActorLeave && world.NativeObjects().FindByNative(seated->usedActorLeave).networkId != 0)) {
+            // A door animation (+0x9c without +0x98) ends in C_human::Update
+            // within seconds; one that does not freezes this replica.
+            const auto now = std::chrono::steady_clock::now();
+            if (seated->usedActorEnter) {
+                owned->second.doorSince = {};
+            }
+            else if (owned->second.doorSince == std::chrono::steady_clock::time_point {}) {
+                owned->second.doorSince = now;
+            }
+            else if (now - owned->second.doorSince > std::chrono::seconds(5)) {
+                Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->warn("Replica {} stuck in a car door transition {} (work {})", networkId, seated->transitionState,
+                                                                           static_cast<SDK::Player::NativeHuman *>(static_cast<void *>(actor))->Melee().canWork);
+                owned->second.doorSince = now;
+            }
             return;
         }
-        const auto direction = glm::mat3_cast(pose.rotation) * glm::vec3(0.0f, 0.0f, 1.0f);
-        owned->second.frame->SetWorldPosition({pose.position.x, pose.position.y, pose.position.z});
+        owned->second.doorSince = {};
+        // A replayed steal placed the thief at the door and plays its
+        // pull-out; C_human::Update returns it to idle when the track ends.
+        if (static_cast<SDK::Player::NativeHuman *>(static_cast<void *>(actor))->IsPullingFromCar()) {
+            const auto now = std::chrono::steady_clock::now();
+            if (owned->second.pullingUntil == std::chrono::steady_clock::time_point {}) {
+                owned->second.pullingUntil = now + kPullLimit;
+            }
+            if (now < owned->second.pullingUntil) {
+                return;
+            }
+        }
+        else {
+            owned->second.pullingUntil = {};
+        }
+        glm::vec3 position  = pose.position;
+        glm::vec3 direction = glm::mat3_cast(pose.rotation) * glm::vec3(0.0f, 0.0f, 1.0f);
+        // Aboard a railway: on this client's copy of it, which runs a render
+        // delay of its own; the streamed world position would trail it.
+        if (const auto *entity = Framework::CoreModules::GetReplication()->GetEntity<Shared::Entities::PlayerEntity>(networkId);
+            entity && entity->railway != Shared::Railway::kNoRailway) {
+            const Railway::RailwayService::Ride ride {entity->railway, entity->railwayPart, entity->railwayLocal, entity->railwayYaw};
+            glm::vec3 ridePosition;
+            glm::vec3 rideDirection;
+            if (static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->Railways().PlaceRide(ride, ridePosition, rideDirection)) {
+                position  = ridePosition;
+                direction = rideDirection;
+            }
+        }
+        owned->second.frame->SetWorldPosition({position.x, position.y, position.z});
         owned->second.frame->SetDirection({direction.x, direction.y, direction.z});
         owned->second.frame->Update();
-        actor->SetStoredTransform({pose.position.x, pose.position.y, pose.position.z}, {direction.x, direction.y, direction.z});
+        actor->SetStoredTransform({position.x, position.y, position.z}, {direction.x, direction.y, direction.z});
         if (alive) {
             auto *human = static_cast<SDK::Player::NativeHuman *>(static_cast<void *>(actor));
             // C_human::Do_Shoot owns its melee animation until native
@@ -639,6 +703,7 @@ namespace Mafia1Online::Features::Player {
         // registry handle is invalidated for a new spawn.
         auto *actor = static_cast<SDK::Player::NativeActor *>(world.NativeObjects().Resolve(_local));
         if (actor && world.IsReady()) {
+            static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->Railways().DetachRider(actor);
             SDK::Core::Mission::Get()->Game()->ClearPlayer(actor);
         }
     }

@@ -16,6 +16,13 @@
 #include <algorithm>
 
 namespace Mafia1Online::Features::Death {
+    namespace {
+        // A server car-impact DamageEvent for a target this client predicted
+        // within this window only sets its health (client -> server, its 100
+        // ms pose wait, the host's Hit and the result back).
+        constexpr auto kPredictedImpactWindow = std::chrono::milliseconds(1500);
+    } // namespace
+
     using SDK::Player::NativeActor;
     using SDK::Player::NativeHitType;
     using SDK::Player::NativeHuman;
@@ -41,6 +48,8 @@ namespace Mafia1Online::Features::Death {
             _applied.clear();
             _pendingDamage.clear();
             _appliedDamage.clear();
+            _impactsToPlay.clear();
+            _predictedImpacts.clear();
             return;
         }
         auto *replication = Framework::CoreModules::GetReplication();
@@ -48,6 +57,32 @@ namespace Mafia1Online::Features::Death {
             return;
         }
         const auto now = std::chrono::steady_clock::now();
+        for (auto it = _predictedImpacts.begin(); it != _predictedImpacts.end();) {
+            it = now - it->second > kPredictedImpactWindow ? _predictedImpacts.erase(it) : ++it;
+        }
+        for (const auto &impact : _impactsToPlay) {
+            const auto *state = combat.GetState(impact.targetId);
+            auto *actor = static_cast<NativeActor *>(world.NativeObjects().Resolve(world.NativeObjects().FindByNetwork(impact.targetId)));
+            if (!state || !state->spawned || !state->alive || !actor || (actor->GetType() != NativeActor::Type::Player && actor->GetType() != NativeActor::Type::Entity)) {
+                continue;
+            }
+            // The reaction the server's DamageEvent would replay (hit type 4,
+            // torso), with the replica's own health kept.
+            Shared::Combat::DamageEvent event;
+            event.bodyPart = 5;
+            event.hitType = 4;
+            event.damage = 5.0f;
+            event.directionX = impact.directionX;
+            event.directionY = impact.directionY;
+            event.directionZ = impact.directionZ;
+            auto *human = static_cast<NativeHuman *>(static_cast<void *>(actor));
+            if (ReplayAuthoritativeDamage(*human, event)) {
+                human->SetHealth(state->health);
+                actor->RestoreLivingState();
+                _predictedImpacts[{impact.carId, impact.targetId}] = now;
+            }
+        }
+        _impactsToPlay.clear();
         for (auto it = _pendingDamage.begin(); it != _pendingDamage.end();) {
             const auto &event = it->event;
             if (event.missionGeneration < world.LoadedMissionGeneration() || now - it->received > std::chrono::seconds(2)) {
@@ -80,7 +115,17 @@ namespace Mafia1Online::Features::Death {
                 continue;
             }
             auto *human = static_cast<NativeHuman *>(static_cast<void *>(actor));
-            if (ReplayAuthoritativeDamage(*human, event)) {
+            // This client already played this car's impact when it hit:
+            // replaying it again would restart the reaction mid-fall. Another
+            // car's impact on the same target still plays.
+            const auto predicted = event.hitType == 4 ? _predictedImpacts.find({event.sourceCarId, event.targetNetworkId}) : _predictedImpacts.end();
+            if (predicted != _predictedImpacts.end()) {
+                _predictedImpacts.erase(predicted);
+                human->SetHealth(state->health);
+                applied = {event.missionGeneration, event.targetSpawnGeneration, event.targetRevision};
+                it      = _pendingDamage.erase(it);
+            }
+            else if (ReplayAuthoritativeDamage(*human, event)) {
                 human->SetHealth(state->health);
                 actor->RestoreLivingState();
                 applied = {event.missionGeneration, event.targetSpawnGeneration, event.targetRevision};
@@ -136,6 +181,8 @@ namespace Mafia1Online::Features::Death {
         _applied.clear();
         _pendingDamage.clear();
         _appliedDamage.clear();
+        _impactsToPlay.clear();
+        _predictedImpacts.clear();
         _world                  = nullptr;
         _combat                 = nullptr;
         _reportedFallNetworkId  = 0;
@@ -253,6 +300,12 @@ namespace Mafia1Online::Features::Death {
         report.hitY                   = hitPosition.y;
         report.hitZ                   = hitPosition.z;
         Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(report);
+    }
+
+    void DeathService::PredictVehicleImpact(uint64_t carId, uint64_t targetId, const Vector3 &direction) {
+        if (_impactsToPlay.size() < 32) {
+            _impactsToPlay.push_back({carId, targetId, direction.x, direction.y, direction.z});
+        }
     }
 
     void DeathService::OnSuppressedFatalFall(NativeHuman &human, Shared::Combat::FatalFallReport::Cause cause) {

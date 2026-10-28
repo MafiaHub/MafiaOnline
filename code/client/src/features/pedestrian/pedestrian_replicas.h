@@ -4,7 +4,9 @@
 
 #include <chrono>
 #include <cstdint>
+#include <optional>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace Mafia1Online::SDK::Traffic {
@@ -39,6 +41,10 @@ namespace Mafia1Online::Features::Pedestrian {
         // The walker whose replica wears this model (C_don_ocas::Collision's
         // frame), or 0.
         uint64_t WalkerOfModel(const SDK::Scene::NativeFrame *model) const;
+        // The NPC the host made of this walker takes its place: the pose the
+        // walker shows on this screen now, and the walker leaves at once and
+        // is not shown again. Nothing when this client shows no such walker.
+        std::optional<Framework::Utils::TransformSnapshot> HandOff(World::WorldService &world, uint64_t walkerId);
 
       private:
         // The host reports every 100 ms. Two samples of render delay keep a
@@ -63,6 +69,8 @@ namespace Mafia1Online::Features::Pedestrian {
         void Release(World::WorldService &world, Replica &replica);
 
         std::unordered_map<uint64_t, Replica> _replicas;
+        // Walkers an NPC replica replaced, while the server still streams them.
+        std::unordered_set<uint64_t> _handedOff;
         std::chrono::steady_clock::time_point _lastUpdate;
     };
 } // namespace Mafia1Online::Features::Pedestrian

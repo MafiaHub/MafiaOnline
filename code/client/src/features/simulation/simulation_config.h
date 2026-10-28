@@ -24,6 +24,9 @@ namespace Mafia1Online::Features::Simulation {
         uint32_t pedestrianPoolScale = 16;
         // Replaces the host's own setup value; scales each generator's count.
         float pedestrianDensity = 1.0f;
+        // The traffic car pool and its active slots hold this many times the
+        // mission's retail maximum, shared out among the players.
+        uint32_t trafficPoolScale = 8;
     };
 
     // Reads the "simulation" object of the client configuration. Call after
@@ -36,4 +39,9 @@ namespace Mafia1Online::Features::Simulation {
     }
 
     const char *RenderModeName(RenderMode mode);
+
+    // Host: a random nonzero id for this process, sent with the reports
+    // players date by the host clock. A new id is another host, whose clock
+    // starts their interpolation over.
+    uint32_t HostSession();
 } // namespace Mafia1Online::Features::Simulation

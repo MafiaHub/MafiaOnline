@@ -23,6 +23,12 @@
 #include "features/sound/sound_service.h"
 #include "features/player/player_service.h"
 #include "features/seat/seat_service.h"
+#include "features/traffic/road_barriers.h"
+#include "features/railway/railway_service.h"
+#include "features/bridge/bridge_service.h"
+#include "features/props/props_service.h"
+#include "features/traffic/traffic_crew.h"
+#include "features/traffic/traffic_host.h"
 #include "features/web_ui/web_ui_service.h"
 #include "features/world/world_service.h"
 #include "features/mod/mod_service.h"
@@ -75,6 +81,9 @@ namespace Mafia1Online::Core {
             return _players;
         }
 
+        Features::Pedestrian::PedestrianService &Pedestrians() {
+            return _pedestrians;
+        }
         Features::Pedestrian::PedestrianReplicaService &PedestrianReplicas() {
             return _pedestrianReplicas;
         }
@@ -85,6 +94,26 @@ namespace Mafia1Online::Core {
 
         Features::Npc::NpcReplicaService &NpcReplicas() {
             return _npcReplicas;
+        }
+
+        Features::Traffic::TrafficHost &Traffic() {
+            return _traffic;
+        }
+
+        Features::Traffic::TrafficCrewService &TrafficCrew() {
+            return _trafficCrew;
+        }
+        Features::Seat::SeatService &Seats() {
+            return _seats;
+        }
+        Features::Death::DeathService &Death() {
+            return _death;
+        }
+        Features::Railway::RailwayService &Railways() {
+            return _railways;
+        }
+        Features::Traffic::RoadBarrierService &RoadBarriers() {
+            return _roadBarriers;
         }
 
         Features::Hud::HudService &Hud() {
@@ -112,6 +141,12 @@ namespace Mafia1Online::Core {
         Features::Pedestrian::PedestrianReplicaService _pedestrianReplicas;
         Features::Npc::NpcHost _npcs;
         Features::Npc::NpcReplicaService _npcReplicas;
+        Features::Traffic::TrafficHost _traffic;
+        Features::Traffic::TrafficCrewService _trafficCrew;
+        Features::Railway::RailwayService _railways;
+        Features::Bridge::BridgeService _bridges;
+        Features::Props::PropsService _props;
+        Features::Traffic::RoadBarrierService _roadBarriers;
         Features::Car::DebrisService _debris;
         Features::Seat::SeatService _seats;
         Features::Combat::CombatService _combat;
