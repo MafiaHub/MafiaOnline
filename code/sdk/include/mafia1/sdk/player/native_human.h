@@ -534,6 +534,14 @@ namespace Mafia1Online::SDK::Player {
         return game ? game->Player() : nullptr;
     }
 
+    // C_player m_iZipSoundUpdateTime: AI_walk stores the game time here each
+    // time the horn key whistles on foot (0x590499), at most every 2000 ms.
+    inline constexpr uintptr_t kPlayerWhistleTimeOffset = 0xafc;
+
+    inline int32_t PlayerWhistleTime(const NativeActor *player) {
+        return *reinterpret_cast<const int32_t *>(reinterpret_cast<const std::byte *>(player) + kPlayerWhistleTimeOffset);
+    }
+
     inline bool IsPlayerActor(void *actor) {
         return actor && static_cast<NativeActor *>(actor)->IsPlayer();
     }

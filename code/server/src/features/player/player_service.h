@@ -23,6 +23,7 @@ namespace Mafia1Online::Shared::Player {
     struct NativePose;
     struct Climb;
     struct CameraView;
+    struct Whistle;
 } // namespace Mafia1Online::Shared::Player
 
 namespace Mafia1Online::Features::Player {
@@ -66,6 +67,7 @@ namespace Mafia1Online::Features::Player {
         void OnNativePose(const Shared::Player::NativePose &pose, MafiaNet::PeerGuid sender);
         void OnClimb(const Shared::Player::Climb &climb, MafiaNet::PeerGuid sender);
         void OnCameraView(const Shared::Player::CameraView &view, MafiaNet::PeerGuid sender);
+        void OnWhistle(const Shared::Player::Whistle &whistle, MafiaNet::PeerGuid sender);
         void Update();
         void Reset();
 
@@ -79,6 +81,7 @@ namespace Mafia1Online::Features::Player {
             std::chrono::steady_clock::time_point lastMovement;
             std::chrono::steady_clock::time_point lastCameraView;
             uint32_t lastCameraViewSequence = 0;
+            std::chrono::steady_clock::time_point lastWhistle;
             glm::vec3 suggestedPosition  = glm::vec3(0.0f);
             uint64_t suggestedGeneration = 0;
             std::deque<std::pair<std::chrono::steady_clock::time_point, float>> recentHeights;

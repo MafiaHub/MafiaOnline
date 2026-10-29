@@ -111,6 +111,10 @@ namespace Mafia1Online::Features::Player {
         uint64_t _missionGeneration = 0;
         uint32_t _sequence          = 0;
         std::chrono::steady_clock::time_point _lastSent;
+        // The native player's last whistle stamp (PlayerWhistleTime); a new
+        // one on the same native is a whistle to relay.
+        std::optional<int32_t> _whistleTime;
+        const void *_whistleActor = nullptr;
         std::unordered_map<uint64_t, RemoteStream> _remote;
         std::unordered_map<uint64_t, void *> _currentById;
         std::unordered_map<void *, NativeHuman> _ownedByNative;

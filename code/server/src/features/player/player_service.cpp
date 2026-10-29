@@ -8,6 +8,8 @@
 #include "shared/features/player/player_camera_view.h"
 #include "shared/features/player/player_movement.h"
 #include "shared/features/player/player_native_pose.h"
+#include "shared/features/player/player_whistle.h"
+#include "shared/features/world/world_effects.h"
 #include "shared/features/railway/railway_report.h"
 #include "shared/net/sample_clock.h"
 
@@ -65,6 +67,9 @@ namespace Mafia1Online::Features::Player {
         });
         Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Player::CameraView>([this](const Shared::Player::CameraView &view, MafiaNet::Packet *packet) {
             OnCameraView(view, MafiaNet::ToPeerGuid(packet->guid));
+        });
+        Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Player::Whistle>([this](const Shared::Player::Whistle &whistle, MafiaNet::Packet *packet) {
+            OnWhistle(whistle, MafiaNet::ToPeerGuid(packet->guid));
         });
     }
 
@@ -327,6 +332,35 @@ namespace Mafia1Online::Features::Player {
         }
         auto relay = climb;
         Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(relay);
+    }
+
+    void PlayerService::OnWhistle(const Shared::Player::Whistle &whistle, MafiaNet::PeerGuid sender) {
+        const auto it = _sessions.find(sender);
+        if (it == _sessions.end() || whistle.networkId != it->second.networkId) {
+            return;
+        }
+        auto *player = FindByGuid(sender);
+        if (!player || !player->spawned || !player->alive || whistle.missionGeneration != player->missionGeneration || whistle.spawnGeneration != player->spawnGeneration ||
+            SeatedCar(*player)) {
+            return;
+        }
+        // Retail whistles at most once per interval; a little slack for jitter.
+        const auto now = std::chrono::steady_clock::now();
+        if (it->second.lastWhistle != std::chrono::steady_clock::time_point {} &&
+            now - it->second.lastWhistle < std::chrono::milliseconds(Shared::Player::kWhistleIntervalMs / 2)) {
+            return;
+        }
+        it->second.lastWhistle = now;
+        Shared::World::PlaySound play;
+        play.missionGeneration = player->missionGeneration;
+        play.wave              = Shared::Player::kWhistleWave;
+        play.x                 = player->position.x;
+        play.y                 = player->position.y + Shared::Player::kWhistleHeight;
+        play.z                 = player->position.z;
+        play.radius            = Shared::Player::kWhistleRange;
+        play.volume            = 1.0f;
+        // The whistler's own game played it already.
+        Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(play, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered, MafiaNet::ToGuid(sender));
     }
 
     void PlayerService::OnCameraView(const Shared::Player::CameraView &view, MafiaNet::PeerGuid sender) {

@@ -12,6 +12,7 @@
 #include "shared/features/player/player_entity.h"
 #include "shared/features/player/player_movement.h"
 #include "shared/features/player/player_native_pose.h"
+#include "shared/features/player/player_whistle.h"
 #include "shared/features/railway/railway_report.h"
 
 #include <core_modules.h>
@@ -280,6 +281,18 @@ namespace Mafia1Online::Features::Player {
         // for everything here that reads it (steal reach, map blips).
         controlled->position = {position.x, position.y, position.z};
         controlled->rotation = glm::angleAxis(yaw, glm::vec3(0.0f, 1.0f, 0.0f));
+        // The native whistle plays here already; the server plays it for
+        // everyone else.
+        const int32_t whistleTime = SDK::Player::PlayerWhistleTime(actor);
+        if (_whistleActor == actor && _whistleTime && *_whistleTime != whistleTime) {
+            Shared::Player::Whistle whistle;
+            whistle.networkId         = id;
+            whistle.missionGeneration = _missionGeneration;
+            whistle.spawnGeneration   = _spawnGeneration;
+            Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(whistle);
+        }
+        _whistleActor = actor;
+        _whistleTime  = whistleTime;
         if (_lastSent != std::chrono::steady_clock::time_point {} && now - _lastSent < kSendInterval) {
             return;
         }
@@ -666,7 +679,27 @@ namespace Mafia1Online::Features::Player {
         case static_cast<int16_t>(Animation::WalkForwardRight):
         case static_cast<int16_t>(Animation::WalkBackwardLeft):
         case static_cast<int16_t>(Animation::WalkBackwardRight):
-        case 102: return RemoteAnimation {base, false};
+        case 102:
+        // Panic (anim_info "panika ..."): an entity's freeze (AI_ACTION_FREEZE,
+        // Do_ShockDown) holds 62, 65 or 68 crouched, on all fours or lying
+        // until Do_ShockUp; standing panic, the panic runs and looking round.
+        case 55:
+        case 56:
+        case 57:
+        case 58:
+        case 59:
+        case 60:
+        case 62:
+        case 65:
+        case 68:
+        case 70:
+        case 71:
+        case 72:
+        case 73:
+        case 74:
+        case 75:
+        case 76:
+        case 77: return RemoteAnimation {base, false};
         // Jumps and the hard landing play once over the streamed arc.
         case 95:
         case 97:
@@ -675,6 +708,21 @@ namespace Mafia1Online::Features::Player {
         case 100:
         case 101:
         case 103:
+        // The startles (Do_ShockStart) and a freeze's way down and back up.
+        case 47:
+        case 48:
+        case 49:
+        case 50:
+        case 51:
+        case 52:
+        case 53:
+        case 54:
+        case 61:
+        case 63:
+        case 64:
+        case 66:
+        case 67:
+        case 69:
         // A car's side jump (C_human::Do_SideJump 0x587040, GAME_ANIM_DODGE_*
         // 322-329): once, as the owner's C_human::Update ends it on idle.
         case 322:
@@ -895,6 +943,8 @@ namespace Mafia1Online::Features::Player {
         _missionGeneration = 0;
         _sequence          = 0;
         _lastSent          = {};
+        _whistleTime       = std::nullopt;
+        _whistleActor      = nullptr;
         _localSeizedUntil  = {};
     }
 
