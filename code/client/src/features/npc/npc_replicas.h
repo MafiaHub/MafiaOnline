@@ -14,6 +14,7 @@
 #include <deque>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace Mafia1Online::SDK::Scene {
     struct NativeFrame;
@@ -95,7 +96,11 @@ namespace Mafia1Online::Features::Npc {
             bool failed = false;
         };
 
-        void Remove(World::WorldService &world, uint64_t networkId, const Replica &replica);
+        // A copy drawn this pass fades out first, as a retail walker leaving
+        // its despawn radius in view does (C_traffic_element::Tick); `fade`
+        // false removes it at once.
+        void Remove(World::WorldService &world, uint64_t networkId, const Replica &replica, bool fade);
+        void AdvanceFades();
         void ApplyPose(Replica &replica, void *actor, bool alive);
         // Eases the pose toward striking range of the local player while
         // engaged, and back to the pose after.
@@ -107,5 +112,14 @@ namespace Mafia1Online::Features::Npc {
         std::unordered_map<uint64_t, Replica> _replicas;
         // Every human this created, until its destructor hands the frame back.
         std::unordered_map<void *, SDK::Scene::NativeFrame *> _frames;
+        // Copies whose NPC went, fading out: the actor, its "base" visual
+        // (SetTransparency) and the opacity left.
+        struct Fading {
+            void *actor = nullptr;
+            SDK::Scene::NativeFrame *base = nullptr;
+            float alpha = 1.0f;
+        };
+        std::vector<Fading> _fading;
+        std::chrono::steady_clock::time_point _fadedAt {};
     };
 } // namespace Mafia1Online::Features::Npc

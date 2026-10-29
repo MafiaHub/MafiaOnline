@@ -140,6 +140,11 @@ namespace Mafia1Online::SDK::Scene {
         }
         // FRMFLAGS_ON, bit 0 of the flags SetOn (LS3DF 0x1001b400) writes at +0xac.
         bool IsOn() const { return (_flags & 1u) != 0; }
+        // I3D_frame m_iRenderStamp (+0x13c): the mission's render stamp
+        // (NativeMission::RenderStamp) on a frame drawn this pass.
+        uint32_t RenderStamp() const {
+            return *reinterpret_cast<const uint32_t *>(reinterpret_cast<const std::byte *>(this) + 0x13c);
+        }
         Player::NativeActor *ActorOwner() const {
             return _internalBuffer ? *static_cast<Player::NativeActor **>(_internalBuffer) : nullptr;
         }

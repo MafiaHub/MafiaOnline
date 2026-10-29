@@ -97,6 +97,7 @@ namespace Mafia1Online::Features::Npc {
             Reset(world);
             return;
         }
+        AdvanceFades();
         auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
         std::unordered_set<uint64_t> seen;
         const MafiaNet::Time networkNow = MafiaNet::GetTime();
@@ -194,7 +195,7 @@ namespace Mafia1Online::Features::Npc {
         // Out of the map first: removal can run the actor destructor now.
         for (const uint64_t id : gone) {
             auto node = _replicas.extract(id);
-            Remove(world, id, node.mapped());
+            Remove(world, id, node.mapped(), true);
         }
     }
 
@@ -428,10 +429,50 @@ namespace Mafia1Online::Features::Npc {
         return lead <= 0.0 || lead > kReachLeadLimitMs;
     }
 
-    void NpcReplicaService::Remove(World::WorldService &world, uint64_t networkId, const Replica &replica) {
+    void NpcReplicaService::Remove(World::WorldService &world, uint64_t networkId, const Replica &replica, bool fade) {
         auto *actor = static_cast<SDK::Player::NativeActor *>(world.NativeObjects().Resolve(replica.handle));
         world.NativeObjects().InvalidateNetwork(networkId);
-        if (actor && world.IsReady()) {
+        if (!actor || !world.IsReady()) {
+            return;
+        }
+        // Retail fades a walker leaving its despawn radius only while it is
+        // drawn, through its "base" mesh, and drops it at once otherwise
+        // (C_traffic_element::Tick, Create's m_pTransparencyObject); a
+        // C_player fades the same mesh (m_pAlphaObject). A seated copy goes
+        // with its seat at once.
+        const auto *seated = static_cast<const SDK::Seat::NativeHuman *>(static_cast<void *>(actor));
+        auto *base = actor->Frame()->FindChildFrame("base");
+        if (fade && !seated->usedActorEnter && !seated->usedActorLeave && base && base->SupportsTransparency() &&
+            actor->Frame()->RenderStamp() == SDK::Core::Mission::Get()->RenderStamp()) {
+            // Nothing moves it any more: it stands, not runs on the spot.
+            auto *human = static_cast<SDK::Player::NativeHuman *>(static_cast<void *>(actor));
+            if (!actor->IsDead() && Player::MovingGait(human->AnimationState())) {
+                human->SetLocomotionAnimation(SDK::Player::LocomotionAnimation::Idle);
+            }
+            _fading.push_back({actor, base, 1.0f});
+            return;
+        }
+        SDK::Core::Mission::Get()->Game()->RemoveTemporaryActor(actor);
+    }
+
+    void NpcReplicaService::AdvanceFades() {
+        const auto now = std::chrono::steady_clock::now();
+        const float seconds = _fadedAt == std::chrono::steady_clock::time_point {} ? 0.0f : std::min(std::chrono::duration<float>(now - _fadedAt).count(), 0.1f);
+        _fadedAt = now;
+        // Retail's rate: the whole opacity in a second (frameTime * 0.001).
+        std::vector<SDK::Player::NativeActor *> faded;
+        for (auto it = _fading.begin(); it != _fading.end();) {
+            it->alpha -= seconds;
+            if (it->alpha > 0.0f) {
+                it->base->SetTransparency(it->alpha);
+                ++it;
+                continue;
+            }
+            faded.push_back(static_cast<SDK::Player::NativeActor *>(it->actor));
+            it = _fading.erase(it);
+        }
+        // Out of the list first: removal runs the actor destructor now.
+        for (auto *actor : faded) {
             SDK::Core::Mission::Get()->Game()->RemoveTemporaryActor(actor);
         }
     }
@@ -443,6 +484,7 @@ namespace Mafia1Online::Features::Npc {
         }
         SDK::Scene::NativeFrame *frame = found->second;
         _frames.erase(found);
+        std::erase_if(_fading, [actor](const Fading &fading) { return fading.actor == actor; });
         // Destroyed natively while still streamed (mission close): the next
         // Update creates a new one if it is still here.
         for (auto it = _replicas.begin(); it != _replicas.end(); ++it) {
@@ -459,7 +501,15 @@ namespace Mafia1Online::Features::Npc {
         auto replicas = std::move(_replicas);
         _replicas.clear();
         for (const auto &[id, replica] : replicas) {
-            Remove(world, id, replica);
+            Remove(world, id, replica, false);
+        }
+        auto fading = std::move(_fading);
+        _fading.clear();
+        _fadedAt = {};
+        if (world.IsReady()) {
+            for (const auto &copy : fading) {
+                SDK::Core::Mission::Get()->Game()->RemoveTemporaryActor(static_cast<SDK::Player::NativeActor *>(copy.actor));
+            }
         }
     }
 } // namespace Mafia1Online::Features::Npc
