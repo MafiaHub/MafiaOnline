@@ -1347,6 +1347,7 @@ namespace Mafia1Online::Features::Npc {
             pose.locomotion = static_cast<int16_t>(human.AnimationState());
             pose.health = human.Health();
             pose.dead = actor->IsDead() || human.Health() <= 0.0f;
+            pose.deathAnimation = tracked.deathAnimation;
             pose.aiming = human.IsAiming();
             pose.crouching = human.IsCrouching();
             Vector3 target {};
@@ -1495,10 +1496,13 @@ namespace Mafia1Online::Features::Npc {
     }
 
     void NpcHost::OnHit(World::WorldService &world, NativeHuman &npc, SDK::Player::NativeHitType type, const Vector3 &direction, float damage, NativeActor *attacker,
-                        uint32_t bodyPart, float healthBefore) {
+                        uint32_t bodyPart, float healthBefore, uint16_t deathAnimation) {
         const auto found = _npcs.find(&npc.Actor());
         if (found == _npcs.end() || healthBefore <= 0.0f) {
             return;
+        }
+        if (Shared::Combat::NativeDeathAnimation(deathAnimation) && found->second.deathAnimation == 0) {
+            found->second.deathAnimation = deathAnimation;
         }
         const auto unit = Unit(direction, {0.0f, 0.0f, 1.0f});
         Shared::Npc::Damaged damaged;

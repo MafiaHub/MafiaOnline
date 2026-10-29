@@ -6,6 +6,7 @@
 #include "features/script/visual_scripting.h"
 #include "features/simulation/simulation_config.h"
 #include "shared/features/car/car_entity.h"
+#include "shared/features/combat/combat_protocol.h"
 #include "shared/features/combat/hit_report.h"
 
 #include <MinHook.h>
@@ -46,6 +47,9 @@ namespace Mafia1Online::Features::Death {
         thread_local unsigned gAuthoritativeDepth      = 0;
         thread_local uint16_t gAuthoritativeAnimation  = 0;
         thread_local unsigned gMovementDepth           = 0;
+        // Simulation host: the death a native Hit on one of its NPCs picked.
+        thread_local unsigned gCaptureDepth            = 0;
+        thread_local uint16_t gCapturedAnimation       = 0;
 
         bool IsSolidLocalHuman(const NativeHuman &human) {
             return Scripting::IsSolidLocalHumanActor(&human.Actor());
@@ -96,8 +100,11 @@ namespace Mafia1Online::Features::Death {
                     return true;
                 }
                 const float before = human->Health();
-                const bool result  = gHitOriginal(human, type, direction, position, normal, damage, attacker, bodyPart, frame);
-                application->Npcs().OnHit(application->World(), *human, type, direction, damage, attacker, bodyPart, before);
+                gCapturedAnimation = 0;
+                ++gCaptureDepth;
+                const bool result = gHitOriginal(human, type, direction, position, normal, damage, attacker, bodyPart, frame);
+                --gCaptureDepth;
+                application->Npcs().OnHit(application->World(), *human, type, direction, damage, attacker, bodyPart, before, gCapturedAnimation);
                 return result;
             }
             if (host) {
@@ -231,11 +238,18 @@ namespace Mafia1Online::Features::Death {
             }
         }
 
+        // Called only by C_human::Hit and C_traffic_element::Hit. A replayed
+        // death plays the one the host's Hit picked, head shots and crouched
+        // deaths included.
         int __fastcall DeathAnimationHook(int bodyPart, bool crouched, const Vector3 &hitDirection, const Vector3 &facing) {
-            if (gAuthoritativeDepth != 0 && gAuthoritativeAnimation >= 131 && gAuthoritativeAnimation <= 136) {
+            if (gAuthoritativeDepth != 0 && Shared::Combat::NativeDeathAnimation(gAuthoritativeAnimation)) {
                 return gAuthoritativeAnimation;
             }
-            return gAnimationOriginal(bodyPart, crouched, hitDirection, facing);
+            const int animation = gAnimationOriginal(bodyPart, crouched, hitDirection, facing);
+            if (gCaptureDepth != 0) {
+                gCapturedAnimation = static_cast<uint16_t>(animation);
+            }
+            return animation;
         }
 
         constexpr std::array<uintptr_t, 8> kAddresses {

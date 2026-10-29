@@ -62,6 +62,7 @@ namespace Mafia1Online::Features::Npc {
             return weaponId == 0 || (weaponId >= 2 && weaponId <= 4);
         }
 
+        // A death the host's Hit did not pick (Pose::deathAnimation 0).
         uint16_t DeathAnimation(uint64_t networkId) {
             return 131 + static_cast<uint16_t>(networkId % 6);
         }
@@ -260,6 +261,11 @@ namespace Mafia1Online::Features::Npc {
                     state.health = 0.0f;
                     state.aiming = false;
                     entity.alive = false;
+                    // The death the host played; DeathAnimation's otherwise.
+                    if (Shared::Combat::NativeDeathAnimation(pose.deathAnimation)) {
+                        state.deathAnimation = pose.deathAnimation;
+                    }
+                    entity.deathAnimation = state.deathAnimation;
                     npc->diedAt = now;
                 }
                 if (aimOnly) {

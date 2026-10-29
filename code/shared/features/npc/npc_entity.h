@@ -82,6 +82,9 @@ namespace Mafia1Online::Shared::Entities {
         uint16_t carActionAgeMs = kCarActionAgeUnknown;
         // Death is final: the corpse stays until the host retires it.
         bool alive = true;
+        // The death the host's NPC played (Combat::NativeDeathAnimation),
+        // with alive, so a copy that learns of the death here plays it.
+        uint16_t deathAnimation = 0;
         // The host's native locomotion state (C_human m_iAnimState), which
         // rides with the pose like a player's.
         int16_t locomotion = 1;
@@ -154,6 +157,7 @@ namespace Mafia1Online::Shared::Entities {
             fields.Field(carActionSeat);
             fields.Field(carActionAgeMs);
             fields.Field(alive);
+            fields.Field(deathAnimation);
             SerializeAnimation(fields);
             fields.Field(voice);
             fields.Field(speechLine);
@@ -172,6 +176,7 @@ namespace Mafia1Online::Shared::Entities {
 
         void SerializeFields(Framework::Networking::Replication::FieldSerializer &fields) override {
             fields.Field(alive);
+            fields.Field(deathAnimation);
             SerializeAnimation(fields);
             fields.Field(speechLine);
             fields.Field(speechRevision);

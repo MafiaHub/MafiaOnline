@@ -172,6 +172,9 @@ namespace Mafia1Online::Shared::Npc {
         int16_t locomotion = 1;
         float health = 0.0f;
         bool dead = false;
+        // Once dead: the death its Hit picked (Combat::NativeDeathAnimation),
+        // 0 for one that came another way.
+        uint16_t deathAnimation = 0;
         bool aiming = false;
         bool crouching = false;
         // Where the neck and back point, relative to the position: the shoot
@@ -216,6 +219,9 @@ namespace Mafia1Online::Shared::Npc {
                 stream->Serialize(write, pose.locomotion);
                 stream->Serialize(write, pose.health);
                 stream->Serialize(write, pose.dead);
+                if (pose.dead) {
+                    stream->Serialize(write, pose.deathAnimation);
+                }
                 stream->Serialize(write, pose.aiming);
                 stream->Serialize(write, pose.crouching);
                 stream->Serialize(write, pose.poseTargetX);

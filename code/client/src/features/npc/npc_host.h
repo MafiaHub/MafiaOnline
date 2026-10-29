@@ -137,9 +137,10 @@ namespace Mafia1Online::Features::Npc {
         void OnAttacked(World::WorldService &world, SDK::Player::NativeActor &npc, SDK::Player::NativeActor &attacker);
         // An officer's police action ticked in this state (police_host.cpp).
         void OnPoliceActionTick(SDK::Player::NativeActor *officer, uint32_t state);
-        // After a native Hit on one of them.
+        // After a native Hit on one of them; deathAnimation is the death
+        // that Hit picked (C_human::GetAnimIDForDeath), 0 for none.
         void OnHit(World::WorldService &world, SDK::Player::NativeHuman &npc, SDK::Player::NativeHitType type, const SDK::Player::Vector3 &direction, float damage,
-                   SDK::Player::NativeActor *attacker, uint32_t bodyPart, float healthBefore);
+                   SDK::Player::NativeActor *attacker, uint32_t bodyPart, float healthBefore, uint16_t deathAnimation);
         // A player's car the server checked ran into a human this host
         // runs (one of its NPCs, or a player's replica) at `speed`: what the
         // driven car's own collision would have told the police here
@@ -189,6 +190,8 @@ namespace Mafia1Online::Features::Npc {
             // The inventory last reported to the server.
             Shared::Npc::Inventory inventory;
             bool removeRequested = false;
+            // The death its fatal Hit played, for every replica to play.
+            uint16_t deathAnimation = 0;
             // Last time a hit turned this officer on another player.
             std::chrono::steady_clock::time_point lastRedirect;
             // Its police action's state and when it last ticked: states 10

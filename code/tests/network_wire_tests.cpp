@@ -185,6 +185,17 @@ namespace {
         snapshot.npcs[0].velocityZ = 1.5f;
         const auto snapshotRead    = RoundTrip(snapshot);
         CHECK(snapshotRead.count == 1 && Near(snapshotRead.npcs[0].velocityX, -3.0f, 0.02f) && Near(snapshotRead.npcs[0].velocityZ, 1.5f, 0.02f));
+        // The death its Hit picked travels once it is dead, a head shot
+        // crouched included.
+        snapshot.count                  = 2;
+        snapshot.npcs[0].deathAnimation = 140;
+        snapshot.npcs[1].dead           = true;
+        snapshot.npcs[1].deathAnimation = 146;
+        snapshot.npcs[1].health         = 0.0f;
+        const auto deathRead            = RoundTrip(snapshot);
+        CHECK(deathRead.count == 2 && deathRead.npcs[0].deathAnimation == 0 && deathRead.npcs[1].dead && deathRead.npcs[1].deathAnimation == 146);
+        CHECK(Shared::Combat::NativeDeathAnimation(146) && Shared::Combat::NativeDeathAnimation(131) && !Shared::Combat::NativeDeathAnimation(130) &&
+              !Shared::Combat::NativeDeathAnimation(147));
         Shared::Pedestrian::Snapshot walkers;
         walkers.count                = 1;
         walkers.walkers[0].velocityX = 0.75f;

@@ -87,6 +87,15 @@ namespace Mafia1Online::Shared::Combat {
         }
     }
 
+    // The deaths C_human::GetAnimIDForDeath (0x57a630) picks in Hit: standing
+    // 131-133 hit from behind, 134-136 from the front, 137-139 a head shot;
+    // crouched 140-143 and 144-146 a head shot.
+    inline constexpr uint16_t kFirstDeathAnimation = 131;
+    inline constexpr uint16_t kLastDeathAnimation  = 146;
+    inline bool NativeDeathAnimation(uint16_t animation) {
+        return animation >= kFirstDeathAnimation && animation <= kLastDeathAnimation;
+    }
+
     // A complete, versioned state replaces all earlier states for this life.
     // Reliable delivery also repairs a missed action or a late join.
     struct State {

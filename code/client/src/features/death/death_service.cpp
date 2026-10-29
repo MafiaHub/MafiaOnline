@@ -178,8 +178,9 @@ namespace Mafia1Online::Features::Death {
         }
         combat.HoldDamage(std::move(heldDamage));
         // Players and simulation host NPCs die the same way; an NPC as soon as
-        // either its entity or its Combat::State says so.
-        const auto applyDeath = [&](uint64_t networkId, uint64_t spawnGeneration, bool killed) {
+        // either its entity or its Combat::State says so, the entity with the
+        // death the host played (`animation`).
+        const auto applyDeath = [&](uint64_t networkId, uint64_t spawnGeneration, bool killed, uint16_t animation) {
             const auto *state        = combat.GetState(networkId);
             if (!state || !state->spawned || state->missionGeneration != world.LoadedMissionGeneration() || state->spawnGeneration != spawnGeneration) {
                 _applied.erase(networkId);
@@ -211,7 +212,10 @@ namespace Mafia1Online::Features::Death {
             if (!actor->IsDead()) {
                 human->SetHealth(std::max(human->Health(), 1.0f));
                 actor->RestoreLivingState();
-                if (ReplayAuthoritativeDeath(*human, state->deathAnimation == 0 ? 134 : state->deathAnimation)) {
+                if (animation == 0) {
+                    animation = state->deathAnimation == 0 ? 134 : state->deathAnimation;
+                }
+                if (ReplayAuthoritativeDeath(*human, animation)) {
                     _applied[networkId] = applied;
                     // Streamed in or recreated after the death: retail's own
                     // Death still runs on the next tick, from the end pose.
@@ -226,9 +230,9 @@ namespace Mafia1Online::Features::Death {
                 _applied[networkId] = applied;
             }
         };
-        replication->ForEach<Shared::Entities::PlayerEntity>([&](Shared::Entities::PlayerEntity *player) { applyDeath(player->GetNetworkID(), player->spawnGeneration, false); });
+        replication->ForEach<Shared::Entities::PlayerEntity>([&](Shared::Entities::PlayerEntity *player) { applyDeath(player->GetNetworkID(), player->spawnGeneration, false, 0); });
         replication->ForEach<Shared::Entities::NpcEntity>([&](Shared::Entities::NpcEntity *npc) {
-            applyDeath(npc->GetNetworkID(), Shared::Entities::NpcEntity::kSpawnGeneration, !npc->alive);
+            applyDeath(npc->GetNetworkID(), Shared::Entities::NpcEntity::kSpawnGeneration, !npc->alive, npc->alive ? 0 : npc->deathAnimation);
         });
     }
 
