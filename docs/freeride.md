@@ -57,11 +57,19 @@ first start and left in place.
 | F1 (hold) | The mod's own list of who is in town. |
 | Tab (hold) | The retail city map, with blips for job stations, fires and ambulance calls, your objectives (an arrow at the border when off the shown part) and your crewmates. |
 | T | Chat. Every command below can also be typed. |
+| V (hold) | Talk on proximity voice; players who hear you see a speaker above your name. |
 | N / B | At a shop or bar counter: next offer / buy or accept it. |
-| F9 | Car radio on or off. |
+| F9 | Car radio on or off (also `/radio on` or `/radio off`); remembered with your record. |
 | K | Siren, in a police car. |
 | U | At a telephone booth, on police duty: call for backup. |
 | G | Under a station's arrow: sign on or clock off. On fire duty: hold to spray the hose (or the truck's roof cannon from its wheel), press next to a trapped civilian to lead them out. On ambulance duty: hold next to a patient to treat them. Down and waiting for a medic: press to give up and wake at the hospital. On the tobacco farm: press on an empty plot to plant, hold to water, pick off hornworms or pick ripe leaves. At the rum still: press to fire it up, tap to vent the pressure, hold to bottle, patch or steal; press beside a character to talk, and in a car stopped at the village store to buy molasses. At a home's door: buy it (press twice), go in, or knock; inside, at a door arrow: go out or into the next room; decorating: pick up and put down a piece; on your home's parking spot: park the car you sit in, or take a parked one out. |
+
+These are the default keys. Esc → Settings → Controls (or Settings in the
+city menu) moves any of them, the retail on-foot and car controls included;
+Free Ride's own keys are listed under "Server: freeride", and the prompts and
+the menu's Help page show the key the player chose. The Gameplay page has the
+car radio switch (the same choice as F9 and `/radio`), and the Audio page
+the radio's volume.
 
 Every button in the city menu sends the same command a player could type, so
 chat and menu share one set of server checks (`server/lib/commands.js`).
@@ -917,7 +925,8 @@ two-hour weather front, chosen from the date, brings rain,
 or sometimes snow in winter, that grows and fades over the front. City music
 is off; the car radio plays the
 [Jazz Club Bandstand](https://www.internet-radio.com/station/bandstand/) live
-stream while you drive.
+stream while you drive, at the "Car radio and server pages" volume of the
+player's settings.
 
 Broken booths, hydrants and bins stay down for everyone until the city crew
 comes round five minutes after the first damage; `/props` shows the damage

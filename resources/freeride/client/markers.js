@@ -19,6 +19,13 @@ const BOUNTY_RANGE = 350;
 const MODEL_RETRY_MS = 2000;
 const BLIP_SYNC_MS = 500;
 const RING_SEGMENTS = 32;
+// A ring this far away is a few pixels across: fewer segments do.
+const FAR_RING_SEGMENTS = 12;
+const FAR_RING_DISTANCE = 50;
+// How often a label's line of sight (a raycast) and the bounty list are
+// checked; the labels still follow their positions every frame.
+const LABEL_SIGHT_MS = 150;
+const BOUNTY_REFRESH_MS = 250;
 const HINT_NEAR = 15;
 const ARROW_MODEL = "sipka.i3d";
 
@@ -27,6 +34,14 @@ const models = new Map();
 // Blip id -> the options it was last set with, so only changes are sent.
 const blips = new Map();
 let blipsSyncedAt = 0;
+// This frame's streamed vehicles by id, built on first use: World.getVehicles()
+// makes a new object for every vehicle, once per frame is enough.
+let frameVehicles = null;
+// Item key -> {at, visible} of its label's last line-of-sight test.
+const labelSight = new Map();
+// [{player, text}] of wanted players, refreshed every BOUNTY_REFRESH_MS.
+let bounties = [];
+let bountiesAt = 0;
 
 function argb(hex, alpha = 1) {
     const rgb = typeof hex === "string" && /^#[0-9a-f]{6}$/i.test(hex) ? parseInt(hex.slice(1), 16) : 0xf3e9d6;
@@ -42,7 +57,9 @@ function eyePosition() {
 }
 
 function streamedVehicle(item) {
-    return typeof item.vehicleId === "number" ? World.getVehicles().find((candidate) => candidate.id === item.vehicleId) ?? null : null;
+    if (typeof item.vehicleId !== "number") return null;
+    if (frameVehicles === null) frameVehicles = new Map(World.getVehicles().map((vehicle) => [vehicle.id, vehicle]));
+    return frameVehicles.get(item.vehicleId) ?? null;
 }
 
 // A vehicle item follows the vehicle while it is streamed here, and falls
@@ -72,10 +89,10 @@ function hideModel(group, item) {
     models.get(`${group}/${item.id}`)?.frame?.setVisible(false);
 }
 
-function circle(center, radius, height, thickness, color) {
+function circle(center, radius, height, thickness, color, segments) {
     let previous = null;
-    for (let step = 0; step <= RING_SEGMENTS; step++) {
-        const angle = step / RING_SEGMENTS * Math.PI * 2;
+    for (let step = 0; step <= segments; step++) {
+        const angle = step / segments * Math.PI * 2;
         const point = Scene.projectWorld({x: center.x + Math.cos(angle) * radius, y: center.y + height, z: center.z + Math.sin(angle) * radius}, false);
         const visible = point && point.x !== null;
         if (visible && previous) Draw.line(previous.x, previous.y, point.x, point.y, thickness, color);
@@ -83,8 +100,8 @@ function circle(center, radius, height, thickness, color) {
     }
 }
 
-function drawRing(center, radius, color) {
-    circle(center, radius, 0.4, 3, argb(color, 0.6));
+function drawRing(center, radius, color, distance) {
+    circle(center, radius, 0.4, 3, argb(color, 0.6), distance - radius > FAR_RING_DISTANCE ? FAR_RING_SEGMENTS : RING_SEGMENTS);
 }
 
 // A dark plate centred on (x, y) with the item's colour down its edge: the
@@ -143,14 +160,22 @@ function drawItems(eye, now) {
                 continue;
             }
             if (item.model) drawModel(group, item, position, now);
-            if (item.ring && distance < item.ring * 6) drawRing(position, item.ring, item.color);
+            if (item.ring && distance < item.ring * 6) drawRing(position, item.ring, item.color, distance);
             if (item.beacon && distance < BEACON_RANGE) drawBeacon(position, item.color, distance);
             const near = item.near ?? (item.primary ? PRIMARY_LABEL_NEAR : LABEL_NEAR);
             if (!item.label || distance > near) continue;
             // Not through walls: a label behind a building waits for the corner.
             // It sinks toward eye level up close, so it stays in view there.
             const lift = Math.min(item.vehicleId ? 2.6 : item.model ? 3.4 : 3, 1.6 + distance * 0.25);
-            const label = Scene.projectWorld({x: position.x, y: position.y + lift, z: position.z}, true);
+            const anchor = {x: position.x, y: position.y + lift, z: position.z};
+            const key = `${group}/${item.id}`;
+            let sight = labelSight.get(key);
+            if (!sight || now - sight.at >= LABEL_SIGHT_MS) {
+                sight = {at: now, visible: Boolean(Scene.projectWorld(anchor, true)?.visible)};
+                labelSight.set(key, sight);
+            }
+            if (!sight.visible) continue;
+            const label = Scene.projectWorld(anchor, false);
             if (!label?.visible) continue;
             // Fades in over the last fifth of its reach instead of popping up.
             const alpha = Math.min(1, (near - distance) / (near * 0.2));
@@ -160,15 +185,28 @@ function drawItems(eye, now) {
     }
 }
 
-function drawPeople(eye) {
-    for (const player of World.getPlayers()) {
-        if (player.isLocal || !player.alive) continue;
-        const position = player.getWorldPosition();
-        if (!position) continue;
-        const bounty = player.state.get("fr.bounty");
-        if (bounty && flatDistance(eye, position) < BOUNTY_RANGE) {
-            Draw.worldText(`$${bounty.toLocaleString("en-US")} BOUNTY`, {x: position.x, y: position.y + 2.7, z: position.z}, 15, argb("#d0574a"), 3, true);
+function drawPeople(eye, now) {
+    // Bounties change seldom; reading every player's state each frame does not pay.
+    if (now - bountiesAt >= BOUNTY_REFRESH_MS) {
+        bountiesAt = now;
+        bounties = [];
+        for (const player of World.getPlayers()) {
+            if (player.isLocal || !player.alive) continue;
+            const bounty = player.state.get("fr.bounty");
+            if (bounty) bounties.push({player, text: `$${bounty.toLocaleString("en-US")} BOUNTY`});
         }
+    }
+    for (const {player, text} of bounties) {
+        // A handle kept from the last refresh stops resolving once its player leaves.
+        let position = null;
+        try {
+            position = player.getWorldPosition();
+        }
+        catch {
+            continue;
+        }
+        if (!position || flatDistance(eye, position) >= BOUNTY_RANGE) continue;
+        Draw.worldText(text, {x: position.x, y: position.y + 2.7, z: position.z}, 15, argb("#d0574a"), 3, true);
     }
 }
 
@@ -231,6 +269,7 @@ function syncBlips() {
 Events.on("fr:markers", (request) => {
     if (typeof request?.group !== "string" || !Array.isArray(request.items)) return;
     releaseModels(request.group);
+    for (const key of [...labelSight.keys()]) if (key.startsWith(`${request.group}/`)) labelSight.delete(key);
     if (request.items.length) groups.set(request.group, request.items);
     else groups.delete(request.group);
     blipsSyncedAt = 0;
@@ -239,6 +278,8 @@ Events.on("fr:markers", (request) => {
 Events.on("missionUnload", () => {
     groups.clear();
     models.clear();
+    labelSight.clear();
+    bounties = [];
     // The mission's blips went with it.
     blips.clear();
 });
@@ -251,6 +292,7 @@ Events.on("resourceStop", (name) => {
 Events.on("render", () => {
     if (!World.isReady() || !LocalPlayer?.spawned) return;
     const now = Date.now();
+    frameVehicles = null;
     // Vehicles and crewmates stream in and out.
     if (now - blipsSyncedAt >= BLIP_SYNC_MS) {
         blipsSyncedAt = now;
@@ -264,5 +306,5 @@ Events.on("render", () => {
     const eye = eyePosition();
     if (!eye) return;
     drawItems(eye, now);
-    drawPeople(eye);
+    drawPeople(eye, now);
 });

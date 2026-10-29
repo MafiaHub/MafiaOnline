@@ -26,7 +26,8 @@ const CAR_REACH = 8;
 const TIP_EVERY_MS = 7 * 60_000;
 const MENU_COMMAND_INTERVAL_MS = 300;
 const MENU_REQUEST_INTERVAL_MS = 800;
-const LEADERBOARD_CACHE_MS = 5000;
+// Sorting every record ever saved: a minute old is fresh enough.
+const LEADERBOARD_CACHE_MS = 60_000;
 
 
 const spawnedInGeneration = new Map();
@@ -278,10 +279,10 @@ onClient("fr:car:choose", (player, request) => {
     if (result.ok) toast(player, result.message, {tone: "good"});
 });
 
-onClient("fr:menu:request", (player) => {
+onClient("fr:menu:request", (player, request) => {
     if (cooldown(player, "menu", MENU_REQUEST_INTERVAL_MS)) return;
     util.emit(player, "fr:menu:data", {
-        ...menu.collect(player),
+        ...menu.collect(player, typeof request?.tab === "string" ? request.tab : null),
         commands: commands.list(),
         you: {name: player.nickname, money: player.money, ...profiles.progress(profiles.get(player) ?? {xp: 0})},
     });
@@ -302,7 +303,7 @@ menu.provide("leaderboard", () => {
         }};
     }
     return leaderboardCache.board;
-});
+}, ["leaders"]);
 
 commands.register({name: "help", aliases: ["commands"], usage: "/help", help: "List the commands in chat.", category: "City"}, (player) => {
     const byCategory = new Map();

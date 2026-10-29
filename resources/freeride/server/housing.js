@@ -84,9 +84,17 @@ const MAP_LISTS = {freeride: ["city"], freeride_extended: ["city", "extended"], 
     }
 }
 
+// The houses of the current map, kept per map: the tick asks for them for
+// every player several times a second. Read only.
+let hereCache = {map: undefined, houses: []};
+
 function here() {
-    const lists = MAP_LISTS[maps.current()?.id] ?? [];
-    return [...ALL.values()].filter((house) => lists.includes(house.list));
+    const map = maps.current()?.id;
+    if (hereCache.map !== map) {
+        const lists = MAP_LISTS[map] ?? [];
+        hereCache = {map, houses: [...ALL.values()].filter((house) => lists.includes(house.list))};
+    }
+    return hereCache.houses;
 }
 
 function title(house) {
@@ -983,7 +991,7 @@ menu.provide("homes", (player) => {
             return [tier, prices.length ? [Math.min(...prices), Math.max(...prices)] : null];
         })),
     };
-});
+}, ["homes"]);
 
 // ---- Lifecycle ------------------------------------------------------------------------
 onStart(() => {

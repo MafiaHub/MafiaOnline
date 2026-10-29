@@ -195,6 +195,9 @@ const COMPASS_PRIORITY = 45;
 const TICK_MS = 250;
 const CARD_MS = 1000;
 const SAVE_MS = 15_000;
+// Plants growing is all that changed: saved this often, the field document
+// is not rewritten every SAVE_MS while anything grows.
+const GROWTH_SAVE_MS = 60_000;
 const MAX_STEP_MS = 2000;
 const NOTICE_EVERY_MS = 45_000;
 const XP = {plant: 2, water: 3, pick: 4, harvest: 6, sell: 10};
@@ -221,6 +224,7 @@ let lastTick = 0;
 let lastCardAt = 0;
 let lastSaveAt = 0;
 let dirty = false;
+let grew = false;
 let wasRaining = false;
 let timer = null;
 
@@ -288,6 +292,7 @@ function persist() {
     const kept = [...stocks].filter(([, stock]) => stock.leaves.n || stock.curing.length || stock.cured.n);
     store.save(STORE, {plants: [...field.values()], stocks: Object.fromEntries(kept)});
     dirty = false;
+    grew = false;
     lastSaveAt = Date.now();
 }
 
@@ -405,11 +410,13 @@ function grow(dt) {
                 if (plant.pestAt !== null && plant.grown >= plant.pestAt) {
                     plant.pest = true;
                     plant.pestAt = null;
+                    dirty = true;
                     notice(plant.ownerKey, "pest", "Hornworms are eating one of your plants! Hold G at it to pick them off.", "bad");
                 }
                 if (plant.grown >= STAGE_MS[plant.stage]) {
                     plant.stage++;
                     plant.grown = 0;
+                    dirty = true;
                     if (plant.stage >= RIPE) {
                         plant.ripeMs = 0;
                         notice(plant.ownerKey, "ripe", "Your tobacco is ripe. Hold G at it to pick the leaves before they spoil.", "good");
@@ -426,7 +433,7 @@ function grow(dt) {
             notice(plant.ownerKey, "withered", "One of your tobacco plants withered.", "bad");
         }
     }
-    if (field.size) dirty = true;
+    if (field.size) grew = true;
 }
 
 function lookOf(plant) {
@@ -1066,7 +1073,7 @@ function tick() {
         lastCardAt = now;
         for (const player of World.getPlayers()) present(player);
     }
-    if (dirty && now - lastSaveAt >= SAVE_MS) persist();
+    if ((dirty && now - lastSaveAt >= SAVE_MS) || (grew && now - lastSaveAt >= GROWTH_SAVE_MS)) persist();
 }
 
 // Signing on happens under the barn's arrow; the command shows the way there

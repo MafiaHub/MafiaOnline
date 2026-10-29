@@ -10,6 +10,11 @@
     let active = false;
     let retryTimer = null;
 
+    function volumeOf(detail) {
+      const volume = Number(detail?.volume);
+      return Number.isFinite(volume) ? Math.max(0, Math.min(1, volume)) : 0.72;
+    }
+
     function tell(event) {
       if (typeof callEvent === "function") callEvent(event, "{}");
     }
@@ -41,9 +46,10 @@
       stop();
       active = true;
       audio.src = stream;
-      audio.volume = Math.max(0, Math.min(1, Number(detail?.volume) || 0.72));
+      audio.volume = volumeOf(detail);
       audio.play().catch(retry);
     });
+    window.addEventListener("radio:volume", ({detail}) => { audio.volume = volumeOf(detail); });
     window.addEventListener("radio:stop", stop);
   </script>
 </body>

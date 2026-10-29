@@ -15,6 +15,11 @@ const hud = {
     menuTab: "city",
     menuTimer: null,
     carNames: null,
+    // The menu's sections so far (the server builds the costly ones only for
+    // their tab) and what the page was last given, so an unchanged refresh
+    // does not rebuild the whole panel.
+    menuData: {},
+    menuPosted: "",
     pickerOpen: false,
     lastPlayerState: "",
     compass: new Map(),
@@ -52,6 +57,11 @@ function openView() {
         requestMenu();
     });
     Web.on(view, "hud:close", () => { if (view === hud.view) closeMenu(); });
+    Web.on(view, "hud:settings", () => {
+        if (view !== hud.view) return;
+        closeMenu();
+        Settings.open();
+    });
     Web.on(view, "hud:car", () => {
         if (view !== hud.view) return;
         closeMenu();
@@ -76,7 +86,11 @@ function openMenu(tab) {
     openView();
     if (tab) hud.menuTab = tab;
     hud.menuOpen = true;
-    post("menu:open", {tab: hud.menuTab});
+    hud.menuPosted = "";
+    // The help page names the keys the player has now, not the defaults.
+    const keys = {};
+    for (const key of ["f2", "f9", "b", "n", "g", "u"]) keys[key] = Settings.getKeyLabel(key);
+    post("menu:open", {tab: hud.menuTab, keys});
     if (hud.view !== null) Web.focusView(hud.view, true);
     requestMenu();
     clearInterval(hud.menuTimer);
@@ -143,7 +157,11 @@ Events.on("fr:menu:data", (data) => {
         hud.carNames = new Map(Scene.getCarCatalog().map((entry) => [entry.model.toLowerCase(), entry.name]));
     }
     for (const entry of data?.export?.models ?? []) entry.name = hud.carNames.get(entry.model) ?? entry.model.replace(/00\.i3d$/i, "");
-    post("menu:data", data);
+    hud.menuData = {...hud.menuData, ...data};
+    const posted = JSON.stringify(hud.menuData);
+    if (posted === hud.menuPosted) return;
+    hud.menuPosted = posted;
+    post("menu:data", hud.menuData);
 });
 Events.on("fr:compass", (request) => {
     if (typeof request?.source !== "string") return;
@@ -159,6 +177,7 @@ Events.onLocal("fr:car:picker", ({open}) => {
     post("visibility", {hidden: hud.pickerOpen});
 });
 
+Settings.describeKey("f2", "City menu");
 Key.bind("f2", () => {
     if (hud.menuOpen) closeMenu();
     else openMenu();
@@ -181,6 +200,7 @@ Events.on("missionReady", () => {
 });
 Events.on("missionUnload", () => {
     closeMenu();
+    hud.menuData = {};
     hud.compass.clear();
     hud.compassKey = null;
     post("reset");

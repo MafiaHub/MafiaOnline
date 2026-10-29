@@ -92,7 +92,24 @@ const CHARACTERS = [
     {name: "Drifter", file: "Homeless01.i3d", role: "The Down-and-Out"},
 ];
 
-const accounts = createAccounts({load: () => store.load("accounts"), save: (doc) => store.save("accounts", doc)});
+// Every login rewrites the whole accounts document (a token is replaced):
+// after a restart the whole server logs in at once, so the writes within a
+// second come to one. The resource's stop writes what is still waiting.
+const ACCOUNTS_SAVE_DELAY_MS = 1000;
+let pendingAccounts = null;
+let accountsTimer = null;
+
+function flushAccounts() {
+    clearTimeout(accountsTimer);
+    accountsTimer = null;
+    if (pendingAccounts) store.save("accounts", pendingAccounts);
+    pendingAccounts = null;
+}
+
+const accounts = createAccounts({load: () => store.load("accounts"), save: (doc) => {
+    pendingAccounts = doc;
+    accountsTimer ??= setTimeout(flushAccounts, ACCOUNTS_SAVE_DELAY_MS);
+}});
 // player id -> {account, needsLook}
 const sessions = new Map();
 // player id -> a ticket for the one login request in flight
@@ -117,6 +134,8 @@ const HANDOFF_MS = 10 * 60_000;
 // Often enough that a dropped connection loses only a few steps. Not on
 // disconnect: life.js has already ended the player's activity by then.
 const RESUME_SAVE_MS = 5000;
+// Closer than this to the saved spot it is not saved again.
+const RESUME_MOVED = 5;
 let resumeTimer = null;
 
 function connected(player) {
@@ -172,8 +191,14 @@ function saveResume(player) {
     const position = plain(player.position);
     if (![position.x, position.y, position.z].every(Number.isFinite)) return;
     const {weapons, selected} = life.loadoutOf(player);
-    profiles.setField(player, "resume", {mission: World.getMission(), position, heading: headingOf(player.rotation), health: player.health,
-        weapons, selected, wanted: Police.getRecord(player)?.level ?? 0, at: Date.now()});
+    const resume = {mission: World.getMission(), position, heading: headingOf(player.rotation), health: player.health,
+        weapons, selected, wanted: Police.getRecord(player)?.level ?? 0, at: Date.now()};
+    // Every change rewrites the whole record: a player standing still, or
+    // barely moving, keeps the one already saved.
+    const saved = profiles.get(player)?.resume;
+    if (saved && saved.mission === resume.mission && distance(saved.position, position) < RESUME_MOVED && saved.health === resume.health &&
+        saved.selected === resume.selected && saved.wanted === resume.wanted && JSON.stringify(saved.weapons) === JSON.stringify(weapons)) return;
+    profiles.setField(player, "resume", resume);
 }
 
 function resumeOf(player) {
@@ -462,6 +487,7 @@ onStart(() => {
 });
 onStop(() => {
     clearInterval(resumeTimer);
+    flushAccounts();
     for (const player of World.getPlayers()) saveResume(player);
     store.save("login_sessions", {at: Date.now(), sessions: World.getPlayers().filter((player) => sessions.has(player.id))
         .map((player) => ({id: player.id, nickname: player.nickname, hardwareId: player.hardwareId, account: sessions.get(player.id).account}))});

@@ -31,6 +31,11 @@ function feed(kind, parts) {
 // Activity cards on the right of the HUD; null removes the card. Many are
 // refreshed on a timer, so one that has not changed is not sent again.
 const lastCards = new Map();
+// Jobs refresh the compass and their markers on a timer too; the same goes
+// for them (a marker list resent also reloads its models). The client
+// forgets them with its HUD page or the mission, and so does this.
+const lastCompass = new Map();
+const lastMarkers = new Map();
 
 function card(player, id, content) {
     const key = `${player.id}:${id}`;
@@ -40,24 +45,49 @@ function card(player, id, content) {
     player.emit("fr:card", payload);
 }
 
-function forgetCards(player) {
-    for (const key of [...lastCards.keys()]) if (key.startsWith(`${player.id}:`)) lastCards.delete(key);
+function forget(sent, player) {
+    for (const key of [...sent.keys()]) if (key.startsWith(`${player.id}:`)) sent.delete(key);
 }
 
-// A freshly loaded HUD page shows no cards, whatever was sent before.
-Events.onClient("fr:hud:ready", (player) => { if (player) forgetCards(player); });
-Events.on("playerDisconnect", forgetCards);
-Events.on("missionChange", () => lastCards.clear());
+function forgetCards(player) {
+    forget(lastCards, player);
+}
+
+function forgetAll(player) {
+    forget(lastCards, player);
+    forget(lastCompass, player);
+    forget(lastMarkers, player);
+}
+
+// A freshly loaded HUD page shows no cards, whatever was sent before; a
+// mission load drops the markers, a spawn the compass.
+Events.onClient("fr:hud:ready", (player) => { if (player) forgetAll(player); });
+Events.on("playerMissionReady", (player) => { forget(lastMarkers, player); forget(lastCompass, player); });
+Events.on("playerSpawn", (player) => forget(lastCompass, player));
+Events.on("playerDisconnect", forgetAll);
+Events.on("missionChange", () => {
+    lastCards.clear();
+    lastCompass.clear();
+    lastMarkers.clear();
+});
+
+function sendOnce(sent, player, key, name, data) {
+    const payload = JSON.stringify(data);
+    if (sent.get(key) === payload) return;
+    sent.set(key, payload);
+    player.emit(name, payload);
+}
 
 function compass(player, source, priority, target) {
-    emit(player, "fr:compass", {source, priority, target: target ?? null});
+    sendOnce(lastCompass, player, `${player.id}:${source}`, "fr:compass", {source, priority, target: target ?? null});
 }
 
 function markers(player, group, items) {
-    emit(player, "fr:markers", {group, items: items ?? []});
+    sendOnce(lastMarkers, player, `${player.id}:${group}`, "fr:markers", {group, items: items ?? []});
 }
 
 function markersAll(group, items) {
+    for (const key of [...lastMarkers.keys()]) if (key.endsWith(`:${group}`)) lastMarkers.delete(key);
     broadcast("fr:markers", {group, items: items ?? []});
 }
 

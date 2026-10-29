@@ -1,11 +1,12 @@
 // Getting together: private messages, asking for a ride to a friend, and
 // watching another player's camera.
 const life = require("./lib/life.js");
+const profiles = require("./lib/profiles.js");
 const invites = require("./lib/invites.js");
 const menu = require("./lib/menu.js");
 const commands = require("./lib/commands.js");
 const {toast, feed, name, text, COLORS} = require("./lib/notify.js");
-const {MAIN_WORLD, distance, playable, findPlayer, headingOf, formatMoney} = require("./lib/util.js");
+const {MAIN_WORLD, distance, playable, findPlayer, headingOf, formatMoney, emit, onClient} = require("./lib/util.js");
 
 const GOTO_COOLDOWN_MS = 60_000;
 const RECENT_DAMAGE_MS = 15_000;
@@ -159,11 +160,38 @@ menu.provide("players", (viewer) => ({
         activity: player.state.get("fr.activity") ?? null, bounty: player.state.get("fr.bounty") ?? null, spawned: player.spawned,
     })),
     invites: invites.listFor(viewer),
-}));
+}), ["city", "players"]);
 
-// Everyone's HUD lists who is talking on proximity voice.
-Events.on("playerVoiceStart", (player) => Events.emitAllClients("fr:voice", {id: player.id, name: player.nickname, talking: true}));
-Events.on("playerVoiceStop", (player) => Events.emitAllClients("fr:voice", {id: player.id, name: player.nickname, talking: false}));
+// The HUD lists who is talking nearby on proximity voice. Only players in
+// earshot are told (a shout carries 25 m): sent to the whole server, every
+// word anyone said anywhere repainted every HUD. The stop goes to the same
+// players as the start, wherever they are by then.
+const VOICE_LIST_RANGE = 40;
+const voiceListeners = new Map();
+
+function voiceNote(player, talking) {
+    return {id: player.id, name: player.nickname, talking};
+}
+
+Events.on("playerVoiceStart", (player) => {
+    const listeners = World.getPlayers().filter((other) => other.id === player.id ||
+        (other.virtualWorld === player.virtualWorld && distance(other.position, player.position) <= VOICE_LIST_RANGE));
+    voiceListeners.set(player.id, new Set(listeners.map((other) => other.id)));
+    for (const other of listeners) emit(other, "fr:voice", voiceNote(player, true));
+});
+
+function endVoice(player) {
+    const listeners = voiceListeners.get(player.id);
+    voiceListeners.delete(player.id);
+    if (!listeners) return;
+    for (const other of World.getPlayers()) if (other.id !== player.id && listeners.has(other.id)) emit(other, "fr:voice", voiceNote(player, false));
+}
+
+Events.on("playerVoiceStop", (player) => {
+    // The speaker's own HUD too.
+    if (voiceListeners.has(player.id)) emit(player, "fr:voice", voiceNote(player, false));
+    endVoice(player);
+});
 
 Events.on("playerDamage", (victim, {attacker}) => {
     lastDamage.set(victim.id, Date.now());
@@ -172,4 +200,24 @@ Events.on("playerDamage", (victim, {attacker}) => {
 Events.on("playerDisconnect", (player) => {
     lastDamage.delete(player.id);
     lastGoto.delete(player.id);
+    endVoice(player);
+});
+
+// The car radio's on/off, kept with the player's record. The client owns the
+// radio itself; F9 and /radio both flip it and the choice comes back on spawn.
+function sendRadio(player) {
+    const record = profiles.get(player);
+    if (record) emit(player, "fr:radio:setting", {enabled: record.radio !== false});
+}
+
+Events.on("playerSpawn", sendRadio);
+onClient("fr:radio:set", (player, request) => {
+    if (typeof request?.enabled === "boolean" && profiles.get(player)) profiles.setField(player, "radio", request.enabled);
+});
+commands.register({name: "radio", usage: "/radio [on|off]", help: "Turn the car radio on or off; Free Ride remembers it (F9 does the same).", category: "Cars"}, (player, args) => {
+    const record = profiles.get(player);
+    if (!record) return;
+    const wanted = args[0] === "on" ? true : args[0] === "off" ? false : record.radio === false;
+    profiles.setField(player, "radio", wanted);
+    emit(player, "fr:radio:setting", {enabled: wanted, announce: true});
 });

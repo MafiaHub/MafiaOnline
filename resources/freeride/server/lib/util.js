@@ -61,12 +61,40 @@ function playable(player) {
         player.missionGeneration === World.getMissionGeneration());
 }
 
+// World.getPlayers() and getVehicles() wrap every entity (traffic cars too)
+// afresh, and tick handlers look many up by id: one index serves a whole
+// synchronous run. An id missing from it is looked up afresh, for an entity
+// created earlier in the same run.
+let playerIndex = null;
+let vehicleIndex = null;
+let indexReset = false;
+
+function dropIndexesLater() {
+    if (indexReset) return;
+    indexReset = true;
+    setImmediate(() => {
+        playerIndex = null;
+        vehicleIndex = null;
+        indexReset = false;
+    });
+}
+
 function playerById(id) {
-    return World.getPlayers().find((player) => player.id === id) ?? null;
+    if (id === undefined || id === null) return null;
+    if (playerIndex === null) {
+        playerIndex = new Map(World.getPlayers().map((player) => [player.id, player]));
+        dropIndexesLater();
+    }
+    return playerIndex.get(id) ?? World.getPlayers().find((player) => player.id === id) ?? null;
 }
 
 function vehicleById(id) {
-    return id === undefined || id === null ? null : World.getVehicles().find((vehicle) => vehicle.id === id) ?? null;
+    if (id === undefined || id === null) return null;
+    if (vehicleIndex === null) {
+        vehicleIndex = new Map(World.getVehicles().map((vehicle) => [vehicle.id, vehicle]));
+        dropIndexesLater();
+    }
+    return vehicleIndex.get(id) ?? World.getVehicles().find((vehicle) => vehicle.id === id) ?? null;
 }
 
 // "#4" picks a player ID; otherwise an exact nickname wins over a unique prefix.

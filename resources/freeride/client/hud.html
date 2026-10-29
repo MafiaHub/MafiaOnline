@@ -83,8 +83,8 @@
     /* Voice */
     #voice { position: fixed; left: clamp(14px, 2vw, 32px); bottom: clamp(140px, 22vh, 220px); display: flex; flex-direction: column; gap: 4px; }
     .speaker { display: flex; align-items: center; gap: 7px; padding: 4px 10px 4px 7px; background: rgba(12, 14, 16, .72); border-left: 3px solid var(--green); font: 700 12px/1.2 var(--sans); animation: slide .2s ease-out; }
-    .speaker i { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 1s ease-in-out infinite alternate; }
-    @keyframes pulse { to { opacity: .35; } }
+    /* Steady: a pulse repainted the page every frame while anyone talked. */
+    .speaker i { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
 
     /* Level strip */
     #xp { position: fixed; left: 50%; bottom: clamp(10px, 2.2vh, 22px); transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 6px 12px; background: rgba(12, 14, 16, .7); border: 1px solid rgba(196, 160, 98, .35); }
@@ -189,7 +189,8 @@
   <script>
     const TABS = [["city", "City"], ["homes", "Homes"], ["jobs", "Jobs"], ["races", "Races"], ["players", "Players"], ["crew", "Crew"], ["leaders", "Leaders"], ["help", "Help"]];
     const state = {player: {spawned: false, alive: false, id: null}, hidden: false, profile: null, cards: new Map(), race: null,
-      raceAt: 0, speakers: new Map(), menuOpen: false, tab: "city", data: null, compose: null};
+      raceAt: 0, speakers: new Map(), menuOpen: false, tab: "city", data: null, compose: null, keys: {}};
+    const keyLabel = (key) => state.keys[key] || key.toUpperCase();
 
     function send(name, payload = {}) {
       if (typeof callEvent === "function") callEvent(name, JSON.stringify(payload));
@@ -309,12 +310,13 @@
           el("span", {}, `${entry.place}. ${entry.name}`), el("span", {}, entry.finishedMs !== null ? clock(entry.finishedMs) : ""))))));
     }
     on("race", (race) => { state.race = race; state.raceAt = Date.now(); renderRace(); });
-    function tickRace() {
+    // Ten times a second, and only during a race: every change repaints the
+    // page and uploads it to the game, so a frame-rate timer cost every frame.
+    setInterval(() => {
+      if (!state.race?.active || state.race.finished) return;
       const node = document.getElementById("race-time");
-      if (node && state.race?.active && !state.race.finished) node.textContent = clock(state.race.elapsedMs + (Date.now() - state.raceAt));
-      requestAnimationFrame(tickRace);
-    }
-    requestAnimationFrame(tickRace);
+      if (node) node.textContent = clock(state.race.elapsedMs + (Date.now() - state.raceAt));
+    }, 100);
 
     /* Voice */
     on("voice", ({id, name, talking}) => {
@@ -609,10 +611,13 @@
       }
       return el("div", {class: "grid"},
         panel("Controls", el("div", {class: "keys"},
-          el("kbd", {}, "F2"), el("span", {}, "City menu"), el("kbd", {}, "F1"), el("span", {}, "Who is in town (hold)"),
+          el("kbd", {}, keyLabel("f2")), el("span", {}, "City menu"), el("kbd", {}, "F1"), el("span", {}, "Who is in town (hold)"),
           el("kbd", {}, "Tab"), el("span", {}, "City map"),
-          el("kbd", {}, "T"), el("span", {}, "Chat"), el("kbd", {}, "N / B"), el("span", {}, "Browse and buy at a shop counter"),
-          el("kbd", {}, "F9"), el("span", {}, "Car radio on or off"), el("kbd", {}, "K"), el("span", {}, "Siren, in a police car"))),
+          el("kbd", {}, "T"), el("span", {}, "Chat"), el("kbd", {}, `${keyLabel("n")} / ${keyLabel("b")}`), el("span", {}, "Browse and buy at a shop counter"),
+          el("kbd", {}, keyLabel("f9")), el("span", {}, "Car radio on or off"), el("kbd", {}, "K"), el("span", {}, "Siren, in a police car"),
+          el("kbd", {}, keyLabel("g")), el("span", {}, "Job key"), el("kbd", {}, keyLabel("u")), el("span", {}, "Call for backup (police)")),
+          el("p", {}, "Chat, the player list, the map and the siren show their default keys. Esc → Settings → Controls changes any key."),
+          el("button", {class: "btn", type: "button", onclick: () => send("hud:settings")}, "Settings")),
         [...byCategory].map(([category, entries]) => panel(category, entries.map((entry) => el("div", {class: "cmd"}, el("code", {}, usage(entry.usage)), el("span", {}, entry.help))))));
     }
 
@@ -647,7 +652,9 @@
               if (event.key === "Enter") sendCompose();
             }}), el("button", {class: "btn primary", type: "button", onclick: sendCompose}, "Send"),
             el("button", {class: "btn", type: "button", onclick: () => { composeTarget = null; renderMenu(); }}, "Cancel"))
-          : [el("span", {}, "Every button runs the same command you could type in chat."), el("span", {style: "margin-left:auto"}, "Esc or F2 to close")])));
+          : [el("span", {}, "Every button runs the same command you could type in chat."),
+            el("button", {class: "btn", type: "button", style: "margin-left:auto", onclick: () => send("hud:settings")}, "Settings"),
+            el("span", {}, `Esc or ${keyLabel("f2")} to close`)])));
       const page = box.querySelector(".page");
       if (page) page.scrollTop = keepScroll;
       if (activeId) {
@@ -668,7 +675,7 @@
       send("hud:tab", {tab});
       renderMenu();
     }
-    on("menu:open", ({tab}) => { state.menuOpen = true; if (tab) state.tab = tab; renderMenu(); });
+    on("menu:open", ({tab, keys}) => { state.menuOpen = true; if (tab) state.tab = tab; if (keys) state.keys = keys; renderMenu(); });
     on("menu:close", () => { state.menuOpen = false; composeTarget = null; renderMenu(); });
     on("menu:data", (data) => {
       state.data = data;
