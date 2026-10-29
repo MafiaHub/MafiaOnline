@@ -58,6 +58,9 @@ namespace Mafia1Online::Features::Death {
         World::WorldService *_world    = nullptr;
         Combat::CombatService *_combat = nullptr;
         std::unordered_map<uint64_t, AppliedDeath> _applied;
+        // The life and native each human was last seen alive on. One that
+        // dies on another lies where it fell instead of falling again.
+        std::unordered_map<uint64_t, AppliedDeath> _seenAlive;
         std::deque<PendingDamage> _pendingDamage;
         std::unordered_map<uint64_t, AppliedDamage> _appliedDamage;
         struct PredictedImpact {

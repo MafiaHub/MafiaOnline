@@ -51,6 +51,7 @@ namespace Mafia1Online::Features::Death {
         _combat = &combat;
         if (!world.IsReady()) {
             _applied.clear();
+            _seenAlive.clear();
             _pendingDamage.clear();
             _appliedDamage.clear();
             _impactsToPlay.clear();
@@ -176,6 +177,7 @@ namespace Mafia1Online::Features::Death {
             }
             if (state->alive && !killed) {
                 _applied.erase(networkId);
+                _seenAlive[networkId] = {state->missionGeneration, state->spawnGeneration, handle.generation};
                 if (!actor->IsAlive() || actor->IsDead()) {
                     RestoreLiving(*actor);
                 }
@@ -192,6 +194,13 @@ namespace Mafia1Online::Features::Death {
                 actor->RestoreLivingState();
                 if (ReplayAuthoritativeDeath(*human, state->deathAnimation == 0 ? 134 : state->deathAnimation)) {
                     _applied[networkId] = applied;
+                    // Streamed in or recreated after the death: retail's own
+                    // Death still runs on the next tick, from the end pose.
+                    const auto seen = _seenAlive.find(networkId);
+                    if (seen == _seenAlive.end() || seen->second.missionGeneration != applied.missionGeneration ||
+                        seen->second.spawnGeneration != applied.spawnGeneration || seen->second.nativeGeneration != applied.nativeGeneration) {
+                        SDK::Player::SkipDeathAnimationToEnd(*human);
+                    }
                 }
             }
             else {
@@ -206,6 +215,7 @@ namespace Mafia1Online::Features::Death {
 
     void DeathService::Reset() {
         _applied.clear();
+        _seenAlive.clear();
         _pendingDamage.clear();
         _appliedDamage.clear();
         _impactsToPlay.clear();
