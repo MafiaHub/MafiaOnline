@@ -664,6 +664,7 @@ namespace Mafia1Online::Core {
             return;
         }
         _lastControllerUpdate = now;
+        _cars.RefreshControllerPings();
         const auto usable = [&](uint64_t carId, uint64_t guid) {
             if (guid == 0 || !_missionReadiness.IsReady(static_cast<MafiaNet::PeerGuid>(guid)) || !_players.FindByGuid(static_cast<MafiaNet::PeerGuid>(guid))) {
                 return false;

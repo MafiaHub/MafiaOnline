@@ -89,11 +89,13 @@ namespace Mafia1Online::Features::Car {
         constexpr double kImpactEpisodeGapMs = 500.0;
         constexpr float kYieldCorrectionSeconds = 1.0f;
         // How fast an observed car's render clock reaches the present near a
-        // car this client simulates, and drops back behind it after: at the
-        // usual 100 ms delay the car runs at most a quarter faster, or 7%
-        // slower, meanwhile.
+        // car this client simulates, and drops back behind it after: the car
+        // runs at most a quarter faster, or 7.5% slower, meanwhile, and the
+        // change takes no less than these.
         constexpr float kLeadEntrySeconds = 0.3f;
         constexpr float kLeadExitSeconds  = 1.0f;
+        constexpr float kLeadEntryRate    = 0.25f;
+        constexpr float kLeadExitRate     = 0.075f;
         // How far a controlled car's physics clock may fall behind the local
         // clock before it rejoins it: more than a frame's read jitter.
         constexpr int32_t kSimClockSlackMs = 40;
@@ -199,14 +201,9 @@ namespace Mafia1Online::Features::Car {
 
         std::unordered_set<uint64_t> seen;
         const uint64_t myGuid = static_cast<uint64_t>(replication->GetMyGUID());
-        // Simulation host: the round trips that bring a player's poses here,
-        // the server's to that player (PlayerEntity::ping) and this host's.
-        std::unordered_map<uint64_t, uint16_t> playerPings;
-        int hostPing = 0;
-        if (Simulation::IsHost()) {
-            replication->ForEach<Shared::Entities::PlayerEntity>([&](Shared::Entities::PlayerEntity *player) { playerPings[player->controllerGuid] = player->ping; });
-            hostPing = Framework::CoreModules::GetClientInstance()->GetNetworkingEngine()->GetNetworkClient()->GetPing();
-        }
+        // With the server's to each controller, the round trip that brings a
+        // car's poses here.
+        const int ownPing = Framework::CoreModules::GetClientInstance()->GetNetworkingEngine()->GetNetworkClient()->GetPing();
         replication->ForEach<Shared::Entities::CarEntity>([&](Shared::Entities::CarEntity *car) {
             if (car->missionGeneration != loadedMissionGeneration) {
                 return;
@@ -215,10 +212,7 @@ namespace Mafia1Online::Features::Car {
             seen.insert(id);
             auto &stream                    = _streams[id];
             const bool simulationController = car->simulationControllerGuid != 0 && car->simulationControllerGuid == myGuid;
-            if (Simulation::IsHost()) {
-                const auto owner = playerPings.find(car->simulationControllerGuid);
-                stream.transitMs = std::clamp(0.5f * static_cast<float>((owner != playerPings.end() ? owner->second : 0) + std::max(hostPing, 0)), 0.0f, 250.0f);
-            }
+            stream.transitMs                = CarPoseBuffer::TransitMs(car->controllerPing, ownPing);
             if (stream.simulationController != simulationController) {
                 stream.simulationController   = simulationController;
                 stream.lastSent               = {};
@@ -1781,6 +1775,9 @@ namespace Mafia1Online::Features::Car {
         // the owner's result then arrives through the corrected pose.
         float nearestSimulated = std::numeric_limits<float>::max();
         {
+            // Far enough ahead for the render clock to reach the present
+            // first; it takes longer the further that is (kLeadEntryRate).
+            const float horizonSeconds = 0.5f + stream.transitMs * 0.002f;
             const auto center = vehicle.WorldCenter();
             const auto velocity = vehicle.LinearVelocity();
             const glm::vec3 position(center.x, center.y, center.z);
@@ -1790,27 +1787,31 @@ namespace Mafia1Online::Features::Car {
                 const float distance = glm::length(offset);
                 nearestSimulated = std::min(nearestSimulated, distance);
                 const float closing = distance > 0.001f ? glm::dot(otherVelocity - motion, offset / distance) : 0.0f;
-                if (distance < std::min(20.0f, 7.0f + std::max(0.0f, closing) * 0.5f)) {
+                if (distance < std::min(25.0f, 7.0f + std::max(0.0f, closing) * horizonSeconds)) {
                     stream.contactUntil = _frameClock + 1500.0;
                 }
             }
         }
         // Watched, the car is shown a delay behind; near a car this client
-        // simulates, at the present, where the two meet. The render clock
-        // eases between them: stepping it moved the car by its speed times
-        // the delay at once, a lurch on entry and a snap back on exit.
+        // simulates, where it is now on its controller's machine, so the two
+        // meet where they do there: the newest pose is the poses' transit
+        // behind that, so contact time alone put a car hit at speed v that
+        // far short (v x the latency). The render clock eases between them:
+        // stepping it moved the car by its speed times the change at once, a
+        // lurch on entry and a snap back on exit.
+        //
+        // Nobody watches the simulation host, but its traffic and police read
+        // every car's centre and velocity (C_car::IsPossibleColl, reM C_car.
+        // cpp:7293; C_actor::IsPossibleCollAll, C_actor.cpp:1416): it runs
+        // every player's car at the present.
         const bool contact = _predictedSync || stream.contactUntil > _frameClock;
-        float leadMs       = contact ? stream.poses.DelayMs() : 0.0f;
-        float leadSeconds  = contact ? kLeadEntrySeconds : kLeadExitSeconds;
-        if (Simulation::IsHost()) {
-            // Nobody watches the simulation host, but its traffic and police
-            // read every car's centre and velocity (C_car::IsPossibleColl,
-            // reM C_car.cpp:7293; C_actor::IsPossibleCollAll, C_actor.cpp:
-            // 1416): it runs a player's car where it is now on its driver's
-            // machine, the poses' transit past the present.
-            leadMs      = stream.poses.DelayMs() + stream.transitMs;
-            leadSeconds = kLeadEntrySeconds;
-        }
+        const bool predict = contact || Simulation::IsHost();
+        // The whole way, not what is left of it: easing the rest faster as it
+        // shrinks sped the car up toward the end.
+        const float span        = stream.poses.DelayMs() + stream.transitMs;
+        const float leadMs      = predict ? span : 0.0f;
+        const float leadSeconds = predict ? CarPoseBuffer::LeadSeconds(span, kLeadEntryRate, kLeadEntrySeconds)
+                                          : CarPoseBuffer::LeadSeconds(span, kLeadExitRate, kLeadExitSeconds);
         const double renderTime =
             stream.poses.AdvanceDelay(_frameClock, static_cast<float>(frameMs)) + stream.poses.AdvanceLead(leadMs, dt, leadSeconds);
         if (contact) {
@@ -1828,7 +1829,8 @@ namespace Mafia1Online::Features::Car {
                 // One episode per contact: pushing it keeps impacting, but the
                 // controller has its answer for the first one by then.
                 if (_frameClock - stream.lastImpactAt > kImpactEpisodeGapMs) {
-                    stream.impactAt = _frameClock;
+                    stream.impactAt       = _frameClock;
+                    stream.impactRenderAt = renderTime;
                 }
                 stream.lastImpactAt = _frameClock;
             }
@@ -1843,7 +1845,7 @@ namespace Mafia1Online::Features::Car {
             // pulling to it drives the car back into what it hit. Ease
             // toward it slowly and keep the local impulse meanwhile.
             const bool yielding = stream.impactAt > 0.0 && _frameClock - stream.impactAt < kImpactHoldMs &&
-                                  stream.poses.Newest().time < stream.impactAt + kImpactResponseMs;
+                                  stream.poses.Newest().time < stream.impactRenderAt + kImpactResponseMs;
             const auto current = frame->WorldPosition();
             const glm::vec3 position(current.x, current.y, current.z);
             const glm::quat rotation = FrameRotation(*frame);

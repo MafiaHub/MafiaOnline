@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <deque>
 #include <iterator>
 
@@ -36,7 +37,9 @@ namespace Mafia1Online::Features::Car {
     //    jump becomes a correction that decays over ~200 ms, in position and
     //    rotation. One beyond kSnapDistance or kSnapCos is applied at once.
     //  - The render time can run a lead ahead of now - delay, which eases
-    //    toward its target rather than stepping (AdvanceLead).
+    //    toward its target rather than stepping (AdvanceLead); past now, to
+    //    predict where the car is on its controller, extrapolation's bound
+    //    counts from now.
     //  - Motion is native physics': the body turns about its mass centre
     //    (reM C_Vehicle_kernel.cpp:2677-2709), so the frame origin moves at
     //    the mass centre's velocity plus the turn, and past the newest pose
@@ -52,6 +55,9 @@ namespace Mafia1Online::Features::Car {
         // than halting at once.
         static constexpr double kMaxExtrapolationMs  = 150.0;
         static constexpr double kExtrapolationEaseMs = 50.0;
+        // The most a lead past now (TransitMs) predicts; the bound above
+        // then counts from there, so the prediction itself never eases.
+        static constexpr float kMaxTransitMs = 250.0f;
         // Above this span Hermite tangents overshoot: interpolate linearly.
         static constexpr float kHermiteSpanSeconds = 0.3f;
         static constexpr float kMinDelayMs         = 40.0f;
@@ -173,7 +179,7 @@ namespace Mafia1Online::Features::Car {
             }
             const auto &newest = _poses.back();
             if (time >= newest.time) {
-                out = Extrapolate(newest, time, kMaxExtrapolationMs);
+                out = Extrapolate(newest, time, kMaxExtrapolationMs + std::max(0.0, static_cast<double>(_leadMs - _delayMs)));
                 return true;
             }
             const auto next    = std::upper_bound(_poses.begin(), _poses.end(), time, [](double t, const CarPoseSample &p) { return t < p.time; });
@@ -264,6 +270,22 @@ namespace Mafia1Online::Features::Car {
             // by 5% a frame.
             _delayMs += std::clamp(target - _delayMs, -step, underrun ? step * 0.5f : step);
             return renderTime;
+        }
+
+        // How far the controller's car is past its newest pose here: half the
+        // server's round trip to the controller (CarEntity::controllerPing)
+        // and half this client's.
+        static float TransitMs(uint16_t controllerPing, int ownPing) {
+            const float transit = 0.5f * (static_cast<float>(controllerPing) + static_cast<float>(std::max(ownPing, 0)));
+            return std::clamp(transit, 0.0f, kMaxTransitMs);
+        }
+
+        // The smoothing AdvanceLead needs to take the lead `changeMs` without
+        // the car running faster or slower than `rate` (a fraction of its
+        // speed) or taking less than `minimumSeconds`: a critically damped
+        // step of A changes fastest, by 2A / (e s) per second, at the start.
+        static float LeadSeconds(float changeMs, float rate, float minimumSeconds) {
+            return std::max(minimumSeconds, 2.0f * std::abs(changeMs) / (2.7182818f * rate * 1000.0f));
         }
 
         // How far past now - delay the car is shown, eased toward `targetMs`

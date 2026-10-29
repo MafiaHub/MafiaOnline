@@ -648,6 +648,48 @@ namespace {
         CHECK(buffer.Present(5900.0, 0.016f, pose) && Near(pose.position.x, 5900.0f * 0.015f, 0.01f));
     }
 
+    // The same car near a car this client simulates from 6 s to 8 s (its
+    // delay settled), with a 120 ms round trip to its controller and 80 ms
+    // to this client: it is shown where it is on its controller by then,
+    // 100 ms past the newest pose's time, at full speed (the prediction does
+    // not count against the extrapolation bound), and the clock never runs
+    // it more than a quarter faster or 7.5% slower.
+    void CarContactPrediction() {
+        Features::Car::CarPoseBuffer buffer;
+        const float transit = Features::Car::CarPoseBuffer::TransitMs(120, 80);
+        CHECK(Near(transit, 100.0f, 1e-4f) && Features::Car::CarPoseBuffer::TransitMs(0, -1) == 0.0f &&
+              Features::Car::CarPoseBuffer::TransitMs(9999, 9999) == Features::Car::CarPoseBuffer::kMaxTransitMs);
+        float lastX   = 0.0f;
+        float minStep = 1.0f;
+        float maxStep = 0.0f;
+        bool shown    = false;
+        for (double now = 0.0; now < 14000.0; now += 16.0) {
+            for (double sent = std::floor(now / 33.0) * 33.0; sent > now - 16.0; sent -= 33.0) {
+                buffer.Push(CarAt(sent, static_cast<float>(sent) * 0.015f, 15.0f), sent + 10.0, false);
+            }
+            const bool contact   = now >= 6000.0 && now < 8000.0;
+            const float span     = buffer.DelayMs() + transit;
+            const float target   = contact ? span : 0.0f;
+            const float seconds  = contact ? Features::Car::CarPoseBuffer::LeadSeconds(span, 0.25f, 0.3f)
+                                           : Features::Car::CarPoseBuffer::LeadSeconds(span, 0.075f, 1.0f);
+            const double renderTime = buffer.AdvanceDelay(now, 16.0f) + buffer.AdvanceLead(target, 0.016f, seconds);
+            Features::Car::CarPoseSample pose;
+            CHECK(buffer.Present(renderTime, 0.016f, pose));
+            if (shown && now > 500.0) {
+                minStep = std::min(minStep, pose.position.x - lastX);
+                maxStep = std::max(maxStep, pose.position.x - lastX);
+            }
+            shown = true;
+            lastX = pose.position.x;
+            if (now > 7800.0 && now < 8000.0) {
+                CHECK(Near(pose.position.x, static_cast<float>(now + transit) * 0.015f, 0.06f) && Near(pose.velocity.x, 15.0f, 0.05f));
+            }
+        }
+        CHECK(maxStep < 0.24f * 1.25f + 0.01f);
+        CHECK(minStep > 0.24f * 0.925f - 0.01f);
+        CHECK(Near(buffer.LeadMs(), 0.0f, 1.0f));
+    }
+
     // A car at 15 m/s handed to another controller at 2 s: its clock starts
     // over (the first pose dated as it arrives, 0.2 m off the old path) and
     // the buffer with it, but the shown car carries on from where it was.
@@ -774,6 +816,7 @@ int main() {
     CarArcMotion();
     CarExtrapolationEase();
     CarContactClock();
+    CarContactPrediction();
     CarControllerChange();
     RideBlend();
     StalledGait();

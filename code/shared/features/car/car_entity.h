@@ -75,6 +75,10 @@ namespace Mafia1Online::Shared::Entities {
         // Only this client may report the car's native physics pose. Server
         // ownership of damage, seats, and terminal state is unchanged.
         uint64_t simulationControllerGuid = 0;
+        // The server's round trip to that client in ms, the simulation host
+        // included (players never learn its ping otherwise): observers
+        // predict the car by half of it plus half their own.
+        uint16_t controllerPing           = 0;
         uint8_t seatCount                 = 4;
         // Incremented for server script teleports so the native physics owner
         // applies the authoritative pose before sending another movement report.
@@ -311,6 +315,7 @@ namespace Mafia1Online::Shared::Entities {
             MafiaNet::RakString passengerName(passengerModel.c_str());
             fields.Field(driverName);
             fields.Field(passengerName);
+            fields.Field(controllerPing);
             if (!fields.Writing()) {
                 terminalState = terminal <= static_cast<uint8_t>(TerminalState::FatalFall) ? static_cast<TerminalState>(terminal) : TerminalState::Active;
                 seatResult    = seat <= static_cast<uint8_t>(SeatResult::Cleared) ? static_cast<SeatResult>(seat) : SeatResult::None;

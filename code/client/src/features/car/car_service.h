@@ -101,13 +101,15 @@ namespace Mafia1Online::Features::Car {
             // The frame is where native physics put it: interpolation next
             // starts from there (CarPoseBuffer::Rebase).
             bool nativeShown = false;
-            // Simulation host: how long the controller's poses take to get
-            // here, in ms (half its round trip to the server and this host's).
+            // How long the controller's poses take to get here, in ms (half
+            // its round trip to the server and this client's).
             float transitMs = 0.0f;
             // Local clock times of the first and the latest impact of the
-            // current contact a locally simulated car gave it here.
+            // current contact a locally simulated car gave it here, and the
+            // pose time it was shown at for the first.
             double impactAt = 0.0;
             double lastImpactAt = 0.0;
+            double impactRenderAt = 0.0;
             MafiaNet::Time lastPacketTime        = 0;
             uint64_t poseClockSource             = 0;
             uint32_t poseClockMs                 = 0;
