@@ -51,10 +51,13 @@ namespace Mafia1Online::Shared::Car {
         std::array<MeshVertex, kMeshVerticesPerChunk> vertices {};
         uint64_t revision = 0;
         uint64_t sourceGuid = 0;
+        // The car's repairRevision the mesh was reported against.
+        uint64_t repairRevision = 0;
         void Serialize(MafiaNet::BitStream *stream, bool write) {
             SerializeMeshChunk(*this, stream, write);
             stream->Serialize(write, revision);
             stream->Serialize(write, sourceGuid);
+            stream->Serialize(write, repairRevision);
         }
     };
 

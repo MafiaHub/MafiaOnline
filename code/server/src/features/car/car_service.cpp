@@ -487,6 +487,7 @@ namespace Mafia1Online::Features::Car {
                 mesh.checkpoint.size() - static_cast<size_t>(index) * Shared::Car::kMeshVerticesPerChunk));
             output.revision = car->meshRevision;
             output.sourceGuid = senderGuid;
+            output.repairRevision = car->repairRevision;
             for (uint16_t i = 0; i < output.vertexCount; ++i) {
                 output.vertices[i] = mesh.checkpoint[static_cast<size_t>(index) * Shared::Car::kMeshVerticesPerChunk + i];
             }
@@ -515,6 +516,7 @@ namespace Mafia1Online::Features::Car {
                 mesh.checkpoint.size() - static_cast<size_t>(index) * Shared::Car::kMeshVerticesPerChunk));
             output.revision = car->meshRevision;
             output.sourceGuid = mesh.sourceGuid;
+            output.repairRevision = car->repairRevision;
             for (uint16_t i = 0; i < output.vertexCount; ++i) {
                 output.vertices[i] = mesh.checkpoint[static_cast<size_t>(index) * Shared::Car::kMeshVerticesPerChunk + i];
             }

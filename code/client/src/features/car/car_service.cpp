@@ -594,12 +594,17 @@ namespace Mafia1Online::Features::Car {
         stream.hasReportedDamage = false;
         stream.lastDamageReport = {};
         stream.appliedMeshRevision = state->nativeDamageValid ? 0 : state->meshRevision;
-        stream.checkpointRevision = 0;
-        stream.pendingMeshRevision = 0;
-        stream.pendingMeshSourceGuid = 0;
-        stream.pendingMeshReceived.clear();
-        stream.pendingMeshVertices.clear();
-        stream.checkpointVertices.clear();
+        // A checkpoint of the repaired car may already be in: keep it.
+        if (stream.checkpointRepairRevision != state->repairRevision) {
+            stream.checkpointRevision = 0;
+            stream.checkpointVertices.clear();
+        }
+        if (stream.pendingMeshRepairRevision != state->repairRevision) {
+            stream.pendingMeshRevision = 0;
+            stream.pendingMeshSourceGuid = 0;
+            stream.pendingMeshReceived.clear();
+            stream.pendingMeshVertices.clear();
+        }
         stream.lastReportedMesh.clear();
         stream.hasReportedMesh = false;
         stream.meshDirty = stream.simulationController;
@@ -744,26 +749,26 @@ namespace Mafia1Online::Features::Car {
     void CarService::OnMeshCheckpoint(const Shared::Car::MeshCheckpointChunk &chunk) {
         auto *state = Framework::CoreModules::GetReplication()->GetEntity<Shared::Entities::CarEntity>(chunk.networkId);
         if (!state || state->missionGeneration != chunk.missionGeneration ||
-            state->meshRevision != chunk.revision ||
-            chunk.revision == 0 ||
             !Shared::Car::ValidateMeshChunkShape(chunk.totalVertices, chunk.chunkIndex,
                                                   chunk.chunkCount, chunk.vertexCount)) {
             return;
         }
         auto &stream = _streams[chunk.networkId];
-        if (chunk.revision <= stream.appliedMeshRevision || chunk.revision == stream.checkpointRevision ||
-            chunk.revision < stream.pendingMeshRevision) {
+        if (!Shared::Car::WantsMeshCheckpoint(chunk.revision, chunk.repairRevision, state->repairRevision, stream.appliedMeshRevision,
+                                              stream.checkpointRevision, stream.pendingMeshRevision)) {
             return;
         }
         if (chunk.revision != stream.pendingMeshRevision) {
             stream.pendingMeshRevision = chunk.revision;
             stream.pendingMeshSourceGuid = chunk.sourceGuid;
+            stream.pendingMeshRepairRevision = chunk.repairRevision;
             stream.pendingMeshChunkCount = chunk.chunkCount;
             stream.pendingMeshTotal = chunk.totalVertices;
             stream.pendingMeshVertices.resize(chunk.totalVertices);
             stream.pendingMeshReceived.assign(chunk.chunkCount, 0);
         }
         if (stream.pendingMeshSourceGuid != chunk.sourceGuid ||
+            stream.pendingMeshRepairRevision != chunk.repairRevision ||
             stream.pendingMeshChunkCount != chunk.chunkCount ||
             stream.pendingMeshTotal != chunk.totalVertices ||
             stream.pendingMeshReceived[chunk.chunkIndex]) {
@@ -785,6 +790,7 @@ namespace Mafia1Online::Features::Car {
         }
         stream.checkpointRevision = chunk.revision;
         stream.checkpointSourceGuid = chunk.sourceGuid;
+        stream.checkpointRepairRevision = chunk.repairRevision;
         stream.checkpointVertices = std::move(stream.pendingMeshVertices);
         stream.pendingMeshReceived.clear();
         stream.pendingMeshRevision = 0;
@@ -894,17 +900,25 @@ namespace Mafia1Online::Features::Car {
 
     void CarService::SyncMesh(World::WorldService &world, uint64_t networkId, Stream &stream) {
         auto *state = Framework::CoreModules::GetReplication()->GetEntity<Shared::Entities::CarEntity>(networkId);
-        if (!state || state->meshRevision <= stream.appliedMeshRevision || !state->nativeDamageValid) {
+        if (!state || !state->nativeDamageValid) {
             return;
         }
         const auto native = _nativeById.find(networkId);
         if (native == _nativeById.end() || native->second.removalQueued) {
             return;
         }
-        const auto now = std::chrono::steady_clock::now();
-        if (stream.checkpointRevision != state->meshRevision) {
-            if (stream.lastMeshRequest == std::chrono::steady_clock::time_point {} ||
-                now - stream.lastMeshRequest >= std::chrono::seconds(1)) {
+        // The newest complete checkpoint goes on at once, whichever revision
+        // the replicated meshRevision names: the server pushes each one ahead
+        // of that field, and a pile-up raises it every 100 ms, so waiting for
+        // a match (or fetching once a second and dropping what was outrun)
+        // showed dents seconds late. Revisions only grow, so it converges.
+        if (stream.checkpointRevision <= stream.appliedMeshRevision || stream.checkpointRepairRevision != state->repairRevision) {
+            const auto now = std::chrono::steady_clock::now();
+            // The revision the car names never arrived whole (a restored
+            // snapshot, one pushed before this client knew the car): fetch
+            // it. A reply fills in an assembly of the same revision.
+            if (state->meshRevision > std::max(stream.appliedMeshRevision, stream.checkpointRevision) &&
+                (stream.lastMeshRequest == std::chrono::steady_clock::time_point {} || now - stream.lastMeshRequest >= std::chrono::seconds(1))) {
                 Shared::Car::MeshCheckpointRequest request;
                 request.networkId = networkId;
                 request.missionGeneration = world.LoadedMissionGeneration();
@@ -919,7 +933,7 @@ namespace Mafia1Online::Features::Car {
         }
         const uint64_t myGuid = static_cast<uint64_t>(Framework::CoreModules::GetReplication()->GetMyGUID());
         if (stream.simulationController && stream.checkpointSourceGuid == myGuid) {
-            stream.appliedMeshRevision = state->meshRevision;
+            stream.appliedMeshRevision = stream.checkpointRevision;
             return;
         }
         auto &vehicle = car->Vehicle();
@@ -949,7 +963,7 @@ namespace Mafia1Online::Features::Car {
                 if (!vehicle.ApplyDeformCheckpoint(zone, lod, groups[zone][lod])) { return; }
             }
         }
-        stream.appliedMeshRevision = state->meshRevision;
+        stream.appliedMeshRevision = stream.checkpointRevision;
     }
 
     void CarService::OnNativeDeformed(SDK::Car::NativeCar *car) {

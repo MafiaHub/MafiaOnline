@@ -151,10 +151,12 @@ namespace Mafia1Online::Features::Car {
             uint64_t appliedMeshRevision = 0;
             uint64_t checkpointRevision = 0;
             uint64_t checkpointSourceGuid = 0;
+            uint64_t checkpointRepairRevision = 0;
             uint16_t pendingMeshChunkCount = 0;
             uint16_t pendingMeshTotal = 0;
             uint64_t pendingMeshRevision = 0;
             uint64_t pendingMeshSourceGuid = 0;
+            uint64_t pendingMeshRepairRevision = 0;
             std::vector<uint8_t> pendingMeshReceived;
             std::vector<Shared::Car::MeshVertex> pendingMeshVertices;
             std::vector<Shared::Car::MeshVertex> checkpointVertices;

@@ -40,4 +40,16 @@ namespace Mafia1Online::Shared::Car {
         }
         return true;
     }
+
+    // Whether a receiver assembles a checkpoint chunk of `revision`, taken
+    // against repair `repairRevision`, beside the car's `currentRepair` and
+    // the newest revisions it applied, assembled and is assembling. Any
+    // newer one is wanted, not only the one the car's replicated
+    // meshRevision names: the server pushes each revision before that field
+    // follows, and in a pile-up a newer revision is always in flight. One
+    // from before a repair is not.
+    inline bool WantsMeshCheckpoint(uint64_t revision, uint64_t repairRevision, uint64_t currentRepair, uint64_t applied, uint64_t assembled,
+                                    uint64_t assembling) {
+        return revision != 0 && repairRevision >= currentRepair && revision > applied && revision > assembled && revision >= assembling;
+    }
 } // namespace Mafia1Online::Shared::Car
