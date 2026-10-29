@@ -55,6 +55,10 @@ namespace Mafia1Online::SDK::Traffic {
     // ret 4: a mafia car rammed by the local player's car (IsActivePlayerInside,
     // +0x215c) or player answers with Krles above force 5.
     inline constexpr uintptr_t kTrafficCarRammed = 0x4B94D0;
+    // static void __fastcall CoDelasTyCuraku(C_car *, C_actor *driver, float
+    // force), ret 4: a police pool car rammed by a person's car books the
+    // ram on that person (C_shvestky::StrcilJsemHoPoldumDoVyfuku 0x4a00a0).
+    inline constexpr uintptr_t kTrafficCarPoliceRammed = 0x4B9460;
     inline constexpr float kMafiaResponseForce = 5.0f;
     // static void __fastcall DostalJsemRanuKachlou(C_car *, I3D_frame *): a
     // bullet hit the driver or passenger model; it plays the in-car death

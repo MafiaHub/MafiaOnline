@@ -63,6 +63,10 @@ namespace Mafia1Online::Features::Traffic {
         void TickTraffic(SDK::Traffic::NativeTrafficCar *traffic, uint32_t frameMs, TrafficAI original);
         void BeforeDeactivate(SDK::Traffic::NativeTrafficCar *traffic, int32_t slot);
         void OnRammed(SDK::Car::NativeCar *car, SDK::Player::NativeActor *actor, float force);
+        // `car`'s body sweep hit `other` with `normal` (C_car::Call_Collision,
+        // before its own handling). `retailRuns`: that handling follows and
+        // reacts itself whenever its own test passes.
+        void OnCarCollision(SDK::Car::NativeCar *car, SDK::Player::NativeActor *other, const SDK::Player::Vector3 &normal, bool retailRuns);
         void OnReplaced(SDK::Car::NativeCar *poolCar, SDK::Car::NativeCar *replacement);
         void OnOccupantShot(SDK::Car::NativeCar *car, void *frame);
         void BeforePoliceCars(std::vector<SDK::Car::NativeCar *> &pending);

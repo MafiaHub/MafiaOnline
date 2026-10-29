@@ -36,12 +36,15 @@ namespace Mafia1Online::Features::Car {
                                          const SDK::Player::Vector3 *, const SDK::Player::Vector3 *, float,
                                          SDK::Player::NativeActor *, unsigned int, SDK::Scene::NativeFrame *);
         using CollisionFilterBody = const void *(__fastcall *)(SDK::Car::NativeCar *, const void *, const SDK::Player::Vector3 &, const SDK::Player::Vector3 &);
+        using CallCollision = void(__fastcall *)(SDK::Car::NativeCar *, const void *, const SDK::Player::Vector3 &, const SDK::Player::Vector3 &,
+                                                 const SDK::Player::Vector3 &, float);
         CarDestructor gCarDestructorOriginal = nullptr;
         CarExplosion gCarExplosionOriginal   = nullptr;
         VehicleDeform gVehicleDeformOriginal = nullptr;
         VehicleDamage gVehicleDamageOriginal = nullptr;
         CarHit gCarHitOriginal = nullptr;
         CollisionFilterBody gCollisionFilterBodyOriginal = nullptr;
+        CallCollision gCallCollisionOriginal = nullptr;
         struct ImpactKey {
             uint64_t carId;
             uint64_t targetId;
@@ -474,6 +477,19 @@ namespace Mafia1Online::Features::Car {
             }
             return nullptr;
         }
+
+        void __fastcall CallCollisionHook(SDK::Car::NativeCar *car, const void *collision, const SDK::Player::Vector3 &position,
+                                          const SDK::Player::Vector3 &impulse, const SDK::Player::Vector3 &normal, float mass) {
+            // Retail reads the owner of a dynamic collision only (its sweep
+            // reports an actor's hit through no other); the ram reaction
+            // comes before the hit car's own Collision, as in retail.
+            const auto *dynamic = static_cast<const SDK::Car::NativeDynamicCollision *>(collision);
+            if (Simulation::IsHost() && (dynamic->packed & SDK::Car::NativeDynamicCollision::kDynamicTypeMask) != 0 && dynamic->ownerActor) {
+                auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
+                application->Traffic().OnCarCollision(car, dynamic->ownerActor, normal, true);
+            }
+            gCallCollisionOriginal(car, collision, position, impulse, normal, mass);
+        }
     } // namespace
 
     bool InstallCarHooks() {
@@ -535,10 +551,17 @@ namespace Mafia1Online::Features::Car {
             UninstallCarHooks();
             return false;
         }
+        if (MH_CreateHook(reinterpret_cast<void *>(SDK::Car::kCallCollision), reinterpret_cast<void *>(&CallCollisionHook), reinterpret_cast<void **>(&gCallCollisionOriginal)) != MH_OK
+            || MH_EnableHook(reinterpret_cast<void *>(SDK::Car::kCallCollision)) != MH_OK) {
+            UninstallCarHooks();
+            return false;
+        }
         return true;
     }
 
     void UninstallCarHooks() {
+        MH_DisableHook(reinterpret_cast<void *>(SDK::Car::kCallCollision));
+        MH_RemoveHook(reinterpret_cast<void *>(SDK::Car::kCallCollision));
         MH_DisableHook(reinterpret_cast<void *>(SDK::Car::kCollisionFilterBody));
         MH_RemoveHook(reinterpret_cast<void *>(SDK::Car::kCollisionFilterBody));
         MH_DisableHook(reinterpret_cast<void *>(SDK::Car::kCarAI));

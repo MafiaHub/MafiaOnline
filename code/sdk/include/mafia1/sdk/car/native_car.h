@@ -45,6 +45,13 @@ namespace Mafia1Online::SDK::Car {
     inline constexpr uintptr_t kReset               = 0x422BE0;
     inline constexpr uintptr_t kSetTransparency     = 0x4233E0;
     inline constexpr uintptr_t kCollisionFilterBody = 0x426340;
+    // C_car::Call_Collision, the body collision callback (__fastcall car,
+    // collision; position, impulse and normal by reference, mass; ret 10h):
+    // this car's sweep hit another actor.
+    inline constexpr uintptr_t kCallCollision       = 0x425480;
+    // float __stdcall S_vector::AngleTo(const S_vector *this, const S_vector &),
+    // the LS3DF import thunk Call_Collision measures a ram's angle with.
+    inline constexpr uintptr_t kVectorAngleTo       = 0x60FC7E;
     inline constexpr uintptr_t kInitDamage          = 0x4D54E0;
     inline constexpr uintptr_t kInitDeform          = 0x4D51F0;
     inline constexpr uintptr_t kSwitchSpecialProjectorTexture = 0x4D6580;
@@ -772,6 +779,15 @@ namespace Mafia1Online::SDK::Car {
             _burnTimer = timer;
             _burnDuration = duration;
         }
+        // C_car::Call_Collision (0x425480) has a traffic car react to this
+        // car ramming it only with m_bCollisionCallbacksEnabled (+0x20f5,
+        // set by C_shvestky::DriveCar for a driver the police track) while
+        // the police are active, or m_bActivePlayerInside (+0x215c, the
+        // retail game's own player at the wheel).
+        bool CollisionCallbacksEnabled() const { return _collisionCallbacksEnabled; }
+        bool ActivePlayerInside() const { return _activePlayerInside; }
+        // m_bTrafficCar (+0x217d): a C_traffic_car pool car.
+        bool TrafficCar() const { return _trafficCar; }
         float BodyDamage() const { return _bodyDamage; }
         float BodyHealthMaximum() const { return _bodyHealthMaximum; }
         int FuelTankHealth() const { return _fuelTankHealth; }
@@ -809,10 +825,15 @@ namespace Mafia1Online::SDK::Car {
         uint32_t _burnTimer;
         uint32_t _burnDuration;
         bool _burning;
-        std::byte _unused20F1[0x2154 - 0x20f1];
+        std::byte _unused20F1[0x20f5 - 0x20f1];
+        bool _collisionCallbacksEnabled;
+        std::byte _unused20F6[0x2154 - 0x20f6];
         int32_t _fuelTankHealth;
         int32_t _fuelTankHealthMaximum;
-        std::byte _unused215C[0x2218 - 0x215c];
+        bool _activePlayerInside;
+        std::byte _unused215D[0x217d - 0x215d];
+        bool _trafficCar;
+        std::byte _unused217E[0x2218 - 0x217e];
         // m_bFirstUpdate: C_car::GameInit (C_car.cpp:1547) and Reset(0.0f)
         // (0x422bf7) arm it.
         bool _firstUpdate;
@@ -826,5 +847,8 @@ namespace Mafia1Online::SDK::Car {
     static_assert(offsetof(NativeCar, _burning) == 0x20f0);
     static_assert(offsetof(NativeCar, _fuelTankHealth) == 0x2154);
     static_assert(offsetof(NativeCar, _fuelTankHealthMaximum) == 0x2158);
+    static_assert(offsetof(NativeCar, _collisionCallbacksEnabled) == 0x20f5);
+    static_assert(offsetof(NativeCar, _activePlayerInside) == 0x215c);
+    static_assert(offsetof(NativeCar, _trafficCar) == 0x217d);
     static_assert(offsetof(NativeCar, _firstUpdate) == 0x2218);
 } // namespace Mafia1Online::SDK::Car

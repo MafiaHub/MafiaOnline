@@ -886,6 +886,42 @@ namespace Mafia1Online::Features::Traffic {
         Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Mafia car crew turned on player {}", _world->NativeObjects().FindByNative(actor).networkId);
     }
 
+    void TrafficHost::OnCarCollision(NativeCar *car, NativeActor *other, const Vector3 &normal, bool retailRuns) {
+        // C_car::Call_Collision (0x425480, reM C_car.cpp:5647-5668): a pool
+        // car rammed by a car whose driver the police track while they are
+        // active, or by the retail player's own car (m_bActivePlayerInside),
+        // reacts: a police car books the ram on the driver (CoDelasTyCuraku),
+        // a mafia car sends its crew after them (CoDelasTyCuraku1). The host
+        // has no player of its own, so a player's car never passed the test
+        // unless the police were active and tracking that player: here any
+        // car a player drives is retail's player's.
+        if (!car || !other || other->GetType() != NativeActor::Type::Car) {
+            return;
+        }
+        auto *rammed = static_cast<NativeCar *>(static_cast<void *>(other));
+        if (!rammed->TrafficCar() || car->Vehicle().SeatSlotCount() == 0) {
+            return;
+        }
+        const bool retail = (car->CollisionCallbacksEnabled() && SDK::Police::PoliceManager(SDK::Core::Mission::Get()->Game())->IsActive()) ||
+                            car->ActivePlayerInside();
+        if ((retailRuns && retail) || (!retail && !IsPlayerCaused(car))) {
+            return;
+        }
+        // Its speed: the closing speed along the rammer's heading to the
+        // contact normal, as Call_Collision measures it.
+        using AngleTo     = float(__stdcall *)(const Vector3 *, const Vector3 *);
+        using PoliceRammed = void(__fastcall *)(NativeCar *, NativeActor *, float);
+        const auto velocity      = car->Vehicle().LinearVelocity();
+        const auto otherVelocity = rammed->Vehicle().LinearVelocity();
+        const float closing      = glm::length(glm::vec3(velocity.x - otherVelocity.x, velocity.y - otherVelocity.y, velocity.z - otherVelocity.z));
+        const float speed        = std::fabs(std::cos(reinterpret_cast<AngleTo>(SDK::Car::kVectorAngleTo)(&velocity, &normal)) * closing);
+        if (!std::isfinite(speed)) {
+            return;
+        }
+        reinterpret_cast<PoliceRammed>(SDK::Traffic::kTrafficCarPoliceRammed)(rammed, static_cast<SDK::Seat::NativeCar *>(static_cast<void *>(car))->GetOwner(0), speed);
+        OnRammed(rammed, car, speed);
+    }
+
     void TrafficHost::OnReplaced(NativeCar *poolCar, NativeCar *replacement) {
         if (replacement && replacement != poolCar) {
             Transfer(poolCar, replacement);
