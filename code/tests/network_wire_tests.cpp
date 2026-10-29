@@ -1,6 +1,7 @@
 // Round trips of the quantized wire forms, the sender sample clock and the
 // railway rider blend.
 #include "client/src/features/car/car_pose_buffer.h"
+#include "client/src/features/npc/replica_motion.h"
 #include "client/src/features/player/host_lead.h"
 #include "client/src/features/player/human_states.h"
 #include "client/src/features/player/ride_blend.h"
@@ -798,6 +799,24 @@ namespace {
         CHECK(CornerActionFor(92).call == CornerCall::FireAimed && CornerActionFor(92).view == 2);
     }
 
+    void ReleaseBlend() {
+        using namespace Features::Npc;
+        // The whole gap at the release, none at its end or after.
+        CHECK(ReleaseWeight(0.0f, 0.3f) == 1.0f);
+        CHECK(ReleaseWeight(0.3f, 0.3f) == 0.0f && ReleaseWeight(1.0f, 0.3f) == 0.0f);
+        // Half way, half the gap; easing out at both ends.
+        CHECK(Near(ReleaseWeight(0.15f, 0.3f), 0.5f, 1e-5f));
+        CHECK(ReleaseWeight(0.03f, 0.3f) > 0.95f && ReleaseWeight(0.27f, 0.3f) < 0.05f);
+        // Monotonic.
+        float previous = 1.0f;
+        for (float t = 0.0f; t <= 0.3f; t += 0.01f) {
+            const float weight = ReleaseWeight(t, 0.3f);
+            CHECK(weight <= previous);
+            previous = weight;
+        }
+        CHECK(ReleaseWeight(0.1f, 0.0f) == 0.0f && ReleaseWeight(std::numeric_limits<float>::quiet_NaN(), 0.3f) == 0.0f);
+    }
+
     void HostView() {
         using namespace Features::Player;
         // Half of each round trip, kept within the buffer's bound one send
@@ -849,6 +868,7 @@ int main() {
     RideBlend();
     StalledGait();
     HumanStates();
+    ReleaseBlend();
     HostView();
     if (failures == 0) {
         std::printf("network wire tests passed\n");

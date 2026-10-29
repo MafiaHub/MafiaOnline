@@ -132,6 +132,16 @@ namespace Mafia1Online::Features::Npc {
             bool deathShown = false;
             bool seenAlive = false;
             std::chrono::steady_clock::time_point settledAt {};
+            // Since when its own animation has moved the body (a hit
+            // reaction, a timed action, a tracked clip), and whether any
+            // hold (that, a door, a pull-out, an arrest) kept the stream off
+            // it. On release it eases back to the stream from
+            // releaseOffset and releaseDirection (BlendFromHold).
+            std::chrono::steady_clock::time_point rootMotionSince {};
+            bool poseHeld = false;
+            glm::vec3 releaseOffset {0.0f};
+            glm::vec3 releaseDirection {0.0f};
+            std::chrono::steady_clock::time_point releasedAt {};
             bool failed = false;
         };
 
@@ -144,6 +154,11 @@ namespace Mafia1Online::Features::Npc {
         // it, else the oldest held.
         static const Replica::Gait *GaitAt(const Replica &replica, double time);
         void ApplyPose(Replica &replica, void *actor);
+        // The stream stays off the body this frame.
+        static void HoldPose(Replica &replica);
+        // After a hold: from where the body was left back to the stream's
+        // `position` and `direction`, which it adjusts.
+        static void BlendFromHold(Replica &replica, void *actor, glm::vec3 &position, glm::vec3 &direction, std::chrono::steady_clock::time_point now);
         // Once the death plays: draws the corpse onto the host's, as it
         // falls and where it rests.
         void SettleCorpse(Replica &replica, void *actor);

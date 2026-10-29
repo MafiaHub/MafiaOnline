@@ -1,6 +1,7 @@
 #include <utils/safe_win32.h>
 
 #include "npc_replicas.h"
+#include "replica_motion.h"
 
 #include "core/application.h"
 #include "features/player/human_states.h"
@@ -73,6 +74,14 @@ namespace Mafia1Online::Features::Npc {
         constexpr float kContactLagLimit = 1.5f;
         constexpr float kContactEaseInSeconds = 0.2f;
         constexpr float kContactEaseOutSeconds = 0.3f;
+        // Once its own animation releases the body (a hit reaction, a timed
+        // action, a door), it returns to the stream over this time; one
+        // further off than this (a teleport) is placed at once.
+        constexpr float kReleaseBlendSeconds = 0.3f;
+        constexpr float kReleaseBlendDistance = 3.0f;
+        // A root-motion hold whose work state never ends goes back to the
+        // stream after this.
+        constexpr auto kRootMotionLimit = std::chrono::seconds(5);
 
         // reM HUMAN_THROW_CAR_SCREAM_BASE and _COUNT.
         constexpr uint32_t kThrownOutFirstLine = 161;
@@ -246,12 +255,15 @@ namespace Mafia1Online::Features::Npc {
         // Seated, or in a door animation: the car carries it and the seat
         // replay animates it.
         if (const auto *seated = static_cast<const SDK::Seat::NativeHuman *>(native); seated->usedActorEnter || seated->usedActorLeave) {
+            HoldPose(replica);
             return;
         }
         auto *human = static_cast<SDK::Player::NativeHuman *>(native);
+        const auto now = std::chrono::steady_clock::now();
         // The officer's arrest half plays from the aligned place.
         if (replica.seizingUntil != std::chrono::steady_clock::time_point {}) {
-            if (human->IsPlayingAnimation() && std::chrono::steady_clock::now() < replica.seizingUntil) {
+            if (human->IsPlayingAnimation() && now < replica.seizingUntil) {
+                HoldPose(replica);
                 return;
             }
             replica.seizingUntil = {};
@@ -259,20 +271,40 @@ namespace Mafia1Online::Features::Npc {
         // A replayed throw placed the NPC at the door and plays its pull-out;
         // the stream would stand it idle there before the player is out.
         if (human->IsPullingFromCar()) {
-            const auto now = std::chrono::steady_clock::now();
             if (replica.pullingUntil == std::chrono::steady_clock::time_point {}) {
                 replica.pullingUntil = now + kPullLimit;
             }
             if (now < replica.pullingUntil) {
+                HoldPose(replica);
                 return;
             }
         }
         else {
             replica.pullingUntil = {};
         }
+        // A hit reaction's steps (work state 6), a timed action (5) and a
+        // clip with a displacement track (4, a looping script clip aside)
+        // move the body by their own root motion in C_human::Movement and
+        // the animation machine, as on the host; the stream, which shows
+        // the host's body doing the same a render delay later, would pin
+        // this one in place and drag it along afterwards.
+        const auto melee = human->Melee();
+        const bool rootMotion = melee.canWork == SDK::Player::kHumanAnimationSequenceWorkState || melee.canWork == SDK::Player::kHumanTimedActionWorkState ||
+                                (melee.canWork == SDK::Player::kHumanPlayAnimationWorkState && replica.animatingUntil != std::chrono::steady_clock::time_point::max());
+        if (!rootMotion) {
+            replica.rootMotionSince = {};
+        }
+        else if (replica.rootMotionSince == std::chrono::steady_clock::time_point {}) {
+            replica.rootMotionSince = now;
+        }
+        if (rootMotion && now - replica.rootMotionSince < kRootMotionLimit) {
+            HoldPose(replica);
+            return;
+        }
         auto position = pose.position;
         auto direction = glm::mat3_cast(pose.rotation) * glm::vec3(0.0f, 0.0f, 1.0f);
         ApplyContact(replica, pose, position, direction);
+        BlendFromHold(replica, actor, position, direction, now);
         replica.frame->SetWorldPosition({position.x, position.y, position.z});
         replica.frame->SetDirection({direction.x, direction.y, direction.z});
         replica.frame->Update();
@@ -280,7 +312,6 @@ namespace Mafia1Online::Features::Npc {
 
         // Leave retail's hit reactions, reloads and timed actions to
         // C_human::Movement, which restores locomotion when they finish.
-        const auto melee = human->Melee();
         if (melee.canWork == SDK::Player::kHumanTimedActionWorkState || melee.canWork == SDK::Player::kHumanAnimationSequenceWorkState || melee.weaponChangeTime >= 0) {
             return;
         }
@@ -290,7 +321,7 @@ namespace Mafia1Online::Features::Npc {
             return;
         }
         // A script clip owns the body until it ends or is stopped.
-        if (std::chrono::steady_clock::now() < replica.animatingUntil) {
+        if (now < replica.animatingUntil) {
             return;
         }
         // The state at the same render time as the pose.
@@ -328,6 +359,42 @@ namespace Mafia1Online::Features::Npc {
         }
         replica.cornerTries = 0;
         replica.lastAnimation = animation.state;
+    }
+
+    void NpcReplicaService::HoldPose(Replica &replica) {
+        replica.poseHeld = true;
+        // The contact eases on from here, not by the whole hold at once.
+        replica.contactAt = {};
+    }
+
+    void NpcReplicaService::BlendFromHold(Replica &replica, void *native, glm::vec3 &position, glm::vec3 &direction, std::chrono::steady_clock::time_point now) {
+        if (replica.poseHeld) {
+            // Where the body's own animation left it, against where the
+            // stream shows it now.
+            replica.poseHeld = false;
+            const auto at = SDK::Player::WorldPosition(native);
+            const auto facing = SDK::Player::WorldDirection(native);
+            const glm::vec3 offset = glm::vec3(at.x, at.y, at.z) - position;
+            const bool blend = std::isfinite(glm::length(offset)) && glm::length(offset) <= kReleaseBlendDistance;
+            replica.releaseOffset = blend ? offset : glm::vec3(0.0f);
+            replica.releaseDirection = glm::vec3(facing.x, 0.0f, facing.z);
+            replica.releasedAt = blend ? now : std::chrono::steady_clock::time_point {};
+        }
+        if (replica.releasedAt == std::chrono::steady_clock::time_point {}) {
+            return;
+        }
+        const float weight = ReleaseWeight(std::chrono::duration<float>(now - replica.releasedAt).count(), kReleaseBlendSeconds);
+        if (weight <= 0.0f) {
+            replica.releasedAt = {};
+            return;
+        }
+        position += replica.releaseOffset * weight;
+        if (glm::length(replica.releaseDirection) > 0.01f) {
+            const glm::vec3 turned = glm::mix(direction, glm::normalize(replica.releaseDirection), weight);
+            if (glm::length(turned) > 0.01f) {
+                direction = glm::normalize(turned);
+            }
+        }
     }
 
     void NpcReplicaService::SettleCorpse(Replica &replica, void *native) {
