@@ -253,8 +253,8 @@ onStop(() => {
         forget(player);
     }
 });
-// After main.js attached the player record.
-Events.on("playerConnect", restore);
+// Once selector.js has attached the player record at login.
+Events.onLocal("fr:login", restore);
 Events.on("playerDisconnect", (player) => {
     if (levels.has(player.id)) persist(player);
     forget(player);

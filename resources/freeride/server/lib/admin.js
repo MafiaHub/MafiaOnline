@@ -1,5 +1,5 @@
-// Server admins. Free Ride has no accounts, so an admin is a player record
-// (nickname on one machine, see profiles.js) granted from the server console:
+// Server admins. An admin is a player record (the one an account owns, see
+// profiles.js and accounts.js) granted from the server console:
 // "fr admin add <player>", "fr admin remove <player>", "fr admin list".
 const store = require("./store.js");
 const profiles = require("./profiles.js");

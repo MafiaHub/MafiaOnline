@@ -190,8 +190,6 @@ function statsLine(record) {
 util.onStart(() => {
     spawnTimer = setInterval(spawnReadyPlayers, 200);
     tipTimer = setInterval(showTip, TIP_EVERY_MS);
-    // A restart of this resource keeps the connected players.
-    for (const player of World.getPlayers()) if (!profiles.get(player)) profiles.attach(player);
 });
 
 util.onStop(() => {
@@ -208,14 +206,14 @@ util.onStop(() => {
     for (const key of Object.keys(require.cache)) if (key.startsWith(__dirname)) delete require.cache[key];
 });
 
-Events.on("playerConnect", (player) => {
-    const {returning} = profiles.attach(player);
-    feed("join", [name(player, COLORS.gold), text(returning ? " is back in town" : " arrived in Lost Heaven")]);
-    console.log(`[${RESOURCE}] ${player.nickname} connected (${returning ? "returning" : "new"})`);
+// The record is attached once the player has logged in (selector.js).
+Events.on("playerConnect", (player) => console.log(`[${RESOURCE}] ${player.nickname} connected`));
+Events.onLocal("fr:login", (player, {returning, restored}) => {
+    if (!restored) feed("join", [name(player, COLORS.gold), text(returning ? " is back in town" : " arrived in Lost Heaven")]);
 });
 
 Events.on("playerDisconnect", (player) => {
-    feed("leave", [name(player), text(" left the city")]);
+    if (profiles.get(player)) feed("leave", [name(player), text(" left the city")]);
     // After every other module's disconnect handler, so they can still
     // write to the player's record (a parked car's condition, for one).
     setTimeout(() => profiles.detach(player), 0);

@@ -1,6 +1,8 @@
 // One command table for chat and the F2 city menu. A menu button sends the
 // same text a player could type, so both paths share every server check.
 const {toast} = require("./notify.js");
+const profiles = require("./profiles.js");
+const {inFreeRide} = require("./util.js");
 
 const CATEGORY_ORDER = ["City", "Cars", "Races", "Combat", "Crew", "Social", "Showcase", "Dev"];
 const commands = new Map();
@@ -19,6 +21,12 @@ function resolve(name) {
 }
 
 function run(player, command, args) {
+    // On a Free Ride map a player's record is attached at login; nothing
+    // runs before it.
+    if (inFreeRide() && !profiles.get(player)) {
+        player.sendMessage("Log in first.", 0xd0574a);
+        return;
+    }
     const entry = resolve(command);
     if (!entry) {
         toast(player, `Unknown command /${command}. Press F2 for the city menu or type /help.`, {tone: "bad"});

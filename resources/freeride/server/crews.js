@@ -29,7 +29,9 @@ function save() {
     store.save("crews", {version: 1, crews});
 }
 
+// Members are named by account, so only a logged-in player has a crew.
 function crewOf(player) {
+    if (!profiles.get(player)) return null;
     return crews.find((crew) => crew.members.includes(key(player.nickname))) ?? null;
 }
 
@@ -44,7 +46,7 @@ function remember(crew, player) {
 }
 
 function onlineMembers(crew) {
-    return World.getPlayers().filter((player) => crew.members.includes(key(player.nickname)));
+    return World.getPlayers().filter((player) => profiles.get(player) && crew.members.includes(key(player.nickname)));
 }
 
 function apply(player) {
@@ -190,6 +192,10 @@ menu.provide("crew", (player) => {
 });
 
 Events.on("playerConnect", apply);
+// Logging in sets the account's name, which is what crews list; any other
+// rename (to a guest name) drops the tag.
+Events.onLocal("fr:login", apply);
+Events.on("playerNicknameChange", apply);
 onStart(() => {
     load();
     for (const player of World.getPlayers()) apply(player);

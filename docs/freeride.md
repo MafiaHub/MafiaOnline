@@ -80,8 +80,10 @@ client (`client/selector.js`); see "The login flight" below.
   usual district (the map's first district if they have none on this map).
 - **Register** creates the account and then, once only, shows the look
   picker: the camera stops at the starting district and aims at a temporary
-  animated human; Left/Right (or the arrow buttons) change the look (thirteen
-  stock models, each checked against the native skeleton first), C turns the
+  animated human; Left/Right (or the arrow buttons) change the look (sixty-one
+  stock street, crew and cast models, each checked against the native
+  skeleton first; no nude or shirtless models, uniforms or cutscene
+  variants), C turns the
   camera and Enter begins. What a player becomes after that comes from play;
   the look they spawn with is the record's `model` field, which gameplay can
   change with `profiles.setField(player, "model", file)`.
@@ -90,11 +92,14 @@ client (`client/selector.js`); see "The login flight" below.
   enters after five seconds or on Enter; "Not you? Switch account" (or Esc)
   logs out on that computer and shows the form.
 
-A player who has not logged in runs no commands. Logging in renames the
-player to the account's name (a guest who joined under that name becomes
-"Guest *id*"), and an account can be in town only once. After a map change a
-logged-in player goes straight back in; a restart of the resource keeps the
-logins of the players in town for ten minutes.
+Until they log in, players are called "Guest *id*" (the nickname they joined
+with only fills in the form, and account names may not start with "Guest"),
+have no crew and run no commands on a Free Ride map; logging in renames them
+to the account's name, and an account can be in town only once. After a map
+change a logged-in player goes straight back in. A restart of the resource
+keeps the logins of the players in town for ten minutes; anyone it does not
+cover is taken off the street and back to the login card. A client that
+cannot show any look starts as the first one.
 
 ### Accounts
 
@@ -105,15 +110,25 @@ characters and may not be the name. A password is stored only as an scrypt
 hash (N 2^15, r 8, p 1, 64 bytes) with a random 16-byte salt per account,
 checked with a timing-safe comparison; an unknown name costs the same
 derivation as a wrong password and gets the same answer. Attempts are
-limited: five failed logins per name and twenty per address in fifteen
-minutes, ten failed remember tokens per address in fifteen minutes, three new
-accounts per address an hour, and one request a second per player.
+limited: five failed logins for one name from one address and twenty per
+address in fifteen minutes, while a name locks for everyone only after fifty
+failures in five minutes (so nobody can keep another player out); ten failed
+remember tokens per address in fifteen minutes, three new accounts per
+address an hour, and one request a second per player. The game connection is
+not encrypted yet, so the form asks players to use a password they use
+nowhere else.
 
 A remember token is 32 random bytes the server issues at login. The server
 keeps only its SHA-256, the hardware ID it was issued to and its expiry (30
 days); each use replaces it with a new one, a token from another machine is
 refused and thrown away, an account holds at most five, and "Switch account"
-revokes it. The client keeps the token, never the password, in the browser
+revokes it. A replaced token is remembered until its expiry: if it is ever
+shown again, a copy is in other hands, and every remembered login of that
+account is signed out. "Log out every other computer" on the login form, or
+`/logout` in town, signs out all of them. A rate limit, a server error or the
+account being in town already (which leaves the token unspent) keeps it on
+the "Welcome back" card for another try; only an expired, revoked or copied
+token is forgotten. The client keeps the token, never the password, in the browser
 storage of its web views, per server: that storage is the CEF profile under
 the client's own `cache/profiles` folder, which the Framework keeps across
 launches (`gui/cef/runtime.cpp`). Every server's pages share that one
@@ -145,7 +160,8 @@ server saves it every five seconds while they are on the street and not busy
 with a race, a duel, a job or a sentence, so those never become the place to
 come back to; a player with time left to serve goes back to jail instead, and
 an arrest takes the guns and the wanted level out of the saved spot. After a
-death they come back at their usual district.
+death they come back at the map's hospital where it has one (Lost Heaven
+Extended), else at their usual district, never at the saved spot.
 
 ### The login flight
 
@@ -183,8 +199,9 @@ Regenerate a skyline with, for example,
 `python tools/export_skyline.py freeride resources/freeride/server/data/skyline_freeride.js --game <Mafia folder> --roads resources/freeride/server/data/roads_freeride.js --report`;
 for Extended add `--mod-dir <mod mission folder> --mod-zip mods/freeride-extended.zip`.
 
-Each life starts with a baseball bat; guns are bought at Yellow Pete's. Dead players come back where
-they entered the city after five seconds (`server/lib/life.js`).
+Each life starts with a baseball bat; guns are bought at Yellow Pete's. Dead players come back after five
+seconds (`server/lib/life.js`): at the map's hospital where it has one, else
+at their usual district.
 
 ## Career
 

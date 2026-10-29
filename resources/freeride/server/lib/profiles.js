@@ -1,5 +1,7 @@
 // Persistent player records: cash, experience, rank and career statistics.
-// Free Ride has no accounts, so a record belongs to a nickname on one machine.
+// A record belongs to an account (lib/accounts.js), which names its key; the
+// records kept before accounts are keyed by nickname on one machine
+// (legacyKey) until their owner registers and claims them.
 // Public values travel in each player's replicated state bag, which the
 // scoreboard and the world labels on every client read.
 const store = require("./store.js");
@@ -51,9 +53,13 @@ function changed(player) {
     saveSoon();
 }
 
-function keyFor(player) {
-    const nickname = player.nickname.toLowerCase();
-    return player.hardwareId ? `${nickname}@${player.hardwareId}` : nickname;
+function legacyKey(nickname, hardwareId) {
+    const name = nickname.toLowerCase();
+    return hardwareId ? `${name}@${hardwareId}` : name;
+}
+
+function exists(key) {
+    return records.has(key);
 }
 
 function fresh(player) {
@@ -120,8 +126,7 @@ function setPublic(player, key, value) {
     }
 }
 
-function attach(player) {
-    const key = keyFor(player);
+function attach(player, key) {
     let record = records.get(key);
     const returning = Boolean(record);
     if (!record) {
@@ -232,5 +237,5 @@ Events.on("playerSpawn", publish);
 
 load();
 
-module.exports = {get, keyOf, keysNamed, attach, save: writeNow, detach, publish, setPublic, addXp, bump, setField, progress, leaderboard,
+module.exports = {get, keyOf, keysNamed, legacyKey, exists, attach, save: writeNow, detach, publish, setPublic, addXp, bump, setField, progress, leaderboard,
     levelFor, rankFor, STARTING_CASH};
