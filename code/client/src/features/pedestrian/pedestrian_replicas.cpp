@@ -28,6 +28,12 @@ namespace Mafia1Online::Features::Pedestrian {
         // A living walker whose next clip has the same id as the last one
         // reports no change; restart it rather than hold forever.
         constexpr std::chrono::milliseconds kLivingHoldLimit {500};
+        // A dead walker's clip ended: the host may still chain the queued
+        // end of a knockdown (Hit 0x4588d0), whose id comes a moment after
+        // this copy's fall ends. Then the corpse settles.
+        constexpr std::chrono::milliseconds kCorpseSettleDelay {500};
+        // How far a walker streamed in dead runs its clip at once.
+        constexpr uint32_t kFallenLimitMs = 10000;
 
         bool Finite(const Framework::Utils::TransformSnapshot &pose) {
             return std::isfinite(pose.position.x) && std::isfinite(pose.position.y) && std::isfinite(pose.position.z) && glm::length(pose.rotation) >= 0.0001f;
@@ -42,6 +48,20 @@ namespace Mafia1Online::Features::Pedestrian {
             return name.size() == model.size() && std::equal(name.begin(), name.end(), model.begin(), [](char a, char b) {
                 return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b));
             });
+        }
+
+        // Update's frames, back to back, until retail Tick would end the
+        // clip; a looping clip stops at kFallenLimitMs.
+        void RunToEnd(SDK::Traffic::NativeTrafficElement &element) {
+            for (uint32_t elapsed = 0; elapsed < kFallenLimitMs; elapsed += kMaximumFrameMs) {
+                if (element.TickAnimation(kMaximumFrameMs)) {
+                    return;
+                }
+                element.Model()->Tick(static_cast<int>(kMaximumFrameMs));
+                if (element.CountDownClip(kMaximumFrameMs)) {
+                    return;
+                }
+            }
         }
 
         std::vector<SDK::Traffic::NativeTrafficGenerator *> MissionGenerators() {
@@ -108,10 +128,18 @@ namespace Mafia1Online::Features::Pedestrian {
             if (!replica.element && !replica.failed) {
                 replica.element = Borrow(generators, *walker, snapshot);
                 replica.failed = !replica.element;
+                // Streamed in after the host's walker died: it lies where
+                // it fell rather than fall again.
+                replica.fallen = replica.element && !walker->alive;
             }
             auto *element = replica.element;
             if (!element) {
                 return;
+            }
+            auto *game = SDK::Core::Mission::Get()->Game();
+            if (!walker->alive && !replica.dead) {
+                replica.dead = true;
+                element->Die(game);
             }
 
             if (replica.appliedAlpha != walker->alpha) {
@@ -132,6 +160,11 @@ namespace Mafia1Online::Features::Pedestrian {
                 replica.appliedWave = walker->taxiWave;
                 element->ShowTaxiWave(walker->taxiWave);
             }
+            // Retail Tick returns at once for a settled corpse (0x452cd0):
+            // a later Hit on it there sets a clip it never plays.
+            if (replica.settled) {
+                return;
+            }
             if (walker->animation != element->CurrentAnimation()) {
                 element->PlayAnimation(walker->animation, walker->animationFlag);
                 replica.holding = false;
@@ -145,6 +178,16 @@ namespace Mafia1Online::Features::Pedestrian {
             // moves with each packet's jitter; subtracting that delay here
             // instead stepped the walker on every late or early packet.
             const bool sampled = replica.snapshots.Sample(replica.snapshots.RenderTimeMs(static_cast<double>(MafiaNet::GetTimeUS()) * 0.001), pose);
+            if (replica.fallen) {
+                replica.fallen = false;
+                RunToEnd(*element);
+                const auto direction = glm::mat3_cast(snapshot.rotation) * glm::vec3(0.0f, 0.0f, 1.0f);
+                element->SetPose({snapshot.position.x, snapshot.position.y, snapshot.position.z}, {direction.x, 0.0f, direction.z});
+                replica.holding = true;
+                replica.settled = true;
+                element->SettleCorpse(game);
+                return;
+            }
             if (sampled && !replica.holding) {
                 // Root motion moves the element; the host's pose, which
                 // already carries the host's root motion, replaces it.
@@ -154,7 +197,12 @@ namespace Mafia1Online::Features::Pedestrian {
                 element->SetPose({pose.position.x, pose.position.y, pose.position.z}, {direction.x, 0.0f, direction.z});
                 if (!replica.holding) {
                     element->Model()->Tick(static_cast<int>(frameMs));
+                    replica.holding = element->CountDownClip(frameMs);
                 }
+            }
+            if (replica.dead && replica.holding && now - replica.holdingSince >= kCorpseSettleDelay) {
+                replica.settled = true;
+                element->SettleCorpse(game);
             }
         });
 

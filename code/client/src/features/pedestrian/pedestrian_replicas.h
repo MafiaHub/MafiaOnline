@@ -34,7 +34,9 @@ namespace Mafia1Online::Features::Pedestrian {
     // generator and model from this client's own pools, so it has the same
     // mesh, animation set and collision as on the host. Its AI never runs:
     // the pose follows the host's snapshots and every animation the host
-    // plays is played here through retail SetAnim.
+    // plays is played here through retail SetAnim. Its death takes retail's
+    // own steps: Hit's when the host's walker dies, Tick's when its last
+    // clip ends.
     class PedestrianReplicaService final {
       public:
         void Update(World::WorldService &world);
@@ -64,6 +66,13 @@ namespace Mafia1Online::Features::Pedestrian {
             // A clip ended: hold its last pose until the host plays the next
             // animation. A corpse never gets one.
             bool holding = false;
+            // The host's walker died: retail Hit's death steps ran here.
+            bool dead = false;
+            // Its last clip ended: the corpse lies as retail leaves it and
+            // never animates again.
+            bool settled = false;
+            // Borrowed already dead: its last clip runs to its end at once.
+            bool fallen = false;
             int32_t appliedAlpha = -1;
             // The taxi wave shown, Shared::Taxi::kWave*.
             uint8_t appliedWave = 0;

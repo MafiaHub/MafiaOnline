@@ -1,7 +1,10 @@
 #pragma once
 
+#include <mafia1/sdk/collision/native_collision.h>
+#include <mafia1/sdk/core/game.h>
 #include <mafia1/sdk/player/native_actor.h>
 #include <mafia1/sdk/scene/native_scene.h>
+#include <mafia1/sdk/world/native_using_object.h>
 
 #include <cmath>
 
@@ -236,15 +239,51 @@ namespace Mafia1Online::SDK::Traffic {
             _currentAnimation = -1;
             PlayAnimation(animation, flag);
         }
-        // True when the clip ended this tick (bit 0 of the machine's result).
-        // Element Tick then returns before ticking the model, so the clip's
-        // last pose holds; a dead walker settles there as a corpse.
+        // True when the clip's track ended this tick (bit 0 of the machine's
+        // result). Element Tick then returns before ticking the model, so the
+        // clip's last pose holds; a dead walker settles there as a corpse.
         bool TickAnimation(uint32_t frameMs) {
             if (!_animationMachine) {
                 return false;
             }
             using Call = int(__thiscall *)(void *, uint32_t);
             return (reinterpret_cast<Call>(kAnimationMachineTick)(_animationMachine, frameMs) & 1) != 0;
+        }
+        // A clip without a track never sets that bit. With no track playing
+        // (machine +0x2c and +0x80 both -1), Tick ends a one-shot clip
+        // (+0x16c) once the countdown SetAnim started at +0x170, its length
+        // less 250 ms, runs out after the model's tick (0x452cd0's
+        // death-rest countdown). True when it ran out this tick.
+        bool CountDownClip(uint32_t frameMs) {
+            const auto *machine = static_cast<const std::byte *>(_animationMachine);
+            if (!machine || !_animationFlag || *reinterpret_cast<const int32_t *>(machine + kMachineCurrentTrack) != -1 ||
+                *reinterpret_cast<const int32_t *>(machine + kMachineBlendingTrack) != -1) {
+                return false;
+            }
+            auto &remaining = *reinterpret_cast<int32_t *>(Raw() + kAnimationCountdown);
+            remaining -= static_cast<int32_t>(frameMs);
+            return remaining <= 0;
+        }
+        // Hit's death (0x4588d0): the health clamped to 0, which also keeps
+        // SetAnim from putting the collision back; no speech (+0x1fc), which
+        // gates the talk prompt; the dynamic collision (+0xc4) out of the
+        // grid and its flag (+0x150) clear, so UpdateModel no longer moves
+        // it; the use object (+0x1bc) unregistered; and every death branch
+        // drops the umbrella. Retail repeats each step (Tick, Deactivate).
+        void Die(Core::Game::NativeGame *game) {
+            _health = 0.0f;
+            *reinterpret_cast<bool *>(Raw() + kCanSpeak) = false;
+            EraseCollision();
+            World::DelUsingObject(game, reinterpret_cast<World::NativeUsingObject *>(Raw() + kUsingObject));
+            DropUmbrella();
+        }
+        // Tick's end of a dead walker's last clip (FinishCurrentAnimation,
+        // inlined in 0x452cd0): the collision out again, panic blocked
+        // (+0x00), after which Tick only holds the corpse, and no shadow.
+        void SettleCorpse(Core::Game::NativeGame *game) {
+            EraseCollision();
+            *reinterpret_cast<bool *>(Raw()) = true;
+            game->DelFrameForShadow(_model);
         }
         // Pedestrian nodes only: an element whose allowed node types were
         // never set (Activate sets them) finds no node otherwise.
@@ -364,6 +403,18 @@ namespace Mafia1Online::SDK::Traffic {
         }
         [[nodiscard]] const std::byte *Raw() const { return reinterpret_cast<const std::byte *>(this); }
         [[nodiscard]] std::byte *Raw() { return reinterpret_cast<std::byte *>(this); }
+        void EraseCollision() {
+            Collision::DynErase(Raw() + kCollisionObject);
+            *reinterpret_cast<bool *>(Raw() + kHasCollisions) = false;
+        }
+
+        static constexpr size_t kCollisionObject      = 0xc4;
+        static constexpr size_t kHasCollisions        = 0x150;
+        static constexpr size_t kAnimationCountdown   = 0x170;
+        static constexpr size_t kUsingObject          = 0x1bc;
+        static constexpr size_t kCanSpeak             = 0x1fc;
+        static constexpr size_t kMachineCurrentTrack  = 0x2c;
+        static constexpr size_t kMachineBlendingTrack = 0x80;
 
         std::byte _unused00[0x08];
         void *_animationMachine;

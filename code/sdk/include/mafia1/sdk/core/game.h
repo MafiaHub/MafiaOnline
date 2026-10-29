@@ -17,6 +17,10 @@ namespace Mafia1Online::SDK::Core::Game {
     // bool __thiscall C_game::ProcessCheatCode(char), retn 4: the game loops
     // feed it every typed key; false means no code is in progress.
     inline constexpr uintptr_t kProcessCheatCode     = 0x5a8030;
+    // bool __thiscall C_game::DelFrameForShadow(I3D_frame *, E_shadow_type),
+    // retn 8: closes the fake shadow cast for that frame; nothing when it
+    // has none. Walkers cast theirs in the default set (0).
+    inline constexpr uintptr_t kDelFrameForShadow    = 0x5ad7c0;
     inline constexpr uint32_t kWideCityCacheFlag     = 0x200;
 
     struct NativeShootRecord {
@@ -95,6 +99,9 @@ namespace Mafia1Online::SDK::Core::Game {
         // linearity, as the retail options menu does on close.
         void UpdatePlayerControls() {
             reinterpret_cast<void(__thiscall *)(NativeGame *)>(0x5a7ff0)(this);
+        }
+        void DelFrameForShadow(Scene::NativeFrame *frame) {
+            reinterpret_cast<bool(__thiscall *)(NativeGame *, Scene::NativeFrame *, int32_t)>(kDelFrameForShadow)(this, frame, 0);
         }
         [[nodiscard]] bool HasPlayerFocus(Player::NativeActor *actor) const {
             return _player == actor && _human == actor && _camera._player == actor;
