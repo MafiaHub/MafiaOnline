@@ -228,11 +228,26 @@ namespace Mafia1Online::Features::Car {
                 stream.meshReportSequence     = 0;
                 stream.meshDirty              = simulationController;
                 stream.hasReportedMesh        = false;
+                // The controller gets no poses of its own (GetTransformSource):
+                // as an observer again it waits for the next controller's on
+                // native physics, then eases from there (Rebase).
+                stream.nativeShown = !simulationController;
+                if (simulationController) {
+                    stream.poses.Clear();
+                }
                 // An adopted car is where its own native physics put it; the
-                // pose the server holds is older.
+                // pose the server holds is older. So, within a snap of it, is a
+                // car this client showed: the last pose is ahead of it by its
+                // speed times the render delay, a jump at the hand-over.
                 if (simulationController && !IsAdopted(id)) {
                     Framework::Utils::TransformSnapshot authoritative {car->position, car->velocity, car->rotation};
-                    if (IsFinite(authoritative) && glm::length(authoritative.rotation) >= 0.0001f) {
+                    bool shownNear = false;
+                    if (const auto native = _nativeById.find(id);
+                        native != _nativeById.end() && !native->second.removalQueued && world.NativeObjects().Resolve(native->second.handle)) {
+                        const auto shown = native->second.frame->WorldPosition();
+                        shownNear        = glm::distance(glm::vec3(shown.x, shown.y, shown.z), authoritative.position) <= 5.0f;
+                    }
+                    if (IsFinite(authoritative) && glm::length(authoritative.rotation) >= 0.0001f && !shownNear) {
                         ApplyPose(world, id, authoritative);
                     }
                 }

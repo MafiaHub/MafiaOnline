@@ -105,16 +105,17 @@ namespace Mafia1Online::Features::Car {
         }
 
         // `arrival` is the local clock the pose was received at; `reset`
-        // starts over (a new controller's clock).
+        // starts over (a new controller's clock), from where the car was
+        // shown: a new controller's poses rarely continue the last ones.
         void Push(const CarPoseSample &pose, double arrival, bool reset) {
+            CarPoseSample before;
+            const bool correct = _presented && Sample(_lastRender, before);
             if (reset) {
-                Clear();
+                _poses.clear();
             }
             if (!_poses.empty() && pose.time <= _poses.back().time) {
                 return;
             }
-            CarPoseSample before;
-            const bool correct = _presented && Sample(_lastRender, before);
             if (!_poses.empty()) {
                 const CarPoseSample last = _poses.back();
                 const float gap          = static_cast<float>(pose.time - last.time);
@@ -158,19 +159,21 @@ namespace Mafia1Online::Features::Car {
         }
 
         // The pose at local clock `time`: Hermite between the bracketing
-        // poses, the oldest before them, and on along the newest's velocities
-        // after (Extrapolate).
+        // poses, and along the newest's or the oldest's velocities after or
+        // before them (Extrapolate). A stream's first pose arrives about now,
+        // up to a delay ahead of the render time: the car runs into it rather
+        // than standing there for the delay.
         bool Sample(double time, CarPoseSample &out) const {
             if (_poses.empty()) {
                 return false;
             }
             if (time <= _poses.front().time) {
-                out = _poses.front();
+                out = Extrapolate(_poses.front(), time, kMaxDelayMs + kExtrapolationEaseMs);
                 return true;
             }
             const auto &newest = _poses.back();
             if (time >= newest.time) {
-                out = Extrapolate(newest, time);
+                out = Extrapolate(newest, time, kMaxExtrapolationMs);
                 return true;
             }
             const auto next    = std::upper_bound(_poses.begin(), _poses.end(), time, [](double t, const CarPoseSample &p) { return t < p.time; });
@@ -213,18 +216,18 @@ namespace Mafia1Online::Features::Car {
             return true;
         }
 
-        // `from` carried on to local clock `time`: its mass centre along an
+        // `from` carried to local clock `time`: its mass centre along an
         // arc (the tyres turn the velocity with the heading, so by the yaw
         // about the car's up axis alone), the body turning about it, at most
-        // kMaxExtrapolationMs worth.
-        CarPoseSample Extrapolate(const CarPoseSample &from, double time) const {
-            constexpr double kFullMs = kMaxExtrapolationMs - kExtrapolationEaseMs;
-            const double reach       = std::abs(time - from.time);
-            double run               = reach;
-            float rate               = 1.0f;
-            if (reach > kFullMs) {
-                const double fade = std::exp(-(reach - kFullMs) / kExtrapolationEaseMs);
-                run               = kFullMs + kExtrapolationEaseMs * (1.0 - fade);
+        // `limitMs` worth, the last kExtrapolationEaseMs of it easing.
+        CarPoseSample Extrapolate(const CarPoseSample &from, double time, double limitMs) const {
+            const double full  = limitMs - kExtrapolationEaseMs;
+            const double reach = std::abs(time - from.time);
+            double run         = reach;
+            float rate         = 1.0f;
+            if (reach > full) {
+                const double fade = std::exp(-(reach - full) / kExtrapolationEaseMs);
+                run               = full + kExtrapolationEaseMs * (1.0 - fade);
                 rate              = static_cast<float>(fade);
             }
             const float dt      = static_cast<float>(time < from.time ? -run : run) * 0.001f;

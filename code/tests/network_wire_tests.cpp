@@ -532,6 +532,44 @@ namespace {
         CHECK(buffer.Present(5900.0, 0.016f, pose) && Near(pose.position.x, 5900.0f * 0.015f, 0.01f));
     }
 
+    // A car at 15 m/s handed to another controller at 2 s: its clock starts
+    // over (the first pose dated as it arrives, 0.2 m off the old path) and
+    // the buffer with it, but the shown car carries on from where it was.
+    void CarControllerChange() {
+        Features::Car::CarPoseBuffer buffer;
+        float lastX   = 0.0f;
+        float maxJump = 0.0f;
+        bool shown    = false;
+        for (double now = 0.0; now < 3000.0; now += 16.0) {
+            for (double sent = std::floor(now / 33.0) * 33.0; sent > now - 16.0; sent -= 33.0) {
+                const bool handed = sent >= 2000.0;
+                const double time = handed ? sent + 40.0 : sent;
+                buffer.Push(CarAt(time, static_cast<float>(sent) * 0.015f - (handed ? 0.2f : 0.0f), 15.0f), sent + 10.0, handed && sent < 2033.0);
+            }
+            const double renderTime = buffer.AdvanceDelay(now, 16.0f);
+            Features::Car::CarPoseSample pose;
+            if (!buffer.Present(renderTime, 0.016f, pose)) {
+                continue;
+            }
+            if (shown && now > 500.0) {
+                maxJump = std::max(maxJump, std::abs(pose.position.x - lastX - 0.24f));
+            }
+            shown = true;
+            lastX = pose.position.x;
+        }
+        // The new path runs 0.8 m behind (the new clock's 40 ms and the
+        // 0.2 m): clearing the buffer jumped the car back by that and stood
+        // it for the delay. Now it is closed like a correction, 19% a frame,
+        // and the car never steps backward.
+        CHECK(maxJump < 0.8f * (1.0f - std::exp(-16.0f / 75.0f)) + 0.01f);
+        CHECK(maxJump < 0.24f);
+        // A stream's first pose: the car runs into it.
+        Features::Car::CarPoseBuffer first;
+        first.Push(CarAt(1000.0, 15.0f, 15.0f), 1000.0, false);
+        Features::Car::CarPoseSample out;
+        CHECK(first.Sample(900.0, out) && Near(out.position.x, 13.5f, 1e-4f));
+    }
+
     void RideBlend() {
         using Features::Player::RemoteRide;
         std::deque<std::pair<MafiaNet::Time, RemoteRide>> rides;
@@ -575,6 +613,7 @@ int main() {
     CarArcMotion();
     CarExtrapolationEase();
     CarContactClock();
+    CarControllerChange();
     RideBlend();
     if (failures == 0) {
         std::printf("network wire tests passed\n");
