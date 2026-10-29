@@ -44,6 +44,7 @@ function clearMarket() {
 }
 
 function shopFacing(shop) {
+    if (shop.facing) return shop.facing;
     const doorHinge = shop.entranceFrame
         ? World.findWorldFrame(shop.entranceFrame)?.getWorldPosition() ?? shop.entrance
         : null;

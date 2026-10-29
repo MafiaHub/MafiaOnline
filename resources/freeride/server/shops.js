@@ -49,9 +49,10 @@ const SHOPS = [
         ]},
     // The "lekarna" frame floats 1.5 m over the hospital's front landing,
     // whose floor is at y 13.2 (the door 3DVERE4 at z 763.5): the clerk
-    // stands on the landing below it.
+    // stands on the landing below it, facing the street (-z, away from the
+    // doors).
     {id: "pharmacy", name: "The Dispensary", tagline: "The city keeps its own hours", position: {x: -761.3176, y: 13.25, z: 762.4796},
-        model: "recep.i3d", animation: null, offers: [
+        facing: {x: 0, y: 0, z: -1}, model: "recep.i3d", animation: null, offers: [
             {id: "bandage", name: "Bandages & tincture", price: 65, note: "Restore up to 45 health"},
         ]},
     {id: "salieri", name: "Salieri's Back Window", tagline: "Coffee, pie, and sealed envelopes", position: {x: -1774.5226, y: -4.5073, z: 5.2466},
