@@ -107,6 +107,17 @@ namespace Mafia1Online::SDK::Player {
     // away (G_Inventory::Holster); what does not fit drops (DropOutItems,
     // which PickupService routes to the server).
     inline constexpr uintptr_t kHumanDoHolster = 0x585C60;
+    // C_entity::actionTick's cover calls, each bool __thiscall(C_human*,
+    // E_corner_view view), retn 4, false for a boxed human or one carrying
+    // a body: Do_CornerView (0x58a9a0) peeks out (80-82) and
+    // Do_CornerFire (0x58aa60) shoots out (83-87), both PersonAnim and
+    // work state 5 for the clip less 250 ms; Do_CornerFireAimed
+    // (0x58ab80) leans out aimed (88-92). Both fire calls refuse a rifle
+    // or an item (+0x1e8 2 or 0) and set m_bIsAiming; side 2 needs a
+    // crouched body.
+    inline constexpr uintptr_t kHumanDoCornerView      = 0x58A9A0;
+    inline constexpr uintptr_t kHumanDoCornerFire      = 0x58AA60;
+    inline constexpr uintptr_t kHumanDoCornerFireAimed = 0x58AB80;
 
     struct NativeItemProperty {
         int32_t type;
@@ -435,6 +446,15 @@ namespace Mafia1Online::SDK::Player {
         }
         void Holster() {
             reinterpret_cast<void(__thiscall *)(NativeHuman *)>(kHumanDoHolster)(this);
+        }
+        bool CornerView(int32_t view) {
+            return reinterpret_cast<bool(__thiscall *)(NativeHuman *, int32_t)>(kHumanDoCornerView)(this, view);
+        }
+        bool CornerFire(int32_t view) {
+            return reinterpret_cast<bool(__thiscall *)(NativeHuman *, int32_t)>(kHumanDoCornerFire)(this, view);
+        }
+        bool CornerFireAimed(int32_t view) {
+            return reinterpret_cast<bool(__thiscall *)(NativeHuman *, int32_t)>(kHumanDoCornerFireAimed)(this, view);
         }
         // PERSON_STOPANIM.
         void StopAnimation() {

@@ -2,6 +2,7 @@
 // railway rider blend.
 #include "client/src/features/car/car_pose_buffer.h"
 #include "client/src/features/player/host_lead.h"
+#include "client/src/features/player/human_states.h"
 #include "client/src/features/player/ride_blend.h"
 #include "client/src/features/player/stalled_gait.h"
 #include "shared/features/car/car_entity.h"
@@ -770,6 +771,33 @@ namespace {
         CHECK(!Stalled(5000.0, 0.0, 150.0f, running));
     }
 
+    void HumanStates() {
+        using namespace Features::Player;
+        // Turning on the spot and cover hold their state; the variant bits
+        // (crouched 8270 = 0x2000 | 78) are dropped for PersonAnim.
+        for (const int16_t state : {8, 9, 10, 78, 79, 88, 92}) {
+            const auto animation = ClassifyHumanState(state);
+            CHECK(animation.state == state && !animation.oneShot);
+        }
+        CHECK(ClassifyHumanState(8270).state == 78);
+        // int16 carries 32855 (0x8000 | 87) negative; the mask still finds 87.
+        CHECK(ClassifyHumanState(static_cast<int16_t>(32855)).state == 87 && ClassifyHumanState(static_cast<int16_t>(32855)).oneShot);
+        // A peek or a shot round the corner plays once.
+        for (const int16_t state : {80, 82, 83, 87}) {
+            CHECK(ClassifyHumanState(state).oneShot);
+        }
+        // Still idle: a door clip, a death, an unknown state.
+        CHECK(ClassifyHumanState(287).state == 1 && ClassifyHumanState(131).state == 1 && ClassifyHumanState(93).state == 1);
+        // Each cover state maps to the call and side that sets it.
+        CHECK(CornerActionFor(78).call == CornerCall::None && CornerActionFor(10).call == CornerCall::None);
+        CHECK(CornerActionFor(81).call == CornerCall::View && CornerActionFor(81).view == 1);
+        CHECK(CornerActionFor(84).call == CornerCall::Fire && CornerActionFor(84).view == 0);
+        CHECK(CornerActionFor(86).call == CornerCall::Fire && CornerActionFor(86).view == 1);
+        CHECK(CornerActionFor(0x4000 | 87).call == CornerCall::Fire && CornerActionFor(0x4000 | 87).view == 2);
+        CHECK(CornerActionFor(89).call == CornerCall::FireAimed && CornerActionFor(89).view == 0);
+        CHECK(CornerActionFor(92).call == CornerCall::FireAimed && CornerActionFor(92).view == 2);
+    }
+
     void HostView() {
         using namespace Features::Player;
         // Half of each round trip, kept within the buffer's bound one send
@@ -820,6 +848,7 @@ int main() {
     CarControllerChange();
     RideBlend();
     StalledGait();
+    HumanStates();
     HostView();
     if (failures == 0) {
         std::printf("network wire tests passed\n");

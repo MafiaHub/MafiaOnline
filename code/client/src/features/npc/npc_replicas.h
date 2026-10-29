@@ -97,6 +97,8 @@ namespace Mafia1Online::Features::Npc {
             Game::Entities::NativeObjectHandle handle;
             SDK::Scene::NativeFrame *frame = nullptr;
             int16_t lastAnimation = 0;
+            // Frames the cover call for the streamed state was refused.
+            int cornerTries = 0;
             // The end of a replayed pull-out (SeatService), if one is playing.
             std::chrono::steady_clock::time_point pullingUntil {};
             // The script clip (NpcEntity::animation) last applied, and until

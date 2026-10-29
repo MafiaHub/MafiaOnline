@@ -3,6 +3,7 @@
 #include "npc_replicas.h"
 
 #include "core/application.h"
+#include "features/player/human_states.h"
 #include "features/player/player_service.h"
 #include "features/player/stalled_gait.h"
 #include "features/seat/seat_service.h"
@@ -58,6 +59,9 @@ namespace Mafia1Online::Features::Npc {
         // How long a script clip waits for the host's date of it: the
         // server -> host -> server round trip behind the clip itself.
         constexpr auto kClipDateWait = std::chrono::milliseconds(1000);
+        // Frames a cover call may be refused (a stance not applied yet)
+        // before the bare state plays instead.
+        constexpr int kCornerTries = 10;
 
         // The host's NPC struck from within reach of where it saw its
         // target, the target itself a pose behind; on the target's screen
@@ -301,10 +305,28 @@ namespace Mafia1Online::Features::Npc {
             Player::Stalled(time, static_cast<double>(replica.locomotion.back().at), kSnapshotConfig.maxExtrapolationMs, replica.newestVelocity)) {
             state = Player::kStopState;
         }
-        const auto animation = Player::PlayerService::ClassifyLocomotion(*state);
-        if (!animation.oneShot || replica.lastAnimation != animation.state) {
+        const auto animation = Player::ClassifyHumanState(*state);
+        // Cover goes through the host's own call, which also starts the
+        // peek's or shot's timed action and raises the gun; one the body
+        // refuses yet (its stance comes with the next CombatService pass)
+        // is tried again, and one it never takes plays as the bare state.
+        if (const auto corner = Player::CornerActionFor(animation.state); corner.call != Player::CornerCall::None) {
+            if (replica.lastAnimation != animation.state || (!animation.oneShot && (human->AnimationState() & 0x1ff) != animation.state)) {
+                const bool taken = corner.call == Player::CornerCall::View ? human->CornerView(corner.view)
+                                   : corner.call == Player::CornerCall::Fire ? human->CornerFire(corner.view)
+                                                                             : human->CornerFireAimed(corner.view);
+                if (!taken) {
+                    if (++replica.cornerTries < kCornerTries) {
+                        return;
+                    }
+                    human->SetLocomotionAnimation(static_cast<SDK::Player::LocomotionAnimation>(animation.state));
+                }
+            }
+        }
+        else if (!animation.oneShot || replica.lastAnimation != animation.state) {
             human->SetLocomotionAnimation(static_cast<SDK::Player::LocomotionAnimation>(animation.state));
         }
+        replica.cornerTries = 0;
         replica.lastAnimation = animation.state;
     }
 

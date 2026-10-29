@@ -1,5 +1,6 @@
 #include "player_service.h"
 #include "host_lead.h"
+#include "human_states.h"
 #include "stalled_gait.h"
 
 #include "core/application.h"
@@ -695,82 +696,8 @@ namespace Mafia1Online::Features::Player {
     }
 
     PlayerService::RemoteAnimation PlayerService::ClassifyLocomotion(int16_t state) {
-        using Animation = SDK::Player::LocomotionAnimation;
-        // The upper bits select the weapon/crouch variant, which each human
-        // applies from its own replicated state (Do_Jump masks the same way).
-        const auto base = static_cast<int16_t>(state & 0x1ff);
-        switch (base) {
-        case static_cast<int16_t>(Animation::Idle):
-        case static_cast<int16_t>(Animation::RunForward):
-        case static_cast<int16_t>(Animation::WalkForward):
-        case static_cast<int16_t>(Animation::WalkBackward):
-        case static_cast<int16_t>(Animation::WalkLeft):
-        case static_cast<int16_t>(Animation::WalkRight):
-        case static_cast<int16_t>(Animation::RunLeft):
-        case static_cast<int16_t>(Animation::RunRight):
-        case static_cast<int16_t>(Animation::RunForwardLeft):
-        case static_cast<int16_t>(Animation::RunForwardRight):
-        case static_cast<int16_t>(Animation::WalkForwardLeft):
-        case static_cast<int16_t>(Animation::WalkForwardRight):
-        case static_cast<int16_t>(Animation::WalkBackwardLeft):
-        case static_cast<int16_t>(Animation::WalkBackwardRight):
-        case 102:
-        // Panic (anim_info "panika ..."): an entity's freeze (AI_ACTION_FREEZE,
-        // Do_ShockDown) holds 62, 65 or 68 crouched, on all fours or lying
-        // until Do_ShockUp; standing panic, the panic runs and looking round.
-        case 55:
-        case 56:
-        case 57:
-        case 58:
-        case 59:
-        case 60:
-        case 62:
-        case 65:
-        case 68:
-        case 70:
-        case 71:
-        case 72:
-        case 73:
-        case 74:
-        case 75:
-        case 76:
-        case 77: return RemoteAnimation {base, false};
-        // Jumps and the hard landing play once over the streamed arc.
-        case 95:
-        case 97:
-        case 98:
-        case 99:
-        case 100:
-        case 101:
-        case 103:
-        // The startles (Do_ShockStart) and a freeze's way down and back up.
-        case 47:
-        case 48:
-        case 49:
-        case 50:
-        case 51:
-        case 52:
-        case 53:
-        case 54:
-        case 61:
-        case 63:
-        case 64:
-        case 66:
-        case 67:
-        case 69:
-        // A car's side jump (C_human::Do_SideJump 0x587040, GAME_ANIM_DODGE_*
-        // 322-329): once, as the owner's C_human::Update ends it on idle.
-        case 322:
-        case 323:
-        case 324:
-        case 325:
-        case 326:
-        case 327:
-        case 328:
-        case 329: return RemoteAnimation {base, true};
-        default: break;
-        }
-        return RemoteAnimation {static_cast<int16_t>(Animation::Idle), false};
+        const auto animation = ClassifyHumanState(state);
+        return RemoteAnimation {animation.state, animation.oneShot};
     }
 
     void PlayerService::ApplyRemotePose(World::WorldService &world, uint64_t networkId, const Framework::Utils::TransformSnapshot &pose, bool alive,
