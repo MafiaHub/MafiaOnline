@@ -48,10 +48,13 @@ namespace Mafia1Online::Features::Npc {
 
         // A copy constructed here later than this into its throw-out, or its
         // door exit or entry, stands where the host's is: replaying it would
-        // pull it back to the seat while the host's one is already out. The
-        // door window stays inside the 2 s SeatService holds an exit for.
+        // pull it back to the seat while the host's one is already out. Each
+        // door clip runs 65 to 78 frames of 40 ms (anims\AutoSmVys FR and
+        // BL, AutoBigNas BR .5DS; LS3D's frame is 40 ms), 2.6 to 3.12 s: a
+        // copy that late or later stands where the host's clip ended
+        // (DoorEndTime) or is seated by SeatService's reconciliation.
         constexpr uint16_t kThrowReplayAgeMs = 1000;
-        constexpr uint16_t kDoorReplayAgeMs = 1500;
+        constexpr uint16_t kDoorReplayAgeMs = 2600;
         // A corpse whose fall ended away from the host's (a pose eased for a
         // melee contact, a death the wait limit let through) is drawn to it
         // within this time constant, no faster than this, while it falls.
@@ -247,7 +250,10 @@ namespace Mafia1Online::Features::Npc {
         // directly stepped the body on every late or early packet.
         const double time = replica.renderTime;
         Framework::Utils::TransformSnapshot pose;
-        if (!replica.snapshots.Sample(time, pose)) {
+        // Not seated for the host's door clip (too late into it to replay):
+        // standing where that clip ends, not idling along its track.
+        const double placed = DoorEndTime(replica.locomotion, time, [](int16_t state) { return Player::DoorAnimation(state); });
+        if (!replica.snapshots.Sample(placed, pose)) {
             return;
         }
         auto *actor = static_cast<SDK::Player::NativeActor *>(native);

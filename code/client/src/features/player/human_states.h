@@ -152,4 +152,13 @@ namespace Mafia1Online::Features::Player {
         default: return {};
         }
     }
+
+    // C_human::Use_Actor's door clips into and out of a car's seat: the
+    // ids GetAnimIDForUseCar (0x57dfc0) returns, 271 plus its side (1), no
+    // door (2), rear seat (4) and exit (16) bits, and the open-wheeler's
+    // 316-319 ("AutoSmNas FL" .. "AutoBigVys BR", "FormuleNastupL" ..).
+    inline bool DoorAnimation(int32_t state) {
+        const int32_t base = state & 0x1ff;
+        return (base >= 271 && base <= 294) || (base >= 316 && base <= 319);
+    }
 } // namespace Mafia1Online::Features::Player

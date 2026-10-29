@@ -46,4 +46,38 @@ namespace Mafia1Online::Features::Npc {
         const float t = std::clamp(seconds / duration, 0.0f, 1.0f);
         return 1.0f - t * t * (3.0f - 2.0f * t);
     }
+
+    // A copy that did not replay its NPC's door clip (streamed in too late
+    // into it) draws the host's body still going through the clip at
+    // `time`. It stands where that body's clip ended instead: the time of
+    // the first later pose that came without a door state, or the newest
+    // pose while there is none yet. `time` itself otherwise. Each entry
+    // has the pose's time `at` and its `locomotion` state.
+    template <typename Entries, typename IsDoor>
+    double DoorEndTime(const Entries &entries, double time, IsDoor isDoor) {
+        // The state drawn with the pose at `time`, as GaitAt picks it.
+        bool door = false;
+        bool seen = false;
+        for (const auto &entry : entries) {
+            if (static_cast<double>(entry.at) > time && seen) {
+                break;
+            }
+            door = isDoor(entry.locomotion);
+            seen = true;
+        }
+        if (!door) {
+            return time;
+        }
+        double end = time;
+        for (const auto &entry : entries) {
+            if (static_cast<double>(entry.at) <= time) {
+                continue;
+            }
+            end = static_cast<double>(entry.at);
+            if (!isDoor(entry.locomotion)) {
+                break;
+            }
+        }
+        return end;
+    }
 } // namespace Mafia1Online::Features::Npc

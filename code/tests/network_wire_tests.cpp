@@ -833,6 +833,32 @@ namespace {
         CHECK(StepFor(glm::vec3(0.0f), north).state == 6 && StepFor(north, glm::vec3(0.0f)).state == 6);
     }
 
+    void DoorEnd() {
+        using namespace Features;
+        // Use_Actor's door clips: 271 + side/no door/rear/exit bits, the
+        // open-wheeler's 316-319; not a seated pose (246) or a pull-out.
+        CHECK(Player::DoorAnimation(271) && Player::DoorAnimation(287) && Player::DoorAnimation(294) && Player::DoorAnimation(316) && Player::DoorAnimation(319));
+        CHECK(!Player::DoorAnimation(246) && !Player::DoorAnimation(270) && !Player::DoorAnimation(295) && !Player::DoorAnimation(306) && !Player::DoorAnimation(1));
+        struct Entry {
+            uint32_t at;
+            int16_t locomotion;
+        };
+        const auto door = [](int16_t state) { return Player::DoorAnimation(state); };
+        const std::vector<Entry> exiting {{1000, 287}, {1100, 287}, {1200, 287}, {1300, 1}, {1400, 6}};
+        // Drawn mid-clip: where the host's clip ended, the first pose after.
+        CHECK(Npc::DoorEndTime(exiting, 1050.0, door) == 1300.0);
+        // Past it, or before any door pose: the time drawn.
+        CHECK(Npc::DoorEndTime(exiting, 1350.0, door) == 1350.0);
+        const std::vector<Entry> walking {{1000, 6}, {1100, 287}};
+        CHECK(Npc::DoorEndTime(walking, 1050.0, door) == 1050.0);
+        // Still in the clip at the newest pose: that pose.
+        const std::vector<Entry> still {{1000, 289}, {1100, 289}, {1200, 289}};
+        CHECK(Npc::DoorEndTime(still, 1150.0, door) == 1200.0);
+        // Before the oldest pose: as GaitAt, by the oldest one's state.
+        CHECK(Npc::DoorEndTime(still, 900.0, door) == 1200.0);
+        CHECK(Npc::DoorEndTime(exiting, 900.0, door) == 1300.0);
+    }
+
     void HostView() {
         using namespace Features::Player;
         // Half of each round trip, kept within the buffer's bound one send
@@ -886,6 +912,7 @@ int main() {
     HumanStates();
     ReleaseBlend();
     ContactStep();
+    DoorEnd();
     HostView();
     if (failures == 0) {
         std::printf("network wire tests passed\n");
