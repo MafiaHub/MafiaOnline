@@ -114,12 +114,14 @@ namespace Mafia1Online::Features::Pedestrian {
             }
         }
 
+        // Players: every active element is a replica the host's snapshots
+        // drive (PedestrianReplicaService), so retail's Tick (0x452cd0) must
+        // never walk, panic, fade or retire one. Their cleared traffic flag
+        // already returns TickElements at once; the police freeze's
+        // SetTrafficVisible(true) would set it again.
         void __fastcall TickElementsHook(uint32_t frameMs) {
             if (Simulation::IsHost()) {
                 gService->OnTickElements(frameMs);
-            }
-            else {
-                gTickElementsOriginal(frameMs);
             }
         }
 
