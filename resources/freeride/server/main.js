@@ -61,7 +61,7 @@ const TIPS = [
     "Three kills in a row put a price on your head. Anyone who drops you collects it.",
     "Challenge someone with /duel <name>. Duels run in a private copy of the city.",
     "Start a crew with /crew create <TAG>. Crewmates share a colour and see each other on the city map (TAB).",
-    "Supply drops and hot cars appear around the city. Watch the compass.",
+    "Supply drops and hot cars appear around the city, marked on the city map (TAB). /event follows one.",
     "Salieri's back window has courier work, Yellow Pete sells guns, the pump sells fuel.",
     "Use /goto <name> to ask for a ride to a friend; they decide with /accept.",
 ];

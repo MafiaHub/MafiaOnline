@@ -26,7 +26,9 @@ const HOT_CAR_PRIZE = 600;
 const HOT_CAR_PASSENGER_PRIZE = 150;
 const HOT_CAR_XP = 150;
 const DELIVERY_RADIUS = 14;
-const CARD_RANGE = 1500;
+// The card is for players at the scene; others see the toast and the map
+// blip, and /event points their compass at it.
+const CARD_RANGE = 250;
 
 const HOT_CARS = [
     {model: "bugatti00.i3d", name: "Bugatti Type 57"}, {model: "duesenberg00.i3d", name: "Duesenberg"},
@@ -42,6 +44,8 @@ let current = null;
 let nextEventAt = 0;
 let tickTimer = null;
 let lastCardAt = 0;
+// Players who asked /event to follow the current event.
+const following = new Set();
 
 function streetPlayers() {
     return World.getPlayers().filter((player) => playable(player) && player.virtualWorld === util.MAIN_WORLD);
@@ -61,6 +65,7 @@ function clearPresentation() {
         compass(player, "event", 40, null);
         card(player, "event", null);
     }
+    following.clear();
 }
 
 function endEvent(message, tone = "info") {
@@ -91,8 +96,8 @@ function startSupplyDrop() {
     current = {kind: "supply", title: "Supply drop", position, expiresAt: Date.now() + DROP_LIFETIME_MS,
         generation: World.getMissionGeneration()};
     markersAll("event", [{id: "drop", position, label: "SUPPLY DROP", color: COLORS.gold, beacon: true, model: "bedna00.i3d", primary: true}]);
-    for (const player of World.getPlayers()) compass(player, "event", 40, {position});
-    toastAll("A crate of guns fell off a truck. First one to it keeps the lot. Follow the compass.", {title: "Supply drop", tone: "gold", seconds: 8});
+    toastAll("A crate of guns fell off a truck. First one to it keeps the lot. It is on the city map (TAB); /event points your compass at it.",
+        {title: "Supply drop", tone: "gold", seconds: 8});
     feed("event", [text("Supply drop", COLORS.gold), text(" landed somewhere in the city")]);
     return true;
 }
@@ -118,9 +123,8 @@ function startHotCar() {
         {id: "car", vehicleId: vehicle.id, label: `HOT CAR · ${choice.name.toUpperCase()}`, color: COLORS.red, beacon: true, primary: true},
         {id: "delivery", position: current.delivery, label: `DELIVER TO ${dropOff.name.toUpperCase()}`, color: COLORS.green, beacon: true},
     ]);
-    for (const player of World.getPlayers()) compass(player, "event", 40, {vehicleId: vehicle.id});
-    toastAll(`A ${choice.name} needs to reach ${dropOff.name}, no questions asked. ${formatMoney(HOT_CAR_PRIZE)} for the driver.`,
-        {title: "Hot car", tone: "gold", seconds: 9});
+    toastAll(`A ${choice.name} needs to reach ${dropOff.name}, no questions asked. ${formatMoney(HOT_CAR_PRIZE)} for the driver. ` +
+        "It is on the city map (TAB); /event points your compass at it.", {title: "Hot car", tone: "gold", seconds: 9});
     feed("event", [text("Hot car", COLORS.red), text(` · a ${choice.name} is waiting for a driver`)]);
     return true;
 }
@@ -162,7 +166,9 @@ function tickHotCar(now) {
     if ((driver?.id ?? null) !== current.driverId) {
         current.driverId = driver?.id ?? null;
         for (const player of World.getPlayers()) {
-            compass(player, "event", 40, driver && player.id === driver.id ? {position: current.delivery} : {vehicleId: current.vehicleId});
+            const isDriver = driver && player.id === driver.id;
+            if (isDriver || following.has(player.id)) compass(player, "event", 40, isDriver ? {position: current.delivery} : {vehicleId: current.vehicleId});
+            else compass(player, "event", 40, null);
         }
         if (driver) {
             feed("event", [name(driver, COLORS.red), text(` took the ${current.carName}`)]);
@@ -195,9 +201,11 @@ function sendCards(now) {
     for (const player of World.getPlayers()) {
         if (!player.spawned) continue;
         const driving = vehicle && vehicle.getDriver()?.id === player.id;
+        const aboard = vehicle && vehicle.getOccupants().some((occupant) => occupant?.id === player.id);
         const goal = driving ? current.delivery : target;
-        // Far away, the announcement, compass and marker are enough.
-        if (!driving && (!goal || distance(player.position, goal) > CARD_RANGE)) {
+        // Away from the scene the announcement and the map blip are enough,
+        // unless the player follows the event.
+        if (!aboard && !following.has(player.id) && (!goal || distance(player.position, goal) > CARD_RANGE)) {
             card(player, "event", null);
             continue;
         }
@@ -237,7 +245,7 @@ function catchUp(player) {
         : [{id: "car", vehicleId: current.vehicleId, label: `HOT CAR · ${current.carName.toUpperCase()}`, color: COLORS.red, beacon: true, primary: true},
             {id: "delivery", position: current.delivery, label: `DELIVER TO ${current.dropOff.toUpperCase()}`, color: COLORS.green, beacon: true}];
     notify.markers(player, "event", items);
-    compass(player, "event", 40, current.kind === "supply" ? {position: current.position} : vehicle ? {vehicleId: vehicle.id} : null);
+    if (following.has(player.id)) compass(player, "event", 40, current.kind === "supply" ? {position: current.position} : vehicle ? {vehicleId: vehicle.id} : null);
 }
 
 util.onStart(() => {
@@ -250,6 +258,7 @@ util.onStop(() => {
 });
 Events.on("missionChange", () => {
     current = null;
+    following.clear();
     nextEventAt = Date.now() + FIRST_EVENT_MS;
 });
 Events.on("playerSpawn", catchUp);
@@ -263,17 +272,28 @@ Events.on("consoleCommand", (command, args) => {
         ? `[freeride] Started ${current.kind}` : "[freeride] No event could start (needs a player on the street)");
 });
 
-commands.register({name: "event", usage: "/event", help: "Where the current city event is.", category: "City"}, (player) => {
+// Follows the current event (compass and card wherever the player is), or
+// stops following it.
+commands.register({name: "event", usage: "/event", help: "Follow the current city event, or stop following it.", category: "City"}, (player) => {
     if (!current) {
         toast(player, `No event right now. The next one comes in about ${formatMinutes(Math.max(0, nextEventAt - Date.now()))}.`);
         return;
     }
+    if (following.delete(player.id)) {
+        compass(player, "event", 40, null);
+        card(player, "event", null);
+        toast(player, "You stopped following the event.", {title: current.title, seconds: 3});
+        return;
+    }
+    following.add(player.id);
     catchUp(player);
-    toast(player, current.kind === "supply" ? "A supply drop is out there. Your compass points at it."
-        : `A hot ${current.carName} is waiting. Your compass points at it.`, {title: current.title, tone: "gold"});
+    toast(player, current.kind === "supply" ? "A supply drop is out there. Your compass points at it. /event again to stop."
+        : `A hot ${current.carName} is waiting. Your compass points at it. /event again to stop.`, {title: current.title, tone: "gold"});
 });
 
-menu.provide("event", () => current ? {kind: current.kind, title: current.title,
+Events.on("playerDisconnect", (player) => following.delete(player.id));
+
+menu.provide("event", (player) => current ? {kind: current.kind, title: current.title, following: following.has(player.id),
     detail: current.kind === "supply" ? "First to the crate keeps it" : `${current.carName} to ${current.dropOff}`,
     secondsLeft: Math.max(0, Math.ceil((current.expiresAt - Date.now()) / 1000))}
     : {kind: null, nextInSeconds: Math.max(0, Math.ceil((nextEventAt - Date.now()) / 1000))});

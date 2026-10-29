@@ -200,7 +200,7 @@ near a random player:
   simulation host runs the police) and has to stop it at a landmark across
   town for $600; passengers get $150. Everyone else's compass follows the car.
 
-`/event` shows the current one. The server console accepts
+The event is announced to everyone and marked on the city map; its card shows to players within 250 m. `/event` follows it (compass and card from anywhere) or stops following. The server console accepts
 `fr event [supply|hotcar]` to start one, `fr money <player> <amount>`,
 `fr say <text>`, `fr dev on|off` and `fr save`.
 

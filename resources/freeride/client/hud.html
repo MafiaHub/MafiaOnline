@@ -363,7 +363,7 @@
         invites.length ? panel("Invitations", invites.map((invite) => line(invite.from, invite.summary,
           button("Accept", `/accept ${invite.id}`, true), button("Decline", `/decline ${invite.id}`)))) : null,
         panel("City event", event.kind
-          ? [el("p", {class: "big"}, event.title), el("p", {}, `${event.detail} · ends in ${minutes(event.secondsLeft)}`), button("Show me", "/event", true)]
+          ? [el("p", {class: "big"}, event.title), el("p", {}, `${event.detail} · ends in ${minutes(event.secondsLeft)}`), button(event.following ? "Stop following" : "Follow", "/event", !event.following)]
           : el("p", {}, `Quiet streets. The next event comes in about ${minutes(event.nextInSeconds ?? 0)}.`)),
         panel("Races taking entries", lobbies.length ? lobbies.map((race) => line(race.route, `${race.host} · ${race.racers.length} racer${race.racers.length === 1 ? "" : "s"} · starts in ${race.secondsLeft} s`,
           race.joined ? button("Leave", "/race leave") : button("Join", `/race join ${race.id}`, true))) : [empty("No lobby is open."), button("Open a race", "/race start", true)]),
