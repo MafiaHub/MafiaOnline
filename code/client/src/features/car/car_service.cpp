@@ -17,6 +17,8 @@
 #include "shared/features/player/player_entity.h"
 
 #include <core_modules.h>
+#include <integrations/client/instance.h>
+#include <integrations/client/networking/engine.h>
 #include <logging/logger.h>
 #include <mafia1/sdk/car/native_car.h>
 #include <mafia1/sdk/core/mission.h>
@@ -25,6 +27,7 @@
 #include <mafia1/sdk/seat/native_seat.h>
 #include <mafia1/sdk/ui/native_indicators.h>
 #include <mafia1/sdk/world/native_fire.h>
+#include <networking/network_client.h>
 #include <networking/network_peer.h>
 #include <networking/replication/replication_manager.h>
 
@@ -196,6 +199,14 @@ namespace Mafia1Online::Features::Car {
 
         std::unordered_set<uint64_t> seen;
         const uint64_t myGuid = static_cast<uint64_t>(replication->GetMyGUID());
+        // Simulation host: the round trips that bring a player's poses here,
+        // the server's to that player (PlayerEntity::ping) and this host's.
+        std::unordered_map<uint64_t, uint16_t> playerPings;
+        int hostPing = 0;
+        if (Simulation::IsHost()) {
+            replication->ForEach<Shared::Entities::PlayerEntity>([&](Shared::Entities::PlayerEntity *player) { playerPings[player->controllerGuid] = player->ping; });
+            hostPing = Framework::CoreModules::GetClientInstance()->GetNetworkingEngine()->GetNetworkClient()->GetPing();
+        }
         replication->ForEach<Shared::Entities::CarEntity>([&](Shared::Entities::CarEntity *car) {
             if (car->missionGeneration != loadedMissionGeneration) {
                 return;
@@ -204,6 +215,10 @@ namespace Mafia1Online::Features::Car {
             seen.insert(id);
             auto &stream                    = _streams[id];
             const bool simulationController = car->simulationControllerGuid != 0 && car->simulationControllerGuid == myGuid;
+            if (Simulation::IsHost()) {
+                const auto owner = playerPings.find(car->simulationControllerGuid);
+                stream.transitMs = std::clamp(0.5f * static_cast<float>((owner != playerPings.end() ? owner->second : 0) + std::max(hostPing, 0)), 0.0f, 250.0f);
+            }
             if (stream.simulationController != simulationController) {
                 stream.simulationController   = simulationController;
                 stream.lastSent               = {};
@@ -1771,8 +1786,19 @@ namespace Mafia1Online::Features::Car {
         // eases between them: stepping it moved the car by its speed times
         // the delay at once, a lurch on entry and a snap back on exit.
         const bool contact = _predictedSync || stream.contactUntil > _frameClock;
-        const double renderTime = stream.poses.AdvanceDelay(_frameClock, static_cast<float>(frameMs)) +
-                                  stream.poses.AdvanceLead(contact ? stream.poses.DelayMs() : 0.0f, dt, contact ? kLeadEntrySeconds : kLeadExitSeconds);
+        float leadMs       = contact ? stream.poses.DelayMs() : 0.0f;
+        float leadSeconds  = contact ? kLeadEntrySeconds : kLeadExitSeconds;
+        if (Simulation::IsHost()) {
+            // Nobody watches the simulation host, but its traffic and police
+            // read every car's centre and velocity (C_car::IsPossibleColl,
+            // reM C_car.cpp:7293; C_actor::IsPossibleCollAll, C_actor.cpp:
+            // 1416): it runs a player's car where it is now on its driver's
+            // machine, the poses' transit past the present.
+            leadMs      = stream.poses.DelayMs() + stream.transitMs;
+            leadSeconds = kLeadEntrySeconds;
+        }
+        const double renderTime =
+            stream.poses.AdvanceDelay(_frameClock, static_cast<float>(frameMs)) + stream.poses.AdvanceLead(leadMs, dt, leadSeconds);
         if (contact) {
             // Native physics runs on the replicated pedals and steering, then
             // is pulled toward the replicated pose at the render time, still
