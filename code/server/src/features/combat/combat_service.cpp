@@ -554,8 +554,42 @@ namespace Mafia1Online::Features::Combat {
             Publish(*session);
             return true;
         }
-        if (!GiveWeapon(networkId, weaponId, loaded, reserve)) {
+        if (GiveWeapon(networkId, weaponId, loaded, reserve)) {
+            leftLoaded = leftReserve = 0;
+            return true;
+        }
+        // G_Inventory::InsertNew (reM systems/G_Inventory.cpp): a big weapon or a melee
+        // item goes to the hand, and what the hand held is stowed -- or
+        // dropped where the player stands when there is no room for it, as
+        // the retail pickup menu drops it. A Thompson taken with a bat in the
+        // hand and a shotgun in the coat leaves the bat on the floor.
+        auto *player = _players->FindByNetworkId(networkId);
+        if (!player || (!Shared::Combat::IsLargeWeapon(weaponId) && !Melee(weaponId))) {
             return false;
+        }
+        auto next = state;
+        const uint8_t previous = next.selectedWeapon;
+        next.inventoryMask |= (1u << weaponId);
+        next.ammo[weaponId] = {Firearm(weaponId) ? std::min<uint16_t>(loaded, kRules[weaponId].capacity) : loaded, reserve};
+        next.selectedWeapon = weaponId;
+        uint8_t dropped = 0;
+        if (!RepresentableInventory(next) && previous != 0) {
+            next.inventoryMask &= ~(1u << previous);
+            next.ammo[previous] = {};
+            dropped = previous;
+        }
+        if (!RepresentableInventory(next)) {
+            return false;
+        }
+        // Dropped from the state it is still in, so the floor gets its ammo.
+        const uint64_t pickupId = dropped != 0 ? DropWeapon(*session, *player, dropped) : 0;
+        if (dropped != 0 && pickupId == 0) {
+            return false;
+        }
+        session->state = next;
+        Publish(*session);
+        if (pickupId != 0 && _droppedCallback) {
+            _droppedCallback(pickupId, networkId);
         }
         leftLoaded = leftReserve = 0;
         return true;
