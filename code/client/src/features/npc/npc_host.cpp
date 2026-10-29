@@ -1348,6 +1348,10 @@ namespace Mafia1Online::Features::Npc {
             pose.health = human.Health();
             pose.dead = actor->IsDead() || human.Health() <= 0.0f;
             pose.deathAnimation = tracked.deathAnimation;
+            if (pose.dead && !tracked.deathClock) {
+                tracked.deathClock = snapshot.hostClockMs;
+            }
+            pose.deathClock = tracked.deathClock.value_or(snapshot.hostClockMs);
             pose.aiming = human.IsAiming();
             pose.crouching = human.IsCrouching();
             Vector3 target {};
@@ -1503,6 +1507,7 @@ namespace Mafia1Online::Features::Npc {
         }
         if (Shared::Combat::NativeDeathAnimation(deathAnimation) && found->second.deathAnimation == 0) {
             found->second.deathAnimation = deathAnimation;
+            found->second.deathClock = Shared::Net::SampleClock(MafiaNet::GetTime());
         }
         const auto unit = Unit(direction, {0.0f, 0.0f, 1.0f});
         Shared::Npc::Damaged damaged;

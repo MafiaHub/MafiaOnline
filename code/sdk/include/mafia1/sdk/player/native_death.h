@@ -42,6 +42,29 @@ namespace Mafia1Online::SDK::Player {
         return true;
     }
 
+    // C_animations_machine_de_luxe::Tick (0x40f1b0) puts a human playing a
+    // displacement track at the track's point plus the machine's world
+    // offset (+0x114, added at 0x40f5d8), written to m_vPosition (+0x24);
+    // C_traffic_element::Tick's root-motion correction folds a move into
+    // that offset (ResolveRootMotion). Moves the body by `delta` the same
+    // way, so a track running on goes on from the new place.
+    inline constexpr uintptr_t kAnimationMachineWorldOffset = 0x114;
+    inline void ShiftBody(NativeHuman &human, const Vector3 &delta) {
+        auto *machine = reinterpret_cast<std::byte *>(&human) + kHumanAnimationMachine;
+        if (*reinterpret_cast<const int32_t *>(machine + kAnimationMachineCurrentTrack) != -1) {
+            auto *offset = reinterpret_cast<Vector3 *>(machine + kAnimationMachineWorldOffset);
+            offset->x += delta.x;
+            offset->y += delta.y;
+            offset->z += delta.z;
+        }
+        auto &actor = human.Actor();
+        const auto &position = actor.Position();
+        const Vector3 moved {position.x + delta.x, position.y + delta.y, position.z + delta.z};
+        actor.SetStoredTransform(moved, actor.Direction());
+        actor.Frame()->SetWorldPosition(moved);
+        actor.Frame()->Update();
+    }
+
     enum class NativeHitType : int32_t {
         Generic       = 0,
         HardKnockdown = 1,

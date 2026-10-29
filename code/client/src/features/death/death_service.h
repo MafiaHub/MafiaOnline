@@ -8,6 +8,7 @@
 #include <deque>
 #include <map>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace Mafia1Online::SDK::Player {
     struct NativeActor;
@@ -61,6 +62,9 @@ namespace Mafia1Online::Features::Death {
         // The life and native each human was last seen alive on. One that
         // dies on another lies where it fell instead of falling again.
         std::unordered_map<uint64_t, AppliedDeath> _seenAlive;
+        // Killed, the death held for its moment (an NPC's replica, a blow
+        // still to land): kept protected until it plays.
+        std::unordered_set<uint64_t> _dying;
         std::deque<PendingDamage> _pendingDamage;
         std::unordered_map<uint64_t, AppliedDamage> _appliedDamage;
         struct PredictedImpact {

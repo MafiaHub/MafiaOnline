@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -192,6 +193,9 @@ namespace Mafia1Online::Features::Npc {
             bool removeRequested = false;
             // The death its fatal Hit played, for every replica to play.
             uint16_t deathAnimation = 0;
+            // When it died on the sample clock its poses carry: the fatal
+            // Hit's moment, or the first snapshot that found it dead.
+            std::optional<uint16_t> deathClock;
             // Last time a hit turned this officer on another player.
             std::chrono::steady_clock::time_point lastRedirect;
             // Its police action's state and when it last ticked: states 10

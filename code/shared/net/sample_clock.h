@@ -5,6 +5,7 @@
 #include <networking/replication/network_entity.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -19,6 +20,11 @@ namespace Mafia1Online::Shared::Net {
     inline uint16_t SampleClock(uint64_t milliseconds) {
         return static_cast<uint16_t>(milliseconds);
     }
+
+    // The longest a receiver holds an event dated on a sender's sample clock
+    // for its picture of that sender to get there (SampleClockMapper::Shows):
+    // the human replicas' longest render delay (600 ms) and a little.
+    inline constexpr std::chrono::milliseconds kEventWaitLimit {700};
 
     // The transform channel's bytes for `entity` as it stands.
     template <typename TEntity>
@@ -111,6 +117,22 @@ namespace Mafia1Online::Shared::Net {
             return static_cast<double>(_extended + static_cast<int16_t>(static_cast<uint16_t>(clock - _last))) + _offset;
         }
 
+        // Whether a receiver drawing this sender's samples at `renderTime`
+        // (the local clock Map returns) shows the moment the sender dated
+        // `clock`: an event it timed with its poses (a shot, a death, a
+        // clip) then plays where the body is drawn doing it. Nothing mapped
+        // yet, or a clock more than kLeadLimitMs ahead of the picture (one
+        // the mapper lost across a gap longer than the 16-bit range), counts
+        // as shown.
+        [[nodiscard]] bool Shows(uint16_t clock, double renderTime) const {
+            const auto at = Project(clock);
+            if (!at) {
+                return true;
+            }
+            const double lead = *at - renderTime;
+            return lead <= 0.0 || lead > kLeadLimitMs;
+        }
+
         void Reset() {
             _started = false;
             _window.clear();
@@ -120,6 +142,7 @@ namespace Mafia1Online::Shared::Net {
         static constexpr size_t kWindow   = 60;
         static constexpr double kResetMs  = 1000.0;
         static constexpr double kSlewMs   = 0.5;
+        static constexpr double kLeadLimitMs = 1000.0;
 
         bool _started     = false;
         uint16_t _last    = 0;

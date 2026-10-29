@@ -48,6 +48,9 @@ namespace Mafia1Online::Features::Npc {
         // at `received`, may play now: once the replica, drawn a render delay
         // behind the host, shows that moment. True for anything else.
         [[nodiscard]] bool Reached(uint64_t networkId, uint16_t hostClock, std::chrono::steady_clock::time_point received) const;
+        // Whether this NPC's death may play: its replica draws the body at
+        // the moment the host's died. True for any other network id.
+        [[nodiscard]] bool DeathShown(uint64_t networkId) const;
         // This NPC's attack is aimed at the local player: until `until` its
         // replica closes to striking range of it (ApplyContact). Only this
         // screen's picture; the server checks hits by the host's poses.
@@ -93,6 +96,14 @@ namespace Mafia1Online::Features::Npc {
             float contact = 0.0f;
             glm::vec3 contactSpot {0.0f};
             std::chrono::steady_clock::time_point contactAt {};
+            // Its death: when a channel first said so, whether this copy
+            // got to the host's moment of it (DeathShown), and whether it
+            // ever drew the body alive. SettleCorpse last eased it at
+            // settledAt.
+            std::chrono::steady_clock::time_point killedAt {};
+            bool deathShown = false;
+            bool seenAlive = false;
+            std::chrono::steady_clock::time_point settledAt {};
             bool failed = false;
         };
 
@@ -101,7 +112,10 @@ namespace Mafia1Online::Features::Npc {
         // false removes it at once.
         void Remove(World::WorldService &world, uint64_t networkId, const Replica &replica, bool fade);
         void AdvanceFades();
-        void ApplyPose(Replica &replica, void *actor, bool alive);
+        void ApplyPose(Replica &replica, void *actor);
+        // Once the death plays: draws the corpse onto the host's, as it
+        // falls and where it rests.
+        void SettleCorpse(Replica &replica, void *actor);
         // Eases the pose toward striking range of the local player while
         // engaged, and back to the pose after.
         void ApplyContact(Replica &replica, const Framework::Utils::TransformSnapshot &pose, glm::vec3 &position, glm::vec3 &direction);

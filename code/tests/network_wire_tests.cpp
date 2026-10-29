@@ -192,9 +192,11 @@ namespace {
         snapshot.npcs[0].deathAnimation = 140;
         snapshot.npcs[1].dead           = true;
         snapshot.npcs[1].deathAnimation = 146;
+        snapshot.npcs[1].deathClock     = 65530;
         snapshot.npcs[1].health         = 0.0f;
         const auto deathRead            = RoundTrip(snapshot);
-        CHECK(deathRead.count == 2 && deathRead.npcs[0].deathAnimation == 0 && deathRead.npcs[1].dead && deathRead.npcs[1].deathAnimation == 146);
+        CHECK(deathRead.count == 2 && deathRead.npcs[0].deathAnimation == 0 && deathRead.npcs[1].dead && deathRead.npcs[1].deathAnimation == 146 &&
+              deathRead.npcs[1].deathClock == 65530);
         CHECK(Shared::Combat::NativeDeathAnimation(146) && Shared::Combat::NativeDeathAnimation(131) && !Shared::Combat::NativeDeathAnimation(130) &&
               !Shared::Combat::NativeDeathAnimation(147));
         Shared::Pedestrian::Snapshot walkers;
@@ -345,6 +347,30 @@ namespace {
         const double first = mapper.Map(1000, 5000.0);
         CHECK(mapper.Map(1000, 9000.0) == first);
         CHECK(std::abs(mapper.Map(1050, 5050.0) - (first + 50.0)) < 0.01);
+    }
+
+    void EventsShownWithTheirPoses() {
+        // Nothing mapped yet: an event plays at once.
+        Shared::Net::SampleClockMapper mapper;
+        CHECK(mapper.Shows(500, 0.0));
+        // Poses at clock 65500..65535, 0..400 (wrapping), mapped 1:1 onto
+        // local 10000 + clock offset; the picture is drawn 200 ms behind.
+        for (int i = 0; i <= 10; ++i) {
+            const uint16_t clock = static_cast<uint16_t>(65500 + i * 50);
+            mapper.Map(clock, 10000.0 + i * 50);
+        }
+        const double newest = 10000.0 + 10 * 50;
+        const double render = newest - 200.0;
+        // A death dated between two shown poses: shown; one dated after the
+        // picture: held; one past the wrap, still ahead: held.
+        CHECK(mapper.Shows(static_cast<uint16_t>(65500 + 5 * 50), render));
+        CHECK(!mapper.Shows(static_cast<uint16_t>(65500 + 9 * 50), render));
+        CHECK(!mapper.Shows(static_cast<uint16_t>(65500 + 10 * 50 + 20), render));
+        CHECK(mapper.Shows(static_cast<uint16_t>(65500 + 9 * 50), render + 150.0));
+        // A clock far ahead of the picture is one the mapper lost: shown.
+        CHECK(mapper.Shows(static_cast<uint16_t>(65500 + 10 * 50 + 5000), render));
+        // A clock long past (a corpse that lay for a while): shown.
+        CHECK(mapper.Shows(static_cast<uint16_t>(65500 - 20000), render));
     }
 
     Features::Car::CarPoseSample CarAt(double time, float x, float speed) {
@@ -688,6 +714,7 @@ int main() {
     Reports();
     SampleClocks();
     HeldSampleClocks();
+    EventsShownWithTheirPoses();
     CarResumeAfterHeartbeat();
     CarBandChange();
     CarLateCorrection();

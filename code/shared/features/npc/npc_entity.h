@@ -85,6 +85,9 @@ namespace Mafia1Online::Shared::Entities {
         // The death the host's NPC played (Combat::NativeDeathAnimation),
         // with alive, so a copy that learns of the death here plays it.
         uint16_t deathAnimation = 0;
+        // When it died on the host's sample clock (sampleClock's): a copy
+        // plays the death once it draws the body at that moment.
+        uint16_t deathClock = 0;
         // The host's native locomotion state (C_human m_iAnimState), which
         // rides with the pose like a player's.
         int16_t locomotion = 1;
@@ -158,6 +161,7 @@ namespace Mafia1Online::Shared::Entities {
             fields.Field(carActionAgeMs);
             fields.Field(alive);
             fields.Field(deathAnimation);
+            fields.Field(deathClock);
             SerializeAnimation(fields);
             fields.Field(voice);
             fields.Field(speechLine);
@@ -177,6 +181,7 @@ namespace Mafia1Online::Shared::Entities {
         void SerializeFields(Framework::Networking::Replication::FieldSerializer &fields) override {
             fields.Field(alive);
             fields.Field(deathAnimation);
+            fields.Field(deathClock);
             SerializeAnimation(fields);
             fields.Field(speechLine);
             fields.Field(speechRevision);

@@ -14,6 +14,7 @@
 #include <core_modules.h>
 #include <logging/logger.h>
 #include <mafia1/sdk/core/mission.h>
+#include <mafia1/sdk/player/native_death.h>
 #include <mafia1/sdk/player/native_human.h>
 #include <mafia1/sdk/player/native_human_factory.h>
 #include <mafia1/sdk/seat/native_seat.h>
@@ -48,12 +49,12 @@ namespace Mafia1Online::Features::Npc {
         // door window stays inside the 2 s SeatService holds an exit for.
         constexpr uint16_t kThrowReplayAgeMs = 1000;
         constexpr uint16_t kDoorReplayAgeMs = 1500;
-        // An action waits for its replica at most the snapshot buffer's
-        // longest render delay (kSnapshotConfig, 600 ms) and a little. One
-        // dated further ahead than a second is from a clock the mapper lost
-        // (no pose change for longer than the 16-bit range) and plays now.
-        constexpr auto kReachWaitLimit = std::chrono::milliseconds(700);
-        constexpr double kReachLeadLimitMs = 1000.0;
+        // A corpse whose fall ended away from the host's (a pose eased for a
+        // melee contact, a death the wait limit let through) is drawn to it
+        // within this time constant, no faster than this, while it falls.
+        constexpr float kCorpseSettleSeconds = 0.25f;
+        constexpr float kCorpseSettleSpeed = 1.0f;
+        constexpr float kCorpseSettledDistance = 0.02f;
 
         // The host's NPC struck from within reach of where it saw its
         // target, the target itself a pose behind; on the target's screen
@@ -170,8 +171,7 @@ namespace Mafia1Online::Features::Npc {
             auto *actor = world.NativeObjects().Resolve(replica.handle);
             if (actor) {
                 // The death reaches the entity and the Combat::State on separate
-                // channels; DeathService replays it on the first, and the pose
-                // stream stops with it.
+                // channels; either one is final.
                 const auto *state = application->Combat().GetState(id);
                 const bool alive = npc->alive && (!state || state->alive);
                 if (replica.speechRevision != npc->speechRevision) {
@@ -183,7 +183,28 @@ namespace Mafia1Online::Features::Npc {
                     }
                 }
                 ApplyAnimation(replica, actor, *npc);
-                ApplyPose(replica, actor, alive);
+                if (replica.deathShown) {
+                    SettleCorpse(replica, actor);
+                }
+                else {
+                    ApplyPose(replica, actor);
+                }
+                replica.seenAlive = replica.seenAlive || alive;
+                if (!alive && !replica.deathShown) {
+                    // The host's body ran on until it died; DeathService
+                    // replays the death once this copy draws the body at that
+                    // moment (NpcEntity::deathClock), where the host's fell.
+                    // Only the State said so yet: the entity's word, with the
+                    // clock, follows within a send. One never seen alive lies
+                    // as it streamed in; a lost clock waits no longer than
+                    // any event.
+                    const auto now = std::chrono::steady_clock::now();
+                    if (replica.killedAt == std::chrono::steady_clock::time_point {}) {
+                        replica.killedAt = now;
+                    }
+                    replica.deathShown = !replica.seenAlive || now - replica.killedAt >= Shared::Net::kEventWaitLimit ||
+                                         (!npc->alive && replica.clock.Shows(npc->deathClock, replica.renderTime));
+                }
             }
         });
         std::vector<uint64_t> gone;
@@ -199,7 +220,7 @@ namespace Mafia1Online::Features::Npc {
         }
     }
 
-    void NpcReplicaService::ApplyPose(Replica &replica, void *native, bool alive) {
+    void NpcReplicaService::ApplyPose(Replica &replica, void *native) {
         // The slewed presentation clock: subtracting the adaptive delay
         // directly stepped the body on every late or early packet.
         const double time = replica.renderTime;
@@ -208,8 +229,8 @@ namespace Mafia1Online::Features::Npc {
             return;
         }
         auto *actor = static_cast<SDK::Player::NativeActor *>(native);
-        // A corpse stays where the death animation left it.
-        if (!alive) {
+        // A corpse lies where its death clip takes it (SettleCorpse).
+        if (actor->IsDead()) {
             return;
         }
         // Seated, or in a door animation: the car carries it and the seat
@@ -284,6 +305,37 @@ namespace Mafia1Online::Features::Npc {
             human->SetLocomotionAnimation(static_cast<SDK::Player::LocomotionAnimation>(animation.state));
         }
         replica.lastAnimation = animation.state;
+    }
+
+    void NpcReplicaService::SettleCorpse(Replica &replica, void *native) {
+        const auto now = std::chrono::steady_clock::now();
+        const float seconds = replica.settledAt == std::chrono::steady_clock::time_point {} ? 0.0f : std::min(std::chrono::duration<float>(now - replica.settledAt).count(), 0.1f);
+        replica.settledAt = now;
+        Framework::Utils::TransformSnapshot pose;
+        const auto *seated = static_cast<const SDK::Seat::NativeHuman *>(native);
+        if (!replica.snapshots.Sample(replica.renderTime, pose) || seated->usedActorEnter || seated->usedActorLeave) {
+            return;
+        }
+        // The host's body at the moment this copy shows: falling along the
+        // same death clip, then where it rests. The fall started from the
+        // host's place at the host's moment, so they part only by a pose
+        // interval of the clip's track; the gap closes while the body falls.
+        // One never seen alive lies where the host's does from the start.
+        const auto at = SDK::Player::WorldPosition(native);
+        const glm::vec3 error = pose.position - glm::vec3(at.x, at.y, at.z);
+        const float distance = glm::length(error);
+        if (!std::isfinite(distance) || distance < kCorpseSettledDistance) {
+            return;
+        }
+        glm::vec3 step = error;
+        if (replica.seenAlive) {
+            step *= std::min(seconds / kCorpseSettleSeconds, 1.0f);
+            const float limit = kCorpseSettleSpeed * seconds;
+            if (glm::length(step) > limit) {
+                step *= limit / glm::length(step);
+            }
+        }
+        SDK::Player::ShiftBody(*static_cast<SDK::Player::NativeHuman *>(native), {step.x, step.y, step.z});
     }
 
     void NpcReplicaService::ApplyContact(Replica &replica, const Framework::Utils::TransformSnapshot &pose, glm::vec3 &position, glm::vec3 &direction) {
@@ -418,15 +470,15 @@ namespace Mafia1Online::Features::Npc {
 
     bool NpcReplicaService::Reached(uint64_t networkId, uint16_t hostClock, std::chrono::steady_clock::time_point received) const {
         const auto found = _replicas.find(networkId);
-        if (found == _replicas.end() || !found->second.frame || std::chrono::steady_clock::now() - received >= kReachWaitLimit) {
+        if (found == _replicas.end() || !found->second.frame || std::chrono::steady_clock::now() - received >= Shared::Net::kEventWaitLimit) {
             return true;
         }
-        const auto at = found->second.clock.Project(hostClock);
-        if (!at) {
-            return true;
-        }
-        const double lead = *at - found->second.renderTime;
-        return lead <= 0.0 || lead > kReachLeadLimitMs;
+        return found->second.clock.Shows(hostClock, found->second.renderTime);
+    }
+
+    bool NpcReplicaService::DeathShown(uint64_t networkId) const {
+        const auto found = _replicas.find(networkId);
+        return found == _replicas.end() || !found->second.frame || found->second.deathShown;
     }
 
     void NpcReplicaService::Remove(World::WorldService &world, uint64_t networkId, const Replica &replica, bool fade) {

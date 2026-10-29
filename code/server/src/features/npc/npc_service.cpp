@@ -149,6 +149,7 @@ namespace Mafia1Online::Features::Npc {
                 // The pose Spawn gave it carried clock 0; the host's own
                 // reaches observers as a new sample, not a repeat.
                 npc.entity->sampleClock = spawned.hostClockMs;
+                npc.entity->deathClock = spawned.hostClockMs;
                 npc.entity->poseSource = MafiaNet::ToPeerGuid(packet->guid);
                 npc.entity->alive = spawned.health > 0.0f;
                 npc.state.alive = npc.entity->alive;
@@ -193,6 +194,7 @@ namespace Mafia1Online::Features::Npc {
             entity->SetVirtualWorld(MafiaNet::VIRTUAL_WORLD_GLOBAL);
             SetPose(*entity, spawned.x, spawned.y, spawned.z, spawned.yaw);
             entity->sampleClock = spawned.hostClockMs;
+            entity->deathClock = spawned.hostClockMs;
             entity->poseSource = MafiaNet::ToPeerGuid(packet->guid);
             auto &npc = _npcs[spawned.key];
             npc.entity = entity;
@@ -266,6 +268,7 @@ namespace Mafia1Online::Features::Npc {
                         state.deathAnimation = pose.deathAnimation;
                     }
                     entity.deathAnimation = state.deathAnimation;
+                    entity.deathClock = pose.deathClock;
                     npc->diedAt = now;
                 }
                 if (aimOnly) {

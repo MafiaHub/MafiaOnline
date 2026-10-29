@@ -55,6 +55,7 @@ namespace Mafia1Online::Features::Death {
             combat.HoldDamage({});
             _applied.clear();
             _seenAlive.clear();
+            _dying.clear();
             _pendingDamage.clear();
             _appliedDamage.clear();
             _impactsToPlay.clear();
@@ -184,6 +185,7 @@ namespace Mafia1Online::Features::Death {
             const auto *state        = combat.GetState(networkId);
             if (!state || !state->spawned || state->missionGeneration != world.LoadedMissionGeneration() || state->spawnGeneration != spawnGeneration) {
                 _applied.erase(networkId);
+                _dying.erase(networkId);
                 return;
             }
             const auto handle = world.NativeObjects().FindByNetwork(networkId);
@@ -193,16 +195,21 @@ namespace Mafia1Online::Features::Death {
             }
             if (state->alive && !killed) {
                 _applied.erase(networkId);
+                _dying.erase(networkId);
                 _seenAlive[networkId] = {state->missionGeneration, state->spawnGeneration, handle.generation};
                 if (!actor->IsAlive() || actor->IsDead()) {
                     RestoreLiving(*actor);
                 }
                 return;
             }
-            // A lethal NPC blow kills when it lands.
-            if (combat.HeldDamage(networkId) > 0.0f) {
+            // A lethal NPC blow kills when it lands, and an NPC dies when its
+            // replica gets to the moment the host's did; Protect keeps it
+            // alive until then.
+            if (combat.HeldDamage(networkId) > 0.0f || !npcReplicas.DeathShown(networkId)) {
+                _dying.insert(networkId);
                 return;
             }
+            _dying.erase(networkId);
             const AppliedDeath applied {state->missionGeneration, state->spawnGeneration, handle.generation};
             const auto it = _applied.find(networkId);
             if (it != _applied.end() && it->second.missionGeneration == applied.missionGeneration && it->second.spawnGeneration == applied.spawnGeneration && it->second.nativeGeneration == applied.nativeGeneration) {
@@ -239,6 +246,7 @@ namespace Mafia1Online::Features::Death {
     void DeathService::Reset() {
         _applied.clear();
         _seenAlive.clear();
+        _dying.clear();
         _pendingDamage.clear();
         _appliedDamage.clear();
         _impactsToPlay.clear();
@@ -257,7 +265,11 @@ namespace Mafia1Online::Features::Death {
         const auto handle = _world->NativeObjects().FindByNative(&actor);
         // Once the server has killed this spawn, the replayed Hit must finish
         // natively: C_actor::Tick calls Death on the next frame and the death
-        // animation ends in SetActState(2). Respawn creates a new actor.
+        // animation ends in SetActState(2). Respawn creates a new actor. A
+        // death still waiting to play (Update) keeps the body protected.
+        if (_dying.contains(handle.networkId)) {
+            return true;
+        }
         if (const auto *state = handle.networkId && _combat ? _combat->GetState(handle.networkId) : nullptr; state && state->spawned && !state->alive) {
             return false;
         }

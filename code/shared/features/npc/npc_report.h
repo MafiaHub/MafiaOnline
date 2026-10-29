@@ -175,6 +175,9 @@ namespace Mafia1Online::Shared::Npc {
         // Once dead: the death its Hit picked (Combat::NativeDeathAnimation),
         // 0 for one that came another way.
         uint16_t deathAnimation = 0;
+        // Once dead: when it died, on the sample clock of hostClockMs (the
+        // fatal Hit, else the first snapshot that found it dead).
+        uint16_t deathClock = 0;
         bool aiming = false;
         bool crouching = false;
         // Where the neck and back point, relative to the position: the shoot
@@ -221,6 +224,7 @@ namespace Mafia1Online::Shared::Npc {
                 stream->Serialize(write, pose.dead);
                 if (pose.dead) {
                     stream->Serialize(write, pose.deathAnimation);
+                    stream->Serialize(write, pose.deathClock);
                 }
                 stream->Serialize(write, pose.aiming);
                 stream->Serialize(write, pose.crouching);
