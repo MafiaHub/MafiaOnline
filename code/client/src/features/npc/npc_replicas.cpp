@@ -55,6 +55,9 @@ namespace Mafia1Online::Features::Npc {
         constexpr float kCorpseSettleSeconds = 0.25f;
         constexpr float kCorpseSettleSpeed = 1.0f;
         constexpr float kCorpseSettledDistance = 0.02f;
+        // How long a script clip waits for the host's date of it: the
+        // server -> host -> server round trip behind the clip itself.
+        constexpr auto kClipDateWait = std::chrono::milliseconds(1000);
 
         // The host's NPC struck from within reach of where it saw its
         // target, the target itself a pose behind; on the target's screen
@@ -402,6 +405,30 @@ namespace Mafia1Online::Features::Npc {
             return;
         }
         const bool first = !replica.animationSynced;
+        // The host starts a clip when the server's word reaches it and dates
+        // that (Npc::AnimationPlayed) on its poses' clock; this copy, drawn a
+        // render delay behind, starts it once it draws that moment, where
+        // the host's body began it. The date follows the clip by the host's
+        // round trip; a stop, or a clip whose date is lost, plays unheld.
+        if (!first && npc.alive && !npc.animation.empty()) {
+            const auto now = std::chrono::steady_clock::now();
+            if (replica.clipRevisionSeen != npc.animationRevision || replica.clipSeenAt == std::chrono::steady_clock::time_point {}) {
+                replica.clipRevisionSeen = npc.animationRevision;
+                replica.clipSeenAt = now;
+                replica.clipDatedAt = {};
+            }
+            if (npc.animationDated == npc.animationRevision) {
+                if (replica.clipDatedAt == std::chrono::steady_clock::time_point {}) {
+                    replica.clipDatedAt = now;
+                }
+                if (now - replica.clipDatedAt < Shared::Net::kEventWaitLimit && !replica.clock.Shows(npc.animationClock, replica.renderTime)) {
+                    return;
+                }
+            }
+            else if (now - replica.clipSeenAt < kClipDateWait) {
+                return;
+            }
+        }
         replica.animationSynced = true;
         replica.animationRevision = npc.animationRevision;
         if (!npc.alive) {

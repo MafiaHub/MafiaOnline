@@ -8,6 +8,7 @@
 #include "features/pedestrian/pedestrian_service.h"
 #include "features/world/world_service.h"
 #include "shared/features/car/car_entity.h"
+#include "shared/net/sample_clock.h"
 
 #include <core_modules.h>
 #include <logging/logger.h>
@@ -358,6 +359,14 @@ namespace Mafia1Online::Features::Npc {
         if (Dead(npc)) {
             return;
         }
+        // Applied in this tick, on the clock the NPC's poses carry: players
+        // start the clip once their replica draws this moment.
+        Shared::Npc::AnimationPlayed played;
+        played.missionGeneration = animation.missionGeneration;
+        played.key = animation.key;
+        played.revision = animation.revision;
+        played.hostClockMs = Shared::Net::SampleClock(MafiaNet::GetTime());
+        Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(played, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
         auto &human = Human(npc);
         if (animation.name.empty()) {
             if (_animating.erase(animation.key)) {

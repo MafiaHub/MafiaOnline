@@ -101,6 +101,11 @@ namespace Mafia1Online::Features::Npc {
             // when it holds the locomotion stream off (max() for a loop).
             uint16_t animationRevision = 0;
             bool animationSynced = false;
+            // A newer clip held for its moment: its revision, when it came
+            // and when its date (NpcEntity::animationClock) did.
+            uint16_t clipRevisionSeen = 0;
+            std::chrono::steady_clock::time_point clipSeenAt {};
+            std::chrono::steady_clock::time_point clipDatedAt {};
             // The last npc.say count heard (NpcEntity::speechRevision).
             uint16_t speechRevision = 0;
             std::chrono::steady_clock::time_point animatingUntil {};

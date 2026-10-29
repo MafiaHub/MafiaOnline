@@ -548,6 +548,19 @@ namespace Mafia1Online::Features::Npc {
             event.sourceCarId = event.hitType == 4 ? damaged.attackerId : 0;
             Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(event, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered, MafiaNet::ToGuid(*_simulation->Host()));
         });
+        network->RegisterRPC<Shared::Npc::AnimationPlayed>([this](const Shared::Npc::AnimationPlayed &played, MafiaNet::Packet *packet) {
+            if (!FromHost(MafiaNet::ToPeerGuid(packet->guid), played.missionGeneration)) {
+                return;
+            }
+            // Only the newest clip: an older one's date would start the
+            // newest at the wrong moment.
+            auto *npc = FindKey(played.key);
+            if (!npc || !npc->entity || played.revision != npc->entity->animationRevision) {
+                return;
+            }
+            npc->entity->animationClock = played.hostClockMs;
+            npc->entity->animationDated = played.revision;
+        });
         network->RegisterRPC<Shared::Npc::TaskDone>([this](const Shared::Npc::TaskDone &done, MafiaNet::Packet *packet) {
             using Result = Shared::Npc::TaskDone::Result;
             if (!FromHost(MafiaNet::ToPeerGuid(packet->guid), done.missionGeneration) || !Shared::Npc::KnownTaskType(done.type) ||
@@ -908,7 +921,7 @@ namespace Mafia1Online::Features::Npc {
         }
         npc->entity->animation = name;
         npc->entity->animationLoop = !name.empty() && loop;
-        ++npc->entity->animationRevision;
+        animation.revision = ++npc->entity->animationRevision;
         Framework::CoreModules::GetNetworkPeer()->SendRPC(animation, MafiaNet::ToGuid(*host), MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
         return true;
     }

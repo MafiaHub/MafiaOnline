@@ -81,15 +81,39 @@ namespace Mafia1Online::Shared::Npc {
         uint32_t key = 0;
         std::string name;
         bool loop = true;
+        // NpcEntity::animationRevision for it, which the host's
+        // AnimationPlayed names.
+        uint16_t revision = 0;
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {
             stream->Serialize(write, missionGeneration);
             stream->Serialize(write, key);
             stream->Serialize(write, name);
             stream->Serialize(write, loop);
+            stream->Serialize(write, revision);
             if (!write && !name.empty() && !AnimationNameValid(name)) {
                 name.clear();
             }
+        }
+    };
+
+    // Host -> server: it applied that Animation (played, kept or stopped
+    // the clip) at hostClockMs on the sample clock its poses carry. Players
+    // start the clip once their replica draws that moment
+    // (NpcEntity::animationClock).
+    struct AnimationPlayed {
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::NpcAnimationPlayed");
+
+        uint64_t missionGeneration = 0;
+        uint32_t key = 0;
+        uint16_t revision = 0;
+        uint16_t hostClockMs = 0;
+
+        void Serialize(MafiaNet::BitStream *stream, bool write) {
+            stream->Serialize(write, missionGeneration);
+            stream->Serialize(write, key);
+            stream->Serialize(write, revision);
+            stream->Serialize(write, hostClockMs);
         }
     };
 } // namespace Mafia1Online::Shared::Npc

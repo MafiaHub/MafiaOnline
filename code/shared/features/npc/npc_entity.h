@@ -102,6 +102,11 @@ namespace Mafia1Online::Shared::Entities {
         std::string animation;
         bool animationLoop = false;
         uint16_t animationRevision = 0;
+        // When the host applied revision animationDated, on its sample clock
+        // (Npc::AnimationPlayed): a copy starts that clip once it draws the
+        // body at that moment, where the host's started it.
+        uint16_t animationClock = 0;
+        uint16_t animationDated = 0;
         // Retail's voice for it (C_human m_uVoice, +0x680): which of the 40
         // sounds of each voices.def line it says. Chosen once at spawn, so
         // one NPC always speaks with the same voice.
@@ -200,6 +205,8 @@ namespace Mafia1Online::Shared::Entities {
             fields.Field(animation);
             fields.Field(animationLoop);
             fields.Field(animationRevision);
+            fields.Field(animationClock);
+            fields.Field(animationDated);
             if (!fields.Writing() && animation.size() > kMaxAnimationLength) {
                 animation.clear();
             }

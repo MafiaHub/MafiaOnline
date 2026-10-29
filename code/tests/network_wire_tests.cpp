@@ -8,6 +8,7 @@
 #include "shared/features/car/car_movement.h"
 #include "shared/features/combat/aim_update.h"
 #include "shared/features/combat/combat_protocol.h"
+#include "shared/features/npc/npc_animation.h"
 #include "shared/features/npc/npc_entity.h"
 #include "shared/features/npc/npc_report.h"
 #include "shared/features/pedestrian/pedestrian_entity.h"
@@ -331,6 +332,16 @@ namespace {
         Shared::Npc::Reload npcReload;
         npcReload.hostClockMs = 65535;
         CHECK(RoundTrip(npcReload).hostClockMs == 65535);
+        // A script clip names its revision, and the host dates that one.
+        Shared::Npc::Animation clip;
+        clip.name     = "Stand01.i3d";
+        clip.revision = 9;
+        CHECK(RoundTrip(clip).revision == 9 && RoundTrip(clip).name == "Stand01.i3d");
+        Shared::Npc::AnimationPlayed played;
+        played.revision    = 9;
+        played.hostClockMs = 4321;
+        const auto playedRead = RoundTrip(played);
+        CHECK(playedRead.revision == 9 && playedRead.hostClockMs == 4321);
     }
 
     void SampleClocks() {
