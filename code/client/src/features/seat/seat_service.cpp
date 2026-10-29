@@ -1,4 +1,5 @@
 #include "seat_service.h"
+#include "seat_hooks.h"
 
 #include "core/application.h"
 #include "features/simulation/simulation_config.h"
@@ -541,10 +542,14 @@ namespace Mafia1Online::Features::Seat {
                 break;
             case Action::Exit:
                 if (human->IsSeatedIn(car, event.seat)) {
-                    human->UseCar(car, SDK::Seat::UseAction::Exit, event.seat);
+                    // Exit, not ExitBlocked: its controller left by the door.
+                    {
+                        const RemoteExitScope remote;
+                        human->UseCar(car, SDK::Seat::UseAction::Exit, event.seat);
+                    }
                     _animations[event.playerId] = {now + std::chrono::seconds(2), event.carId, event.seat};
-                    // Use_Actor exit animates with the car in +0x9c; a refused
-                    // door (Can_DropOutFromCar) ends in ForceExitCar instead.
+                    // Use_Actor exit animates with the car in +0x9c (an overturned
+                    // car takes TryExitOverturnedCar's way out instead).
                     if (npc && human->usedActorLeave != static_cast<NativeActor *>(car)) {
                         Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->warn("NPC {} left car {} seat {} without the door animation ({})", event.playerId, event.carId,
                                                                                    event.seat, human->IsSeatedIn(car, event.seat) ? "still seated" : "popped out");
