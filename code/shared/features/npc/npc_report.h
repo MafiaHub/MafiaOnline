@@ -165,8 +165,10 @@ namespace Mafia1Online::Shared::Npc {
         float y = 0.0f;
         float z = 0.0f;
         float yaw = 0.0f;
-        // Ground speed in m/s, for the replicas' interpolation.
-        float speed = 0.0f;
+        // Ground velocity in m/s over the last interval, for the replicas'
+        // extrapolation: backing off or strafing too.
+        float velocityX = 0.0f;
+        float velocityZ = 0.0f;
         int16_t locomotion = 1;
         float health = 0.0f;
         bool dead = false;
@@ -209,7 +211,8 @@ namespace Mafia1Online::Shared::Npc {
                     pose.z = position.z;
                 }
                 Net::SerializeAngle(stream, write, pose.yaw, 12);
-                Net::SerializeFixed(stream, write, pose.speed, -16.0f, 16.0f, 10);
+                Net::SerializeFixed(stream, write, pose.velocityX, -16.0f, 16.0f, 10);
+                Net::SerializeFixed(stream, write, pose.velocityZ, -16.0f, 16.0f, 10);
                 stream->Serialize(write, pose.locomotion);
                 stream->Serialize(write, pose.health);
                 stream->Serialize(write, pose.dead);

@@ -46,10 +46,10 @@ namespace Mafia1Online::Features::Npc {
             }
         }
 
-        void SetPose(NpcEntity &entity, float x, float y, float z, float yaw, float speed) {
+        void SetPose(NpcEntity &entity, float x, float y, float z, float yaw, float velocityX = 0.0f, float velocityZ = 0.0f) {
             entity.position = {x, y, z};
             entity.rotation = glm::angleAxis(yaw, glm::vec3(0.0f, 1.0f, 0.0f));
-            entity.velocity = {std::sin(yaw) * speed, 0.0f, std::cos(yaw) * speed};
+            entity.velocity = {velocityX, 0.0f, velocityZ};
         }
 
         // Retail firearm item ids; the host only reports native shots.
@@ -144,7 +144,7 @@ namespace Mafia1Online::Features::Npc {
                 }
                 npc.confirmed = true;
                 npc.lastSeen = std::chrono::steady_clock::now();
-                SetPose(*npc.entity, spawned.x, spawned.y, spawned.z, spawned.yaw, 0.0f);
+                SetPose(*npc.entity, spawned.x, spawned.y, spawned.z, spawned.yaw);
                 // The pose Spawn gave it carried clock 0; the host's own
                 // reaches observers as a new sample, not a repeat.
                 npc.entity->sampleClock = spawned.hostClockMs;
@@ -190,7 +190,7 @@ namespace Mafia1Online::Features::Npc {
             entity->voice = VoiceFor(spawned.kind, entity->GetNetworkID());
             entity->streaming.range = kStreamRange;
             entity->SetVirtualWorld(MafiaNet::VIRTUAL_WORLD_GLOBAL);
-            SetPose(*entity, spawned.x, spawned.y, spawned.z, spawned.yaw, 0.0f);
+            SetPose(*entity, spawned.x, spawned.y, spawned.z, spawned.yaw);
             entity->sampleClock = spawned.hostClockMs;
             entity->poseSource = MafiaNet::ToPeerGuid(packet->guid);
             auto &npc = _npcs[spawned.key];
@@ -219,7 +219,7 @@ namespace Mafia1Online::Features::Npc {
             for (uint8_t i = 0; i < snapshot.count; ++i) {
                 const auto &pose = snapshot.npcs[i];
                 auto *npc = FindKey(pose.key);
-                if (!npc || (npc->scripted && !npc->confirmed) || !Finite(pose.x, pose.y, pose.z) || !std::isfinite(pose.yaw) || !std::isfinite(pose.speed) || !std::isfinite(pose.health) ||
+                if (!npc || (npc->scripted && !npc->confirmed) || !Finite(pose.x, pose.y, pose.z) || !std::isfinite(pose.yaw) || !std::isfinite(pose.velocityX) || !std::isfinite(pose.velocityZ) || !std::isfinite(pose.health) ||
                     !Finite(pose.poseTargetX, pose.poseTargetY, pose.poseTargetZ)) {
                     continue;
                 }
@@ -229,7 +229,8 @@ namespace Mafia1Online::Features::Npc {
                 // An unchanged pose keeps its clock, so a standing NPC or a
                 // corpse is not sent again every snapshot.
                 Shared::Net::RelayPose(entity, snapshot.hostClockMs, [&] {
-                    SetPose(entity, pose.x, pose.y, pose.z, pose.yaw, state.alive && !pose.dead ? pose.speed : 0.0f);
+                    const bool moving = state.alive && !pose.dead;
+                    SetPose(entity, pose.x, pose.y, pose.z, pose.yaw, moving ? pose.velocityX : 0.0f, moving ? pose.velocityZ : 0.0f);
                     entity.locomotion = pose.locomotion;
                 });
                 entity.poseSource = MafiaNet::ToPeerGuid(packet->guid);
@@ -747,7 +748,7 @@ namespace Mafia1Online::Features::Npc {
         entity->voice = request.voice && *request.voice < NpcEntity::kVoiceCount ? *request.voice : VoiceFor(entity->kind, entity->GetNetworkID());
         entity->streaming.range = kStreamRange;
         entity->SetVirtualWorld(request.virtualWorld);
-        SetPose(*entity, request.position.x, request.position.y, request.position.z, request.heading, 0.0f);
+        SetPose(*entity, request.position.x, request.position.y, request.position.z, request.heading);
         auto &npc = _npcs[key];
         npc.entity = entity;
         npc.scripted = true;

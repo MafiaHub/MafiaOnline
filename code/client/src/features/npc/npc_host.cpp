@@ -1341,7 +1341,8 @@ namespace Mafia1Online::Features::Npc {
             pose.yaw = std::atan2(direction.x, direction.z);
             const float dx = position.x - tracked.lastPosition.x;
             const float dz = position.z - tracked.lastPosition.z;
-            pose.speed = seconds > 0.0f ? std::sqrt(dx * dx + dz * dz) / seconds : 0.0f;
+            pose.velocityX = seconds > 0.0f ? dx / seconds : 0.0f;
+            pose.velocityZ = seconds > 0.0f ? dz / seconds : 0.0f;
             tracked.lastPosition = position;
             pose.locomotion = static_cast<int16_t>(human.AnimationState());
             pose.health = human.Health();

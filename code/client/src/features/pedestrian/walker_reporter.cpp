@@ -150,7 +150,8 @@ namespace Mafia1Online::Features::Pedestrian {
             pose.y = position.y;
             pose.z = position.z;
             pose.yaw = YawOf(element->Model());
-            pose.speed = std::sqrt(dx * dx + dz * dz) / seconds;
+            pose.velocityX = dx / seconds;
+            pose.velocityZ = dz / seconds;
             pose.dead = element->IsDead();
             pose.alpha = static_cast<uint8_t>(std::clamp(element->Alpha(), 0.0f, 1.0f) * 255.0f + 0.5f);
             if (pose.dead && !reported.dead) {

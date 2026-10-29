@@ -122,7 +122,7 @@ namespace Mafia1Online::Shared::Entities {
             carActionAt = std::chrono::steady_clock::now();
         }
 
-        // 14 bytes (43 as raw floats): a walker's pose plus the locomotion.
+        // 16 bytes (43 as raw floats): a walker's pose plus the locomotion.
         void SerializeTransform(Framework::Networking::Replication::FieldSerializer &fields) override {
             auto *stream = fields.PlainStream();
             if (!stream) {
@@ -133,7 +133,7 @@ namespace Mafia1Online::Shared::Entities {
             }
             const bool write = fields.Writing();
             if (!Net::SerializeWorldPosition(stream, write, position) || !Net::SerializeHeading(stream, write, rotation, 10) ||
-                !Net::SerializeGroundSpeed(stream, write, rotation, velocity) || !stream->Serialize(write, sampleClock) || !stream->Serialize(write, locomotion)) {
+                !Net::SerializePlanarVelocity(stream, write, velocity) || !stream->Serialize(write, sampleClock) || !stream->Serialize(write, locomotion)) {
                 fields.Fail();
             }
         }

@@ -38,9 +38,8 @@ namespace Mafia1Online::Shared::Entities {
             return poseSource;
         }
 
-        // 12 bytes (41 as raw floats): position at 1/64 m, yaw in 10 bits and
-        // the ground speed along it, which is all the server builds the
-        // velocity from.
+        // 14 bytes (41 as raw floats): position at 1/64 m, yaw in 10 bits and
+        // the planar velocity, which is all the host measures.
         void SerializeTransform(Framework::Networking::Replication::FieldSerializer &fields) override {
             auto *stream = fields.PlainStream();
             if (!stream) {
@@ -50,7 +49,7 @@ namespace Mafia1Online::Shared::Entities {
             }
             const bool write = fields.Writing();
             if (!Net::SerializeWorldPosition(stream, write, position) || !Net::SerializeHeading(stream, write, rotation, 10) ||
-                !Net::SerializeGroundSpeed(stream, write, rotation, velocity) || !stream->Serialize(write, sampleClock)) {
+                !Net::SerializePlanarVelocity(stream, write, velocity) || !stream->Serialize(write, sampleClock)) {
                 fields.Fail();
             }
         }

@@ -27,10 +27,10 @@ namespace Mafia1Online::Features::Pedestrian {
             return std::isfinite(x) && std::isfinite(y) && std::isfinite(z) && std::isfinite(yaw);
         }
 
-        void SetPose(Shared::Entities::PedestrianEntity &entity, float x, float y, float z, float yaw, float speed) {
+        void SetPose(Shared::Entities::PedestrianEntity &entity, float x, float y, float z, float yaw, float velocityX = 0.0f, float velocityZ = 0.0f) {
             entity.position = {x, y, z};
             entity.rotation = glm::angleAxis(yaw, glm::vec3(0.0f, 1.0f, 0.0f));
-            entity.velocity = {std::sin(yaw) * speed, 0.0f, std::cos(yaw) * speed};
+            entity.velocity = {velocityX, 0.0f, velocityZ};
         }
     } // namespace
 
@@ -99,7 +99,7 @@ namespace Mafia1Online::Features::Pedestrian {
             entity->umbrella = spawned.umbrella;
             entity->streaming.range = kStreamRange;
             entity->SetVirtualWorld(MafiaNet::VIRTUAL_WORLD_GLOBAL);
-            SetPose(*entity, spawned.x, spawned.y, spawned.z, spawned.yaw, 0.0f);
+            SetPose(*entity, spawned.x, spawned.y, spawned.z, spawned.yaw);
             _walkers[spawned.key] = {entity, std::chrono::steady_clock::now()};
             _keyByNetworkId[entity->GetNetworkID()] = spawned.key;
             if (_events.spawn) {
@@ -114,14 +114,15 @@ namespace Mafia1Online::Features::Pedestrian {
             for (uint8_t i = 0; i < snapshot.count; ++i) {
                 const auto &pose = snapshot.walkers[i];
                 const auto walker = _walkers.find(pose.key);
-                if (walker == _walkers.end() || !Finite(pose.x, pose.y, pose.z, pose.yaw) || !std::isfinite(pose.speed)) {
+                if (walker == _walkers.end() || !Finite(pose.x, pose.y, pose.z, pose.yaw) || !std::isfinite(pose.velocityX) || !std::isfinite(pose.velocityZ)) {
                     continue;
                 }
                 auto &entity = *walker->second.entity;
                 // An unchanged pose keeps its clock, so a standing walker or
                 // a corpse is not sent again every snapshot.
                 Shared::Net::RelayPose(entity, snapshot.hostClockMs, [&] {
-                    SetPose(entity, pose.x, pose.y, pose.z, pose.yaw, entity.alive && !pose.dead ? pose.speed : 0.0f);
+                    const bool moving = entity.alive && !pose.dead;
+                    SetPose(entity, pose.x, pose.y, pose.z, pose.yaw, moving ? pose.velocityX : 0.0f, moving ? pose.velocityZ : 0.0f);
                 });
                 entity.poseSource = MafiaNet::ToPeerGuid(packet->guid);
                 entity.animation = pose.animation;

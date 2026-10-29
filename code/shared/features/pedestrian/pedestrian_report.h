@@ -65,8 +65,11 @@ namespace Mafia1Online::Shared::Pedestrian {
         float y = 0.0f;
         float z = 0.0f;
         float yaw = 0.0f;
-        // Ground speed in m/s; replicas pick their locomotion from it.
-        float speed = 0.0f;
+        // Ground velocity in m/s over the last interval, for the replicas'
+        // extrapolation: a walker retreating to its origin node walks off
+        // its heading (TRAFFIC_ANIM_WEB_WALK).
+        float velocityX = 0.0f;
+        float velocityZ = 0.0f;
         bool dead = false;
         // C_traffic_element's current animation (+0x160) and the flag SetAnim
         // passes with it (+0x16c).
@@ -109,7 +112,8 @@ namespace Mafia1Online::Shared::Pedestrian {
                     walker.z = position.z;
                 }
                 Net::SerializeAngle(stream, write, walker.yaw, 12);
-                Net::SerializeFixed(stream, write, walker.speed, -16.0f, 16.0f, 10);
+                Net::SerializeFixed(stream, write, walker.velocityX, -16.0f, 16.0f, 10);
+                Net::SerializeFixed(stream, write, walker.velocityZ, -16.0f, 16.0f, 10);
                 stream->Serialize(write, walker.dead);
                 stream->Serialize(write, walker.animation);
                 stream->Serialize(write, walker.animationFlag);

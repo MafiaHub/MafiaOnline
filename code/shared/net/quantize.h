@@ -177,16 +177,17 @@ namespace Mafia1Online::Shared::Net {
         return true;
     }
 
-    // A walker's motion as the server builds it: its signed ground speed
-    // along the heading, over +-16 m/s at 1/32 m/s.
-    inline bool SerializeGroundSpeed(MafiaNet::BitStream *stream, bool write, const glm::quat &rotation, glm::vec3 &velocity) {
-        const glm::vec3 forward = rotation * glm::vec3(0.0f, 0.0f, 1.0f);
-        float speed             = write ? glm::dot(velocity, forward) : 0.0f;
-        if (!SerializeFixed(stream, write, speed, -16.0f, 16.0f, 10)) {
+    // A walking body's ground motion: its planar velocity over +-16 m/s at
+    // 1/32 m/s per axis. Humans back off and strafe, which a speed along
+    // the heading would extrapolate forward.
+    inline bool SerializePlanarVelocity(MafiaNet::BitStream *stream, bool write, glm::vec3 &velocity) {
+        float x = velocity.x;
+        float z = velocity.z;
+        if (!SerializeFixed(stream, write, x, -16.0f, 16.0f, 10) || !SerializeFixed(stream, write, z, -16.0f, 16.0f, 10)) {
             return false;
         }
         if (!write) {
-            velocity = forward * speed;
+            velocity = {x, 0.0f, z};
         }
         return true;
     }

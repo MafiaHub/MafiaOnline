@@ -8,7 +8,9 @@
 #include "shared/features/combat/aim_update.h"
 #include "shared/features/combat/combat_protocol.h"
 #include "shared/features/npc/npc_entity.h"
+#include "shared/features/npc/npc_report.h"
 #include "shared/features/pedestrian/pedestrian_entity.h"
+#include "shared/features/pedestrian/pedestrian_report.h"
 #include "shared/features/player/player_entity.h"
 #include "shared/features/player/player_movement.h"
 #include "shared/features/railway/railway_report.h"
@@ -161,12 +163,34 @@ namespace {
         CHECK(Near(walkerRead.velocity, walker.velocity, 0.05f));
         CHECK(walkerRead.sampleClock == 1234);
 
+        // Off the heading: a walker retreating sideways keeps its direction.
+        walker.velocity = walker.rotation * glm::vec3(-1.2f, 0.0f, 0.0f);
+        TransformRoundTrip(walker, walkerRead);
+        CHECK(Near(walkerRead.velocity, walker.velocity, 0.05f));
+
         Shared::Entities::NpcEntity npc;
         npc.position   = {1.0f, 2.0f, 3.0f};
         npc.locomotion = -5;
+        // Backing off as it faces its target: the velocity points behind it.
+        npc.rotation = glm::angleAxis(0.4f, glm::vec3(0.0f, 1.0f, 0.0f));
+        npc.velocity = npc.rotation * glm::vec3(0.5f, 0.0f, -2.0f);
         Shared::Entities::NpcEntity npcRead;
         TransformRoundTrip(npc, npcRead);
         CHECK(npcRead.locomotion == -5 && Near(npcRead.position, npc.position, 1.0f / 64.0f));
+        CHECK(Near(npcRead.velocity, npc.velocity, 0.05f) && npcRead.velocity.y == 0.0f);
+
+        Shared::Npc::Snapshot snapshot;
+        snapshot.count             = 1;
+        snapshot.npcs[0].velocityX = -3.0f;
+        snapshot.npcs[0].velocityZ = 1.5f;
+        const auto snapshotRead    = RoundTrip(snapshot);
+        CHECK(snapshotRead.count == 1 && Near(snapshotRead.npcs[0].velocityX, -3.0f, 0.02f) && Near(snapshotRead.npcs[0].velocityZ, 1.5f, 0.02f));
+        Shared::Pedestrian::Snapshot walkers;
+        walkers.count                = 1;
+        walkers.walkers[0].velocityX = 0.75f;
+        walkers.walkers[0].velocityZ = -1.25f;
+        const auto walkersRead       = RoundTrip(walkers);
+        CHECK(walkersRead.count == 1 && Near(walkersRead.walkers[0].velocityX, 0.75f, 0.02f) && Near(walkersRead.walkers[0].velocityZ, -1.25f, 0.02f));
     }
 
     void CarTransform() {
