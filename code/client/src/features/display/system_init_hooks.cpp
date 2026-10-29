@@ -3,6 +3,7 @@
 #include "system_init_hooks.h"
 
 #include "features/compat/ls3df_index_leak.h"
+#include "features/quick_join/quick_join.h"
 #include "features/simulation/simulation_config.h"
 
 #include <MinHook.h>
@@ -11,12 +12,18 @@
 #include <mafia1/sdk/core/system.h>
 #include <mafia1/sdk/graphics/native_graph.h>
 
+#include <nlohmann/json.hpp>
+
 #include <atomic>
+#include <fstream>
+#include <stdexcept>
 
 namespace Mafia1Online::Features::Display {
     namespace {
         constexpr int32_t kWindowWidth  = 1024;
         constexpr int32_t kWindowHeight = 768;
+        int32_t gWindowWidth  = kWindowWidth;
+        int32_t gWindowHeight = kWindowHeight;
 
         using InitSystem = bool(__fastcall *)(HINSTANCE, bool *);
         using VideoMemOverflow = void(__cdecl *)(int, int, const char *);
@@ -57,8 +64,8 @@ namespace Mafia1Online::Features::Display {
             auto &setup = SDK::Core::InitSettings();
             gOriginalSettings = {setup.width, setup.height, setup.fullscreen, setup.suspendInactive, setup.soundDisabled};
 
-            setup.width = kWindowWidth;
-            setup.height = kWindowHeight;
+            setup.width = gWindowWidth;
+            setup.height = gWindowHeight;
             setup.fullscreen = 0;
             setup.suspendInactive = 0;
             // InitSystem creates no ISND driver while this is set (0x5bfa32).
@@ -80,6 +87,31 @@ namespace Mafia1Online::Features::Display {
             return initialized;
         }
     } // namespace
+
+    void Initialize(const std::string &projectPath) {
+        std::ifstream input(QuickJoin::ConfigPath(projectPath));
+        if (!input) {
+            return;
+        }
+        try {
+            const auto root = nlohmann::json::parse(input);
+            const auto window = root.find("window");
+            if (window == root.end()) {
+                return;
+            }
+            const auto width = window->at("width").get<int32_t>();
+            const auto height = window->at("height").get<int32_t>();
+            if (width < 640 || width > 7680 || height < 480 || height > 4320) {
+                throw std::invalid_argument("window must be 640x480 to 7680x4320");
+            }
+            gWindowWidth = width;
+            gWindowHeight = height;
+            Framework::Logging::GetLogger("Mafia1Online")->info("Window size {}x{} from client config", width, height);
+        }
+        catch (const std::exception &error) {
+            Framework::Logging::GetLogger("Mafia1Online")->error("Invalid window configuration ({}); using {}x{}", error.what(), kWindowWidth, kWindowHeight);
+        }
+    }
 
     bool InstallSystemInitHook() {
         if (MH_CreateHook(reinterpret_cast<void *>(SDK::Core::System::kInitSystem), reinterpret_cast<void *>(&InitSystemHook), reinterpret_cast<void **>(&gInitSystemOriginal)) != MH_OK) {

@@ -14,6 +14,9 @@ namespace Mafia1Online::SDK::Core::Game {
     inline constexpr uintptr_t kRemoveTemporaryActor = 0x5a79a0;
     inline constexpr uintptr_t kNewShoot             = 0x5a84a0;
     inline constexpr uintptr_t kRandomFloat          = 0x408470;
+    // bool __thiscall C_game::ProcessCheatCode(char), retn 4: the game loops
+    // feed it every typed key; false means no code is in progress.
+    inline constexpr uintptr_t kProcessCheatCode     = 0x5a8030;
     inline constexpr uint32_t kWideCityCacheFlag     = 0x200;
 
     struct NativeShootRecord {
@@ -86,6 +89,12 @@ namespace Mafia1Online::SDK::Core::Game {
         }
         void RecomputeLightCache() {
             reinterpret_cast<void(__thiscall *)(NativeGame *)>(0x5b5d40)(this);
+        }
+        // C_game::UpdatePlayerControls 0x5a7ff0: returns unless initialized,
+        // then hands each C_player's driven car the profile's steering
+        // linearity, as the retail options menu does on close.
+        void UpdatePlayerControls() {
+            reinterpret_cast<void(__thiscall *)(NativeGame *)>(0x5a7ff0)(this);
         }
         [[nodiscard]] bool HasPlayerFocus(Player::NativeActor *actor) const {
             return _player == actor && _human == actor && _camera._player == actor;

@@ -15,6 +15,7 @@
 ;     tools\run_two_clients.ahk --players=N  start N player clients (0-2, default 2)
 ;     tools\run_two_clients.ahk --pool-scale=N  pedestrian pool scale of the host (1-16, default 16)
 ;     tools\run_two_clients.ahk --release    run the Release builds (build-prod-32/64)
+;     tools\run_two_clients.ahk --window=WxH  player window size (default 1024x768)
 ;
 ; Build first: builds\build.bat Mafia1OnlineServer 64, Mafia1OnlineClient 32 and
 ; Mafia1OnlineLauncher 32, each with Release as a third argument for --release.
@@ -77,6 +78,18 @@ if (PlayerCount < 0 || PlayerCount > 2) {
     MsgBox "--players must be 0, 1 or 2.", "Mafia1Online", "Iconx"
     ExitApp 1
 }
+; The size the client asks the renderer for (its config's "window").
+WindowWidth := 1024
+WindowHeight := 768
+WindowArg := ArgValue("--window", "")
+if WindowArg != "" {
+    if !RegExMatch(WindowArg, "^(\d+)x(\d+)$", &size) || size[1] < 640 || size[1] > 7680 || size[2] < 480 || size[2] > 4320 {
+        MsgBox "--window must be WIDTHxHEIGHT, 640x480 to 7680x4320.", "Mafia1Online", "Iconx"
+        ExitApp 1
+    }
+    WindowWidth := Integer(size[1])
+    WindowHeight := Integer(size[2])
+}
 if SimulationMode != "" {
     if !(SimulationMode = "full" || SimulationMode = "wireframe" || SimulationMode = "headless") {
         MsgBox "--simulation must be full, wireframe or headless.", "Mafia1Online", "Iconx"
@@ -93,9 +106,6 @@ if !HasArg("--no-server") {
     StartServer()
 }
 
-; Matches the window the client asks the renderer for (1024 by 768).
-WindowWidth := 1024
-WindowHeight := 768
 Gap := 16
 LayoutWidth := WindowWidth * 2 + Gap
 FirstX := Max(0, (A_ScreenWidth - LayoutWidth) // 2)
@@ -170,10 +180,11 @@ StartServer() {
 ; and return the launcher PID (0 on failure). The launcher maps Game.exe into
 ; its own process, so that PID owns the game window.
 LaunchClient(index, x) {
-    global LauncherExe, ClientBin, RuntimeDir, ServerHost, ServerPort, WindowY
+    global LauncherExe, ClientBin, RuntimeDir, ServerHost, ServerPort, WindowY, WindowWidth, WindowHeight
     config := RuntimeDir "\config\client-" index ".json"
     handle := FileOpen(config, "w", "UTF-8-RAW")
-    handle.Write('{"quickJoin":{"enabled":true,"nickname":"Player' index '","host":"' ServerHost '","port":' ServerPort ',"password":"","profileIndex":0}}')
+    handle.Write('{"quickJoin":{"enabled":true,"nickname":"Player' index '","host":"' ServerHost '","port":' ServerPort ',"password":"","profileIndex":0},'
+        . '"window":{"width":' WindowWidth ',"height":' WindowHeight '}}')
     handle.Close()
 
     EnvSet "MAFIA1ONLINE_CLIENT_CONFIG", config
