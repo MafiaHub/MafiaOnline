@@ -79,6 +79,9 @@ namespace Mafia1Online::Features::Npc {
         // A Retired for a key the host never tracked (a scripted NPC it could
         // not create).
         void ReportRetired(uint32_t key) const;
+        // C_human::NewScream on a tracked NPC: its line goes to the server
+        // for every player's copy (Shared::Npc::Speech).
+        void OnScream(SDK::Player::NativeHuman *human, uint32_t screamId);
         // A C_entity the retail game made without a spawn hook of its own
         // (a mafia car's crew, a police car's crew, a thrown traffic driver):
         // tracked with the model its frame was opened from.

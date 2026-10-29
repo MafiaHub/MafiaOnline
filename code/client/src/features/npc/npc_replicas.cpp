@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <random>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -42,6 +43,9 @@ namespace Mafia1Online::Features::Npc {
         // where the host's is: replaying the throw would pull it back to the
         // seat while the host's one is already out.
         constexpr uint16_t kThrowReplayAgeMs = 1000;
+        // reM HUMAN_THROW_CAR_SCREAM_BASE and _COUNT.
+        constexpr uint32_t kThrownOutFirstLine = 161;
+        constexpr uint32_t kThrownOutLines     = 7;
 
         // A stolen traffic car's driver, constructed while its throw-out runs.
         // Retail's Corovacka branch of Do_ThrowCocotFromCar seats the new
@@ -55,6 +59,11 @@ namespace Mafia1Online::Features::Npc {
             auto *human = static_cast<SDK::Seat::NativeHuman *>(actor);
             if (!car->GetOwner(0) && human->PlaceInCar(car, 0)) {
                 human->ThrowOutOfSeat();
+                // The Corovacka branch then plays one of the thrown-out
+                // lines (161-167) in the new driver's voice; on the host it
+                // is a loose sound, never a line of its tracked NPC.
+                static std::mt19937 random {std::random_device {}()};
+                static_cast<SDK::Player::NativeHuman *>(actor)->Say(kThrownOutFirstLine + std::uniform_int_distribution<uint32_t>(0, kThrownOutLines - 1)(random));
             }
         }
     } // namespace

@@ -379,6 +379,29 @@ namespace Mafia1Online::Shared::Npc {
         }
     };
 
+    // A host NPC's own line: C_human::NewScream from its talker, police calls
+    // or a steal refused. The server says it on every player's copy
+    // (NpcEntity::speechRevision); hit and pain lines each client plays itself.
+    struct Speech {
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::NpcSpeech");
+
+        uint64_t missionGeneration = 0;
+        uint32_t key = 0;
+        uint16_t line = 0;
+
+        void Serialize(MafiaNet::BitStream *stream, bool write) {
+            stream->Serialize(write, missionGeneration);
+            stream->Serialize(write, key);
+            stream->Serialize(write, line);
+        }
+    };
+
+    // The lines Speech carries: not 79-93, a hit, pain or dying (C_human::Hit),
+    // which every client's copy says when it is hit there.
+    inline constexpr bool RelayedSpeechLine(uint16_t line) {
+        return line >= 2 && line <= 1023 && !(line >= 79 && line <= 93);
+    }
+
     // Retail AI_ACTION_KICK_DRIVER (gangster fights, police arrests) threw a
     // player's replica out of a seat of that player's network car on the
     // host: Do_ThrowCocotFromCar -> intern_ThrowMeFromCar. The thrower never

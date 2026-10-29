@@ -396,6 +396,21 @@ namespace Mafia1Online::Features::Npc {
             event.weaponId = reload.weaponId;
             Emit(*npc, event);
         });
+        network->RegisterRPC<Shared::Npc::Speech>([this](const Shared::Npc::Speech &speech, MafiaNet::Packet *packet) {
+            if (!FromHost(MafiaNet::ToPeerGuid(packet->guid), speech.missionGeneration) || !Shared::Npc::RelayedSpeechLine(speech.line)) {
+                return;
+            }
+            // Each line cuts off the one before it on every copy: lines
+            // closer together than this would only be heard as noise.
+            auto *npc = FindKey(speech.key);
+            const auto now = std::chrono::steady_clock::now();
+            if (!npc || !npc->entity || now - npc->lastSpeech < std::chrono::milliseconds(250)) {
+                return;
+            }
+            if (Say(npc->entity->GetNetworkID(), speech.line)) {
+                npc->lastSpeech = now;
+            }
+        });
         network->RegisterRPC<Shared::Npc::PlayerHit>([this](const Shared::Npc::PlayerHit &hit, MafiaNet::Packet *packet) {
             if (!FromHost(MafiaNet::ToPeerGuid(packet->guid), hit.missionGeneration)) {
                 return;

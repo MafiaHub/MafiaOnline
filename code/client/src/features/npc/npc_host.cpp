@@ -90,6 +90,17 @@ namespace Mafia1Online::Features::Npc {
             return owned ? gHost->PickTarget(npc, logs, retail) : retail;
         }
 
+        // C_human::NewScream: void __thiscall(C_human*, unsigned screamId), retn 4.
+        using NewScream = void(__thiscall *)(NativeHuman *, uint32_t);
+        NewScream gNewScreamOriginal = nullptr;
+
+        void __fastcall NewScreamHook(NativeHuman *human, void *, uint32_t screamId) {
+            gNewScreamOriginal(human, screamId);
+            if (gHost) {
+                gHost->OnScream(human, screamId);
+            }
+        }
+
         bool IsTemporaryActor(const void *actor) {
             auto *game = SDK::Core::Mission::Get()->Game();
             for (auto *const *it = SDK::Traffic::TemporaryActorsBegin(game); it && it != SDK::Traffic::TemporaryActorsEnd(game); ++it) {
@@ -143,7 +154,9 @@ namespace Mafia1Online::Features::Npc {
         if (MH_CreateHook(reinterpret_cast<void *>(SDK::Police::kTickDoRiciActors), reinterpret_cast<void *>(&TickDoRiciHook), reinterpret_cast<void **>(&gTickDoRiciOriginal)) != MH_OK ||
             MH_EnableHook(reinterpret_cast<void *>(SDK::Police::kTickDoRiciActors)) != MH_OK ||
             MH_CreateHook(reinterpret_cast<void *>(kGetMaxAngryCharacter), reinterpret_cast<void *>(&GetMaxAngryHook), reinterpret_cast<void **>(&gGetMaxAngryOriginal)) != MH_OK ||
-            MH_EnableHook(reinterpret_cast<void *>(kGetMaxAngryCharacter)) != MH_OK || !InstallGangsterSpawn(*this) || !InstallPolice(*this)) {
+            MH_EnableHook(reinterpret_cast<void *>(kGetMaxAngryCharacter)) != MH_OK ||
+            MH_CreateHook(reinterpret_cast<void *>(SDK::Player::kHumanNewScream), reinterpret_cast<void *>(&NewScreamHook), reinterpret_cast<void **>(&gNewScreamOriginal)) != MH_OK ||
+            MH_EnableHook(reinterpret_cast<void *>(SDK::Player::kHumanNewScream)) != MH_OK || !InstallGangsterSpawn(*this) || !InstallPolice(*this)) {
             Uninstall();
             return false;
         }
@@ -153,6 +166,8 @@ namespace Mafia1Online::Features::Npc {
     void NpcHost::Uninstall() {
         UninstallPolice();
         UninstallGangsterSpawn();
+        MH_DisableHook(reinterpret_cast<void *>(SDK::Player::kHumanNewScream));
+        MH_RemoveHook(reinterpret_cast<void *>(SDK::Player::kHumanNewScream));
         MH_DisableHook(reinterpret_cast<void *>(kGetMaxAngryCharacter));
         MH_RemoveHook(reinterpret_cast<void *>(kGetMaxAngryCharacter));
         MH_DisableHook(reinterpret_cast<void *>(SDK::Police::kTickDoRiciActors));
@@ -1217,6 +1232,18 @@ namespace Mafia1Online::Features::Npc {
         Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(caught, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
         Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("NPC {} {} player {}", caught.key, outcome == Shared::Npc::Caught::Outcome::Arrest ? "arrested" : "fined",
                                                                    victim.networkId);
+    }
+
+    void NpcHost::OnScream(NativeHuman *human, uint32_t screamId) {
+        const auto tracked = _npcs.find(human);
+        if (tracked == _npcs.end() || screamId > 0xffff || !Shared::Npc::RelayedSpeechLine(static_cast<uint16_t>(screamId))) {
+            return;
+        }
+        Shared::Npc::Speech speech;
+        speech.missionGeneration = _missionGeneration;
+        speech.key = tracked->second.key;
+        speech.line = static_cast<uint16_t>(screamId);
+        Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(speech, MafiaNet::Priority::Medium, MafiaNet::Reliability::Reliable);
     }
 
     void NpcHost::SendInventory(Tracked &tracked, const NativeHuman &human, bool dead) {

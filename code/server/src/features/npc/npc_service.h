@@ -199,6 +199,8 @@ namespace Mafia1Online::Features::Npc {
             Shared::Npc::Behaviour behaviour = Shared::Npc::Behaviour::Neutral;
             std::chrono::steady_clock::time_point createdAt;
             std::chrono::steady_clock::time_point diedAt;
+            // The host's last relayed line (Shared::Npc::Speech).
+            std::chrono::steady_clock::time_point lastSpeech;
             bool removeSent = false;
             CurrentTask task;
             bool taskRunning = false;
