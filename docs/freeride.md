@@ -495,13 +495,22 @@ The Jobs tab of the city menu shows every one of these with its live state.
     wreck burns beside them, a fire call of its own ($260): it does not
     explode, and the wrecks are towed once it is out.
 - **Tobacco farm** (Lost Heaven Extended and The Countryside, `server/farm.js`).
-  The farm is the stock barn (`4stodola`) both countryside scenes place in
-  the lowlands at (-2295.3, -3.6, 711.6), beside the road north-west of
-  crossing (-2306.2, -5.9, 668.8); it is on the city map. Sign on with G
-  under the arrow at its lean-to side. Two stock flatbed trucks
-  (`trucka00`) stand on the apron towards the road; only farmhands on duty
-  drive an empty one. The field is the open grass east of the barn: seven
-  rows of eight plots with a round hay bale (`baliksena`) at each corner.
+  Each map has its own farm. On Lost Heaven Extended it is the mod's
+  farmstead in the north of the countryside, north-west of the hills
+  (`models/prejimka.4ds`, its rebuild of the stock countryside farm): leave
+  the road at (-840, 3316), cross the bridge over the creek and follow the
+  lane north into the yard. Sign on with G under the arrow outside the
+  barn's west door. The field fills the fenced paddock west of the barn,
+  open towards it, and two stock flatbed trucks (`trucka00`) stand in the
+  paddock beside the field; the loading bay is the paddock's gap by the
+  barn. (The stock lowland barn the countryside places at (-2295.3, -3.6,
+  711.6) is walled off from its road on this map by a 3 m plank wall the mod
+  adds.) On The Countryside the farm is that lowland barn, at the end of the
+  lowland road past crossing (-2306.2, -5.9, 668.8): the arrow is at its
+  lean-to side, the trucks on the apron towards the road and the field the
+  open grass east of the barn. Only farmhands on duty drive an empty truck.
+  The field has seven rows of eight plots with a round hay bale
+  (`baliksena`) at each corner.
   Press G on an empty plot to plant a seedling ($10, up to eight plants each);
   the plants are stock bushes (`s_ker`) every player sees, growing through
   seedling, young, leafy and ripe (about 70, 90 and 90 seconds). A plant
@@ -515,22 +524,26 @@ The Jobs tab of the city menu shows every one of these with its live state.
   minutes, then rots. Anyone on the farm may water anyone's plants (a $5
   tip each) or pick off their hornworms; only the planter and their crew
   pick the leaves. Carry the leaves to the barn's arrow: they cure in two
-  and a half minutes. Then stop a farm truck at the loading bay in front of
-  the barn for six seconds and drive the load to a buyer: the village co-op
-  on the countryside main street pays $110 a bundle at full quality (35% of
-  that at none), and on Lost Heaven Extended the container docks pay 70%
-  more. Within 900 m of the docks the whole city is told and sees the truck
-  on the map, and a loaded farm truck can be driven by anyone: whoever stops
-  it at a buyer is paid. A wrecked truck loses its load; a loaded truck left
-  standing is towed back and unloaded at the barn. `/farm` shows the way to
-  the barn, or clocks off from anywhere.
+  and a half minutes. Then stop a farm truck at the loading bay beside the
+  barn for six seconds and drive the load to a buyer: the village co-op on
+  the countryside main street pays $110 a bundle at full quality on The
+  Countryside (35% of that at none). Lost Heaven Extended's farmstead is
+  farther out (4.4 km to the co-op, 5.8 km to the container docks), so there
+  the co-op pays $121 and the docks $165 a bundle. Within 900 m of the docks
+  the whole city is told and sees the truck on the map, and a loaded farm
+  truck can be driven by anyone: whoever stops it at a buyer is paid. A
+  wrecked truck loses its load; a loaded truck left standing is towed back
+  and unloaded at the barn. `/farm` shows the way to the barn, or clocks off
+  from anywhere.
 
   The farm keeps its own clock: plants grow and cure only while a map with
   the farm is loaded, so a crop waits through the city map or a restart,
   but not through its owner leaving town. Plants, picked leaves, curing
   batches and cured tobacco are saved in the database by player record; a
   load on a truck goes back to the barn when the map changes or the resource
-  stops. Both maps share the same field.
+  stops. The two farms share one crop: a plant keeps its plot (row and place
+  in the row) on either map's field, so plants saved at the old Lost Heaven
+  Extended field grow on in the same plots of the farmstead's.
 - **Courier.** Salieri's back window, as before.
 - **Bootleg run** (`/bootleg`, Lost Heaven Extended). Drive to the still in
   the hills, wait eight seconds while the crates are loaded (the police are

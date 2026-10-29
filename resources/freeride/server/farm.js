@@ -8,22 +8,47 @@
 // the whole city learns of the load, and whoever drives that truck in is
 // paid. A loaded farm truck may be driven by anyone.
 //
-// Where it is. The barn is the stock models/4stodola.4ds that FREEKRAJINA's
-// scene2.bin places at (-2295.25, -3.62, 711.61) with rotation
-// (0.447, 0, 0.894, 0); Freeride Extended's scene2.bin places the same barn
-// at the same spot (the mod's cache.bin adds three more around it at
-// (-2266.86, 671.48), (-2349.87, 684.28) and (-2239.89, 618.32)). Applied
-// as LS3D does (the conjugate, see lib/maps.js) its lean-to side, local -x,
-// faces (0.6, -0.8), toward the field. The ground heights below are sampled
-// from the FREEKRAJINA scene.4ds ground mesh, which the mod's scene.4ds
-// repeats to the centimetre here; the road beside the barn is the road graph
-// line from crossing (-2306.2, -5.9, 668.8) north-west (data/roads_*.js).
-// The field is open grass east of the barn, clear of every scene object on
-// both maps. The village buyer is the main street crossing in front of the
+// Where it is. Each map has its own site; both have seven rows of eight
+// plots, so a plant keeps its plot (row and place in the row) from map to
+// map, and a plant saved at the old Lost Heaven Extended field grows on in
+// the same plot of the new one. Ground heights are sampled from each map's
+// ground mesh; every spot below was checked clear of the scene's objects.
+//
+// The Countryside (FREEKRAJINA): the stock models/4stodola.4ds its scene2.bin
+// places at (-2295.25, -3.62, 711.61), rotation (0.447, 0, 0.894, 0), at the
+// end of the lowland road: road graph crossing (-2306.2, -5.9, 668.8) is a
+// dead end 32 m from the barn, with fences (@PLplot) only on the far side of
+// the road. Applied as LS3D does (the conjugate, see lib/maps.js) its lean-to
+// side, local -x, faces (0.6, -0.8), toward the field: open grass east of the
+// barn. Heights from the FREEKRAJINA scene.4ds ground mesh.
+//
+// Lost Heaven Extended: the same barn is no farm there. The mod's scene.4ds
+// adds "Loft14", a 3 m plank wall (0LKULNA1.BMP) from (-2172.8, 496.4) to
+// (-2349.1, 781.2) with 16 collision faces and two plates in its tree.klz,
+// between that road and the barn: the trucks and the loading bay were on the
+// road side, the arrow and the field behind the wall. The farm is the mod's
+// farmstead in the north of the countryside instead: scene2.bin's "prejimka"
+// (models/prejimka.4ds, its rebuild of the stock FREEKRAJINA "prejimka*"
+// frames) furnished with straw, sacks, carts and tractor "traktor1". The way
+// in is its bridge ("2obj80"/"Object08", deck y 19.8, 6 m between the rails)
+// over the creek, 22 m north of the road graph line at (-840, 18.6, 3316),
+// on the main network (4.4 km by road to the village co-op, 5.8 km to the
+// docks), then the lane north (Loft05/Object25, fenced on the east by
+// Object31/28/26) into the yard. The barn ("&& stodola1-4", floor y 19.86)
+// opens to the west between its posts at (-849.6, 3491) and (-851.8, 3497.8);
+// the arrow is in front of that door. West of it lies the fenced paddock
+// (Object14/Cylinder134 north, Object13/Object11 west, Object32 south, with
+// collision kolize5/6/8) whose east side is open between Object09 (ends at
+// (-863.2, 3505.7)) and Object07 (ends at (-858.8, 3491.5)): the field fills
+// it on flat grass (y 19.45 to 19.79), the trucks wait beside it facing the
+// gap and the loading bay is in the gap, clear of the crates there
+// ("anchr" boxes x -864.7 to -862.8, z 3496.6 to 3499.7).
+//
+// Buyers. The village buyer is the main street crossing in front of the
 // village store (models/4build76.4ds at (-1488.4, 14.4, 714.4) in
-// FREEKRAJINA, (-1489.8, 14.5, 714.6) in the mod's cache.bin); the road
-// graph crossing (-1484.1, 14.6, 725.1) is on both maps. The docks are the
-// mod's container docks crossing (lib/maps.js).
+// FREEKRAJINA, (-1489.8, 14.5, 714.6) in the mod's cache.bin); the road graph
+// crossing (-1484.1, 14.6, 725.1) is on both maps. The docks are the mod's
+// container docks crossing (lib/maps.js).
 //
 // Plants live on the server's farm clock: it runs while a map with the farm
 // is loaded, so a crop waits through a map without it or a restart, but not
@@ -51,39 +76,87 @@ const PLANT_MODEL = "s_ker.i3d";
 const BALE_MODEL = "baliksena.i3d";
 const STORE = "farm";
 
-const SIGN_ON = {x: -2286.7, y: -5.0, z: 700.2};
-// On the flat apron between the road and the barn, noses north-west along
-// the road; ground -4.68 and -4.53 under both ends.
-const SPOTS = [
-    {position: {x: -2314.5, y: -4.63, z: 716.0}, heading: -0.675},
-    {position: {x: -2311.2, y: -4.48, z: 718.6}, heading: -0.675},
-];
-// In front of the barn's road side, 7 m out.
-const LOADING = {x: -2305.0, y: -4.84, z: 702.0};
-// Seven rows 5 m apart, eight plots 3 m apart in each; ground height of each plot.
-const PLOT_X0 = -2276;
-const PLOT_DX = 3;
-const PLOT_Z0 = 699;
-const PLOT_DZ = 5;
-const PLOT_GROUND = [
-    [-5.52, -5.64, -5.75, -5.87, -5.98, -6.09, -6.21, -6.32],
-    [-5.10, -5.22, -5.33, -5.45, -5.56, -5.68, -5.79, -5.90],
-    [-4.68, -4.80, -4.91, -5.03, -5.14, -5.26, -5.37, -5.49],
-    [-4.26, -4.38, -4.49, -4.61, -4.72, -4.84, -4.95, -5.07],
-    [-3.85, -3.96, -4.07, -4.19, -4.30, -4.42, -4.53, -4.65],
-    [-3.50, -3.54, -3.66, -3.77, -3.88, -4.00, -4.11, -4.23],
-    [-3.34, -3.28, -3.24, -3.35, -3.47, -3.58, -3.69, -3.81],
-];
-const PLOTS = PLOT_GROUND.flatMap((row, r) => row.map((y, c) => ({id: r * row.length + c, row: r + 1, x: PLOT_X0 + c * PLOT_DX, y, z: PLOT_Z0 + r * PLOT_DZ})));
-const FIELD = {minX: -2277.5, maxX: -2253.5, minZ: 697, maxZ: 731, center: {x: -2265.5, y: -4.6, z: 714}};
-// Hay bales at the field's corners mark it out.
-const BALES = [
-    {x: -2279.5, y: -5.87, z: 695.0}, {x: -2252.5, y: -6.9, z: 695.0},
-    {x: -2279.5, y: -3.45, z: 733.5}, {x: -2252.5, y: -3.68, z: 733.5},
-];
+// The plots of a field: seven rows dz apart, eight plots dx apart in each,
+// with the ground height of each plot.
+function plots(x0, dx, z0, dz, ground) {
+    return ground.flatMap((row, r) => row.map((y, c) => ({id: r * row.length + c, row: r + 1, x: x0 + c * dx, y, z: z0 + r * dz})));
+}
+const PLOT_COUNT = 56;
+
+const LOWLANDS = {
+    place: "the barn in the lowlands",
+    signOn: {x: -2286.7, y: -5.0, z: 700.2},
+    // On the flat apron between the road and the barn, noses north-west
+    // along the road; ground -4.68 and -4.53 under both ends.
+    spots: [
+        {position: {x: -2314.5, y: -4.63, z: 716.0}, heading: -0.675},
+        {position: {x: -2311.2, y: -4.48, z: 718.6}, heading: -0.675},
+    ],
+    // In front of the barn's road side, 7 m out.
+    loading: {x: -2305.0, y: -4.84, z: 702.0},
+    plots: plots(-2276, 3, 699, 5, [
+        [-5.52, -5.64, -5.75, -5.87, -5.98, -6.09, -6.21, -6.32],
+        [-5.10, -5.22, -5.33, -5.45, -5.56, -5.68, -5.79, -5.90],
+        [-4.68, -4.80, -4.91, -5.03, -5.14, -5.26, -5.37, -5.49],
+        [-4.26, -4.38, -4.49, -4.61, -4.72, -4.84, -4.95, -5.07],
+        [-3.85, -3.96, -4.07, -4.19, -4.30, -4.42, -4.53, -4.65],
+        [-3.50, -3.54, -3.66, -3.77, -3.88, -4.00, -4.11, -4.23],
+        [-3.34, -3.28, -3.24, -3.35, -3.47, -3.58, -3.69, -3.81],
+    ]),
+    field: {minX: -2277.5, maxX: -2253.5, minZ: 697, maxZ: 731, center: {x: -2265.5, y: -4.6, z: 714}},
+    // Hay bales at the field's corners mark it out.
+    bales: [
+        {x: -2279.5, y: -5.87, z: 695.0}, {x: -2252.5, y: -6.9, z: 695.0},
+        {x: -2279.5, y: -3.45, z: 733.5}, {x: -2252.5, y: -3.68, z: 733.5},
+    ],
+};
+
+// Heights from the prejimka model's own ground patches (Object21, Object23,
+// Object27, Object30), which lie over the mod's countryside mesh scene_fk.
+const FARMSTEAD = {
+    place: "the barn of the farmstead north-west of the hills, over the creek bridge",
+    // Outside the barn's west door, 3.5 m from the barrels at its north post.
+    signOn: {x: -854.0, y: 19.88, z: 3494.5},
+    // In the paddock between the field and the crates, noses north towards
+    // the gap; ground 19.51/19.57 and 19.67/19.71 under the ends.
+    spots: [
+        {position: {x: -871.0, y: 19.54, z: 3490.0}, heading: 0},
+        {position: {x: -866.5, y: 19.69, z: 3490.0}, heading: 0},
+    ],
+    // In the paddock's gap, between the barn and the field.
+    loading: {x: -859.5, y: 20.12, z: 3499.0},
+    plots: plots(-897.5, 3, 3478, 5, [
+        [19.45, 19.49, 19.57, 19.60, 19.66, 19.73, 19.79, 19.76],
+        [19.46, 19.46, 19.46, 19.48, 19.51, 19.54, 19.56, 19.58],
+        [19.48, 19.48, 19.48, 19.47, 19.49, 19.51, 19.52, 19.50],
+        [19.49, 19.48, 19.48, 19.48, 19.48, 19.49, 19.50, 19.51],
+        [19.48, 19.48, 19.47, 19.47, 19.48, 19.49, 19.50, 19.50],
+        [19.48, 19.47, 19.47, 19.47, 19.48, 19.49, 19.50, 19.53],
+        [19.47, 19.47, 19.47, 19.47, 19.49, 19.50, 19.51, 19.57],
+    ]),
+    field: {minX: -899, maxX: -875, minZ: 3476, maxZ: 3510, center: {x: -887, y: 19.48, z: 3493}},
+    // Bales at the field's corners, each 1.5 m or more clear of the paddock
+    // fences and the stable (Object119, south of the field).
+    bales: [
+        {x: -898.5, y: 19.57, z: 3473.0}, {x: -873.0, y: 19.85, z: 3475.0},
+        {x: -901.5, y: 19.47, z: 3508.0}, {x: -873.5, y: 19.68, z: 3510.0},
+    ],
+};
+
 const COOP = {id: "coop", name: "the village co-op", label: "TOBACCO BUYER", mapLabel: "Tobacco buyer", position: {x: -1484.1, y: 14.6, z: 725.1}, rate: 1};
 const DOCKS = {id: "docks", name: "the container docks", label: "TOBACCO EXPORT", mapLabel: "Tobacco export", position: maps.landmark("docks").position, rate: 1.7, risky: true};
-const FARMS = {freekrajina: {buyers: [COOP]}, freeride_extended: {buyers: [COOP, DOCKS]}};
+// The farmstead is 4.4 km from the co-op and 5.8 km from the docks by road,
+// where the old Lost Heaven Extended barn was 1.3 and 1.7 km away. The
+// longer drive pays a little more, but a full load stays near the other
+// jobs' biggest calls for its 15-20 minutes: about $970 at the co-op and
+// $1,320 at the docks, whose run is the risky one.
+const FARMS = {
+    freekrajina: {site: LOWLANDS, buyers: [COOP]},
+    freeride_extended: {site: FARMSTEAD, buyers: [{...COOP, rate: 1.1}, {...DOCKS, rate: 1.5}]},
+};
+for (const {site} of Object.values(FARMS)) {
+    if (site.plots.length !== PLOT_COUNT) throw new Error("farm: every site needs the same plots");
+}
 
 // Growing time of each stage with water: seedling, young, leafy; then ripe.
 const STAGE_MS = [70_000, 90_000, 90_000];
@@ -163,6 +236,11 @@ function buyers() {
     return farm()?.buyers ?? [];
 }
 
+// The current map's farm site; only asked while a map with the farm plays.
+function site() {
+    return farm()?.site ?? null;
+}
+
 const station = stations.define({
     id: "farm",
     title: "Tobacco farm",
@@ -174,7 +252,7 @@ const station = stations.define({
     vehicleLabel: "FARM TRUCK",
     pitch: "Grow tobacco: plant seedlings in the field beside the barn, water them with a farm truck's hose as they grow, pick the leaves " +
         "and cure them here, then drive the tobacco to a buyer. Press G here to sign on.",
-    place: () => (farm() ? {signOn: SIGN_ON, spots: SPOTS} : null),
+    place: () => (site() ? {signOn: site().signOn, spots: site().spots} : null),
     available,
     onDuty: (player) => farmers.has(player.id),
     start: (player) => startDuty(player),
@@ -198,7 +276,8 @@ function stockOf(key, ownerName = null) {
 function load() {
     const saved = store.load(STORE) ?? {};
     for (const plant of saved.plants ?? []) {
-        if (PLOTS[plant.plot] && typeof plant.ownerKey === "string") field.set(plant.plot, plant);
+        // Plots are kept by index, the same row and place on every site.
+        if (Number.isInteger(plant.plot) && plant.plot >= 0 && plant.plot < PLOT_COUNT && typeof plant.ownerKey === "string") field.set(plant.plot, plant);
     }
     for (const [key, stock] of Object.entries(saved.stocks ?? {})) {
         stocks.set(key, {name: stock.name ?? "", leaves: stock.leaves ?? {n: 0, q: 0}, curing: stock.curing ?? [], cured: stock.cured ?? {n: 0, q: 0}});
@@ -245,12 +324,13 @@ function quality(entry) {
 /* The field */
 
 function inField(position) {
-    return position.x >= FIELD.minX && position.x <= FIELD.maxX && position.z >= FIELD.minZ && position.z <= FIELD.maxZ &&
-        Math.abs(position.y - FIELD.center.y) < 6;
+    const area = site().field;
+    return position.x >= area.minX && position.x <= area.maxX && position.z >= area.minZ && position.z <= area.maxZ &&
+        Math.abs(position.y - area.center.y) < 6;
 }
 
 function plotPosition(plot) {
-    const spot = PLOTS[plot];
+    const spot = site().plots[plot];
     return {x: spot.x, y: spot.y, z: spot.z};
 }
 
@@ -269,7 +349,7 @@ function plantsNear(position, reach) {
 
 // The plot the player stands on, when it is free.
 function freePlot(position) {
-    const nearest = PLOTS.map((spot) => ({spot, gap: flatDistance(spot, position)})).sort((a, b) => a.gap - b.gap)[0];
+    const nearest = site().plots.map((spot) => ({spot, gap: flatDistance(spot, position)})).sort((a, b) => a.gap - b.gap)[0];
     return nearest && nearest.gap <= PLANT_REACH && !field.has(nearest.spot.id) ? nearest.spot : null;
 }
 
@@ -366,7 +446,7 @@ function syncObjects(now) {
         objectsGeneration = generation;
     }
     if (!bales.length) {
-        bales = BALES.map((spot, index) => MapObject.create(BALE_MODEL, spot, {x: 0, y: index * 1.3, z: 0}, {virtualWorld: MAIN_WORLD}))
+        bales = site().bales.map((spot, index) => MapObject.create(BALE_MODEL, spot, {x: 0, y: index * 1.3, z: 0}, {virtualWorld: MAIN_WORLD}))
             .filter(Boolean);
     }
     for (const [plot, record] of objects) {
@@ -380,7 +460,7 @@ function syncObjects(now) {
         const record = objects.get(plant.plot);
         if (record && (record.look === look || now < record.retryAt)) continue;
         record?.object?.destroy();
-        const spot = PLOTS[plant.plot];
+        const spot = site().plots[plant.plot];
         const object = MapObject.create(PLANT_MODEL, {x: spot.x, y: spot.y - 0.05, z: spot.z}, {x: 0, y: plant.yaw, z: 0},
             {virtualWorld: MAIN_WORLD, collision: false, scale});
         objects.set(plant.plot, {object, look: object ? look : null, retryAt: now + 2000});
@@ -534,10 +614,11 @@ function tickBarn(now) {
             loading.delete(player.id);
             continue;
         }
-        if (stock.leaves.n && flatDistance(player.position, SIGN_ON) <= DROP_RADIUS && Math.abs(player.position.y - SIGN_ON.y) < 4) hang(player, stock);
+        const {signOn, loading: bay} = site();
+        if (stock.leaves.n && flatDistance(player.position, signOn) <= DROP_RADIUS && Math.abs(player.position.y - signOn.y) < 4) hang(player, stock);
         const vehicle = player.getSeat() === 0 ? player.getVehicle() : null;
         const pending = loading.get(player.id);
-        const atBay = Boolean(vehicle) && stock.cured.n > 0 && flatDistance(vehicle.position, LOADING) <= LOAD_RADIUS && speedOf(vehicle) < 1.5;
+        const atBay = Boolean(vehicle) && stock.cured.n > 0 && flatDistance(vehicle.position, bay) <= LOAD_RADIUS && speedOf(vehicle) < 1.5;
         if (!atBay) {
             if (pending) {
                 loading.delete(player.id);
@@ -549,7 +630,7 @@ function tickBarn(now) {
         if (!station.isVehicle(vehicle)) {
             if (!pending?.refused) {
                 loading.set(player.id, {vehicleId: vehicle.id, refused: true});
-                toast(player, "The bales go on a farm truck: bring one of the two parked beside the barn.", {title: "Tobacco farm", tone: "bad"});
+                toast(player, "The bales go on a farm truck: bring one of the farm's two trucks.", {title: "Tobacco farm", tone: "bad"});
             }
             continue;
         }
@@ -617,13 +698,13 @@ function startDuty(player) {
         toast(player, "The tobacco farm is in the countryside: play Lost Heaven Extended or The Countryside (/map).", {tone: "bad"});
         return;
     }
-    if (player.getVehicle() || flatDistance(player.position, SIGN_ON) > stations.SIGN_ON_RADIUS + 1) {
+    if (player.getVehicle() || flatDistance(player.position, site().signOn) > stations.SIGN_ON_RADIUS + 1) {
         // Asked again, the compass stops showing the way.
         if (!station.guide(player)) {
             toast(player, "The compass no longer shows the way.", {title: "Tobacco farm", seconds: 3});
             return;
         }
-        toast(player, "Sign on at the barn of the tobacco farm in the lowlands: follow the compass to the arrow and press G. " +
+        toast(player, `Sign on at ${site().place}: follow the compass to the arrow and press G. ` +
             "Hold TAB to see it on the map.", {title: "Tobacco farm", tone: "gold", seconds: 8});
         return;
     }
@@ -889,11 +970,11 @@ function markerItems(player, farmer, stock, entry) {
         return items;
     }
     if (stock?.cured.n) {
-        items.push({id: "load", position: LOADING, label: "LOADING BAY", hint: "STOP A FARM TRUCK HERE", color: LEAF, range: 300, near: 60,
+        items.push({id: "load", position: site().loading, label: "LOADING BAY", hint: "STOP A FARM TRUCK HERE", color: LEAF, range: 300, near: 60,
             map: {icon: "dot", label: "Loading bay", size: 5}});
     }
     if (!farmer) return items;
-    items.push({id: "field", position: FIELD.center, label: "TOBACCO FIELD", color: LEAF, range: 300, near: 45,
+    items.push({id: "field", position: site().field.center, label: "TOBACCO FIELD", color: LEAF, range: 300, near: 45,
         map: {icon: "square", label: "Tobacco field", size: 5}});
     // Only plants losing quality are labelled; the rest show by their size
     // and the card counts them.
@@ -912,10 +993,11 @@ function compassTarget(player, farmer, stock, entry, plants) {
         return nearest ? nearest.buyer.position : null;
     }
     if (!farmer) return null;
-    if (stock?.leaves.n && !plants.some((plant) => plant.stage >= RIPE)) return SIGN_ON;
-    if (stock?.cured.n && !plants.some((plant) => plant.stage >= RIPE || plant.dry || plant.pest)) return LOADING;
-    if (flatDistance(player.position, FIELD.center) > 45 && (!plants.length || plants.some((plant) => plant.dry || plant.pest || plant.stage >= RIPE))) {
-        return FIELD.center;
+    const {signOn, loading: bay, field: area} = site();
+    if (stock?.leaves.n && !plants.some((plant) => plant.stage >= RIPE)) return signOn;
+    if (stock?.cured.n && !plants.some((plant) => plant.stage >= RIPE || plant.dry || plant.pest)) return bay;
+    if (flatDistance(player.position, area.center) > 45 && (!plants.length || plants.some((plant) => plant.dry || plant.pest || plant.stage >= RIPE))) {
+        return area.center;
     }
     return null;
 }
@@ -1000,7 +1082,8 @@ menu.provide("farm", (player) => {
     const stock = key ? stocks.get(key) : null;
     return {available: Boolean(farm()), onDuty: farmers.has(player.id), farmers: farmers.size, plants: plants.length,
         ripe: plants.filter((plant) => plant.stage >= RIPE).length, curing: stock?.curing.reduce((sum, batch) => sum + batch.n, 0) ?? 0,
-        cured: stock?.cured.n ?? 0, export: buyers().some((buyer) => buyer.risky), earned: farmers.get(player.id)?.earned ?? 0};
+        cured: stock?.cured.n ?? 0, export: buyers().some((buyer) => buyer.risky), earned: farmers.get(player.id)?.earned ?? 0,
+        place: site()?.place ?? null};
 });
 
 load();

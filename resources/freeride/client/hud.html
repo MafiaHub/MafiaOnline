@@ -447,7 +447,7 @@
           el("p", {}, `${medic.medics ?? 0} on duty · ${medic.calls ?? 0} call${medic.calls === 1 ? "" : "s"} waiting${medic.onDuty ? ` · ${money(medic.earned ?? 0)} this shift` : ""}`),
           button(medic.onDuty ? "Clock off" : "Show me the hospital", "/medic", !medic.onDuty)) : null,
         farm.available ? panel("Tobacco farm",
-          el("p", {}, "Sign on with G under the arrow at the barn in the lowlands. Press G on an empty plot in the field beside it to plant a seedling ($10), water the plants with a farm truck's hose (hold G) at every stage, pick off hornworms and pick the ripe leaves. Carry them to the barn to cure, then load a farm truck at the loading bay and sell the tobacco in the village" +
+          el("p", {}, `Sign on with G under the arrow at ${farm.place ?? "the farm's barn"}.` + " Press G on an empty plot in the field beside it to plant a seedling ($10), water the plants with a farm truck's hose (hold G) at every stage, pick off hornworms and pick the ripe leaves. Carry them to the barn to cure, then load a farm truck at the loading bay and sell the tobacco in the village" +
             (farm.export ? ", or export it at the docks for much more, if nobody takes the truck off you on the way." : ".")),
           el("p", {}, `${farm.farmers ?? 0} on the farm · your plants ${farm.plants ?? 0}${farm.ripe ? ` (${farm.ripe} ripe)` : ""} · curing ${farm.curing ?? 0} · cured ${farm.cured ?? 0}${farm.onDuty ? ` · ${money(farm.earned ?? 0)} this shift` : ""}`),
           button(farm.onDuty ? "Clock off" : "Show me the farm", "/farm", !farm.onDuty)) : null,
