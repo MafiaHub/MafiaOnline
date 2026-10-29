@@ -4,6 +4,7 @@
 
 #include "core/application.h"
 #include "features/player/player_service.h"
+#include "features/seat/seat_service.h"
 #include "features/simulation/simulation_config.h"
 #include "features/world/world_service.h"
 #include "shared/features/npc/npc_entity.h"
@@ -39,10 +40,12 @@ namespace Mafia1Online::Features::Npc {
         // the pose stream off.
         constexpr std::chrono::milliseconds kSeizingLimit {15000};
 
-        // A driver constructed here later than this into its throw-out stands
-        // where the host's is: replaying the throw would pull it back to the
-        // seat while the host's one is already out.
+        // A copy constructed here later than this into its throw-out, or its
+        // door exit or entry, stands where the host's is: replaying it would
+        // pull it back to the seat while the host's one is already out. The
+        // door window stays inside the 2 s SeatService holds an exit for.
         constexpr uint16_t kThrowReplayAgeMs = 1000;
+        constexpr uint16_t kDoorReplayAgeMs = 1500;
         // reM HUMAN_THROW_CAR_SCREAM_BASE and _COUNT.
         constexpr uint32_t kThrownOutFirstLine = 161;
         constexpr uint32_t kThrownOutLines     = 7;
@@ -132,8 +135,13 @@ namespace Mafia1Online::Features::Npc {
                 // Lines said before this copy existed are not replayed.
                 static_cast<SDK::Player::NativeHuman *>(static_cast<void *>(actor))->SetVoice(npc->voice);
                 replica.speechRevision = npc->speechRevision;
-                if (npc->kind == Shared::Entities::NpcKind::Driver && npc->thrownFromCarId && npc->alive && npc->throwAgeMs < kThrowReplayAgeMs) {
-                    ReplayThrowOut(world, actor, npc->thrownFromCarId);
+                using CarAction = Shared::Entities::NpcCarAction;
+                if (npc->alive && npc->carAction == CarAction::Throw && npc->kind == Shared::Entities::NpcKind::Driver && npc->carActionAgeMs < kThrowReplayAgeMs) {
+                    ReplayThrowOut(world, actor, npc->carActionCarId);
+                }
+                else if (npc->alive && (npc->carAction == CarAction::Exit || npc->carAction == CarAction::Enter) && npc->carActionAgeMs < kDoorReplayAgeMs) {
+                    application->Seats().ReplayNpcDoor(world, id, npc->carActionCarId, npc->carActionSeat,
+                                                       npc->carAction == CarAction::Exit ? Shared::Car::SeatAction::Exit : Shared::Car::SeatAction::Enter);
                 }
             }
             replica.renderTime = replica.snapshots.RenderTimeMs(clockNow);

@@ -540,7 +540,7 @@ namespace Mafia1Online::Features::Seat {
             }
             case Action::StealTraffic:
                 // The host plays this in its takeover, with the real driver.
-                // The driver arrives as the host's NPC (NpcEntity::throwAgeMs).
+                // The driver arrives as the host's NPC (NpcEntity::carAction).
                 if (!Simulation::IsHost() && !car->GetOwner(event.seat) && human->TrySteal(car, event.seat)) {
                     _animations[event.playerId] = {now + std::chrono::seconds(3), event.carId, event.seat};
                 }

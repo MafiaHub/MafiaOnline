@@ -184,7 +184,7 @@ namespace Mafia1Online::Features::Npc {
                 car && car->missionGeneration == spawned.missionGeneration) {
                 entity->thrownFromCarId = spawned.carId;
                 // The host reports the driver right after Do_ThrowCocotFromCar.
-                entity->thrownAt = std::chrono::steady_clock::now();
+                entity->SetCarAction(Shared::Entities::NpcCarAction::Throw, spawned.carId, 0);
             }
             entity->alive = spawned.health > 0.0f;
             entity->voice = VoiceFor(spawned.kind, entity->GetNetworkID());

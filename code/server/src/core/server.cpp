@@ -228,6 +228,11 @@ namespace Mafia1Online::Core {
             Shared::Car::SeatEvent event;
             if (_traffic.ApplyNpcSeat(npcId, seat, event)) {
                 Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(event);
+                // A player constructing it during the door animation plays it.
+                if (auto *npc = _npcs.Find(npcId)) {
+                    npc->SetCarAction(event.action == Shared::Car::SeatAction::Exit ? Shared::Entities::NpcCarAction::Exit : Shared::Entities::NpcCarAction::Enter,
+                                      event.carId, event.seat);
+                }
             }
             _npcs.OnSeatChanged(npcId);
         });

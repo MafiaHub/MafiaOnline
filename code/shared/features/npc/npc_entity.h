@@ -28,6 +28,16 @@ namespace Mafia1Online::Shared::Entities {
         return kind == NpcKind::Gangster || kind == NpcKind::Police || kind == NpcKind::Driver || kind == NpcKind::Scripted;
     }
 
+    // A door action an NPC took at a car (NpcEntity::carAction).
+    enum class NpcCarAction : uint8_t {
+        None = 0,
+        // A stolen traffic car's driver thrown out (Do_ThrowCocotFromCar).
+        Throw = 1,
+        // C_human::Use_Actor's animated exit and entry.
+        Exit = 2,
+        Enter = 3,
+    };
+
     inline const char *NpcKindName(NpcKind kind) {
         switch (kind) {
         case NpcKind::Gangster: return "gangster";
@@ -56,15 +66,20 @@ namespace Mafia1Online::Shared::Entities {
         // The walker this NPC replaced, or 0. A player who sees that walker
         // swaps it for this NPC where it stands on that player's screen.
         uint64_t sourcePedestrianId = 0;
-        // The car a stolen traffic car's driver was thrown out of, or 0.
+        // Server only: the car a stolen traffic car's driver was thrown out
+        // of, or 0.
         uint64_t thrownFromCarId = 0;
-        // Server only: when that throw started on the host.
-        std::chrono::steady_clock::time_point thrownAt {};
-        // How long before this copy was constructed the throw started, in
-        // ms (construction is written per destination); kThrowAgeUnknown
-        // for none. A player constructing it during the throw replays it.
-        static constexpr uint16_t kThrowAgeUnknown = 0xffff;
-        uint16_t throwAgeMs = kThrowAgeUnknown;
+        // Its last door action at a car, and that car and seat.
+        NpcCarAction carAction = NpcCarAction::None;
+        uint64_t carActionCarId = 0;
+        uint8_t carActionSeat = 0;
+        // Server only: when that action started on the host.
+        std::chrono::steady_clock::time_point carActionAt {};
+        // How long before this copy was constructed the action started, in
+        // ms (construction is written per destination); kCarActionAgeUnknown
+        // for none. A player constructing it during the action replays it.
+        static constexpr uint16_t kCarActionAgeUnknown = 0xffff;
+        uint16_t carActionAgeMs = kCarActionAgeUnknown;
         // Death is final: the corpse stays until the host retires it.
         bool alive = true;
         // The host's native locomotion state (C_human m_iAnimState), which
@@ -99,6 +114,14 @@ namespace Mafia1Online::Shared::Entities {
             return poseSource;
         }
 
+        // Server: the host reports an action as it starts.
+        void SetCarAction(NpcCarAction action, uint64_t carId, uint8_t seat) {
+            carAction = action;
+            carActionCarId = carId;
+            carActionSeat = seat;
+            carActionAt = std::chrono::steady_clock::now();
+        }
+
         // 14 bytes (43 as raw floats): a walker's pose plus the locomotion.
         void SerializeTransform(Framework::Networking::Replication::FieldSerializer &fields) override {
             auto *stream = fields.PlainStream();
@@ -117,16 +140,19 @@ namespace Mafia1Online::Shared::Entities {
 
         void OnSerializeConstruction(Framework::Networking::Replication::FieldSerializer &fields) override {
             auto kindValue = static_cast<uint8_t>(kind);
+            auto actionValue = static_cast<uint8_t>(carAction);
             fields.Field(model);
             fields.Field(missionGeneration);
             fields.Field(kindValue);
             fields.Field(sourcePedestrianId);
             if (fields.Writing()) {
-                const auto age = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - thrownAt).count();
-                throwAgeMs = thrownFromCarId ? static_cast<uint16_t>(std::clamp<long long>(age, 0, kThrowAgeUnknown)) : kThrowAgeUnknown;
+                const auto age = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - carActionAt).count();
+                carActionAgeMs = carAction != NpcCarAction::None ? static_cast<uint16_t>(std::clamp<long long>(age, 0, kCarActionAgeUnknown)) : kCarActionAgeUnknown;
             }
-            fields.Field(thrownFromCarId);
-            fields.Field(throwAgeMs);
+            fields.Field(actionValue);
+            fields.Field(carActionCarId);
+            fields.Field(carActionSeat);
+            fields.Field(carActionAgeMs);
             fields.Field(alive);
             SerializeAnimation(fields);
             fields.Field(voice);
@@ -134,6 +160,7 @@ namespace Mafia1Online::Shared::Entities {
             fields.Field(speechRevision);
             if (!fields.Writing()) {
                 kind = static_cast<NpcKind>(kindValue);
+                carAction = actionValue <= static_cast<uint8_t>(NpcCarAction::Enter) ? static_cast<NpcCarAction>(actionValue) : NpcCarAction::None;
                 if (voice >= kVoiceCount) {
                     voice = kDefaultVoice;
                 }
