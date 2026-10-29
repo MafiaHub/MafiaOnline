@@ -36,6 +36,10 @@ namespace Mafia1Online::Features::Bridge {
         // Past the newest report the leaves keep moving as the last two did,
         // within one phase, rather than stop until the next arrives.
         constexpr double kMaxExtrapolationMs = 300.0;
+        // A steamer sails at a steady 5 m/s and brakes at 1 m/s^2 (C_bridge
+        // Update), so it carries on further: a late report would otherwise
+        // stop it dead and jump it forward when it lands.
+        constexpr double kMaxSteamerExtrapolationMs = 1000.0;
         // Update divides a steamer's progress past 1 by its step; it never
         // gets there with the speed of 0 players give it.
         constexpr float kMaxProgress = 0.999f;
@@ -89,8 +93,22 @@ namespace Mafia1Online::Features::Bridge {
             return nullptr;
         }
 
-        float PathPosition(const Shared::Bridge::Steamer &steamer) {
-            return static_cast<float>(steamer.point) + steamer.progress;
+        // Metres sailed along the steamer's route. Segments differ in length,
+        // so blending point + progress would change its speed at each point.
+        float RouteDistance(const Shared::Bridge::Steamer &steamer) {
+            float distance = 0.0f;
+            for (uint8_t point = 0; point < steamer.point; ++point) {
+                distance += NativeBridgeRuntime::SegmentLength(steamer.route, point);
+            }
+            return distance + steamer.progress * NativeBridgeRuntime::SegmentLength(steamer.route, steamer.point);
+        }
+
+        float RouteLength(uint8_t route) {
+            float length = 0.0f;
+            for (uint8_t point = 0; point < Shared::Bridge::kSegmentCount; ++point) {
+                length += NativeBridgeRuntime::SegmentLength(route, point);
+            }
+            return length;
         }
     } // namespace
 
@@ -362,10 +380,12 @@ namespace Mafia1Online::Features::Bridge {
         const Sample *a = &_samples.back();
         const Sample *b = a;
         float u = 1.0f;
+        float steamerU = 1.0f;
         if (target >= 0.0 && _samples.size() > 1) {
             a = &_samples[_samples.size() - 2];
             const double span = -time(*a);
             u = span > 0.0 ? static_cast<float>(1.0 + std::min(target, kMaxExtrapolationMs) / span) : 1.0f;
+            steamerU = span > 0.0 ? static_cast<float>(1.0 + std::min(target, kMaxSteamerExtrapolationMs) / span) : 1.0f;
         }
         else if (target < 0.0 && _samples.size() > 1) {
             size_t later = 1;
@@ -377,6 +397,7 @@ namespace Mafia1Online::Features::Bridge {
             const double timeA = time(*a);
             const double timeB = time(*b);
             u = timeB > timeA ? static_cast<float>(std::clamp((target - timeA) / (timeB - timeA), 0.0, 1.0)) : 1.0f;
+            steamerU = u;
         }
         const auto *from = Find(a->snapshot, index);
         const auto *to = Find(b->snapshot, index);
@@ -405,27 +426,32 @@ namespace Mafia1Online::Features::Bridge {
             return;
         }
         auto &runtime = NativeBridgeRuntime::Get();
-        // Steamers wrap onto new routes, so they stop at the newest report.
-        u = std::min(u, 1.0f);
         for (uint8_t i = 0; i < Shared::Bridge::kSteamerCount; ++i) {
             const auto &steamerA = a->snapshot.steamers[i];
             const auto &steamerB = b->snapshot.steamers[i];
-            // Along one route the position only grows; a new route starts
-            // over once the later report is reached, as Update's wrap does.
+            // Along one route the distance only grows, and past the newest
+            // report it goes on at the last pair's speed. Update's wrap picks
+            // the next route at random, so a steamer waits at its route's end
+            // for the report naming it, and starts over once that is reached.
             uint8_t route = steamerB.route;
-            float position = PathPosition(steamerB);
-            if (steamerA.route == steamerB.route && PathPosition(steamerB) >= PathPosition(steamerA)) {
-                position = PathPosition(steamerA) + (PathPosition(steamerB) - PathPosition(steamerA)) * u;
+            float distance = RouteDistance(steamerB);
+            if (steamerA.route == steamerB.route && RouteDistance(steamerB) >= RouteDistance(steamerA)) {
+                distance = RouteDistance(steamerA) + (RouteDistance(steamerB) - RouteDistance(steamerA)) * steamerU;
             }
-            else if (u < 1.0f) {
+            else if (steamerU < 1.0f) {
                 route = steamerA.route;
-                position = PathPosition(steamerA);
+                distance = RouteDistance(steamerA);
             }
-            const uint32_t point = std::min<uint32_t>(static_cast<uint32_t>(position), Shared::Bridge::kSegmentCount - 1);
+            distance = std::min(distance, RouteLength(route));
+            uint32_t point = 0;
+            while (point + 1 < Shared::Bridge::kSegmentCount && distance > NativeBridgeRuntime::SegmentLength(route, point)) {
+                distance -= NativeBridgeRuntime::SegmentLength(route, point);
+                ++point;
+            }
             auto &steamer = runtime.steamers[i];
             steamer.route = route;
             steamer.point = point;
-            steamer.progress = std::clamp(position - static_cast<float>(point), 0.0f, kMaxProgress);
+            steamer.progress = std::clamp(distance / NativeBridgeRuntime::SegmentLength(route, point), 0.0f, kMaxProgress);
             steamer.speed = 0.0f;
         }
     }

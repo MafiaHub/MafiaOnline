@@ -56,6 +56,15 @@ namespace Mafia1Online::SDK::World {
         static NativeBridgeRuntime &Get() {
             return *reinterpret_cast<NativeBridgeRuntime *>(kAddress);
         }
+
+        // reM g_aBridgeSegmentLengths[4][6] at 0x646ff0: each segment's length
+        // in metres, filled by GameInit; Update advances the progress by
+        // speed / length.
+        static constexpr uintptr_t kSegmentLengths = 0x646ff0;
+
+        static float SegmentLength(uint32_t route, uint32_t point) {
+            return reinterpret_cast<const float(*)[kSegmentCount]>(kSegmentLengths)[route][point];
+        }
     };
     static_assert(offsetof(NativeBridgeRuntime, bridgeOpen) == 0x14);
     static_assert(offsetof(NativeBridgeRuntime, bridgeRequests) == 0x1c);
