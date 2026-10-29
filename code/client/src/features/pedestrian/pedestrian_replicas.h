@@ -4,6 +4,8 @@
 
 #include <utils/snapshot_buffer.h>
 
+#include <glm/vec3.hpp>
+
 #include <chrono>
 #include <cstdint>
 #include <optional>
@@ -60,6 +62,10 @@ namespace Mafia1Online::Features::Pedestrian {
             Replica(): snapshots(&kSnapshotConfig) {}
             Framework::Utils::TransformSnapshotBuffer snapshots;
             MafiaNet::Time lastTransformTime = 0;
+            // The newest pose's time and velocity: a stall holds a moving
+            // body still.
+            double newestTime = 0.0;
+            glm::vec3 newestVelocity {0.0f};
             // Dates each pose by when the host sampled it.
             Shared::Net::SampleClockMapper clock;
             SDK::Traffic::NativeTrafficElement *element = nullptr;

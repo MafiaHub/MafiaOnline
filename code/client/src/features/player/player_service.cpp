@@ -1,4 +1,5 @@
 #include "player_service.h"
+#include "stalled_gait.h"
 
 #include "core/application.h"
 
@@ -154,6 +155,7 @@ namespace Mafia1Online::Features::Player {
                     const MafiaNet::Time packetTime = static_cast<MafiaNet::Time>(std::max(1.0, std::round(stream.clock.Map(player->sampleClock, clockNow))));
                     stream.snapshots.Push(snapshot, packetTime, clockNow);
                     stream.locomotion.emplace_back(packetTime, player->locomotion);
+                    stream.newestVelocity = snapshot.velocity;
                     while (stream.locomotion.size() > 32) {
                         stream.locomotion.pop_front();
                     }
@@ -655,6 +657,11 @@ namespace Mafia1Online::Features::Player {
         }
         if (!state) {
             return std::nullopt;
+        }
+        // Held at the extrapolation bound: the stop pose until the stream
+        // resumes, not a run on the spot.
+        if (MovingGait(*state) && Stalled(time, static_cast<double>(stream.locomotion.back().first), kRemoteSnapshotConfig.maxExtrapolationMs, stream.newestVelocity)) {
+            state = kStopState;
         }
         return ClassifyLocomotion(*state);
     }

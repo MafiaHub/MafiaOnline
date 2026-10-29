@@ -2,6 +2,7 @@
 
 #include "pedestrian_replicas.h"
 
+#include "features/player/stalled_gait.h"
 #include "features/simulation/simulation_config.h"
 #include "features/world/world_service.h"
 #include "shared/features/pedestrian/pedestrian_entity.h"
@@ -120,10 +121,13 @@ namespace Mafia1Online::Features::Pedestrian {
             // Dated by when the host sampled the pose, not the server pass
             // that relayed it.
             const MafiaNet::Time transformTime = walker->GetLastTransformTime();
+            const double clockNow = static_cast<double>(MafiaNet::GetTimeUS()) * 0.001;
             if (replica.snapshots.Empty() || replica.lastTransformTime != transformTime) {
-                const double clockNow = static_cast<double>(MafiaNet::GetTimeUS()) * 0.001;
-                replica.snapshots.Push(snapshot, static_cast<MafiaNet::Time>(std::max(1.0, std::round(replica.clock.Map(walker->sampleClock, clockNow)))), clockNow);
+                const auto sampleTime = static_cast<MafiaNet::Time>(std::max(1.0, std::round(replica.clock.Map(walker->sampleClock, clockNow))));
+                replica.snapshots.Push(snapshot, sampleTime, clockNow);
                 replica.lastTransformTime = transformTime;
+                replica.newestTime = static_cast<double>(sampleTime);
+                replica.newestVelocity = snapshot.velocity;
             }
             if (!replica.element && !replica.failed) {
                 replica.element = Borrow(generators, *walker, snapshot);
@@ -165,19 +169,26 @@ namespace Mafia1Online::Features::Pedestrian {
             if (replica.settled) {
                 return;
             }
-            if (walker->animation != element->CurrentAnimation()) {
-                element->PlayAnimation(walker->animation, walker->animationFlag);
-                replica.holding = false;
-            }
-            else if (replica.holding && walker->alive && now - replica.holdingSince > kLivingHoldLimit) {
-                element->RestartAnimation(walker->animation, walker->animationFlag);
-                replica.holding = false;
-            }
-            Framework::Utils::TransformSnapshot pose;
             // The buffer's presentation clock slews as the adaptive delay
             // moves with each packet's jitter; subtracting that delay here
             // instead stepped the walker on every late or early packet.
-            const bool sampled = replica.snapshots.Sample(replica.snapshots.RenderTimeMs(static_cast<double>(MafiaNet::GetTimeUS()) * 0.001), pose);
+            const double renderTime = replica.snapshots.RenderTimeMs(clockNow);
+            // Held at the extrapolation bound: retail's idle (SetAnim
+            // blends to it) until the stream resumes, not a walk on the spot.
+            const bool stopped = walker->alive && Player::MovingGait(walker->animation) &&
+                                 Player::Stalled(renderTime, replica.newestTime, kSnapshotConfig.maxExtrapolationMs, replica.newestVelocity);
+            const int32_t animation = stopped ? Player::kStopState : walker->animation;
+            const bool animationFlag = stopped ? false : walker->animationFlag;
+            if (animation != element->CurrentAnimation()) {
+                element->PlayAnimation(animation, animationFlag);
+                replica.holding = false;
+            }
+            else if (replica.holding && walker->alive && now - replica.holdingSince > kLivingHoldLimit) {
+                element->RestartAnimation(animation, animationFlag);
+                replica.holding = false;
+            }
+            Framework::Utils::TransformSnapshot pose;
+            const bool sampled = replica.snapshots.Sample(renderTime, pose);
             if (replica.fallen) {
                 replica.fallen = false;
                 RunToEnd(*element);

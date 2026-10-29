@@ -4,6 +4,7 @@
 
 #include "core/application.h"
 #include "features/player/player_service.h"
+#include "features/player/stalled_gait.h"
 #include "features/seat/seat_service.h"
 #include "features/simulation/simulation_config.h"
 #include "features/world/world_service.h"
@@ -130,6 +131,7 @@ namespace Mafia1Online::Features::Npc {
             if (newPose) {
                 replica.snapshots.Push(snapshot, sampleTime, clockNow);
                 replica.locomotion.emplace_back(sampleTime, npc->locomotion);
+                replica.newestVelocity = snapshot.velocity;
                 while (replica.locomotion.size() > 32) {
                     replica.locomotion.pop_front();
                 }
@@ -201,8 +203,7 @@ namespace Mafia1Online::Features::Npc {
         // directly stepped the body on every late or early packet.
         const double time = replica.renderTime;
         Framework::Utils::TransformSnapshot pose;
-        bool held = false;
-        if (!replica.snapshots.Sample(time, pose, &held)) {
+        if (!replica.snapshots.Sample(time, pose)) {
             return;
         }
         auto *actor = static_cast<SDK::Player::NativeActor *>(native);
@@ -270,6 +271,12 @@ namespace Mafia1Online::Features::Npc {
         }
         if (!state) {
             return;
+        }
+        // Held at the extrapolation bound: the stop pose until the stream
+        // resumes, not a run on the spot.
+        if (Player::MovingGait(*state) &&
+            Player::Stalled(time, static_cast<double>(replica.locomotion.back().first), kSnapshotConfig.maxExtrapolationMs, replica.newestVelocity)) {
+            state = Player::kStopState;
         }
         const auto animation = Player::PlayerService::ClassifyLocomotion(*state);
         if (!animation.oneShot || replica.lastAnimation != animation.state) {

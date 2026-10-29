@@ -72,6 +72,8 @@ namespace Mafia1Online::Features::Player {
             uint64_t spawnGeneration      = 0;
             bool creationFailed           = false;
             std::deque<std::pair<MafiaNet::Time, int16_t>> locomotion;
+            // The newest pose's velocity: a stall holds a moving body still.
+            glm::vec3 newestVelocity {0.0f};
             // The ride each pose came with, so the offset on the wagon is
             // read at the same render time as the pose and locomotion.
             std::deque<std::pair<MafiaNet::Time, RemoteRide>> rides;

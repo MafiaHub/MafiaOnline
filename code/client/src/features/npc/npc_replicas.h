@@ -62,6 +62,8 @@ namespace Mafia1Online::Features::Npc {
             Replica(): snapshots(&kSnapshotConfig) {}
             Framework::Utils::TransformSnapshotBuffer snapshots;
             std::deque<std::pair<MafiaNet::Time, int16_t>> locomotion;
+            // The newest pose's velocity: a stall holds a moving body still.
+            glm::vec3 newestVelocity {0.0f};
             MafiaNet::Time lastTransformTime = 0;
             // This frame's presentation time, shared by pose and locomotion.
             double renderTime = 0.0;

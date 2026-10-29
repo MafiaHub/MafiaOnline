@@ -2,6 +2,7 @@
 // railway rider blend.
 #include "client/src/features/car/car_pose_buffer.h"
 #include "client/src/features/player/ride_blend.h"
+#include "client/src/features/player/stalled_gait.h"
 #include "shared/features/car/car_entity.h"
 #include "shared/features/car/car_movement.h"
 #include "shared/features/combat/aim_update.h"
@@ -595,6 +596,22 @@ namespace {
         rides.erase(rides.begin());
         CHECK(Features::Player::RideAt(rides, 1060.0, ride, weight) && weight == 1.0f);
     }
+
+    void StalledGait() {
+        using namespace Features::Player;
+        // Runs and walks, with the weapon overlay bits; not the turns on the
+        // spot, the breath, a jump or a death.
+        CHECK(MovingGait(5) && MovingGait(6) && MovingGait(11) && MovingGait(20) && MovingGait(0x400 | 7));
+        CHECK(!MovingGait(1) && !MovingGait(8) && !MovingGait(9) && !MovingGait(10) && !MovingGait(97) && !MovingGait(131));
+        const glm::vec3 running {0.0f, 0.0f, 5.0f};
+        // Inside the bound the body still moves; past it, held moving.
+        CHECK(!Stalled(1149.0, 1000.0, 150.0f, running));
+        CHECK(Stalled(1150.0, 1000.0, 150.0f, running));
+        // A body at rest (or only falling) held there is not stalled.
+        CHECK(!Stalled(5000.0, 1000.0, 150.0f, glm::vec3(0.05f, -3.0f, 0.0f)));
+        // Nothing received yet.
+        CHECK(!Stalled(5000.0, 0.0, 150.0f, running));
+    }
 } // namespace
 
 int main() {
@@ -615,6 +632,7 @@ int main() {
     CarContactClock();
     CarControllerChange();
     RideBlend();
+    StalledGait();
     if (failures == 0) {
         std::printf("network wire tests passed\n");
     }
