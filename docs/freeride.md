@@ -378,12 +378,22 @@ The client shows the countdown. A prisoner who gets out of the cell is walked
 back within a quarter second, `/kill` is refused, and `/bail` pays $5 per
 second left. The warden, a policeman the simulation host runs
 (`server/lib/warden.js`, `Npc.spawn`), stands at his desk while anyone is in
-the jail, and leaves 15 seconds after the last person does. When the time is
-up or bail is paid he walks to the cell door (`npc.walkTo`); `walkTo` follows
-the mission's pedestrian paths, which the jail lacks, so when the host fails
-the walk he turns to the door from where he stands instead. He works the lock,
-the barred door slides aside after 1.5 seconds, and he goes back to the desk.
-Without a simulation host the door opens on its own after the same pause. The
+the jail, and leaves 15 seconds after the last person does. The jail has no
+pedestrian paths, so he walks in straight lines (`npc.walkTo` with `direct`).
+When the time is up or bail is paid he walks to the latch of the cell door,
+turns to it and works the lock with the clip Ralph unlocks a car with in the
+story (`RalphOdemykani.i3d`, about 10 seconds, which MISE14-SALIERY plays
+with `carunlock4.wav`); 4 seconds in the lock clunks and the barred door
+slides aside, and once the clip has ended he walks back to the desk, or on to
+the next door. Someone standing in his way stops the walk; he then works the
+lock from where he is. Between unlocks he does the rounds the way the
+watchman of MISE15-MESTO keeps his beat: 20 seconds after he arrives, and 45
+seconds after each return to the desk, he walks to each cell in turn, faces
+it and stands guard (`PolSt01` into the stance, `PolSt03` held for 6
+seconds, `PolSt04` out of it), then walks back to the desk. An unlock calls
+him off the round at once. A lost warden is sent again after 10 seconds.
+Without a simulation host the door opens on its own after the same 4 second
+pause. The
 prisoner then walks down the corridor to the EXIT arrow; the screen fades and
 they stand at the map's release point (`jail.release` in `lib/maps.js`) with
 the starting kit. In the city that is the street outside the gate of the stock

@@ -87,6 +87,8 @@ function lockUp(player, until) {
     const resume = profiles.get(player)?.resume;
     if (resume) profiles.setField(player, "resume", {...resume, weapons: [], selected: 0, wanted: 0});
     markers(player, "jail", []);
+    const {x, y, z} = prison.spawnOf(cell).position;
+    console.log(`[freeride] ${player.nickname} locked in cell ${cell.index + 1} at ${x.toFixed(1)} ${y.toFixed(1)} ${z.toFixed(1)} for ${Math.round((until - Date.now()) / 1000)} s`);
     transfer(player, prison.spawnOf(cell), prison.WORLD, {weapons: [], selected: 0, health: player.health}, () => {
         // The game's own countdown watch runs on the prisoner's client.
         emit(player, "fr:jail", {active: true, seconds: Math.ceil((until - Date.now()) / 1000)});
@@ -99,9 +101,11 @@ function unlock(player, message) {
     const prisoner = prisoners.get(player.id);
     if (!prisoner || prisoner.stage !== "locked") return;
     prisoner.stage = "unlocking";
+    console.log(`[freeride] ${player.nickname}'s cell ${prisoner.cell.index + 1} is being unlocked`);
     profiles.setField(player, "jailUntil", 0);
     toast(player, message, {title: "Released", tone: "good"});
     warden.unlock(prisoner.cell, () => {
+        console.log(`[freeride] Cell ${prisoner.cell.index + 1} is open`);
         prison.openDoor(prisoner.cell);
         for (const [id, other] of prisoners) {
             if (other.cell !== prisoner.cell || other.stage !== "unlocking") continue;
@@ -174,7 +178,12 @@ function watch() {
         if (!player?.alive || moving.has(id)) continue;
         const {position} = player;
         if (prisoner.stage === "free") {
-            if (prison.atExit(position, EXIT_REACH) || !prison.inHall(position, 2)) walkOut(player);
+            const atExit = prison.atExit(position, EXIT_REACH);
+            if (atExit || !prison.inHall(position, 2)) {
+                const {x, y, z} = position;
+                console.log(`[freeride] ${player.nickname} walked out (${atExit ? "at the exit" : "left the hall"}) at ${x.toFixed(1)} ${y.toFixed(1)} ${z.toFixed(1)}`);
+                walkOut(player);
+            }
             continue;
         }
         if (player.virtualWorld === prison.WORLD && prison.inCell(prisoner.cell, position, CELL_MARGIN)) continue;

@@ -63,8 +63,11 @@ function cellAt(index) {
         index, x0, x1: x0 + CELL_WIDTH,
         spawn: {position: {x: x0 + 4.2, y: 0.05, z: 2.4}, heading: Math.PI},
         door: {closed: {x: x0 + PANEL * 1.5, y: BARS_Y, z: DOOR_Z}, open: {x: x0 + PANEL / 2, y: BARS_Y, z: DOOR_Z}},
-        // Where the warden stands to work the lock, in the corridor.
-        lock: {x: x0 + PANEL * 1.5, y: 0, z: CELL_FRONT - 1.3},
+        // Where the warden stands to work the lock: in the corridor, at
+        // arm's length from the door's latch edge by the partition.
+        lock: {x: x0 + PANEL * 2 - 0.45, y: 0, z: DOOR_Z - 0.6},
+        // Where he stops on his rounds to look into the cell.
+        round: {x: x0 + CELL_WIDTH / 2, y: 0, z: CELL_FRONT - 1.3},
     };
 }
 const CELLS = [0, 1, 2].map(cellAt);
@@ -228,6 +231,10 @@ module.exports = {
     openDoor: (cell) => setDoor(cell, true), closeDoor: (cell) => setDoor(cell, false), doorOpen, doorOpenFor,
     spawnOf: (cell) => ({position: toWorld(cell.spawn.position), heading: cell.spawn.heading}),
     lockOf: (cell) => toWorld(cell.lock),
+    // A point on the door straight ahead of the lock spot.
+    latchOf: (cell) => toWorld({x: cell.lock.x, y: 0, z: DOOR_Z}),
+    // His stop on the rounds, and a point inside the cell to look at.
+    roundOf: (cell) => ({position: toWorld(cell.round), look: toWorld({x: cell.round.x, y: 0, z: cell.spawn.position.z})}),
     post: () => ({position: toWorld(POST.position), heading: POST.heading}),
     visit: () => ({position: toWorld(VISIT.position), heading: VISIT.heading}),
     inAnyCell: (position, margin = 0) => CELLS.some((cell) => inCell(cell, position, margin)),
