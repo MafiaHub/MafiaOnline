@@ -296,10 +296,16 @@ namespace Mafia1Online::Features::Npc {
         // move the body by their own root motion in C_human::Movement and
         // the animation machine, as on the host; the stream, which shows
         // the host's body doing the same a render delay later, would pin
-        // this one in place and drag it along afterwards.
+        // this one in place and drag it along afterwards. A tracked clip of
+        // a state the stream itself plays here (a turn, a jump) stays with
+        // the stream: the host's AI turns that body (AI_human_turn_to_point
+        // rotates m_vDirection) and a track carries positions only.
         const auto melee = human->Melee();
+        const int32_t playing = human->AnimationState() & 0x1ff;
+        const bool streamedClip = playing != Player::kStopState && Player::ClassifyHumanState(static_cast<int16_t>(playing)).state == playing;
         const bool rootMotion = melee.canWork == SDK::Player::kHumanAnimationSequenceWorkState || melee.canWork == SDK::Player::kHumanTimedActionWorkState ||
-                                (melee.canWork == SDK::Player::kHumanPlayAnimationWorkState && replica.animatingUntil != std::chrono::steady_clock::time_point::max());
+                                (melee.canWork == SDK::Player::kHumanPlayAnimationWorkState && !streamedClip &&
+                                 replica.animatingUntil != std::chrono::steady_clock::time_point::max());
         if (!rootMotion) {
             replica.rootMotionSince = {};
         }
