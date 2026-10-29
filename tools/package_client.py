@@ -5,7 +5,9 @@ Build it first with `builds\\build.bat Mafia1OnlineClient 32 Release` and
 `builds\\build.bat Mafia1OnlineLauncher 32 Release`. --bin-dir packages another
 Release or RelWithDebInfo tree; a Debug tree is refused. The MSVC runtime DLLs
 ship app-local from the Visual Studio redist folder matching the tree's
-compiler, so players need no separate VC++ redistributable.
+compiler, so players need no separate VC++ redistributable: the x86 runtime
+next to the client, the x64 one in cef64/ next to the 64-bit CEF host the
+client starts for its web UI.
 """
 
 import argparse
@@ -28,6 +30,12 @@ CRT_FILES = (
     "vcruntime140.dll",
     "vcruntime140_threads.dll",
 )
+# x64 only: the 64-bit CEF host needs it besides the files above.
+CRT_FILES_X64 = ("vcruntime140_1.dll",)
+# The 64-bit CEF host and its runtime (Framework cmake/FrameworkCefHost.cmake). Build artifacts that
+# are not runtime files stay out.
+HOST_DIR = "cef64"
+HOST_EXCLUDED_SUFFIXES = (".pdb", ".ilk", ".lib", ".exp")
 VERSION = (PROJECT_ROOT / "VERSION").read_text(encoding="utf-8").strip()
 OUTPUT = PROJECT_ROOT / "builds" / "releases" / f"Mafia1OnlineClient-{VERSION}-windows-x86.zip"
 
@@ -85,6 +93,10 @@ The multiplayer server is distributed separately.
 If the game crashes, look for a .dmp file in this folder's logs directory.
 The dump and Mafia1Online.log from the same run help identify the failing
 module and stack; the matching developer PDBs are held with the build.
+The web UI runs in a separate 64-bit process (cef64\\cef_host.exe) that the
+game starts and stops itself, so 64-bit Windows, or a 64-bit Wine prefix, is
+needed for it. Where it cannot start, the game runs the web UI inside its own
+process instead; set FW_CEF_MODE=inprocess to choose that from the start.
 Under Wine, the web UI uses CPU rendering and keeps Chromium's remaining GPU
 service in the browser process. Set MAFIA1ONLINE_NATIVE_UI=1 to use the
 native fallback when CEF is unavailable.
@@ -104,8 +116,8 @@ def read_cmake_cache(path: Path) -> dict:
     return entries
 
 
-def find_crt_dir(compiler: Path) -> Path:
-    # .../VC/Tools/MSVC/<version>/bin/Host<host>/x86/cl.exe -> .../VC/Redist/MSVC/<version>/x86
+def find_crt_dir(compiler: Path, arch: str = "x86") -> Path:
+    # .../VC/Tools/MSVC/<version>/bin/Host<host>/x86/cl.exe -> .../VC/Redist/MSVC/<version>/<arch>
     parts = compiler.parts
     tools = [i for i, part in enumerate(parts) if part.lower() == "tools"]
     if not tools or parts[-2].lower() != "x86":
@@ -113,9 +125,9 @@ def find_crt_dir(compiler: Path) -> Path:
     vc_root, version = Path(*parts[: tools[-1]]), parts[tools[-1] + 2]
     redist = vc_root / "Redist" / "MSVC"
     # The redist folder normally carries the compiler's version; fall back to the newest.
-    candidates = sorted(redist.glob(f"{version}/x86/Microsoft.VC*.CRT")) or sorted(redist.glob("*/x86/Microsoft.VC*.CRT"))
+    candidates = sorted(redist.glob(f"{version}/{arch}/Microsoft.VC*.CRT")) or sorted(redist.glob(f"*/{arch}/Microsoft.VC*.CRT"))
     if not candidates:
-        raise SystemExit(f"No x86 MSVC runtime under {redist}")
+        raise SystemExit(f"No {arch} MSVC runtime under {redist}")
     return candidates[-1]
 
 
@@ -128,9 +140,20 @@ def main() -> None:
     if cache.get("CMAKE_BUILD_TYPE") not in ("Release", "RelWithDebInfo"):
         raise SystemExit(f"{bin_dir} is a {cache.get('CMAKE_BUILD_TYPE', 'unknown')} build; package a Release build")
     crt_dir = find_crt_dir(Path(cache["CMAKE_CXX_COMPILER"]))
+    crt_dir_x64 = find_crt_dir(Path(cache["CMAKE_CXX_COMPILER"]), "x64")
 
     files = [(bin_dir / name, name) for name in RUNTIME_FILES]
     files.extend((crt_dir / name, name) for name in CRT_FILES)
+
+    host_dir = bin_dir / HOST_DIR
+    if not (host_dir / "cef_host.exe").is_file():
+        raise FileNotFoundError(host_dir / "cef_host.exe")
+    files.extend(
+        (path, path.relative_to(bin_dir).as_posix())
+        for path in sorted(host_dir.rglob("*"))
+        if path.is_file() and path.suffix.lower() not in HOST_EXCLUDED_SUFFIXES
+    )
+    files.extend((crt_dir_x64 / name, f"{HOST_DIR}/{name}") for name in CRT_FILES + CRT_FILES_X64)
     for folder in ("locales", "ui"):
         source_dir = bin_dir / folder
         if not source_dir.is_dir():

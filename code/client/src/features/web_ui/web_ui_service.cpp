@@ -784,15 +784,14 @@ namespace Mafia1Online::Features::WebUi {
             }
         }
         _heldKeys.clear();
-        auto browser = target->GetBrowser();
-        if (browser && _mouseButtons != 0) {
+        if (target->HasBrowser() && _mouseButtons != 0) {
             CefMouseEvent event;
             event.x = _mouseX - static_cast<int>(target->GetPosition().x);
             event.y = _mouseY - static_cast<int>(target->GetPosition().y);
             for (const auto &[bit, type] : {std::pair {SDK::Graphics::kMouseLeft, MBT_LEFT}, std::pair {SDK::Graphics::kMouseRight, MBT_RIGHT},
                                             std::pair {SDK::Graphics::kMouseMiddle, MBT_MIDDLE}}) {
                 if (_mouseButtons & bit) {
-                    browser->GetHost()->SendMouseClickEvent(event, type, true, 1);
+                    target->SendMouseClick(event, type, true, 1);
                 }
             }
         }
@@ -929,14 +928,12 @@ namespace Mafia1Online::Features::WebUi {
     // Off-screen CEF has no window for the IME to draw into, so compositions
     // go through the browser host's IME API instead of WM_IME_CHAR.
     bool WebUiService::HandleIme(Framework::GUI::View *target, HWND window, UINT message, LPARAM lParam) {
-        auto browser = target->GetBrowser();
-        if (!browser) {
+        if (!target->HasBrowser()) {
             return false;
         }
-        auto host = browser->GetHost();
         switch (message) {
         case WM_IME_STARTCOMPOSITION: return true;
-        case WM_IME_ENDCOMPOSITION: host->ImeFinishComposingText(false); return false;
+        case WM_IME_ENDCOMPOSITION: target->ImeFinishComposingText(false); return false;
         case WM_IME_CHAR: return true;
         default: break;
         }
@@ -953,12 +950,12 @@ namespace Mafia1Online::Features::WebUi {
             return text;
         };
         if (lParam & GCS_RESULTSTR) {
-            host->ImeCommitText(read(GCS_RESULTSTR), CefRange::InvalidRange(), 0);
+            target->ImeCommitText(read(GCS_RESULTSTR));
         }
         if (lParam & GCS_COMPSTR) {
             const std::wstring composition = read(GCS_COMPSTR);
             const int cursor               = lParam & GCS_CURSORPOS ? static_cast<int>(ImmGetCompositionStringW(context, GCS_CURSORPOS, nullptr, 0) & 0xffff) : static_cast<int>(composition.size());
-            host->ImeSetComposition(composition, {}, CefRange::InvalidRange(), CefRange(cursor, cursor));
+            target->ImeSetComposition(composition, cursor, cursor);
         }
         ImmReleaseContext(window, context);
         return true;
@@ -995,13 +992,11 @@ namespace Mafia1Online::Features::WebUi {
     }
 
     void WebUiService::ForwardMouse(Screen live, Framework::GUI::View *target) {
-        auto browser = target->GetBrowser();
-        if (!browser) {
+        if (!target->HasBrowser()) {
             return;
         }
-        auto host = browser->GetHost();
-        int x     = 0;
-        int y     = 0;
+        int x = 0;
+        int y = 0;
         if (live == Screen::Menu) {
             x = SDK::Menu::MenuMouseX();
             y = SDK::Menu::MenuMouseY();
@@ -1026,7 +1021,7 @@ namespace Mafia1Online::Features::WebUi {
         if (x != _mouseX || y != _mouseY) {
             _mouseX = x;
             _mouseY = y;
-            host->SendMouseMoveEvent(event, false);
+            target->SendMouseMove(event, false);
         }
         const struct {
             uint32_t bit;
@@ -1035,12 +1030,12 @@ namespace Mafia1Online::Features::WebUi {
         for (const auto &button : buttons) {
             const bool down = (now & button.bit) != 0;
             if (down != ((_mouseButtons & button.bit) != 0)) {
-                host->SendMouseClickEvent(event, button.type, !down, 1);
+                target->SendMouseClick(event, button.type, !down, 1);
             }
         }
         _mouseButtons = now;
         if (wheel != 0) {
-            host->SendMouseWheelEvent(event, 0, wheel);
+            target->SendMouseWheel(event, 0, wheel);
         }
     }
 
