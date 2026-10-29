@@ -240,11 +240,12 @@ namespace Mafia1Online::Features::Pedestrian {
         return true;
     }
 
-    bool PedestrianService::SendShotHit(uint64_t walkerId, uint64_t attackerId, uint8_t bodyPart, float damage, const glm::vec3 &position) const {
+    bool PedestrianService::SendShotHit(uint64_t walkerId, uint64_t attackerId, uint8_t bodyPart, float damage, const glm::vec3 &direction) const {
         const auto host = _simulation->Host();
         const auto key  = _keyByNetworkId.find(walkerId);
-        if (!host || key == _keyByNetworkId.end() || !std::isfinite(damage) || damage < 0.0f || bodyPart < 1 || bodyPart > 6 || !std::isfinite(position.x) ||
-            !std::isfinite(position.y) || !std::isfinite(position.z)) {
+        const float length = glm::length(direction);
+        if (!host || key == _keyByNetworkId.end() || !std::isfinite(damage) || damage < 0.0f || bodyPart < 1 || bodyPart > 6 || !std::isfinite(length) ||
+            length < 0.5f || length > 1.5f) {
             return false;
         }
         Shared::Pedestrian::ShotHit hit;
@@ -253,9 +254,9 @@ namespace Mafia1Online::Features::Pedestrian {
         hit.attackerId = attackerId;
         hit.bodyPart = bodyPart;
         hit.damage = damage;
-        hit.x = position.x;
-        hit.y = position.y;
-        hit.z = position.z;
+        hit.directionX = direction.x / length;
+        hit.directionY = direction.y / length;
+        hit.directionZ = direction.z / length;
         Framework::CoreModules::GetNetworkPeer()->SendRPC(hit, MafiaNet::ToGuid(*host), MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
         return true;
     }

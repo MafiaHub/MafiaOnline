@@ -139,9 +139,10 @@ namespace Mafia1Online::Shared::Pedestrian {
         uint8_t bodyPart = 0;
         // The pellet's damage after retail's range falloff.
         float damage = 0.0f;
-        float x = 0.0f;
-        float y = 0.0f;
-        float z = 0.0f;
+        // The unit shot direction, which C_traffic_element::Hit takes.
+        float directionX = 0.0f;
+        float directionY = 0.0f;
+        float directionZ = 0.0f;
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {
             stream->Serialize(write, missionGeneration);
@@ -149,9 +150,9 @@ namespace Mafia1Online::Shared::Pedestrian {
             stream->Serialize(write, attackerId);
             stream->Serialize(write, bodyPart);
             stream->Serialize(write, damage);
-            stream->Serialize(write, x);
-            stream->Serialize(write, y);
-            stream->Serialize(write, z);
+            stream->Serialize(write, directionX);
+            stream->Serialize(write, directionY);
+            stream->Serialize(write, directionZ);
         }
     };
 

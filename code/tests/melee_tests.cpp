@@ -85,12 +85,12 @@ namespace {
         shot.attackerId = 41;
         shot.bodyPart = 2;
         shot.damage = 26.5f;
-        shot.x = -1520.25f;
-        shot.y = 1.4f;
-        shot.z = 610.5f;
+        shot.directionX = 0.6f;
+        shot.directionY = 0.0f;
+        shot.directionZ = -0.8f;
         const auto readShot = RoundTrip(shot);
         CHECK(readShot.missionGeneration == 3 && readShot.key == 12 && readShot.attackerId == 41 && readShot.bodyPart == 2 && Near(readShot.damage, 26.5f));
-        CHECK(Near(readShot.x, -1520.25f) && Near(readShot.y, 1.4f) && Near(readShot.z, 610.5f));
+        CHECK(Near(readShot.directionX, 0.6f) && Near(readShot.directionY, 0.0f) && Near(readShot.directionZ, -0.8f));
     }
 
     void Reach() {

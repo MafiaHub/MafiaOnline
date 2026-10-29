@@ -1026,7 +1026,8 @@ namespace Mafia1Online::Features::Combat {
         // stood a render delay and a report ahead of the one the player hit.
         if (report.kind == Shared::Combat::HitReport::Kind::Bullet) {
             if (const auto bullet = ValidateBullet(report, session, hitTarget)) {
-                _walkerTargets.shot(report.targetNetworkId, report.shooterNetworkId, report.bodyPart, bullet->damage, glm::vec3(report.hitX, report.hitY, report.hitZ));
+                _walkerTargets.shot(report.targetNetworkId, report.shooterNetworkId, report.bodyPart, bullet->damage,
+                                    glm::vec3(report.directionX, report.directionY, report.directionZ));
             }
             return;
         }

@@ -59,9 +59,12 @@ namespace Mafia1Online::Features::Pedestrian {
         WalkerHit gWalkerHitOriginal                 = nullptr;
         PedestrianService *gService                  = nullptr;
         // Player: the local player's bullet on a walker replica, between the
-        // walker collision's Hit (which has its direction) and the element
-        // Hit it calls with the body part.
+        // walker collision's Hit and the element Hit it calls with the body
+        // part. C_game::TickShoot hits a walker with (segment direction,
+        // segment start, hit point) where a human gets (direction, hit
+        // point, normal), and the element Hit gets the direction.
         const SDK::Player::Vector3 *gReplicaShotDirection = nullptr;
+        const SDK::Player::Vector3 *gReplicaShotPoint     = nullptr;
         // Host: a ShotHit the server checked is being applied.
         bool gApplyingShotHit = false;
         constexpr uintptr_t kHookAddresses[] {SDK::Traffic::kGeneratorGameInit, SDK::Traffic::kGeneratorAI, SDK::Traffic::kTickElements,
@@ -138,8 +141,8 @@ namespace Mafia1Online::Features::Pedestrian {
                     auto *mission = SDK::Core::Mission::Get();
                     SDK::Traffic::AddWalkerBlood(mission, mission->Game(), *element, *position);
                     // The server checks it against the shot and the host applies it.
-                    if (gReplicaShotDirection && attacker && attacker == SDK::Player::CurrentPlayer()) {
-                        gService->OnReplicaShot(element, *gReplicaShotDirection, *position, part);
+                    if (gReplicaShotDirection && gReplicaShotPoint && attacker && attacker == SDK::Player::CurrentPlayer()) {
+                        gService->OnReplicaShot(element, *gReplicaShotDirection, *gReplicaShotPoint, part);
                     }
                 }
                 return;
@@ -219,9 +222,12 @@ namespace Mafia1Online::Features::Pedestrian {
         bool __fastcall WalkerHitHook(void *collision, void *, int32_t type, const SDK::Player::Vector3 &direction, const SDK::Player::Vector3 &position,
                                       const SDK::Player::Vector3 &normal, float damage, SDK::Player::NativeActor *attacker, uint32_t flags, SDK::Scene::NativeFrame *model) {
             if (type == kBulletHit && attacker && !Simulation::IsHost() && attacker == SDK::Player::CurrentPlayer()) {
+                // For a bullet `normal` carries the hit point (see gReplicaShotPoint).
                 gReplicaShotDirection = &direction;
+                gReplicaShotPoint     = &normal;
                 const bool hit = gWalkerHitOriginal(collision, type, direction, position, normal, damage, attacker, flags, model);
                 gReplicaShotDirection = nullptr;
+                gReplicaShotPoint     = nullptr;
                 return hit;
             }
             if (type == SDK::Traffic::kHardKnockdownHit && attacker) {
@@ -428,7 +434,8 @@ namespace Mafia1Online::Features::Pedestrian {
         // becomes its armed C_entity in there.
         network->RegisterRPC<Shared::Pedestrian::ShotHit>([this](const Shared::Pedestrian::ShotHit &hit, MafiaNet::Packet *) {
             if (!Simulation::IsHost() || !_world || !_world->IsReady() || hit.missionGeneration != _world->LoadedMissionGeneration() || !std::isfinite(hit.damage) ||
-                hit.damage < 0.0f || hit.bodyPart < 1 || hit.bodyPart > 6 || !std::isfinite(hit.x) || !std::isfinite(hit.y) || !std::isfinite(hit.z)) {
+                hit.damage < 0.0f || hit.bodyPart < 1 || hit.bodyPart > 6 || !std::isfinite(hit.directionX) || !std::isfinite(hit.directionY) ||
+                !std::isfinite(hit.directionZ)) {
                 return;
             }
             auto *element = _reporter.ActiveElement(hit.key);
@@ -436,9 +443,11 @@ namespace Mafia1Online::Features::Pedestrian {
             if (!element || !element->Model() || element->IsDead() || !attacker || attacker->IsDead()) {
                 return;
             }
-            const SDK::Player::Vector3 position {hit.x, hit.y, hit.z};
+            // The element Hit takes the shot direction, as C_don_ocas::Hit
+            // hands it on: blood, the fall and CreateMafianos read it.
+            const SDK::Player::Vector3 direction {hit.directionX, hit.directionY, hit.directionZ};
             gApplyingShotHit = true;
-            reinterpret_cast<ElementHit>(SDK::Traffic::kElementHit)(element, kBulletHit, &position, hit.bodyPart, attacker, hit.damage);
+            reinterpret_cast<ElementHit>(SDK::Traffic::kElementHit)(element, kBulletHit, &direction, hit.bodyPart, attacker, hit.damage);
             gApplyingShotHit = false;
         });
         network->RegisterRPC<Shared::Pedestrian::Remove>([this](const Shared::Pedestrian::Remove &remove, MafiaNet::Packet *) {
