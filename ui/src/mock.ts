@@ -90,9 +90,9 @@ export function startMock(receive: (message: InboundMessage) => void) {
             payload: {
                 mission: 'freeride',
                 players: [
-                    { id: 1, name: 'Tommy', health: 100, alive: true, spawned: true, local: true },
-                    { id: 2, name: 'Sam', health: 64, alive: true, spawned: true, local: false },
-                    { id: 3, name: 'Paulie', health: 0, alive: false, spawned: true, local: false },
+                    { id: 1, name: 'Tommy', health: 100, alive: true, spawned: true, ping: 38, local: true },
+                    { id: 2, name: 'Sam', health: 64, alive: true, spawned: true, ping: 72, local: false },
+                    { id: 3, name: 'Paulie', health: 0, alive: false, spawned: true, ping: 140, local: false },
                 ],
             },
         });

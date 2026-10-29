@@ -38,6 +38,9 @@ namespace Mafia1Online::Shared::Entities {
         bool alive = false;
         // Server-owned camera follow target. Zero restores this player's own camera.
         uint64_t cameraTargetId = 0;
+        // The server's round trip to this player in milliseconds, for the
+        // player list; refreshed every few seconds (PlayerService::Update).
+        uint16_t ping = 0;
         // Server-authored: scripts choose the label, color and components.
         Framework::Networking::Replication::NametagState nametag;
 
@@ -131,6 +134,7 @@ namespace Mafia1Online::Shared::Entities {
             fields.Field(spawned);
             fields.Field(alive);
             fields.Field(cameraTargetId);
+            fields.Field(ping);
             nametag.Serialize(fields);
             if (!fields.Writing()) {
                 nickname = name.C_String();

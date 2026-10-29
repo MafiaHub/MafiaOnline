@@ -495,6 +495,24 @@ namespace Mafia1Online::Features::Player {
                 ++it;
             }
         }
+        // The player list shows everyone's ping; a reliable field, so it is
+        // refreshed seldom and only when it moved noticeably.
+        const auto now = std::chrono::steady_clock::now();
+        if (now - _lastPingRefresh < kPingRefresh) {
+            return;
+        }
+        _lastPingRefresh = now;
+        for (const auto &[guid, session] : _sessions) {
+            auto *player = FindByNetworkId(session.networkId);
+            const int ping = Framework::CoreModules::GetNetworkPeer()->GetPing(MafiaNet::ToGuid(guid));
+            if (!player || ping < 0) {
+                continue;
+            }
+            const auto clamped = static_cast<uint16_t>(std::min(ping, 9999));
+            if (std::abs(static_cast<int>(clamped) - static_cast<int>(player->ping)) >= kPingChange) {
+                player->ping = clamped;
+            }
+        }
     }
 
     void PlayerService::Reset() {

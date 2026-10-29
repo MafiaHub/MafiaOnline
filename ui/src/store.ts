@@ -70,6 +70,8 @@ export interface Player {
     health: number;
     alive: boolean;
     spawned: boolean;
+    // The server's round trip to the player, in milliseconds.
+    ping: number;
     local: boolean;
 }
 

@@ -87,6 +87,9 @@ namespace Mafia1Online::Features::Player {
             std::deque<std::pair<std::chrono::steady_clock::time_point, float>> recentHeights;
         };
         std::unordered_map<MafiaNet::PeerGuid, Session> _sessions;
+        static constexpr auto kPingRefresh = std::chrono::seconds(2);
+        static constexpr int kPingChange   = 5;
+        std::chrono::steady_clock::time_point _lastPingRefresh;
         uint64_t _currentMissionGeneration = 1;
     };
 } // namespace Mafia1Online::Features::Player

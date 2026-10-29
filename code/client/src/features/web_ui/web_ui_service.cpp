@@ -643,6 +643,7 @@ namespace Mafia1Online::Features::WebUi {
                                  {"health", player->health},
                                  {"alive", player->alive},
                                  {"spawned", player->spawned},
+                                 {"ping", player->ping},
                                  {"local", player->controllerGuid == myGuid}}});
             });
         }
