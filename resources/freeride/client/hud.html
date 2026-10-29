@@ -187,7 +187,7 @@
   <section id="menu" class="hidden"></section>
 
   <script>
-    const TABS = [["city", "City"], ["jobs", "Jobs"], ["races", "Races"], ["players", "Players"], ["crew", "Crew"], ["leaders", "Leaders"], ["help", "Help"]];
+    const TABS = [["city", "City"], ["homes", "Homes"], ["jobs", "Jobs"], ["races", "Races"], ["players", "Players"], ["crew", "Crew"], ["leaders", "Leaders"], ["help", "Help"]];
     const state = {player: {spawned: false, alive: false, id: null}, hidden: false, profile: null, cards: new Map(), race: null,
       raceAt: 0, speakers: new Map(), menuOpen: false, tab: "city", data: null, compose: null};
 
@@ -416,6 +416,51 @@
           !rum.hidden ? button("Put it aside", "/rum hide") : null));
     }
 
+    // Homes (server/housing.js): the home you stand in and its furnishings,
+    // your homes and their keys, homes you may visit, and what is for sale.
+    function homesPage(data) {
+      const homes = data.homes ?? {};
+      const inside = homes.inside;
+      const mine = homes.mine ?? [];
+      const cash = data.you?.money ?? 0;
+      const span = (tier) => homes.prices?.[tier] ? `${money(homes.prices[tier][0])} to ${money(homes.prices[tier][1])}` : "none on this map";
+      const carName = (model) => String(model ?? "").replace(/00\.i3d$/i, "");
+      const catalogue = inside?.mine ? [...new Set(inside.catalogue.map((item) => item.category))].map((category) => panel(`Furnish · ${category}`,
+        inside.catalogue.filter((item) => item.category === category).map((item) => line(item.name, money(item.price),
+          button("Buy", `/home decor ${item.id}`, false, cash < item.price || inside.decor >= inside.limit))))) : [];
+      return el("div", {class: "grid"},
+        inside ? panel(inside.name, inside.mine
+          ? [el("p", {class: "big"}, `${inside.decor} of ${inside.limit} pieces`),
+            el("p", {}, "Buy a piece below and walk it into place: G puts it down (and pays for it), Home and End turn it, PgUp and PgDn raise it, Delete sells it back at full price, Num 0 puts it back. Solid pieces keep clear of the doorway. To move a piece later, start moving furniture and press G in front of it."),
+            el("div", {class: "actions"}, button(inside.editing ? "Done moving furniture" : "Move furniture", "/home edit", !inside.editing), button("Show visitors out", "/home kick"), button("Go outside", "/home leave"))]
+          : el("p", {}, `${inside.owner ?? "Someone"}'s home. The green arrow by the door leads back to the street.`)) : null,
+        catalogue,
+        panel(`Your homes · ${homes.owned ?? 0} of ${homes.max ?? 2}`, mine.length ? mine.map((home) => line(home.name,
+          [home.kind, home.locked ? "locked" : "open house", home.crew ? `crew [${home.crew}] welcome` : null,
+            home.guests.length ? `guests ${home.guests.join(", ")}` : null, `${home.decor}/${home.limit} pieces`,
+            home.parking ? (home.cars.length ? `parked: ${home.cars.map((car) => carName(car.model)).join(", ")}` : "parking at the kerb") : null,
+            home.here ? "you are here" : `${home.distance} m`].filter(Boolean).join(" · "),
+          button(home.locked ? "Open house" : "Lock", `/home lock ${home.id}`), button(home.crew ? "Crew needs a key" : "Let my crew in", `/home crew ${home.id}`),
+          button(`Sell ${money(home.sellFor)}`, `/home sell ${home.id}`)))
+          : empty("No home yet. Gold arrows at front doors mark homes for sale; press G there."),
+          mine.length ? el("div", {class: "form"}, el("input", {id: "home-guest", maxlength: "24", placeholder: "Player to invite"}),
+            el("button", {class: "btn primary", type: "button", onclick: () => {
+              const who = document.getElementById("home-guest").value.trim();
+              if (who) command(`/home invite ${who}`);
+            }}, "Give a key")) : null),
+        (homes.visiting ?? []).length ? panel("Homes you may visit", homes.visiting.map((home) => line(home.name, `${home.owner}'s ${home.kind.toLowerCase()} · ${home.distance} m`,
+          button("Show on map", `/home show ${home.id}`)))) : null,
+        panel("For sale", el("p", {}, `${homes.counts?.poor ?? 0} rooms (${span("poor")}), ${homes.counts?.middle ?? 0} flats (${span("middle")}) and ${homes.counts?.rich ?? 0} villas and houses (${span("rich")}). Nearest first:`),
+          (homes.forSale ?? []).length ? homes.forSale.map((home) => line(home.name, `${home.kind}${home.parking ? " with parking" : ""} · ${home.distance} m`,
+            el("span", {class: "pill gold"}, money(home.price)),
+            button(homes.browsing === home.id ? "On your map" : "Show on map", `/home show ${home.id}`, homes.browsing !== home.id)))
+            : empty("Every home on this map has been sold.")),
+        panel("How homes work",
+          el("p", {}, "Rooms in the tenements are cheap and bare; flats are papered, furnished and come with a parking spot at the kerb; villas on the hills have a salon, a dining room with a fire and a bedroom."),
+          el("p", {}, "Each home is private: lock it, open it to everyone, let your crew in or give a friend a key. Drive a car from your garage onto your spot and press G (or /park): it goes into your home's garage as it was, even through a restart, and G on the spot brings it out again."),
+          el("p", {}, "Selling a home back returns 60% of its price and the full price of its furnishings. There is no rent.")));
+    }
+
     function jobsPage(data) {
       const exportList = data.export;
       const duty = data.duty ?? {};
@@ -584,7 +629,7 @@
       document.body.classList.toggle("menu-open", state.menuOpen);
       if (!state.menuOpen) return;
       const data = state.data ?? {};
-      const pages = {city: cityPage, jobs: jobsPage, races: racesPage, players: playersPage, crew: crewPage, leaders: leadersPage, help: helpPage};
+      const pages = {city: cityPage, homes: homesPage, jobs: jobsPage, races: racesPage, players: playersPage, crew: crewPage, leaders: leadersPage, help: helpPage};
       const keepScroll = box.querySelector(".page")?.scrollTop ?? 0;
       const active = document.activeElement;
       const activeId = active?.id;

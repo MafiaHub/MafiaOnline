@@ -83,7 +83,7 @@ function store(player, {force = false} = {}) {
     return true;
 }
 
-function deliver(player, slot, {fee}) {
+function deliver(player, slot, {fee, at = null}) {
     if (!garage(player)[slot] || garage(player)[slot].totaled) return false;
     if (!store(player)) {
         toast(player, "Someone is still sitting in your other car.", {tone: "bad"});
@@ -92,9 +92,9 @@ function deliver(player, slot, {fee}) {
     // Read after store(): calling round the car that is out brings it back
     // as it was put away, not as it was last parked.
     const owned = garage(player)[slot];
-    const graph = roads.current();
-    const spot = graph.nearestRoadPoint(player.position);
-    if (!spot || spot.gap > 120) {
+    // A home's kerb (server/housing.js) needs no road search.
+    const spot = at ? null : roads.current().nearestRoadPoint(player.position);
+    if (!at && (!spot || spot.gap > 120)) {
         toast(player, "No road nearby to bring the car to.", {tone: "bad"});
         return false;
     }
@@ -102,9 +102,9 @@ function deliver(player, slot, {fee}) {
         toast(player, `Delivery costs ${formatMoney(fee)}.`, {tone: "bad"});
         return false;
     }
-    const {x, y, z} = spot.position;
-    const heading = Math.atan2(spot.direction.x, spot.direction.z);
-    const position = {x: x + spot.direction.z * ROADSIDE, y: y + 0.6, z: z - spot.direction.x * ROADSIDE};
+    const heading = at ? at.heading : Math.atan2(spot.direction.x, spot.direction.z);
+    const position = at ? {x: at.position.x, y: at.position.y + 0.6, z: at.position.z}
+        : {x: spot.position.x + spot.direction.z * ROADSIDE, y: spot.position.y + 0.6, z: spot.position.z - spot.direction.x * ROADSIDE};
     const vehicle = Vehicle.spawn(owned.model, position, heading, player);
     if (!vehicle) {
         if (fee) player.giveMoney(fee);
@@ -120,10 +120,47 @@ function deliver(player, slot, {fee}) {
     vehicle.setRadarMarker(true, crew?.color ? parseInt(crew.color.slice(1), 16) : 0xe8c57d);
     out.set(player.id, {vehicleId: vehicle.id, slot, locked: true});
     vehicle.state.set("fr.locked", true);
-    lastDelivery.set(player.id, Date.now());
+    if (owned.home) {
+        const list = garage(player).slice();
+        const {home, ...rest} = list[slot];
+        list[slot] = rest;
+        saveGarage(player, list);
+    }
+    if (!at) lastDelivery.set(player.id, Date.now());
     compass(player, "garage", 20, {vehicleId: vehicle.id});
     setTimeout(() => compass(player, "garage", 20, null), 30_000);
     return true;
+}
+
+// Homes (server/housing.js) park a car at their kerb: it goes into the
+// garage like any other, condition and all, tagged with the home, and comes
+// out there again for nothing.
+let homeSpot = () => null;
+
+function carOut(player) {
+    const entry = out.get(player.id);
+    const vehicle = entry && vehicleById(entry.vehicleId);
+    return vehicle ? {vehicle, slot: entry.slot, model: garage(player)[entry.slot]?.model ?? vehicle.model} : null;
+}
+
+function parkAtHome(player, homeId) {
+    const entry = out.get(player.id);
+    if (!entry) return false;
+    const {slot} = entry;
+    if (!store(player)) return false;
+    const list = garage(player).slice();
+    if (list[slot]) list[slot] = {...list[slot], home: homeId};
+    saveGarage(player, list);
+    return true;
+}
+
+function parkedAt(player, homeId) {
+    return garage(player).map((owned, slot) => ({slot, model: owned.model, home: owned.home, totaled: owned.totaled}))
+        .filter((owned) => owned.home === homeId && !owned.totaled && out.get(player.id)?.slot !== owned.slot);
+}
+
+function fromHome(player, slot, pose) {
+    return garage(player)[slot]?.home !== undefined && deliver(player, slot, {fee: 0, at: pose});
 }
 
 function openPicker(player, mode) {
@@ -252,6 +289,11 @@ commands.register({name: "park", usage: "/park", help: "Put your car away in you
         toast(player, "Stand by your car to park it.", {tone: "bad"});
         return;
     }
+    const home = homeSpot(player, vehicle);
+    if (home) {
+        toast(player, parkAtHome(player, home) ? "Into your home's garage, as it is. G on the parking spot brings it out again." : "Someone is still sitting in it.", {tone: "good"});
+        return;
+    }
     toast(player, store(player) ? "Parked. It will be in your garage next time." : "Someone is still sitting in it.", {tone: "good"});
 });
 
@@ -291,7 +333,8 @@ commands.register({name: "sellcar", usage: "/sellcar <number>", help: "Sell a ca
 });
 
 menu.provide("garage", (player) => ({lot: lot()?.name ?? null, near: nearLot(player), fee: DELIVERY_FEE, max: MAX_OWNED,
-    cars: garage(player).map((owned, slot) => ({slot: slot + 1, model: owned.model, totaled: Boolean(owned.totaled), out: out.get(player.id)?.slot === slot}))}));
+    cars: garage(player).map((owned, slot) => ({slot: slot + 1, model: owned.model, totaled: Boolean(owned.totaled), out: out.get(player.id)?.slot === slot,
+        home: owned.home ?? null}))}));
 
 Events.on("playerDisconnect", (player) => {
     store(player, {force: true});
@@ -303,4 +346,4 @@ onStop(() => {
     for (const player of World.getPlayers()) store(player, {force: true});
 });
 
-module.exports = {choose};
+module.exports = {choose, carOut, parkAtHome, parkedAt, fromHome, setHomeSpot: (handler) => { homeSpot = handler; }};

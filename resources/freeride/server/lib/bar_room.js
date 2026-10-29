@@ -15,12 +15,16 @@
 //  plotdrev.4ds     the same plane in weathered boards (PRKNA01): the floor
 //                   and, scaled, the counter top
 //  plotcihly3.4ds   the plane in bare concrete: the ceiling
-//  @Rbstol1.4ds     a bar stool, @rstul1.4ds a table and @hqzdl01.4ds a
-//                   chair: Salieri's bar furniture of the story missions
+//  xzidle 04.4ds    a wooden stool with a cushion: the bar stools;
+//  xstul07.4ds     a dark square table, and xzidle 01.4ds a kitchen chair
+//                   (its back towards its +x): the drinkers' tables
 //  xskrin 01.4ds    a cupboard: the back bar
-//  @flasa2, xflaska 1, 2flask, 9lahvic, Sklenice: bottles and glasses
-//  xradio 1.4ds     the radio on the counter, @Rvetr1.4ds the ceiling fan,
-//                   @hqsvtl1.4ds the hanging lamps, xpopelnik.4ds ashtrays
+//  xflaska 1, 2flask, 9lahvic, Sklenice: bottles and glasses
+//  xradio 1.4ds     the radio on the counter, "xsvetlo 10 on" the lit
+//                   ceiling lamps, xpopelnik.4ds ashtrays
+//  (Salieri's own furniture of the story missions, @Rbstol1, @rstul1,
+//  @hqzdl01, @flasa2, @hqsvtl1 and the fan @Rvetr1, cannot be map objects:
+//  MapObject takes only names of letters, digits, "_", "-", "." and spaces.)
 //  plotdrev7.4ds    a steel door with a notice: the way out
 // The pieces stand upright or lie flat, turned by 0 or a quarter turn.
 
@@ -56,12 +60,13 @@ const ARRIVAL = Object.freeze({position: {x: 7.3, y: 0.05, z: -2.9}, heading: -Q
 // A drinker sits on a chair that does not collide, so the host can place
 // him on it.
 function table(list, x, z, seated = false) {
-    // @rstul1 spans x -0.83..0.5 about its origin; the chairs face it from
-    // both ends (the chair's back is towards its +x).
-    list.push(["@rstul1.i3d", {x: x + 0.165, y: 0.57, z}, 0]);
-    list.push(["@hqzdl01.i3d", {x: x + 0.75, y: 0.26, z}, Math.PI, false, null, seated]);
-    list.push(["@hqzdl01.i3d", {x: x - 0.85, y: 0.26, z}, 0, false, null, seated]);
-    list.push(["xpopelnik.i3d", {x: x + 0.1, y: 0.85, z: z + 0.2}, 0]);
+    // xstul07 is 1.26 m square, its top 0.88 m up (box y -0.84..0.04); the
+    // chairs (box x -0.22..0.3, y -0.52..0.58, back towards +x) face it from
+    // both sides, where the seated drinkers of STAFF sit.
+    list.push(["xstul07.i3d", {x, y: 0.84, z}, 0]);
+    list.push(["xzidle 01.i3d", {x: x + 0.71, y: 0.52, z}, 0, false, null, seated]);
+    list.push(["xzidle 01.i3d", {x: x - 0.81, y: 0.52, z}, Math.PI, false, null, seated]);
+    list.push(["xpopelnik.i3d", {x: x + 0.1, y: 0.88, z: z + 0.2}, 0]);
 }
 
 // [model, local position, yaw, flat?, scale?, passable?]
@@ -81,9 +86,10 @@ function pieces() {
     // The counter: a wall box cut down to 1.05 x 0.6 m, boards on top.
     list.push(["xzed.i3d", {x: COUNTER.x, y: 0, z: COUNTER.z}, 0, false, {x: COUNTER.length / 6, y: COUNTER.height / 2.5, z: 2.5}]);
     list.push(["plotdrev.i3d", {x: COUNTER.x, y: COUNTER.height + 0.01, z: COUNTER.z}, 0, true, {x: (COUNTER.length + 0.1) / 12, y: 0.8 / 2.7, z: 1}]);
-    for (const x of [-1.2, 0, 1.2, 2.4, 3.6]) list.push(["@Rbstol1.i3d", {x, y: 0.73, z: 1.2}, 0]);
+    // Stools (box y -0.21..0.44) along the counter.
+    for (const x of [-1.2, 0, 1.2, 2.4, 3.6]) list.push(["xzidle 04.i3d", {x, y: 0.21, z: 1.2}, 0]);
     const top = COUNTER.height + 0.02;
-    list.push(["@flasa2.i3d", {x: -1.6, y: top, z: 2.05}, 0]);
+    list.push(["xflaska 1.i3d", {x: -1.6, y: top, z: 2.05}, 0]);
     list.push(["xflaska 1.i3d", {x: -1.45, y: top, z: 1.9}, 0]);
     list.push(["Sklenice.i3d", {x: 0.4, y: top, z: 1.8}, 0]);
     list.push(["Sklenice.i3d", {x: 1.9, y: top, z: 1.85}, 0]);
@@ -94,13 +100,13 @@ function pieces() {
     for (const x of [-0.6, 2.6]) {
         list.push(["xskrin 01.i3d", {x, y: 1.21, z: ROOM_Z - 0.4}, 0]);
         list.push(["2flask.i3d", {x: x - 0.3, y: 2.35, z: ROOM_Z - 0.45}, 0]);
-        list.push(["@flasa2.i3d", {x: x + 0.3, y: 2.35, z: ROOM_Z - 0.45}, 0]);
+        list.push(["xflaska 1.i3d", {x: x + 0.3, y: 2.35, z: ROOM_Z - 0.45}, 0]);
     }
     table(list, -6.15, -2.2, true);
     table(list, -6.15, 1.6);
     table(list, -2.4, -2.4);
-    for (const x of [-5, 0, 5]) list.push(["@hqsvtl1.i3d", {x, y: HEIGHT - 0.55, z: 0.4}, 0]);
-    list.push(["@Rvetr1.i3d", {x: -2.5, y: HEIGHT - 0.12, z: -0.6}, 0]);
+    // Lit ceiling lamps (box y -0.24..0) flush with the ceiling.
+    for (const x of [-5, 0, 5]) list.push(["xsvetlo 10 on.i3d", {x, y: HEIGHT, z: 0.4}, 0]);
     list.push(["plotdrev7.i3d", {x: 7.3, y: 1.16, z: -ROOM_Z}, 0]);
     return list;
 }
@@ -122,10 +128,21 @@ function available() {
     return typeof MapObject !== "undefined" && typeof MapObject.create === "function";
 }
 
+// MapObject.create throws for a model name outside [A-Za-z0-9_-. ]: such a
+// piece is left out, so the room still stands and a mission change never
+// fails on it.
+const LOADABLE = /^[A-Za-z0-9_\-. ]{1,59}\.(i3d|4ds)$/i;
+const skipped = new Set();
+
 function place([model, local, yaw, flat, scale, passable]) {
     const options = {virtualWorld: WORLD, collision: !passable};
     if (scale) options.scale = scale;
-    return MapObject.create(model, toWorld(local), {x: flat ? QUARTER : 0, y: yaw, z: 0}, options);
+    try {
+        return MapObject.create(model, toWorld(local), {x: flat ? QUARTER : 0, y: yaw, z: 0}, options);
+    } catch (error) {
+        console.error(`[freeride] Back-room bar piece ${model} was refused: ${error?.message ?? error}`);
+        return null;
+    }
 }
 
 function clear() {
@@ -142,6 +159,11 @@ function attempt() {
         return;
     }
     for (const piece of pieces()) {
+        if (!LOADABLE.test(piece[0])) {
+            if (!skipped.has(piece[0])) console.error(`[freeride] Back-room bar piece ${piece[0]} cannot be a map object; left out`);
+            skipped.add(piece[0]);
+            continue;
+        }
         const object = place(piece);
         if (!object) {
             clear();

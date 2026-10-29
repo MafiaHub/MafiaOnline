@@ -2,7 +2,7 @@
   "name": "freeride",
   "version": "1.9.0",
   "author": "Mafia1Online",
-  "description": "Free Ride, the default Mafia1Online gamemode: street races, bounties, duels, crews, turf wars, jobs, hold-ups, interiors, city events and a persistent career",
+  "description": "Free Ride, the default Mafia1Online gamemode: street races, bounties, duels, crews, turf wars, jobs, hold-ups, interiors, homes, city events and a persistent career",
   "mafiahub": {
     "serverScripts": [
       "server/main.js",
@@ -40,6 +40,7 @@
       "server/hospital.js",
       "server/props.js",
       "server/doors.js",
+      "server/housing.js",
       "server/dev.js"
     ],
     "clientScripts": [
@@ -55,7 +56,8 @@
       "client/police.js",
       "client/rescue.js",
       "client/jail.js",
-      "client/distillery.js"
+      "client/distillery.js",
+      "client/housing.js"
     ],
     "files": [
       "client/hud.html",

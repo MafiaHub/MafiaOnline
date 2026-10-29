@@ -44,6 +44,8 @@ let leaderboardCache = null;
 const TIPS = [
     "F2 opens the city menu: jobs, races, crews, events and everyone in town.",
     "Buy a car at the car lot with /dealer. /garage brings it to you, /park puts it away, /lock keeps it yours.",
+    "Gold arrows at front doors mark homes for sale: a room in a tenement for a few thousand, a flat, or a villa on the hills. Press G at the door. F2 → Homes.",
+    "Your home is yours to furnish (F2 → Homes), lock or share with your crew, and a flat or villa keeps a car at its kerb: drive onto the spot and press G.",
     "Jobs pay: taxi fares, courier envelopes, Lucas's export list, police duty and bootleg runs.",
     "Fancy a uniform? Sign on under the arrow at the fire station or the hospital (both on the city map), then take a truck or an ambulance.",
     "Out in the countryside the tobacco farm takes on farmhands: plant, water, pick and cure the crop, then truck it to a buyer. F2 → Jobs.",

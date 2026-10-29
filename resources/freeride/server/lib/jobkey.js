@@ -30,9 +30,9 @@ function isHeld(player) {
 }
 
 // Who may hold the prompt line, strongest first: standing at a station's
-// sign-on point beats a job's own hint, which beats a side activity's (the
-// rum distillery's) hint.
-const PROMPT_LAYERS = ["station", "job", "side"];
+// sign-on point beats a job's own hint, which beats a home's door (housing),
+// which beats a side activity's (the rum distillery's) hint.
+const PROMPT_LAYERS = ["station", "job", "home", "side"];
 const prompts = new Map();
 
 // The prompt line and an optional progress bar above it; null clears this

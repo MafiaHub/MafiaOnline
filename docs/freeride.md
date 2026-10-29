@@ -53,7 +53,7 @@ first start and left in place.
 
 | Key | Action |
 | --- | --- |
-| F2 | City menu: events, jobs, race lobbies, bounties, players, crews, leaderboards and help. Esc or F2 closes it; 1–7 switch tabs. |
+| F2 | City menu: events, homes, jobs, race lobbies, bounties, players, crews, leaderboards and help. Esc or F2 closes it; 1–8 switch tabs. |
 | F1 (hold) | The mod's own list of who is in town. |
 | Tab (hold) | The retail city map, with blips for job stations, fires and ambulance calls, your objectives (an arrow at the border when off the shown part) and your crewmates. |
 | T | Chat. Every command below can also be typed. |
@@ -61,7 +61,7 @@ first start and left in place.
 | F9 | Car radio on or off. |
 | K | Siren, in a police car. |
 | U | At a telephone booth, on police duty: call for backup. |
-| G | Under a station's arrow: sign on or clock off. On fire duty: hold to spray the hose (or the truck's roof cannon from its wheel), press next to a trapped civilian to lead them out. On ambulance duty: hold next to a patient to treat them. Down and waiting for a medic: press to give up and wake at the hospital. On the tobacco farm: press on an empty plot to plant, hold to water, pick off hornworms or pick ripe leaves. At the rum still: press to fire it up, tap to vent the pressure, hold to bottle, patch or steal; press beside a character to talk, and in a car stopped at the village store to buy molasses. |
+| G | Under a station's arrow: sign on or clock off. On fire duty: hold to spray the hose (or the truck's roof cannon from its wheel), press next to a trapped civilian to lead them out. On ambulance duty: hold next to a patient to treat them. Down and waiting for a medic: press to give up and wake at the hospital. On the tobacco farm: press on an empty plot to plant, hold to water, pick off hornworms or pick ripe leaves. At the rum still: press to fire it up, tap to vent the pressure, hold to bottle, patch or steal; press beside a character to talk, and in a car stopped at the village store to buy molasses. At a home's door: buy it (press twice), go in, or knock; inside, at a door arrow: go out or into the next room; decorating: pick up and put down a piece; on your home's parking spot: park the car you sit in, or take a parked one out. |
 
 Every button in the city menu sends the same command a player could type, so
 chat and menu share one set of server checks (`server/lib/commands.js`).
@@ -753,6 +753,72 @@ should arrive, face the way they should look and type `/entrance inside`.
 `/entrance list` and `/entrance delete <name>` manage them; they are saved to
 the database and work at once.
 
+## Homes
+
+Homes are for sale all over every map, in its real residential buildings
+(`server/housing.js`, `server/data/houses.js`): 82 in Lost Heaven (on both
+city maps), 84 in Lost Heaven Extended (the city and two in its village) and
+six in the countryside (its village and two log cabins). The building
+outside says what is inside:
+
+| Kind | Buildings | Inside | Price |
+| --- | --- | --- | --- |
+| Room (36 in the city) | Tenements and walk-ups: grimy brick and stone blocks over shops, clapboard houses and cottages | A 6 × 4.5 m room of stained plaster and bare boards: a cot, a plank table, an iron stove, a wash basin, a cupboard with a radio, a bulb on a cord | $3,200–4,800 (a log cabin $2,800), a couple of hours of jobs |
+| Flat (32) | Apartment houses: the blue, yellow and red-brick blocks, brownstones with a stoop, the arcaded and the grand blocks | A papered room on a parquet floor: a sofa and armchairs round a rug, a dining table, a double bed, a wardrobe, a kitchen corner; a parking spot at the kerb | $13,000–19,000, a few evenings |
+| Villa (14) | Detached brick houses with a porch, and on the Oak Hill estates the two stone townhouses, the Victorian villa and the two mansions | Three rooms: a salon (leather chesterfields, curtained windows, a piano, a chandelier), a dining room for eight with a fire in the hearth and a bedroom with a carved double bed; a parking spot | $38,000 for a brick house to $95,000 for the hilltop mansion |
+
+A small gold arrow at the door marks a home for sale; up close its label
+reads `FOR SALE · FLAT · $14,500`. Press G to see the offer, G again to buy.
+Homes for sale are not on the city map unless asked for: F2 → Homes lists
+the nearest with **Show on map** (a blip and the compass), and `/homes`
+marks the nearest one. Your own homes have a green arrow and a square blip;
+a home you may visit has a blue one with its owner's name. A player owns up
+to two homes. Selling one back (F2 → Homes, press **Sell** twice) returns
+60% of what it cost and the full price of its furnishings; there is no rent.
+
+At your door G lets you in. Each home is its own virtual world, so the
+rooms (`server/lib/house_rooms.js`) are built once, 150 m under the fields
+north of the city, and every home of a kind shares them; only its owner's
+furnishings differ. A villa's salon has arrows at its north and west doors
+into the dining room and the bedroom. Locked (the default) only you, your
+guests (`/home invite <player>`, F2 → Homes → Give a key) and, if you let
+them, your crew come in; an open house lets anyone in. Others at a locked
+door knock, and you are told. `/home kick` shows visitors out; locking up,
+taking a key back or shutting the crew out shows out whoever no longer has
+one, and a crew's welcome lapses once the owner leaves that crew.
+`/home leave` (or **Go outside**) steps out from anywhere inside. Doors stay
+shut to anyone the police are after, and during races and duels.
+
+Furnishing: inside your home, F2 → Homes has a catalogue of stock pieces
+(`server/lib/house_decor.js`), from a $25 bottle and a $60 chair to a $1,400
+piano, and for villas the story missions' villa set (chesterfields, a china
+cabinet, a marble fireplace, a crystal chandelier, oil paintings, a palm).
+A piece you pick is carried in front of you and paid for when you put it
+down with G. Home/End (or numpad 4/6) turn it, PgUp/PgDn (numpad 8/2) raise
+it, for pictures flat on a wall or a chandelier under the ceiling, Delete
+sells it back at full price and numpad 0 puts it back (or, with nothing
+carried, ends decorating); the mouse wheel is left to the game's weapon
+switch. Solid pieces keep 1.2 m clear of the arrival point and the door
+arrows. **Move furniture** lets you pick up a piece again with G. A room
+holds 10 pieces, a flat 20, a villa 36; everyone inside sees them, and they
+are saved with the home.
+
+Parking: every flat, villa and house has a spot (a blue `PARKING` label up
+close, for its owner): at the kerb of the street at its door's level, or on
+the forecourt or drive of a villa or house, within 16 m of the door. Drive a
+car from your garage onto it and press G, or `/park` beside it: it goes into
+your garage with its damage and fuel (`Vehicle.saveState`), tagged with the
+home, and survives a restart. On foot on the spot, G brings it out there,
+free and at once; `/garage` can still have it delivered anywhere.
+
+Door positions are not guessed: the tenements' and apartment houses' doors
+are the quads of their models textured with a door bitmap, the painted-on
+doors of the villas, brick houses and village buildings were read off
+textured elevations of the models, and every marker stands on the stock
+pavement, stoop or porch there (the header of `data/houses.js` has the
+method). Mafia has no script lights; lamps are the stock models whose glass
+is drawn lit, and the villa's fire is a real `Fire` with no damage.
+
 ## Bars
 
 `/bar` points the compass at the nearest bar. At the counter, N picks a
@@ -885,6 +951,7 @@ development mode is on.
 | `server/distillery.js`, `client/distillery.js` | The hidden rum distillery: its quest, still minigame, casks, loads and buyers, heat, raids and characters; the reveal shot and blast flash. |
 | `server/turf.js`, `stashes.js`, `speed_traps.js`, `interiors.js` | Turf, cash stashes, speed traps and building entrances, each per map. |
 | `server/bars.js`, `drunk.js`, `lib/bar_room.js` | Bars, their staff and drink counters; drunkenness, blackouts and drunk driving; the stock map's back-room bar. |
+| `server/housing.js`, `lib/house_rooms.js`, `lib/house_decor.js`, `data/houses.js`, `client/housing.js` | Homes: the houses of every map, buying and selling, keys and visitors, the shared rooms under the fields, the furnishing catalogue and its editor keys, parking at the kerb. |
 | `server/map_vote.js`, `bootleg.js`, `lib/maps.js` | The default map, map votes, the bootleg run and the map registry. |
 | `server/championship.js`, `jail.js`, `jail_visits.js`, `hospital.js` | The Autodrom championship, jail sentences, jail visits and hospital respawns. |
 | `client/hud.js`, `client/hud.html` | One transparent web view for toasts, feed, activity cards, race panel, level strip and the city menu; it also arbitrates the single native compass by priority. |
