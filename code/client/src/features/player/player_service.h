@@ -1,6 +1,7 @@
 #pragma once
 
 #include "game/entities/native_object_registry.h"
+#include "host_lead.h"
 #include "ride_blend.h"
 #include "shared/features/combat/vehicle_impact.h"
 #include "shared/features/npc/npc_seized.h"
@@ -64,6 +65,8 @@ namespace Mafia1Online::Features::Player {
         // bands every 100 or 200 ms. Two intervals of render delay, plus how
         // late packets come, keep a bracket through one lost packet.
         inline static const Framework::Utils::SnapshotBufferConfig kRemoteSnapshotConfig {75.0f, 150.0f, 4.0f, 4.0f, true, 75.0f, 500.0f, 2.0f, 0.1f};
+        // As CarService's kLeadEntrySeconds.
+        static constexpr float kHostLeadSeconds = 0.3f;
         struct RemoteStream {
             RemoteStream(): snapshots(&kRemoteSnapshotConfig) {}
             Framework::Utils::TransformSnapshotBuffer snapshots;
@@ -81,6 +84,11 @@ namespace Mafia1Online::Features::Player {
             double renderTime = 0.0;
             // Dates each pose by when the controller sampled it.
             Shared::Net::SampleClockMapper clock;
+            // Simulation host: the render clock's lead past now - delay, the
+            // correction a new pose makes, and the last frame's local clock.
+            HostLead lead;
+            HostCorrection correction;
+            double frameClock = 0.0;
         };
 
         struct NativeHuman {

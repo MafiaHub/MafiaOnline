@@ -1,6 +1,7 @@
 // Round trips of the quantized wire forms, the sender sample clock and the
 // railway rider blend.
 #include "client/src/features/car/car_pose_buffer.h"
+#include "client/src/features/player/host_lead.h"
 #include "client/src/features/player/ride_blend.h"
 #include "client/src/features/player/stalled_gait.h"
 #include "shared/features/car/car_entity.h"
@@ -647,6 +648,34 @@ namespace {
         // Nothing received yet.
         CHECK(!Stalled(5000.0, 0.0, 150.0f, running));
     }
+
+    void HostView() {
+        using namespace Features::Player;
+        // Half of each round trip, kept within the buffer's bound one send
+        // interval past the newest pose.
+        CHECK(Near(HostTransitMs(80, 40, 50.0f, 150.0f), 60.0f, 1e-4f));
+        CHECK(Near(HostTransitMs(400, 100, 50.0f, 150.0f), 100.0f, 1e-4f));
+        CHECK(HostTransitMs(0, -1, 50.0f, 150.0f) == 0.0f && HostTransitMs(200, 0, 200.0f, 150.0f) == 0.0f);
+        // The lead eases to its target without overshooting.
+        Features::Player::HostLead lead;
+        float previous = 0.0f;
+        for (int i = 0; i < 120; ++i) {
+            const float ms = lead.Advance(200.0f, 1.0f / 60.0f, 0.3f);
+            CHECK(ms >= previous - 1e-3f && ms <= 200.0f + 1e-3f);
+            previous = ms;
+        }
+        CHECK(Near(previous, 200.0f, 1.0f));
+        // A jump decays to under a tenth in 200 ms; a teleport snaps.
+        HostCorrection correction;
+        correction.Rebase(glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f));
+        glm::vec3 offset {1.0f, 0.0f, 0.0f};
+        for (int i = 0; i < 12; ++i) {
+            offset = correction.Advance(1.0f / 60.0f);
+        }
+        CHECK(offset.x > 0.0f && offset.x < 0.1f);
+        correction.Rebase(glm::vec3(10.0f, 0.0f, 0.0f), glm::vec3(0.0f));
+        CHECK(correction.offset == glm::vec3(0.0f));
+    }
 } // namespace
 
 int main() {
@@ -668,6 +697,7 @@ int main() {
     CarControllerChange();
     RideBlend();
     StalledGait();
+    HostView();
     if (failures == 0) {
         std::printf("network wire tests passed\n");
     }

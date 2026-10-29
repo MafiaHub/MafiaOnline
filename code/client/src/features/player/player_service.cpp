@@ -1,4 +1,5 @@
 #include "player_service.h"
+#include "host_lead.h"
 #include "stalled_gait.h"
 
 #include "core/application.h"
@@ -17,16 +18,20 @@
 #include "shared/features/railway/railway_report.h"
 
 #include <core_modules.h>
+#include <integrations/client/instance.h>
+#include <integrations/client/networking/engine.h>
 #include <logging/logger.h>
 #include <mafia1/sdk/player/native_human.h>
 #include <mafia1/sdk/player/native_human_factory.h>
 #include <mafia1/sdk/police/native_police_action.h>
 #include <mafia1/sdk/seat/native_seat.h>
+#include <networking/network_client.h>
 #include <networking/network_peer.h>
 #include <networking/replication/replication_manager.h>
 
 #include <glm/gtc/quaternion.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 #include <unordered_set>
@@ -118,7 +123,9 @@ namespace Mafia1Online::Features::Player {
         });
         // A player sees others once spawned; the simulation host, which never
         // spawns, sees every spawned player.
-        const bool observing = Simulation::IsHost() || (controlled && controlled->spawned);
+        const bool host      = Simulation::IsHost();
+        const bool observing = host || (controlled && controlled->spawned);
+        const int hostPing   = host ? Framework::CoreModules::GetClientInstance()->GetNetworkingEngine()->GetNetworkClient()->GetPing() : 0;
         std::unordered_set<uint64_t> seen;
         replication->ForEach<Shared::Entities::PlayerEntity>([&](Shared::Entities::PlayerEntity *player) {
             if (player->missionGeneration != world.LoadedMissionGeneration()) {
@@ -148,7 +155,14 @@ namespace Mafia1Online::Features::Player {
             // controller's sample clock, not by the server pass that relayed it.
             const MafiaNet::Time transformTime = player->GetLastTransformTime();
             const double clockNow              = static_cast<double>(MafiaNet::GetTimeUS()) * 0.001;
+            const float frameSeconds           = stream.frameClock > 0.0 ? static_cast<float>(std::min(clockNow - stream.frameClock, 100.0) * 0.001) : 0.0f;
+            stream.frameClock                  = clockNow;
+            // The host's correction: the buffer as it stood before a new pose.
+            std::optional<Framework::Utils::TransformSnapshotBuffer> before;
             if (stream.snapshots.Empty() || stream.lastPacketTime != transformTime) {
+                if (host) {
+                    before = stream.snapshots;
+                }
                 Framework::Utils::TransformSnapshot snapshot {player->position, player->velocity, player->rotation};
                 if (IsFinite(snapshot) && glm::length(snapshot.rotation) >= 0.0001f) {
                     snapshot.rotation              = glm::normalize(snapshot.rotation);
@@ -167,6 +181,19 @@ namespace Mafia1Online::Features::Player {
                 }
             }
             stream.renderTime = stream.snapshots.RenderTimeMs(clockNow);
+            if (host && stream.renderTime > 0.0) {
+                // Simulation host: where the player is now, past the render
+                // delay and the poses' transit. Its NPCs aim at, chase and
+                // steer round this body (C_actor::IsPossibleCollAll, reM
+                // C_actor.cpp:1416).
+                const float transit = HostTransitMs(player->ping, hostPing, stream.snapshots.IntervalMs(), kRemoteSnapshotConfig.maxExtrapolationMs);
+                stream.renderTime += stream.lead.Advance(stream.snapshots.EffectiveDelayMs() + transit, frameSeconds, kHostLeadSeconds);
+                Framework::Utils::TransformSnapshot was;
+                Framework::Utils::TransformSnapshot now;
+                if (before && before->Sample(stream.renderTime, was) && stream.snapshots.Sample(stream.renderTime, now)) {
+                    stream.correction.Rebase(was.position, now.position);
+                }
+            }
             if (!_currentById.contains(id) && !stream.creationFailed) {
                 Framework::Utils::TransformSnapshot pose {player->position, player->velocity, player->rotation};
                 if (IsFinite(pose) && glm::length(pose.rotation) >= 0.0001f) {
@@ -177,6 +204,7 @@ namespace Mafia1Online::Features::Player {
             ApplyModel(world, id, player->model);
             Framework::Utils::TransformSnapshot pose;
             if (SampleRemote(id, pose)) {
+                pose.position += stream.correction.Advance(frameSeconds);
                 ApplyRemotePose(world, id, pose, player->alive, RemoteLocomotion(stream));
             }
         });
