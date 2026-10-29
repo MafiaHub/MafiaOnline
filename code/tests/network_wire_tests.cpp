@@ -175,9 +175,14 @@ namespace {
         // Backing off as it faces its target: the velocity points behind it.
         npc.rotation = glm::angleAxis(0.4f, glm::vec3(0.0f, 1.0f, 0.0f));
         npc.velocity = npc.rotation * glm::vec3(0.5f, 0.0f, -2.0f);
+        npc.aiming    = true;
+        npc.crouching = false;
         Shared::Entities::NpcEntity npcRead;
+        npcRead.crouching = true;
         TransformRoundTrip(npc, npcRead);
         CHECK(npcRead.locomotion == -5 && Near(npcRead.position, npc.position, 1.0f / 64.0f));
+        // The stance rides with the pose it was taken in.
+        CHECK(npcRead.aiming && !npcRead.crouching);
         CHECK(Near(npcRead.velocity, npc.velocity, 0.05f) && npcRead.velocity.y == 0.0f);
 
         Shared::Npc::Snapshot snapshot;

@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cstdint>
 #include <deque>
+#include <optional>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -35,6 +36,11 @@ namespace Mafia1Online::Features::Npc {
     // replay its shots, reloads, hits and death as they do a remote player's.
     class NpcReplicaService final {
       public:
+        struct Stance {
+            bool aiming = false;
+            bool crouching = false;
+        };
+
         void Update(World::WorldService &world);
         void Reset(World::WorldService &world);
         // The actor destructor: the frame to delete after it, if it was ours.
@@ -51,6 +57,10 @@ namespace Mafia1Online::Features::Npc {
         // Whether this NPC's death may play: its replica draws the body at
         // the moment the host's died. True for any other network id.
         [[nodiscard]] bool DeathShown(uint64_t networkId) const;
+        // The aim and crouch the host's NPC had at the moment its replica
+        // shows, which CombatService applies in place of the Combat::State's
+        // newest; nothing for any other network id.
+        [[nodiscard]] std::optional<Stance> DisplayedStance(uint64_t networkId) const;
         // This NPC's attack is aimed at the local player: until `until` its
         // replica closes to striking range of it (ApplyContact). Only this
         // screen's picture; the server checks hits by the host's poses.
@@ -65,7 +75,16 @@ namespace Mafia1Online::Features::Npc {
         struct Replica {
             Replica(): snapshots(&kSnapshotConfig) {}
             Framework::Utils::TransformSnapshotBuffer snapshots;
-            std::deque<std::pair<MafiaNet::Time, int16_t>> locomotion;
+            // What rides with each pose: the locomotion state and stance.
+            struct Gait {
+                MafiaNet::Time at = 0;
+                int16_t locomotion = 1;
+                bool aiming = false;
+                bool crouching = false;
+            };
+            std::deque<Gait> locomotion;
+            // The stance at this frame's presentation time, once a pose came.
+            std::optional<Stance> stance;
             // The newest pose's velocity: a stall holds a moving body still.
             glm::vec3 newestVelocity {0.0f};
             MafiaNet::Time lastTransformTime = 0;
@@ -112,6 +131,9 @@ namespace Mafia1Online::Features::Npc {
         // false removes it at once.
         void Remove(World::WorldService &world, uint64_t networkId, const Replica &replica, bool fade);
         void AdvanceFades();
+        // What rode with the pose drawn at `time`: the newest at or before
+        // it, else the oldest held.
+        static const Replica::Gait *GaitAt(const Replica &replica, double time);
         void ApplyPose(Replica &replica, void *actor);
         // Once the death plays: draws the corpse onto the host's, as it
         // falls and where it rests.

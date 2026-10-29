@@ -132,7 +132,7 @@ namespace Mafia1Online::Features::Npc {
             }
             if (newPose) {
                 replica.snapshots.Push(snapshot, sampleTime, clockNow);
-                replica.locomotion.emplace_back(sampleTime, npc->locomotion);
+                replica.locomotion.push_back({sampleTime, npc->locomotion, npc->aiming, npc->crouching});
                 replica.newestVelocity = snapshot.velocity;
                 while (replica.locomotion.size() > 32) {
                     replica.locomotion.pop_front();
@@ -168,6 +168,9 @@ namespace Mafia1Online::Features::Npc {
                 }
             }
             replica.renderTime = replica.snapshots.RenderTimeMs(clockNow);
+            if (const auto *gait = GaitAt(replica, replica.renderTime)) {
+                replica.stance = Stance {gait->aiming, gait->crouching};
+            }
             auto *actor = world.NativeObjects().Resolve(replica.handle);
             if (actor) {
                 // The death reaches the entity and the Combat::State on separate
@@ -284,20 +287,15 @@ namespace Mafia1Online::Features::Npc {
             return;
         }
         // The state at the same render time as the pose.
-        std::optional<int16_t> state;
-        for (const auto &[at, value] : replica.locomotion) {
-            if (static_cast<double>(at) > time && state) {
-                break;
-            }
-            state = value;
-        }
-        if (!state) {
+        const auto *gait = GaitAt(replica, time);
+        if (!gait) {
             return;
         }
+        std::optional<int16_t> state = gait->locomotion;
         // Held at the extrapolation bound: the stop pose until the stream
         // resumes, not a run on the spot.
         if (Player::MovingGait(*state) &&
-            Player::Stalled(time, static_cast<double>(replica.locomotion.back().first), kSnapshotConfig.maxExtrapolationMs, replica.newestVelocity)) {
+            Player::Stalled(time, static_cast<double>(replica.locomotion.back().at), kSnapshotConfig.maxExtrapolationMs, replica.newestVelocity)) {
             state = Player::kStopState;
         }
         const auto animation = Player::PlayerService::ClassifyLocomotion(*state);
@@ -474,6 +472,22 @@ namespace Mafia1Online::Features::Npc {
             return true;
         }
         return found->second.clock.Shows(hostClock, found->second.renderTime);
+    }
+
+    const NpcReplicaService::Replica::Gait *NpcReplicaService::GaitAt(const Replica &replica, double time) {
+        const Replica::Gait *gait = nullptr;
+        for (const auto &entry : replica.locomotion) {
+            if (static_cast<double>(entry.at) > time && gait) {
+                break;
+            }
+            gait = &entry;
+        }
+        return gait;
+    }
+
+    std::optional<NpcReplicaService::Stance> NpcReplicaService::DisplayedStance(uint64_t networkId) const {
+        const auto found = _replicas.find(networkId);
+        return found == _replicas.end() || !found->second.frame ? std::nullopt : found->second.stance;
     }
 
     bool NpcReplicaService::DeathShown(uint64_t networkId) const {

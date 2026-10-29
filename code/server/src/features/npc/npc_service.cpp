@@ -235,6 +235,8 @@ namespace Mafia1Online::Features::Npc {
                     const bool moving = state.alive && !pose.dead;
                     SetPose(entity, pose.x, pose.y, pose.z, pose.yaw, moving ? pose.velocityX : 0.0f, moving ? pose.velocityZ : 0.0f);
                     entity.locomotion = pose.locomotion;
+                    entity.aiming = moving && pose.aiming;
+                    entity.crouching = moving && pose.crouching;
                 });
                 entity.poseSource = MafiaNet::ToPeerGuid(packet->guid);
                 if (!state.alive) {

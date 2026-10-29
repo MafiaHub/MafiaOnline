@@ -118,6 +118,7 @@ namespace Mafia1Online::Features::Combat {
         if (!replication) {
             return;
         }
+        const auto &npcReplicas = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->NpcReplicas();
         for (const auto &[networkId, state] : _states) {
             const auto life = FindCombatLife(*replication, networkId);
             if (!life || !life->spawned || !state.spawned || life->missionGeneration != state.missionGeneration || life->spawnGeneration != state.spawnGeneration) {
@@ -194,13 +195,19 @@ namespace Mafia1Online::Features::Combat {
             if (!state.alive || life->killed) {
                 continue;
             }
-            const bool crouchChanged = human->IsCrouching() != state.crouching;
+            // An NPC's replica takes the stance its host's body had at the
+            // moment it draws, which rides with the pose; the State's is a
+            // render delay ahead of the body.
+            const auto stance = npcReplicas.DisplayedStance(networkId);
+            const bool crouching = stance ? stance->crouching : state.crouching;
+            const bool aiming = stance ? stance->aiming : state.aiming;
+            const bool crouchChanged = human->IsCrouching() != crouching;
             if (crouchChanged) {
-                human->SetCrouching(state.crouching);
+                human->SetCrouching(crouching);
             }
-            const bool aimChanged = human->IsAiming() != state.aiming;
+            const bool aimChanged = human->IsAiming() != aiming;
             if (aimChanged) {
-                human->SetAiming(state.aiming);
+                human->SetAiming(aiming);
             }
             if ((aimChanged || crouchChanged) && !inCar) {
                 human->RefreshAnimation();
@@ -226,7 +233,7 @@ namespace Mafia1Online::Features::Combat {
                 applied.poseUpdatedAt = now;
                 (void)human->AimPoseAt({position.x + applied.poseTargetOffsetX, position.y + applied.poseTargetOffsetY, position.z + applied.poseTargetOffsetZ});
             }
-            else if (state.aiming) {
+            else if (aiming) {
                 const float squared = state.aimDirectionX * state.aimDirectionX + state.aimDirectionY * state.aimDirectionY + state.aimDirectionZ * state.aimDirectionZ;
                 if (std::isfinite(squared) && squared > 0.8f && squared < 1.2f) {
                     // PoseSetPoseAimed refuses seated humans. C_human::Movement

@@ -91,6 +91,11 @@ namespace Mafia1Online::Shared::Entities {
         // The host's native locomotion state (C_human m_iAnimState), which
         // rides with the pose like a player's.
         int16_t locomotion = 1;
+        // Its stance (C_human m_bIsAiming, m_bIsCrouching), with the pose
+        // for the same reason: a replica raises the gun or ducks where the
+        // host's body did. The Combat::State keeps them too.
+        bool aiming = false;
+        bool crouching = false;
         // The clip a script plays on it (npc.playAnimation), empty for none.
         // Each play or stop counts the revision up, so a replayed one-shot
         // clip starts again on every player's copy.
@@ -128,18 +133,21 @@ namespace Mafia1Online::Shared::Entities {
             carActionAt = std::chrono::steady_clock::now();
         }
 
-        // 16 bytes (43 as raw floats): a walker's pose plus the locomotion.
+        // A walker's pose plus the locomotion and the stance's two bits.
         void SerializeTransform(Framework::Networking::Replication::FieldSerializer &fields) override {
             auto *stream = fields.PlainStream();
             if (!stream) {
                 NetworkEntity::SerializeTransform(fields);
                 fields.Field(sampleClock);
                 fields.Field(locomotion);
+                fields.Field(aiming);
+                fields.Field(crouching);
                 return;
             }
             const bool write = fields.Writing();
             if (!Net::SerializeWorldPosition(stream, write, position) || !Net::SerializeHeading(stream, write, rotation, 10) ||
-                !Net::SerializePlanarVelocity(stream, write, velocity) || !stream->Serialize(write, sampleClock) || !stream->Serialize(write, locomotion)) {
+                !Net::SerializePlanarVelocity(stream, write, velocity) || !stream->Serialize(write, sampleClock) || !stream->Serialize(write, locomotion) ||
+                !stream->Serialize(write, aiming) || !stream->Serialize(write, crouching)) {
                 fields.Fail();
             }
         }
