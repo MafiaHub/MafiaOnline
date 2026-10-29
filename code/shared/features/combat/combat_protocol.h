@@ -260,6 +260,9 @@ namespace Mafia1Online::Shared::Combat {
         uint16_t throwHoldMs        = 0;
         // The accepted intent's sequence; a Detonation refers to it.
         uint32_t sequence          = 0;
+        // An NPC's melee action: its host's sample clock at the attack
+        // (Npc::Melee::hostClockMs). A player's carries none.
+        uint16_t sampleClock       = 0;
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {
             stream->Serialize(write, networkId);
@@ -288,6 +291,9 @@ namespace Mafia1Online::Shared::Combat {
             if (action == Action::Melee) {
                 stream->Serialize(write, meleeIndex);
                 stream->Serialize(write, meleeHoldMs);
+            }
+            if (action == Action::MeleeStart || action == Action::Melee || action == Action::MeleeCancel) {
+                stream->Serialize(write, sampleClock);
             }
             if (action == Action::Throw) {
                 stream->Serialize(write, sequence);

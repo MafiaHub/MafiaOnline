@@ -46,6 +46,13 @@ namespace Mafia1Online::Features::Npc {
         // door window stays inside the 2 s SeatService holds an exit for.
         constexpr uint16_t kThrowReplayAgeMs = 1000;
         constexpr uint16_t kDoorReplayAgeMs = 1500;
+        // An action waits for its replica at most the snapshot buffer's
+        // longest render delay (kSnapshotConfig, 600 ms) and a little. One
+        // dated further ahead than a second is from a clock the mapper lost
+        // (no pose change for longer than the 16-bit range) and plays now.
+        constexpr auto kReachWaitLimit = std::chrono::milliseconds(700);
+        constexpr double kReachLeadLimitMs = 1000.0;
+
         // reM HUMAN_THROW_CAR_SCREAM_BASE and _COUNT.
         constexpr uint32_t kThrownOutFirstLine = 161;
         constexpr uint32_t kThrownOutLines     = 7;
@@ -343,6 +350,19 @@ namespace Mafia1Online::Features::Npc {
             return;
         }
         replica.seizingUntil = std::chrono::steady_clock::now() + std::min(std::chrono::milliseconds(duration), kSeizingLimit);
+    }
+
+    bool NpcReplicaService::Reached(uint64_t networkId, uint16_t hostClock, std::chrono::steady_clock::time_point received) const {
+        const auto found = _replicas.find(networkId);
+        if (found == _replicas.end() || !found->second.frame || std::chrono::steady_clock::now() - received >= kReachWaitLimit) {
+            return true;
+        }
+        const auto at = found->second.clock.Project(hostClock);
+        if (!at) {
+            return true;
+        }
+        const double lead = *at - found->second.renderTime;
+        return lead <= 0.0 || lead > kReachLeadLimitMs;
     }
 
     void NpcReplicaService::Remove(World::WorldService &world, uint64_t networkId, const Replica &replica) {

@@ -1,5 +1,6 @@
 #include "combat_service.h"
 
+#include "core/application.h"
 #include "features/simulation/simulation_config.h"
 
 #include "combat_hooks.h"
@@ -501,10 +502,18 @@ namespace Mafia1Online::Features::Combat {
             return std::tie(left.networkId, left.missionGeneration, left.spawnGeneration, left.revision) < std::tie(right.networkId, right.missionGeneration, right.spawnGeneration, right.revision);
         });
         const auto now = std::chrono::steady_clock::now();
+        const auto &npcReplicas = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->NpcReplicas();
+        // Bodies with an NPC attack waiting for their replica: their later
+        // events wait behind it.
+        std::unordered_set<uint64_t> waiting;
         for (auto it = _events.begin(); it != _events.end();) {
             const auto &event = it->event;
             if (now - it->received > std::chrono::seconds(2) || event.missionGeneration < world.LoadedMissionGeneration()) {
                 it = _events.erase(it);
+                continue;
+            }
+            if (waiting.contains(event.networkId)) {
+                ++it;
                 continue;
             }
             const auto *state = GetState(event.networkId);
@@ -517,6 +526,14 @@ namespace Mafia1Online::Features::Combat {
             const bool meleeAction   = (event.action == Shared::Combat::Action::Melee || event.action == Shared::Combat::Action::MeleeStart || event.action == Shared::Combat::Action::MeleeCancel)
                 && (event.weaponId == 0 || (event.weaponId >= 2 && event.weaponId <= 4));
             const bool throwAction   = event.action == Shared::Combat::Action::Throw && (event.weaponId == 5 || event.weaponId == 15);
+            // An NPC's replica is drawn a render delay behind its host, where
+            // the AI struck from within reach: its swing plays once the
+            // replica gets there, not ahead of the steps that brought it.
+            if (meleeAction && !npcReplicas.Reached(event.networkId, event.sampleClock, it->received)) {
+                waiting.insert(event.networkId);
+                ++it;
+                continue;
+            }
             const bool grenadePhase = (event.action == Shared::Combat::Action::ThrowStart || event.action == Shared::Combat::Action::ThrowRelease || event.action == Shared::Combat::Action::ThrowCancel)
                 && (event.weaponId == 5 || event.weaponId == 15);
             if (throwAction) {

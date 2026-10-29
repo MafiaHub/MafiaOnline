@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <optional>
 
 namespace Mafia1Online::Shared::Net {
     // A sender's sample clock: its own milliseconds, 16 bits on the wire,
@@ -98,6 +99,16 @@ namespace Mafia1Online::Shared::Net {
             _offset += std::clamp(floor - _offset, -kSlewMs, kSlewMs);
             _mapped = static_cast<double>(_extended) + _offset;
             return _mapped;
+        }
+
+        // Where Map would place a sample at `clock` now, without taking it
+        // as one (a melee attack dated by the same sender clock as its
+        // poses); nothing until a sample has been mapped.
+        [[nodiscard]] std::optional<double> Project(uint16_t clock) const {
+            if (!_started) {
+                return std::nullopt;
+            }
+            return static_cast<double>(_extended + static_cast<int16_t>(static_cast<uint16_t>(clock - _last))) + _offset;
         }
 
         void Reset() {

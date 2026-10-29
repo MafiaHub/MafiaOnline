@@ -1421,6 +1421,7 @@ namespace Mafia1Online::Features::Npc {
         melee.directionX = direction.x;
         melee.directionY = direction.y;
         melee.directionZ = direction.z;
+        melee.hostClockMs = Shared::Net::SampleClock(MafiaNet::GetTime());
         Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(melee, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
     }
 

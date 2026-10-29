@@ -26,6 +26,10 @@ namespace Mafia1Online::Shared::Npc {
         float directionX = 0.0f;
         float directionY = 0.0f;
         float directionZ = 0.0f;
+        // When the host's AI attacked, on the clock its poses are sampled by
+        // (Shared::Net::SampleClock): players replay it once the NPC's
+        // replica, drawn one render delay behind, gets there.
+        uint16_t hostClockMs = 0;
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {
             auto actionValue = static_cast<uint8_t>(action);
@@ -38,6 +42,7 @@ namespace Mafia1Online::Shared::Npc {
             stream->Serialize(write, directionX);
             stream->Serialize(write, directionY);
             stream->Serialize(write, directionZ);
+            stream->Serialize(write, hostClockMs);
             if (!write) {
                 action = static_cast<Combat::Action>(actionValue);
             }
