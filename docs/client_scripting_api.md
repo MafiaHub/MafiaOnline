@@ -39,6 +39,7 @@ binding metadata registered by the game and framework at runtime.
 | `Scene`, `Draw` | Client-only 3D models, projection, and per-frame 2D drawing. |
 | `Events`, `Messages`, `Exports`, `Imports` | Resource events, client/server events, and local resource communication. |
 | `Web`, `Chat`, `Key`, `Voice`, `Nametags`, `Discord` | Client UI, input, voice, labels, and presence. |
+| `Settings` | List a resource's keys and switches on the player's settings screen; the web-audio volume. |
 | `Vector2`, `Vector3`, `Vector4`, `Quaternion`, `Color` | Mutable value types. |
 | `ExecutionEnvironment`, `console` | Runtime flags and resource-aware logging. |
 
@@ -352,6 +353,33 @@ directory or its archives, such as `"00_dog.wav"`.
   or the mission closes (at most 32 loops). A missing file returns null and is
   logged once.
 
+## Settings
+
+The player's settings screen (Esc, Settings, or `Settings.open()`) lists
+every retail control, the mod's own keys and the keys resources describe.
+
+- `Settings.describeKey(key, label): boolean` — Lists a `Key.bind` key name
+  (not the wheel or Escape) under this resource on the Controls page. When
+  the player moves it, this resource's `Key.bind` handlers and `Key.isDown`
+  for that key follow the key the player chose (or never fire, if they
+  unbound it). Up to 64 keys per resource.
+- `Settings.getKeyLabel(key): string` — The label of the key the player now
+  presses for it, such as `"F8"`, for prompts. `"Unbound"` when removed.
+- `Settings.defineToggle(id, label, value): boolean` /
+  `Settings.setToggle(id, value): boolean` — An on/off switch on the
+  Gameplay page. Flipping it raises `settingToggle`; the resource keeps the
+  choice itself (Free Ride stores the radio switch in the player's record).
+  Up to 32 per resource.
+- `Settings.getMediaVolume(): number` — The player's volume for resource
+  web audio, 0 to 1; scale page audio by it and follow `mediaVolumeChange`.
+- `Settings.open(): boolean` — Opens the settings screen over the game.
+
+The player's moves are kept in the client's settings file per resource name
+and key, and apply while that resource runs. A move is made where `Key.bind`
+reads the keyboard, so it applies to the key itself: another resource
+binding the same key follows it too. Descriptions, switches and moves stop
+applying when the resource stops.
+
 The [Free Ride car radio](../resources/freeride/client/radio.js) uses a
 resource-owned `Web` audio view for a live internet stream. The stream starts
 when this client enters a car and stops on exit. The HTML page handles a lost
@@ -369,6 +397,8 @@ source; use the station's direct stream URL. Live streams do not support seek.
 | `chatSend` | `text` | A locally typed chat line is about to be sent; return `false` to cancel it. `Chat.send` bypasses this event. |
 | `entityStateChange` | `entity, key, value, previous` | A replicated entity's state key changed. |
 | `voiceStart` / `voiceStop` | none | The local player started or stopped talking. |
+| `settingToggle` | `id, value, resource` | The player flipped a `Settings.defineToggle` switch. Every resource receives it; compare `resource`. |
+| `mediaVolumeChange` | `volume` | The player changed the volume `Settings.getMediaVolume()` returns. |
 | `missionReady` | `{ mission, missionGeneration }` | The native mission loaded and the server's weather and frame overrides were applied. |
 | `missionUnload` | `{ mission, missionGeneration }` | The mission is closing; local sounds and HUD state are cleared right after. |
 | `playerStreamIn` | `player` | A player's replica reached this client (the local player too). |

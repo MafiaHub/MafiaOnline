@@ -15,6 +15,8 @@ const view = {text: null, progress: null};
 let holding = false;
 let pingAt = 0;
 
+Settings.describeKey(JOB_KEY, "Job key: sign on, use, treat, plant, pick up");
+
 Key.bind(JOB_KEY, "both", (_key, state) => {
     holding = state === "down";
     pingAt = Date.now();
@@ -42,7 +44,9 @@ Events.on("render", () => {
     Draw.rect(width / 2 - 230, top, 460, plate, PROMPT_FILL);
     Draw.rect(width / 2 - 230, top, 4, plate, PROMPT_COLOR);
     Draw.rect(width / 2 - 226, top, 456, 1, PROMPT_EDGE);
-    Draw.text(view.text, width / 2 + 2, top + 24, 15, PROMPT_COLOR, 3);
+    // The server words its prompts for G; show the key the player moved it to.
+    const text = view.text.replace("[G]", `[${Settings.getKeyLabel(JOB_KEY).toUpperCase()}]`);
+    Draw.text(text, width / 2 + 2, top + 24, 15, PROMPT_COLOR, 3);
     if (view.progress !== null) {
         Draw.rect(width / 2 - 200, top + 36, 400, 6, BAR_TRACK);
         Draw.rect(width / 2 - 200, top + 36, Math.round(400 * view.progress), 6, BAR_FILL);

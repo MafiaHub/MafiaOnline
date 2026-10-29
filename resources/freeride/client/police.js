@@ -42,6 +42,7 @@ Events.on("fr:police", (data) => {
     }
 });
 
+Settings.describeKey(CALL_KEY, "Police: call for backup at a phone booth");
 Key.bind(CALL_KEY, () => {
     if (boothInReach(LocalPlayer)) Events.emitServer("fr:backup:call", {});
 });
@@ -49,7 +50,7 @@ Key.bind(CALL_KEY, () => {
 Events.on("render", () => {
     if (!boothInReach(LocalPlayer)) return;
     const {width, height} = Web.getScreenSize();
-    const label = "[U] CALL THE PRECINCT FOR BACKUP";
+    const label = `[${Settings.getKeyLabel(CALL_KEY).toUpperCase()}] CALL THE PRECINCT FOR BACKUP`;
     Draw.rect(width / 2 - 190, height - 96, 380, 36, BOOTH_PROMPT_FILL);
     Draw.text(label, width / 2, height - 72, 15, BOOTH_PROMPT_COLOR, 3);
 });

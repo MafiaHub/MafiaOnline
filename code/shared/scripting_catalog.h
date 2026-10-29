@@ -57,6 +57,9 @@ namespace Mafia1Online::Scripting {
         events.add_property("chatSend", "[text: string]", "Dispatched synchronously when the local player submits a chat line. Return false to keep the line client-side. Chat.send bypasses this event; asynchronous handlers cannot block it.");
         events.add_property("voiceStart", "[]", "Dispatched when the local player starts speaking on voice chat. A held push-to-talk key with no speech does not trigger it.");
         events.add_property("voiceStop", "[]", "Dispatched when the local player stops speaking.");
+        events.add_property("settingToggle", "[id: string, value: boolean, resource: string]",
+            "Dispatched when the player flips a switch a resource defined with `Settings.defineToggle`. Compare `resource` with your own name; every resource receives it.");
+        events.add_property("mediaVolumeChange", "[volume: number]", "Dispatched when the player changes the web-audio volume `Settings.getMediaVolume` returns.");
         auto &mission = catalog.data_type("ClientMissionInfo", "The mission this client has loaded.");
         mission.add_property("mission", "string", "Stock or detected mod mission directory name.");
         mission.add_property("missionGeneration", "number", "Server generation of this mission load.");

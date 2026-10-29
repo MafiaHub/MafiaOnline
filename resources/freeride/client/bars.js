@@ -65,9 +65,13 @@ function drawCard(bar, player) {
     Draw.text(`${drink.name}  ·  ${price}`, center, top + 102, 19, BAR_TEXT_COLOR, 3);
     Draw.text(drink.note, center, top + 126, 12, BAR_PANEL_MUTED, 3);
     Draw.line(left + 28, top + 138, left + cardWidth - 28, top + 138, 1, BAR_PANEL_LINE);
-    Draw.text(`[N] NEXT  ${index + 1}/${bar.drinks.length}      [B] ORDER      CASH $${player.money}`, center, top + 164, 13, BAR_LABEL_COLOR, 3);
+    const next = Settings.getKeyLabel("n").toUpperCase();
+    const order = Settings.getKeyLabel("b").toUpperCase();
+    Draw.text(`[${next}] NEXT  ${index + 1}/${bar.drinks.length}      [${order}] ORDER      CASH $${player.money}`, center, top + 164, 13, BAR_LABEL_COLOR, 3);
 }
 
+Settings.describeKey("b", "Buy or accept at a shop or bar counter");
+Settings.describeKey("n", "Next offer at a shop or bar counter");
 Key.bind("b", orderDrink);
 Key.bind("n", nextDrink);
 

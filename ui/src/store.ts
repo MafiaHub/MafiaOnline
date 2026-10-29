@@ -127,6 +127,66 @@ export const scoreboardVisible = signal(false);
 export const roster = signal<{ players: Player[]; mission: string }>({ players: [], mission: '' });
 export const toasts = signal<Toast[]>([]);
 
+// The client's settings screen (code/client/src/features/settings). Slots are
+// "native:<retail slot>", "mod:<key>" and "script:<resource>/<key>".
+export interface SettingsSlot {
+    key: string;
+    label: string;
+    defaultLabel: string;
+    mouse: boolean;
+    wheel: boolean;
+    clearable: boolean;
+    conflicts: string[];
+}
+
+export interface SettingsGroup {
+    id: string;
+    label: string;
+    rows: { id: string; label: string; slots: string[] }[];
+}
+
+export interface GameSettings {
+    groups: SettingsGroup[];
+    slots: Record<string, SettingsSlot>;
+    mouse: {
+        sensitivityX: number;
+        sensitivityY: number;
+        turnLimit: number;
+        steering: number;
+        invertY: boolean;
+        doubleTapRoll: boolean;
+        mph: boolean;
+        crosshair: number;
+    };
+    audio: { sound: number; music: number; car: number; speech: number };
+    media: number;
+    voice: {
+        enabled: boolean;
+        volume: number;
+        mode: 'pushToTalk' | 'voiceActivity';
+        threshold: number;
+        releaseMs: number;
+        noiseSuppression: boolean;
+        device: string;
+    };
+    hud: { nametags: boolean; nametagHealth: boolean };
+    devices: string[];
+    voiceAvailable: boolean;
+    toggles: { resource: string; id: string; label: string; value: boolean }[];
+    // True while that part still follows the selected Mafia profile.
+    profile: { controls: boolean; audio: boolean };
+}
+
+export interface VoiceLevel {
+    level: number;
+    talking: boolean;
+    microphone: boolean;
+}
+
+export const settingsOpen = signal(false);
+export const gameSettings = signal<GameSettings | null>(null);
+export const voiceLevel = signal<VoiceLevel>({ level: 0, talking: false, microphone: false });
+
 // Wall clock for fades, ticked by the HUD while it is on screen.
 export const now = signal(Date.now());
 

@@ -109,10 +109,14 @@ function drawShopCard(shop, player) {
     Draw.text(`${offer.name}  ·  ${price}`, center, top + 102, 19, SHOP_PAGE_TEXT_COLOR, 3);
     Draw.text(offer.note, center, top + 126, 12, SHOP_PANEL_MUTED, 3);
     Draw.line(left + 28, top + 138, left + cardWidth - 28, top + 138, 1, SHOP_PANEL_LINE);
-    Draw.text(`[N] NEXT  ${index + 1}/${shop.offers.length}      [B] ${offer.price === 0 ? "ACCEPT" : "BUY"}      CASH $${player.money}`,
+    const next = Settings.getKeyLabel("n").toUpperCase();
+    const buy = Settings.getKeyLabel("b").toUpperCase();
+    Draw.text(`[${next}] NEXT  ${index + 1}/${shop.offers.length}      [${buy}] ${offer.price === 0 ? "ACCEPT" : "BUY"}      CASH $${player.money}`,
         center, top + 164, 13, SHOP_LABEL_COLOR, 3);
 }
 
+Settings.describeKey("b", "Buy or accept at a shop or bar counter");
+Settings.describeKey("n", "Next offer at a shop or bar counter");
 Key.bind("b", buyNearest);
 Key.bind("n", nextOffer);
 

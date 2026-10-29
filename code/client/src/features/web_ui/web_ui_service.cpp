@@ -7,6 +7,7 @@
 #include "features/chat/chat_service.h"
 #include "features/menu/menu_hooks.h"
 #include "features/quick_join/quick_join.h"
+#include "features/settings/settings_service.h"
 #include "features/world/world_hooks.h"
 #include "features/world/world_service.h"
 #include "shared/features/chat/text_policy.h"
@@ -20,11 +21,13 @@
 #include <mafia1/sdk/graphics/native_graph.h>
 #include <mafia1/sdk/menu/native_menu.h>
 #include <networking/replication/replication_manager.h>
+#include <voice/client/voice_client.h>
 
 #include <imm.h>
 #include <windowsx.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <limits>
@@ -37,13 +40,12 @@ namespace Mafia1Online::Features::WebUi {
         using Clock = std::chrono::steady_clock;
 
         constexpr char kResourceHost[] = "mafia1online";
-        // DirectInput codes; window messages carry the same scan code with
-        // the extended flag, which DirectInput folds into bit 7 instead.
+        using Settings::ModKey;
+        // DirectInput code; window messages carry the same scan code with
+        // the extended flag, which DirectInput folds into bit 7 instead. The
+        // chat, command and player list keys (T, / and held F1 by default;
+        // Tab stays the retail city map) come from the player's settings.
         constexpr uint32_t kDikEscape  = 0x01;
-        // Tab is the retail city map; the player list is held F1 instead.
-        constexpr uint32_t kDikF1      = 0x3b;
-        constexpr uint32_t kDikT       = 0x14;
-        constexpr uint32_t kDikSlash   = 0x35;
         constexpr uint32_t kKeyEnter    = 0x01c;
         constexpr uint32_t kKeyNumEnter = 0x11c;
         // How long the page has to close its chat after Enter.
@@ -55,6 +57,8 @@ namespace Mafia1Online::Features::WebUi {
         constexpr auto kHeartbeatTimeout = std::chrono::seconds(8);
         constexpr uint32_t kHeartbeatTicks = 240;
         constexpr auto kPlayerInterval   = std::chrono::milliseconds(1000);
+        // The settings page's microphone meter, only while it asks for one.
+        constexpr auto kVoiceLevelInterval = std::chrono::milliseconds(66);
 
         const char *ScreenName(WebUiService::Screen screen) {
             switch (screen) {
@@ -137,7 +141,7 @@ namespace Mafia1Online::Features::WebUi {
         }
     } // namespace
 
-    bool WebUiService::Install(Framework::Integrations::Client::Instance &instance, Chat::ChatService &chat, const std::string &projectPath) {
+    bool WebUiService::Install(Framework::Integrations::Client::Instance &instance, Chat::ChatService &chat, Settings::SettingsService &settings, const std::string &projectPath) {
         if (Compat::EnvironmentFlagEnabled(L"MAFIA1ONLINE_NATIVE_UI")) {
             Framework::Logging::GetLogger("Web")->info("CEF skipped by MAFIA1ONLINE_NATIVE_UI");
             return false;
@@ -199,8 +203,9 @@ namespace Mafia1Online::Features::WebUi {
             _lastCursorState.clear();
         });
 
-        _instance = &instance;
-        _chat     = &chat;
+        _instance     = &instance;
+        _chat         = &chat;
+        _gameSettings = &settings;
         _window   = static_cast<HWND>(SDK::Graphics::GetGraph()->MainWindow());
         _settings.Load(SettingsPath(projectPath));
         BindPage();
@@ -213,8 +218,9 @@ namespace Mafia1Online::Features::WebUi {
             _cursorViewId = -1;
             _view     = nullptr;
             _viewId   = -1;
-            _instance = nullptr;
-            _chat     = nullptr;
+            _instance     = nullptr;
+            _chat         = nullptr;
+            _gameSettings = nullptr;
             return false;
         }
         chat.SetKeyRouter(
@@ -245,8 +251,9 @@ namespace Mafia1Online::Features::WebUi {
         _cursorReady  = false;
         _view     = nullptr;
         _viewId   = -1;
-        _instance = nullptr;
-        _chat     = nullptr;
+        _instance     = nullptr;
+        _chat         = nullptr;
+        _gameSettings = nullptr;
         _history.clear();
         _outgoing.clear();
     }
@@ -258,6 +265,8 @@ namespace Mafia1Online::Features::WebUi {
         _outgoing.clear();
         _chatOpen        = false;
         _pauseOpen       = false;
+        _settingsOpen    = false;
+        _voiceMeter      = false;
         _scoreboardShown = false;
         _lastPlayers.clear();
         if (_pageReady) {
@@ -267,7 +276,8 @@ namespace Mafia1Online::Features::WebUi {
 
     void WebUiService::BindPage() {
         for (const char *name : {"ui:ready", "ui:alive", "ui:screen", "menu:connect", "menu:disconnect", "menu:play", "app:quit", "chat:send", "chat:close",
-                                 "pause:close", "gameplay:select", "gameplay:close", "servers:favorite", "servers:forget", "settings:save"}) {
+                                 "pause:close", "gameplay:select", "gameplay:close", "servers:favorite", "servers:forget", "settings:save", "settings:open",
+                                 "settings:close", "settings:set", "settings:bind", "settings:reset", "settings:toggle", "settings:meter", "settings:devices"}) {
             const std::string eventName = name;
             _view->AddEventListener(eventName, [this, eventName](const std::string &payload) {
                 OnPageEvent(eventName, payload);
@@ -398,7 +408,81 @@ namespace Mafia1Online::Features::WebUi {
         if (name == "settings:save") {
             _settings.SetPreferences(data);
             PushState(false);
+            return;
         }
+        if (name == "settings:open") {
+            _settingsOpen = true;
+            _gameSettings->RefreshDevices();
+            PushSettings(true);
+            return;
+        }
+        if (name == "settings:close") {
+            _settingsOpen = false;
+            _voiceMeter   = false;
+            _gameSettings->Flush();
+            return;
+        }
+        if (name == "settings:devices") {
+            _gameSettings->RefreshDevices();
+            PushSettings(false);
+            return;
+        }
+        if (name == "settings:meter") {
+            const auto on = data.is_object() ? data.find("on") : data.end();
+            _voiceMeter   = _settingsOpen && on != data.end() && on->is_boolean() && on->get<bool>();
+            _lastVoiceLevel.clear();
+            return;
+        }
+        if (name == "settings:toggle") {
+            if (const auto value = data.is_object() ? data.find("value") : data.end(); value != data.end() && value->is_boolean()) {
+                _gameSettings->SetToggleFromPage(StringField(data, "resource"), StringField(data, "id"), value->get<bool>());
+                PushSettings(false);
+            }
+            return;
+        }
+        std::optional<std::string> error;
+        if (name == "settings:set") {
+            error = _gameSettings->Set(data);
+        }
+        else if (name == "settings:bind") {
+            error = data.is_object() ? _gameSettings->Bind(StringField(data, "slot"), StringField(data, "key")) : std::optional<std::string>("Unknown control");
+        }
+        else if (name == "settings:reset") {
+            error = _gameSettings->Reset(data.is_object() ? StringField(data, "section") : std::string());
+        }
+        if (error) {
+            Send("toast", {{"kind", "error"}, {"text", *error}});
+            // The page drew its guess; put the real state back.
+            PushSettings(true);
+            return;
+        }
+        PushSettings(false);
+    }
+
+    // Only while the page shows its settings, and only after a change.
+    void WebUiService::PushSettings(bool force) {
+        if (!_pageReady || !_settingsOpen || (!force && _settingsRevision == _gameSettings->Revision())) {
+            return;
+        }
+        _settingsRevision = _gameSettings->Revision();
+        Send("settings", _gameSettings->PageState());
+    }
+
+    void WebUiService::PushVoiceLevel() {
+        const auto now = Clock::now();
+        if (!_voiceMeter || now - _lastVoiceLevelPush < kVoiceLevelInterval) {
+            return;
+        }
+        _lastVoiceLevelPush = now;
+        auto *voice         = Framework::CoreModules::GetVoiceClient();
+        const auto level    = voice ? std::round(std::clamp(voice->GetInputLevel(), 0.0f, 1.0f) * 200.0f) / 200.0f : 0.0f;
+        const nlohmann::json payload = {{"level", level}, {"talking", voice && voice->IsLocalTalking()}, {"microphone", voice && voice->HasMicrophone()}};
+        std::string encoded = payload.dump();
+        if (encoded == _lastVoiceLevel) {
+            return;
+        }
+        _lastVoiceLevel = std::move(encoded);
+        Send("settings:level", payload);
     }
 
     void WebUiService::Activate() {
@@ -411,6 +495,7 @@ namespace Mafia1Online::Features::WebUi {
         _silentTicks         = 0;
         _lastState.clear();
         _lastPlayers.clear();
+        _settingsRevision = 0;
         _mouseX       = -1;
         _mouseY       = -1;
         _mouseButtons = 0;
@@ -435,6 +520,8 @@ namespace Mafia1Online::Features::WebUi {
         _pageReady          = false;
         _chatOpen           = false;
         _pauseOpen          = false;
+        _settingsOpen       = false;
+        _voiceMeter         = false;
         _scoreboardShown    = false;
         _pageScreen         = Screen::Hidden;
         UpdateCapture();
@@ -600,7 +687,14 @@ namespace Mafia1Online::Features::WebUi {
             _chatOpen  = false;
             _pauseOpen = false;
         }
-        const bool scoreboard = _screen == Screen::Game && !_captured && Native::TestKey(static_cast<uint8_t>(kDikF1));
+        // A script's Settings.open() this tick; dropped where it cannot show.
+        if (_gameSettings->TakeOpenRequest()) {
+            OpenSettings();
+        }
+        PushSettings(false);
+        PushVoiceLevel();
+        const uint16_t playerList = _gameSettings->ModKeyDik(ModKey::PlayerList);
+        const bool scoreboard     = _screen == Screen::Game && !_captured && playerList != 0 && Native::TestKey(static_cast<uint8_t>(playerList));
         if (scoreboard != _scoreboardShown) {
             _scoreboardShown = scoreboard;
             if (scoreboard) {
@@ -652,8 +746,11 @@ namespace Mafia1Online::Features::WebUi {
         if (!_chatOpen && !_pauseOpen) {
             return;
         }
-        _chatOpen  = false;
-        _pauseOpen = false;
+        _chatOpen     = false;
+        _pauseOpen    = false;
+        _settingsOpen = false;
+        _voiceMeter   = false;
+        _gameSettings->Flush();
         Send("chat:closed", nlohmann::json::object());
         UpdateCapture();
     }
@@ -668,14 +765,23 @@ namespace Mafia1Online::Features::WebUi {
         Send("chat:open", {{"prefill", prefill}});
     }
 
-    void WebUiService::OpenPause() {
+    void WebUiService::OpenPause(bool settings) {
         CloseGameplayMenu();
         _latched |= _keysDown;
         _pauseOpen = true;
         UpdateCapture();
         _lastPlayers.clear();
         _lastPlayerPush = {};
-        Send("pause:open", nlohmann::json::object());
+        Send("pause:open", {{"settings", settings}});
+    }
+
+    void WebUiService::OpenSettings() {
+        if (!_pageReady || LiveScreen() != Screen::Game || _pageScreen != Screen::Game || _settingsOpen) {
+            return;
+        }
+        _chatOpen = false;
+        _closeRequestedAt.reset();
+        OpenPause(true);
     }
 
     bool WebUiService::ToggleInGame(uint32_t key) {
@@ -683,6 +789,9 @@ namespace Mafia1Online::Features::WebUi {
             return false;
         }
         if (key == kDikEscape) {
+            if (_settingsOpen) {
+                return false;
+            }
             if (_chatOpen || _pauseOpen || _gameplayMenuId) {
                 CloseInGameScreens();
             }
@@ -691,8 +800,10 @@ namespace Mafia1Online::Features::WebUi {
             }
             return true;
         }
-        if (!_captured && (key == kDikT || key == kDikSlash)) {
-            OpenChat(key == kDikSlash ? "/" : "");
+        const uint32_t chat    = _gameSettings->ModKeyMessage(ModKey::Chat);
+        const uint32_t command = _gameSettings->ModKeyMessage(ModKey::Command);
+        if (!_captured && key != 0 && (key == chat || key == command)) {
+            OpenChat(key == command ? "/" : "");
             return true;
         }
         return false;
@@ -735,7 +846,8 @@ namespace Mafia1Online::Features::WebUi {
         if (HidesKeyboard()) {
             return true;
         }
-        return LiveScreen() == Screen::Game && (scanCode == kDikT || scanCode == kDikSlash || scanCode == kDikEscape);
+        return LiveScreen() == Screen::Game &&
+               (scanCode == kDikEscape || scanCode == _gameSettings->ModKeyDik(ModKey::Chat) || scanCode == _gameSettings->ModKeyDik(ModKey::Command));
     }
 
     void WebUiService::ApplyFocus() {

@@ -4,7 +4,7 @@ import { send } from './bridge';
 import { Toasts } from './components/Toasts';
 import { GameHud } from './game/GameHud';
 import { MainMenu } from './screens/MainMenu';
-import { chatOpen, pauseOpen, gameplayMenu, preferences, state } from './store';
+import { chatOpen, pauseOpen, gameplayMenu, preferences, settingsOpen, state } from './store';
 
 const styles = stylex.create({
     root: {
@@ -25,6 +25,7 @@ export function App() {
             gameplayMenu.value = null;
             chatOpen.value = null;
             pauseOpen.value = false;
+            settingsOpen.value = false;
         }
         let second = 0;
         const first = requestAnimationFrame(() => {

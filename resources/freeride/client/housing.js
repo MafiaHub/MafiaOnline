@@ -14,11 +14,14 @@ Events.on("fr:home:edit", (data) => {
     decorating = Boolean(data?.on);
 });
 
-for (const [key, request] of [
-    ["end", {turn: 1}], ["home", {turn: -1}], ["numpad6", {turn: 1}], ["numpad4", {turn: -1}],
-    ["pageup", {lift: 1}], ["pagedown", {lift: -1}], ["numpad8", {lift: 1}], ["numpad2", {lift: -1}],
-    ["delete", {sell: true}], ["numpad0", {cancel: true}],
+for (const [key, request, label] of [
+    ["end", {turn: 1}, "Decorating: turn right"], ["home", {turn: -1}, "Decorating: turn left"],
+    ["numpad6", {turn: 1}, "Decorating: turn right (2nd)"], ["numpad4", {turn: -1}, "Decorating: turn left (2nd)"],
+    ["pageup", {lift: 1}, "Decorating: raise"], ["pagedown", {lift: -1}, "Decorating: lower"],
+    ["numpad8", {lift: 1}, "Decorating: raise (2nd)"], ["numpad2", {lift: -1}, "Decorating: lower (2nd)"],
+    ["delete", {sell: true}, "Decorating: sell the piece back"], ["numpad0", {cancel: true}, "Decorating: put back or finish"],
 ]) {
+    Settings.describeKey(key, label);
     Key.bind(key, () => send(request));
 }
 

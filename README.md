@@ -82,13 +82,17 @@ integration testing. Full weapon, damage, death, vehicle terminal behavior,
 bounded correction, a graphical fill health bar and multiplayer loss testing
 remain release gates.
 
-The main menu, chat, pause screen and player list are a CEF web UI
+The main menu, chat, pause screen, settings and player list are a CEF web UI
 (Preact + StyleX, `ui/`). It is composited into the game's Direct3D 8 frame
 through the Framework's D3D8 backend. Build it with `tools/build_ui.sh`; the
 client build runs that script and copies the result to `bin/ui`. When CEF or
 the page is unavailable, or with `MAFIA1ONLINE_NATIVE_UI=1`, the retail main
 menu keeps only Exit, quick join connects, and the native HUD chat is used. See
-[`docs/ui.md`](docs/ui.md).
+[`docs/ui.md`](docs/ui.md). Its Settings screen (main menu, or Esc in game)
+rebinds every retail control, the mod's keys and resources' keys, and sets
+the mouse, HUD, game and voice volumes, push-to-talk or voice activity and
+the microphone. It saves to `bin/config/settings.json` and applies in-process;
+the Mafia profile is never written.
 The launcher does not write `steam_appid.txt`. Without Steam, or without Mafia
 in its Steam library, it asks for `Game.exe` once and keeps that choice in
 `Mafia1Online_launcher.json` beside itself; it writes nothing when

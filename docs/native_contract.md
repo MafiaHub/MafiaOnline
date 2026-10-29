@@ -432,6 +432,36 @@ suppressed in every mod session, including native shutdown. An existing
 profile is required; with none present, a startup error is shown and the
 skipped picker returns Back without creating a file.
 
+## Player settings
+
+The settings screen (`Features::Settings`, `docs/ui.md`) applies retail
+controls the way the retail options menu does, but from the mod's own
+`config/settings.json`; the profile file is never written. The loaded
+profile's `G_LoadSaveClass` copy at `0x6d4628` (`g_pLoadSaveClass`) holds
+`m_Bindings[60]` at `+0x1f4` (reM `GameKey`, `0x0c` bytes each) and
+`m_ControlSettings` at `+0x4c4` (reM `G_ControlSettings`, `0x5c` bytes; IDA
+`G_IndicatorsClass::GameInit` reads `m_bUseMph` as `0x6d4b44`, which is
+`+0x4c4+0x58`). Until the player changes a binding, the mouse/HUD values or a
+game volume in the mod, those values stay the profile's. Mouse sensitivity,
+turning limit, invert Y, double-tap roll, crosshair (`m_uIndicatorMode`) and
+speech volume are read live by `C_player`, `G_Camera`, `C_human` and
+`G_IndicatorsClass::DrawAll`; the others need the calls below. Gamma is not
+offered: the mod runs windowed, where `SetGammaRamp` has no effect.
+
+| Retail item | Original bytes | Convention, callers and effects | Lifetime and unload |
+| --- | --- | --- | --- |
+| `G_LoadSaveClass::PushBindingsToInput` `0x607a60` | `56 57 8B F9 B9 30 7C 64 00 E8 82 86 EE FF 33 F6 81 C7 F4 01 00 00 56 57` | `void __thiscall(loadSave*)`. IDA callers: native Init `0x604f3a`/`0x604fe9`, ProfileChange `0x605118`, ProfileLoad `0x605973`, options controls `OnClick` `0x5e1714` and `OnDestroy` `0x5e1625`. `C_Input::Reset` on `g_sInput` `0x647c30`, `BindKey` for each of the 60 slots, then `SetSensitivity(400, 400, 400)`. | Called on the game thread from the client update, after the mod wrote changed slots, and only when a slot changed. `C_Input` reallocates its state vectors; the chat input hook reads them only inside its own `Update` call. |
+| `G_LoadSaveClass::Refresh` `0x60dfe0` | `81 EC 08 06 00 00 53 8A 9C 24 10 06 00 00 57 8B F9 F6 C3 01 74 16 A1 DC` | `void __thiscall(loadSave*, unsigned mask)`, `ret 4`. IDA callers: audio options `0x5e0d78`-`0x5e0f6f`, controls `0x5e163b`/`0x5e1720`/`0x5e18a3`/`0x5e18cc`, ProfileLoad `0x605995`. Bit 1 sets the ISND driver volume (`g_ISNDDriver` `0x647edc`, checked by retail), bit 2 sets every IShow record's music volume through `g_pMission->m_pGame` (`0x5b6600`), bits 1 or `0x20` set the vehicle sound gain. The mod passes 1 and `0x20`, plus 2 only while `g_pMission` has its game; never gamma (4) or force feedback. | No pointer kept. The mission's game owns the IShow records; an empty list is a no-op. |
+| `G_IndicatorsClass::GameInit` `0x5f73c0` | `A1 8C 78 63 00 56 8D B1 84 40 00 00 8B 50 24 8A 82 44 2D 00 00 84 C0 8B` | `void __thiscall(indicators*)` on `0x6bf980`. IDA callers: `C_game::Init` `0x5a0cb8` and controls `OnDestroy` `0x5e162f`. Releases and recreates the dashboard textures for mph/km/h and night mode; it reads `g_pMission->m_pGame`. | Called only when the speedometer unit changed while `C_game` is initialized; otherwise the next `C_game::Init` loads the right texture. The indicators own both textures. |
+| `C_game::UpdatePlayerControls` `0x5a7ff0` | `8A 41 40 56 84 C0 57 74 2F 8B 0D 8C 78 63 00 8B 41 38 8D 79 38 85 C0 74` | `void __thiscall(C_game*)`. IDA callers: `GameLoopSingle` `0x549793`, `GameLoopSingle1` `0x5be9a8` after the pause menu, options `0x5e0f87`/`0x5e172e`. Returns unless initialized (`+0x40`), then each `C_player` hands its driven car the steering linearity. | Called after a controls change while the mission's game is initialized. No actor pointer is kept. |
+
+Mod keys outside `C_Input` (chat, chat with `/`, held player list, siren, car
+sync mode) are compared as DirectInput scan codes from `ReadKey` and
+`IGraph::TestKey`, or as window-message scan codes in the web UI; push-to-talk
+is the Framework `VoiceClient` key polled through `GetAsyncKeyState` in the
+active layout. Script keys are remapped where `Key.bind` reads them, in the
+client's `GetBaseInput()`.
+
 ## Native chat and health display
 
 The chat feature uses the game's existing indicator font and scene render

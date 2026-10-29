@@ -36,6 +36,9 @@
 #include "features/world/world_service.h"
 #include "features/mod/mod_service.h"
 #include "features/gameplay_menu/gameplay_menu_service.h"
+#include "features/voice/voice_input.h"
+#include "features/settings/remapped_input.h"
+#include "features/settings/settings_service.h"
 
 namespace Mafia1Online::Core {
     class Application final: public Framework::Integrations::Client::Instance {
@@ -127,12 +130,17 @@ namespace Mafia1Online::Core {
             return _sounds;
         }
 
+        Features::Settings::SettingsService &Settings() {
+            return _settings;
+        }
+
       private:
         void SubmitChatLine(const std::string &line);
         // Chat, web UI and gameplay menus; absent on the simulation host.
         void UpdatePlayerInterface();
         void ConnectFromConfiguration();
-        std::unique_ptr<Framework::Input::PollingInput> _input = std::make_unique<Framework::Input::PollingInput>();
+        // Script key moves from the settings screen apply to what Key.bind polls.
+        std::unique_ptr<Features::Settings::RemappedInput> _input = std::make_unique<Features::Settings::RemappedInput>();
         Features::Mod::ModService _mods;
         std::string _assetError;
         bool _autoEnterPending = false;
@@ -168,6 +176,9 @@ namespace Mafia1Online::Core {
         Features::Effects::EffectsService _effects;
         Features::Hud::HudService _hud;
         Features::Script::ScriptService _script;
+        Features::Voice::VoiceInput _voiceInput;
+        Features::Settings::SettingsService _settings;
+        uint64_t _settingsMissionGeneration = 0;
         std::string _projectPath;
         bool _quickJoinConnectIssued = false;
         bool _quickJoinPlayIssued    = false;

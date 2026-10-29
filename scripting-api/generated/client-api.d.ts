@@ -36,6 +36,16 @@ declare global {
     voiceStop: [];
 
     /**
+     * Dispatched when the player flips a switch a resource defined with `Settings.defineToggle`. Compare `resource` with your own name; every resource receives it.
+     */
+    settingToggle: [id: string, value: boolean, resource: string];
+
+    /**
+     * Dispatched when the player changes the web-audio volume `Settings.getMediaVolume` returns.
+     */
+    mediaVolumeChange: [volume: number];
+
+    /**
      * Dispatched once the native mission has loaded, after the server's weather and frame overrides were applied.
      */
     missionReady: [mission: ClientMissionInfo];
@@ -1266,6 +1276,55 @@ declare global {
      * @returns False while no mission is loaded.
      */
     isOpen(): boolean;
+  };
+
+  /**
+   * The player's settings screen (Esc, Settings). A resource lists the keys it binds and the switches it offers there; the player can move a key, and its Key.bind handlers and Key.isDown then follow the key the player chose. Entries are removed when the resource stops.
+   */
+  const Settings: {
+    /**
+     * Lists a key on the Controls page under this resource, so the player can move it. Describing it again updates the label.
+     * @param key The Key.bind name this resource binds, such as "f9"; not the wheel.
+     * @param label What the key does, at most 64 characters.
+     * @returns False for an unknown key, the wheel or Escape, an empty label, outside a resource, or past 64 keys per resource.
+     */
+    describeKey(key: string, label: string): boolean;
+
+    /**
+     * The label of the key the player now presses for this key, for prompts such as "Press F9". Ask again when showing the prompt.
+     * @param key The Key.bind name this resource binds.
+     * @returns The layout's label, such as "F8" or "Mouse 4"; "Unbound" when the player removed it.
+     */
+    getKeyLabel(key: string): string;
+
+    /**
+     * Shows an on/off switch on the settings screen's Gameplay page. Flipping it raises `settingToggle`; the resource stores the choice itself.
+     * @param id This resource's switch id: 1 to 32 letters, digits, '-', '_' or '.'.
+     * @param label What it switches, at most 64 characters.
+     * @param value Its current state.
+     * @returns False for an invalid id or label, outside a resource, or past 32 switches per resource.
+     */
+    defineToggle(id: string, label: string, value: boolean): boolean;
+
+    /**
+     * Updates a switch the resource changed another way, such as by a key or a command. Raises no event.
+     * @param id A switch this resource defined.
+     * @param value Its new state.
+     * @returns False when this resource has no such switch.
+     */
+    setToggle(id: string, value: boolean): boolean;
+
+    /**
+     * The player's volume for resource web audio, such as a car radio, from 0 to 1. Multiply page audio by it; `mediaVolumeChange` reports changes.
+     * @returns 0 to 1; 1 by default.
+     */
+    getMediaVolume(): number;
+
+    /**
+     * Opens the settings screen over the game, as Esc then Settings does.
+     * @returns False while no mission is loaded; the request is then dropped.
+     */
+    open(): boolean;
   };
 
   /**

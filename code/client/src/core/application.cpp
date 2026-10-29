@@ -19,6 +19,7 @@
 #include "features/script/pickup_scripting.h"
 #include "features/script/player_scripting.h"
 #include "features/script/script_runtime.h"
+#include "features/script/settings_scripting.h"
 #include "features/script/visual_scripting.h"
 #include "features/world/world_hooks.h"
 
@@ -141,13 +142,20 @@ namespace Mafia1Online::Core {
             ExitProcess(1);
         }
         if (!host) {
+            // The profile is loaded by now: G_LoadSaveClass::Init ran inside
+            // InitSystem, before the first mission tick created this instance.
+            _settings.Load(_projectPath);
+            _settings.AttachInput(_input.get());
+            _settings.ApplyAll();
+        }
+        if (!host) {
             _chat.SetOverlay([this] {
                 _nametags.Render(_world);
                 Scripting::RenderDrawCommands();
                 Scripting::ClientCityMap::Render();
             });
             // Optional: without CEF, quick join and the native chat stay in charge.
-            if (!_webUi.Install(*this, _chat, _projectPath)) {
+            if (!_webUi.Install(*this, _chat, _settings, _projectPath)) {
                 Features::Menu::SetNativeControlsSuppressed(false);
             }
         }
@@ -263,24 +271,33 @@ namespace Mafia1Online::Core {
         if (Features::Simulation::IsHost()) {
             return;
         }
+        using Features::Settings::ModKey;
+        _settings.Update();
+        if (_world.IsReady() && _world.LoadedMissionGeneration() != _settingsMissionGeneration) {
+            _settingsMissionGeneration = _world.LoadedMissionGeneration();
+            _settings.OnMissionReady();
+        }
+        _chat.SetOpenKeys(_settings.ModKeyDik(ModKey::Chat), _settings.ModKeyDik(ModKey::Command));
+        _nametags.SetVisible(_settings.Hud().nametags, _settings.Hud().nametagHealth);
         const auto *localState = _combat.GetLocalState(_world);
         _chat.Update(_world.IsReady(), localState && localState->spawned ? std::optional<float>(localState->health) : std::nullopt);
         while (auto line = _chat.TakeOutgoing()) {
             SubmitChatLine(*line);
         }
         while (auto key = _chat.TakeGameKey()) {
-            // DIK_K: retail has no player siren control.
-            if (*key == 0x25) {
+            // K by default: retail has no player siren control.
+            if (*key == _settings.ModKeyDik(ModKey::Siren)) {
                 (void)_cars.ToggleSiren(_world);
             }
-            // DIK_F10: compare the two observer car sync modes. F9 tunes the radio.
-            else if (*key == 0x44) {
+            // F10 by default: compare the two observer car sync modes.
+            else if (*key == _settings.ModKeyDik(ModKey::CarSync)) {
                 const char *mode = _cars.ToggleSyncMode() ? "Car sync: predicted physics" : "Car sync: interpolated";
                 _chat.OnMessage("", mode, 0xE0C080FF);
                 _webUi.OnChatMessage("", mode, 0xE0C080FF);
             }
         }
         _webUi.Update(_world);
+        _voiceInput.Update(_chat.IsInputActive() || _webUi.IsCapturingInput());
         _gameplayMenus.Update();
         while (auto line = _webUi.TakeOutgoing()) {
             SubmitChatLine(*line);
@@ -365,6 +382,7 @@ namespace Mafia1Online::Core {
         _mapObjects.Uninstall();
         Features::Car::UninstallDebrisHooks();
         _webUi.Shutdown();
+        _settings.Shutdown();
         _chat.Shutdown();
         Features::Death::UninstallDeathHooks();
         Features::Combat::UninstallCombatHooks();
@@ -450,6 +468,7 @@ namespace Mafia1Online::Core {
         if (_visualResourceCleanupRegistered) return;
         Scripting::RegisterVisualResourceCleanup(*GetScriptingModule()->GetResourceManager());
         Scripting::ClientCityMap::RegisterResourceCleanup(*GetScriptingModule()->GetResourceManager());
+        Scripting::SettingsApi::RegisterResourceCleanup(*GetScriptingModule()->GetResourceManager());
         // Every resource runs in an isolate of its own; the bindings' classes go with it.
         GetScriptingModule()->GetEngine()->AddRuntimeDisposingListener([](v8::Isolate *isolate) {
             Scripting::Player::UnregisterIsolate(isolate);

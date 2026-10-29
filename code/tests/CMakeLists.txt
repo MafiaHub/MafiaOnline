@@ -62,3 +62,11 @@ target_link_libraries(Mafia1OnlineContactSyncTests PRIVATE Framework::Framework)
 add_executable(Mafia1OnlineMeleeTests melee_tests.cpp)
 target_include_directories(Mafia1OnlineMeleeTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(Mafia1OnlineMeleeTests PRIVATE Framework::Framework)
+
+add_executable(Mafia1OnlineSettingsTests
+    settings_tests.cpp
+    ../client/src/features/settings/key_catalog.cpp
+    ../client/src/features/settings/settings_model.cpp
+)
+target_include_directories(Mafia1OnlineSettingsTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../client/src")
+target_link_libraries(Mafia1OnlineSettingsTests PRIVATE Framework::Framework)

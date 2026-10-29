@@ -34,6 +34,13 @@ namespace Mafia1Online::SDK::UI {
             return *reinterpret_cast<NativeIndicators *>(kIndicators);
         }
 
+        // G_IndicatorsClass::GameInit 0x5f73c0: reloads the dashboard
+        // textures for the profile's mph/km/h choice and the game's night
+        // mode. C_game::Init calls it on every mission load.
+        void GameInit() {
+            reinterpret_cast<void(__thiscall *)(NativeIndicators *)>(0x5f73c0)(this);
+        }
+
         void SetAmmo(uint32_t loaded, uint32_t reserve) {
             reinterpret_cast<void(__thiscall *)(NativeIndicators *, uint32_t, uint32_t)>(kPlayerSetAmmo)(this, loaded, reserve);
         }
