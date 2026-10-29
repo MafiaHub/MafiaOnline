@@ -1355,6 +1355,7 @@ namespace Mafia1Online::Features::Npc {
             pose.deathClock = tracked.deathClock.value_or(snapshot.hostClockMs);
             pose.aiming = human.IsAiming();
             pose.crouching = human.IsCrouching();
+            pose.weapon = static_cast<uint8_t>(human.SelectedWeapon());
             Vector3 target {};
             if (pose.aiming) {
                 target = human.ShootTarget();

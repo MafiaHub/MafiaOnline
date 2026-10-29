@@ -135,7 +135,7 @@ namespace Mafia1Online::Features::Npc {
             }
             if (newPose) {
                 replica.snapshots.Push(snapshot, sampleTime, clockNow);
-                replica.locomotion.push_back({sampleTime, npc->locomotion, npc->aiming, npc->crouching});
+                replica.locomotion.push_back({sampleTime, npc->locomotion, npc->aiming, npc->crouching, npc->weapon});
                 replica.newestVelocity = snapshot.velocity;
                 while (replica.locomotion.size() > 32) {
                     replica.locomotion.pop_front();
@@ -172,7 +172,7 @@ namespace Mafia1Online::Features::Npc {
             }
             replica.renderTime = replica.snapshots.RenderTimeMs(clockNow);
             if (const auto *gait = GaitAt(replica, replica.renderTime)) {
-                replica.stance = Stance {gait->aiming, gait->crouching};
+                replica.stance = Stance {gait->aiming, gait->crouching, gait->weapon};
             }
             auto *actor = world.NativeObjects().Resolve(replica.handle);
             if (actor) {

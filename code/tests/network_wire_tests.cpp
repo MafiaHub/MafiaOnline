@@ -178,20 +178,23 @@ namespace {
         npc.velocity = npc.rotation * glm::vec3(0.5f, 0.0f, -2.0f);
         npc.aiming    = true;
         npc.crouching = false;
+        npc.weapon    = 9;
         Shared::Entities::NpcEntity npcRead;
         npcRead.crouching = true;
         TransformRoundTrip(npc, npcRead);
         CHECK(npcRead.locomotion == -5 && Near(npcRead.position, npc.position, 1.0f / 64.0f));
         // The stance rides with the pose it was taken in.
-        CHECK(npcRead.aiming && !npcRead.crouching);
+        CHECK(npcRead.aiming && !npcRead.crouching && npcRead.weapon == 9);
         CHECK(Near(npcRead.velocity, npc.velocity, 0.05f) && npcRead.velocity.y == 0.0f);
 
         Shared::Npc::Snapshot snapshot;
         snapshot.count             = 1;
         snapshot.npcs[0].velocityX = -3.0f;
         snapshot.npcs[0].velocityZ = 1.5f;
+        snapshot.npcs[0].weapon    = 12;
         const auto snapshotRead    = RoundTrip(snapshot);
         CHECK(snapshotRead.count == 1 && Near(snapshotRead.npcs[0].velocityX, -3.0f, 0.02f) && Near(snapshotRead.npcs[0].velocityZ, 1.5f, 0.02f));
+        CHECK(snapshotRead.npcs[0].weapon == 12);
         // The death its Hit picked travels once it is dead, a head shot
         // crouched included.
         snapshot.count                  = 2;

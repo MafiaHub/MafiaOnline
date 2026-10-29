@@ -39,6 +39,7 @@ namespace Mafia1Online::Features::Npc {
         struct Stance {
             bool aiming = false;
             bool crouching = false;
+            uint8_t weapon = 0;
         };
 
         void Update(World::WorldService &world);
@@ -81,6 +82,7 @@ namespace Mafia1Online::Features::Npc {
                 int16_t locomotion = 1;
                 bool aiming = false;
                 bool crouching = false;
+                uint8_t weapon = 0;
             };
             std::deque<Gait> locomotion;
             // The stance at this frame's presentation time, once a pose came.

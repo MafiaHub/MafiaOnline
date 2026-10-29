@@ -119,6 +119,7 @@ namespace Mafia1Online::Features::Combat {
             return;
         }
         const auto &npcReplicas = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->NpcReplicas();
+        const auto frameNow = std::chrono::steady_clock::now();
         for (const auto &[networkId, state] : _states) {
             const auto life = FindCombatLife(*replication, networkId);
             if (!life || !life->spawned || !state.spawned || life->missionGeneration != state.missionGeneration || life->spawnGeneration != state.spawnGeneration) {
@@ -156,7 +157,20 @@ namespace Mafia1Online::Features::Combat {
                                && (pending.event.action == Shared::Combat::Action::ThrowStart
                                    || pending.event.action == Shared::Combat::Action::ThrowRelease);
                        }));
-            if (!localPending && !remoteThrowBeforeNotify && (inventoryChanged || human->InventoryMask() != state.inventoryMask || human->SelectedWeapon() != state.selectedWeapon)) {
+            // An NPC's replica draws or holsters where its host's body did:
+            // a switch the State brings ahead of the pose that shows it
+            // waits for that pose (its weapon rides with it), at most as long
+            // as any event.
+            const auto stance = npcReplicas.DisplayedStance(networkId);
+            const bool switchAhead = stance && !newNative && state.selectedWeapon != applied.selectedWeapon && stance->weapon != state.selectedWeapon;
+            if (!switchAhead) {
+                applied.switchHeldSince = {};
+            }
+            else if (applied.switchHeldSince == std::chrono::steady_clock::time_point {}) {
+                applied.switchHeldSince = frameNow;
+            }
+            const bool holdSwitch = switchAhead && frameNow - applied.switchHeldSince < Shared::Net::kEventWaitLimit;
+            if (!holdSwitch && !localPending && !remoteThrowBeforeNotify && (inventoryChanged || human->InventoryMask() != state.inventoryMask || human->SelectedWeapon() != state.selectedWeapon)) {
                 const auto previousSelected = human->SelectedItem();
                 std::array<SDK::Player::NativeStockItem, Shared::Combat::kWeaponSlots> stock {};
                 size_t count = 0;
@@ -181,7 +195,7 @@ namespace Mafia1Online::Features::Combat {
                     applied.ammo              = state.ammo;
                 }
             }
-            else if (!localPending) {
+            else if (!localPending && !holdSwitch) {
                 // Pose and stance revisions do not change the stock inventory.
                 // Keep action acknowledgement current without resetting native
                 // item slots during ordinary local movement.
@@ -198,7 +212,6 @@ namespace Mafia1Online::Features::Combat {
             // An NPC's replica takes the stance its host's body had at the
             // moment it draws, which rides with the pose; the State's is a
             // render delay ahead of the body.
-            const auto stance = npcReplicas.DisplayedStance(networkId);
             const bool crouching = stance ? stance->crouching : state.crouching;
             const bool aiming = stance ? stance->aiming : state.aiming;
             const bool crouchChanged = human->IsCrouching() != crouching;
@@ -696,6 +709,10 @@ namespace Mafia1Online::Features::Combat {
             // no reserve after a reload. Give the native action temporary
             // ammunition and then restore the latest server state.
             const bool fire = event.action == Shared::Combat::Action::Fire;
+            // Back to the weapon in hand after: for an NPC's replica the one
+            // its pose shows (ApplyNativeStates may hold a newer switch).
+            const auto inHand = static_cast<uint8_t>(human->SelectedWeapon());
+            const uint8_t restored = npcReplicas.DisplayedStance(event.networkId) && inHand < Shared::Combat::kWeaponSlots ? inHand : state->selectedWeapon;
             // The state snapshot already contains the ammunition moved by a
             // reload. Give Do_Reload a one-round deficit and a reserve round
             // so it can enter the stock reload animation, then restore the
@@ -711,8 +728,8 @@ namespace Mafia1Online::Features::Combat {
                     shotResult == NativeShotReplayResult::Played ? "played" : shotResult == NativeShotReplayResult::Rejected ? "rejected" : "deferred");
             }
             const bool replayed = fire ? shotResult != NativeShotReplayResult::Deferred : human->ReplayReload();
-            const auto &selectedAmmo = state->ammo[state->selectedWeapon];
-            human->ApplySelectedWeapon(state->selectedWeapon, selectedAmmo.loaded, selectedAmmo.reserve);
+            const auto &selectedAmmo = state->ammo[restored];
+            human->ApplySelectedWeapon(restored, selectedAmmo.loaded, selectedAmmo.reserve);
             it = replayed ? _events.erase(it) : std::next(it);
         }
     }

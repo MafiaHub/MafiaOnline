@@ -237,6 +237,9 @@ namespace Mafia1Online::Features::Npc {
                     entity.locomotion = pose.locomotion;
                     entity.aiming = moving && pose.aiming;
                     entity.crouching = moving && pose.crouching;
+                    if (pose.weapon < Shared::Combat::kWeaponSlots) {
+                        entity.weapon = pose.weapon;
+                    }
                 });
                 entity.poseSource = MafiaNet::ToPeerGuid(packet->guid);
                 if (!state.alive) {

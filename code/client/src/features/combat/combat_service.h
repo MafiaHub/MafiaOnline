@@ -107,6 +107,8 @@ namespace Mafia1Online::Features::Combat {
             float poseTargetOffsetY    = 0.0f;
             float poseTargetOffsetZ    = 0.0f;
             std::chrono::steady_clock::time_point poseUpdatedAt {};
+            // An NPC's weapon switch held for its replica's pose, since when.
+            std::chrono::steady_clock::time_point switchHeldSince {};
         };
 
         struct EventKey {

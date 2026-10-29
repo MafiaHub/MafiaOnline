@@ -180,6 +180,8 @@ namespace Mafia1Online::Shared::Npc {
         uint16_t deathClock = 0;
         bool aiming = false;
         bool crouching = false;
+        // The weapon in its hand (G_Inventory's selected item).
+        uint8_t weapon = 0;
         // Where the neck and back point, relative to the position: the shoot
         // target while aiming, else straight ahead at neck height.
         float poseTargetX = 0.0f;
@@ -228,6 +230,7 @@ namespace Mafia1Online::Shared::Npc {
                 }
                 stream->Serialize(write, pose.aiming);
                 stream->Serialize(write, pose.crouching);
+                stream->Serialize(write, pose.weapon);
                 stream->Serialize(write, pose.poseTargetX);
                 stream->Serialize(write, pose.poseTargetY);
                 stream->Serialize(write, pose.poseTargetZ);

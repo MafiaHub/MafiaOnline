@@ -96,6 +96,9 @@ namespace Mafia1Online::Shared::Entities {
         // host's body did. The Combat::State keeps them too.
         bool aiming = false;
         bool crouching = false;
+        // The weapon in its hand, with the pose too: a replica draws or
+        // holsters where the host's body did.
+        uint8_t weapon = 0;
         // The clip a script plays on it (npc.playAnimation), empty for none.
         // Each play or stop counts the revision up, so a replayed one-shot
         // clip starts again on every player's copy.
@@ -138,7 +141,8 @@ namespace Mafia1Online::Shared::Entities {
             carActionAt = std::chrono::steady_clock::now();
         }
 
-        // A walker's pose plus the locomotion and the stance's two bits.
+        // A walker's pose plus the locomotion, the stance's two bits and the
+        // weapon in hand.
         void SerializeTransform(Framework::Networking::Replication::FieldSerializer &fields) override {
             auto *stream = fields.PlainStream();
             if (!stream) {
@@ -147,12 +151,13 @@ namespace Mafia1Online::Shared::Entities {
                 fields.Field(locomotion);
                 fields.Field(aiming);
                 fields.Field(crouching);
+                fields.Field(weapon);
                 return;
             }
             const bool write = fields.Writing();
             if (!Net::SerializeWorldPosition(stream, write, position) || !Net::SerializeHeading(stream, write, rotation, 10) ||
                 !Net::SerializePlanarVelocity(stream, write, velocity) || !stream->Serialize(write, sampleClock) || !stream->Serialize(write, locomotion) ||
-                !stream->Serialize(write, aiming) || !stream->Serialize(write, crouching)) {
+                !stream->Serialize(write, aiming) || !stream->Serialize(write, crouching) || !stream->Serialize(write, weapon)) {
                 fields.Fail();
             }
         }
