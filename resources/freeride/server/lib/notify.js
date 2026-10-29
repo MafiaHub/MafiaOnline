@@ -61,8 +61,26 @@ function markersAll(group, items) {
     broadcast("fr:markers", {group, items: items ?? []});
 }
 
+// Markers whose city-map blips only a crew sees: everyone gets the world
+// markers, the crew also gets the blips. `sent` (playerId -> payload) keeps
+// each player from being sent the same list twice; call it every tick, so
+// duty changes show within one.
+function crewMarkers(group, sent, items, isCrew) {
+    const crewItems = items;
+    const publicItems = items.map((item) => ({...item, map: false}));
+    const crewPayload = JSON.stringify(crewItems);
+    const publicPayload = JSON.stringify(publicItems);
+    for (const player of World.getPlayers()) {
+        const crew = isCrew(player);
+        const payload = crew ? crewPayload : publicPayload;
+        if (sent.get(player.id) === payload) continue;
+        sent.set(player.id, payload);
+        markers(player, group, crew ? crewItems : publicItems);
+    }
+}
+
 function announce(player, text, seconds = 2, sound = null) {
     emit(player, "fr:announce", {text, seconds, sound});
 }
 
-module.exports = {COLORS, toast, toastAll, name, text, feed, card, compass, markers, markersAll, announce};
+module.exports = {COLORS, toast, toastAll, name, text, feed, card, compass, markers, markersAll, crewMarkers, announce};

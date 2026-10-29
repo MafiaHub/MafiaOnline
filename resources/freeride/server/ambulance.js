@@ -31,7 +31,7 @@ const stations = require("./lib/stations.js");
 const firefighters = require("./firefighters.js");
 const barRoom = require("./lib/bar_room.js");
 const prison = require("./lib/prison.js");
-const {toast, card, compass, markers, markersAll, feed, name, text, COLORS} = require("./lib/notify.js");
+const {toast, card, compass, markers, crewMarkers, feed, name, text, COLORS} = require("./lib/notify.js");
 const {MAIN_WORLD, distance, flatDistance, playable, playerById, vehicleById, speedOf, formatMoney, formatMinutes, headingOf, pick, onStart, onStop, inFreeRide} =
     require("./lib/util.js");
 
@@ -122,8 +122,8 @@ let nextCall = 1;
 let nextCallAt = 0;
 let timer = null;
 let lastCardAt = 0;
-let lastMarkers = "";
-let lastItems = [];
+// playerId -> the call markers last sent (lib/notify.js crewMarkers).
+const sentMarkers = new Map();
 // Patients who walk off after treatment or into the hospital, removed a
 // little later; and the exit tasks after which they walk in.
 const strays = new Set();
@@ -194,11 +194,8 @@ function presentCalls() {
             map: grouped ? (leads.has(call.id) ? {icon: "diamond", label: "Pile-up", flash: true} : false)
                 : {icon: "diamond", label: call.kind === "downed" ? "Man down" : "Patient", flash: call.kind === "downed" || call.kind === "cardiac"}};
     });
-    const payload = JSON.stringify(items);
-    if (payload === lastMarkers) return;
-    lastMarkers = payload;
-    lastItems = items;
-    markersAll("medic", items);
+    // Everyone sees the patients; only medics on duty get them on the map.
+    crewMarkers("medic", sentMarkers, items, (player) => medics.has(player.id));
 }
 
 function callMessage(call) {
@@ -979,10 +976,11 @@ onStop(() => {
     arrivals.clear();
 });
 Events.on("playerSpawn", (player) => {
-    // The calls open before this player came: markersAll sends only changes.
-    if (lastItems.length) markers(player, "medic", lastItems);
+    // The calls open before this player came go out on the next tick.
+    sentMarkers.delete(player.id);
 });
 Events.on("playerDisconnect", (player) => {
+    sentMarkers.delete(player.id);
     for (const call of [...calls.values()]) if (call.kind === "downed" && call.playerId === player.id) calls.delete(call.id);
     const medic = medics.get(player.id);
     if (!medic) return;
@@ -999,8 +997,7 @@ Events.on("missionChange", () => {
     pileups.clear();
     strays.clear();
     arrivals.clear();
-    lastMarkers = "";
-    lastItems = [];
+    sentMarkers.clear();
     nextCallAt = Date.now() + FIRST_CALL_MS;
 });
 

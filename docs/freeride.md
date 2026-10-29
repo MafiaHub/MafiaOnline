@@ -68,33 +68,127 @@ chat and menu share one set of server checks (`server/lib/commands.js`).
 
 ## Entering Lost Heaven
 
-The character selector uses the stock Free Ride scene frames `emeth_1`,
-`emeth_3` and `emeth_4` for Little Italy, Downtown and Hoboken. The camera aims
-at a temporary animated human at the chosen point. The client reads the
-actual frames, and the server offers a district only when the reported
-position matches that mission's stock frame, so no client can pick its own
-spawn point. Each waiting player is placed in a private virtual world, so
-another player's ped never walks into the preview. Up/Down change the
-district, Left/Right the character (thirteen stock models, each checked
-against the native skeleton first), C turns the camera and Enter spawns. A
-returning player starts on the district and character they chose last time.
+A joining player sees the city from the air: a camera flies a loop over the
+map behind a Lost Heaven ticket with two tabs, Log in and Register. Tab moves
+between the fields, Enter sends, and a wrong name, a short password or a
+taken name is marked on its own field. The flight is built by the server
+(`server/lib/flyover.js`, `server/lib/spline.js`) and played back by the
+client (`client/selector.js`); see "The login flight" below.
 
-A returning player is also offered "Where you left off", selected first: the
-spot on this map's streets where they last stood, with the health, weapons
-and ammunition and the wanted level they had. The server saves it every five
-seconds while they are on the street and not busy with a race, a duel, a job
-or a sentence, so those never become the place to come back to; a player
-with time left to serve goes back to jail instead, and an arrest takes the
-guns and the wanted level out of the saved spot. After a death they come
-back at their usual district.
+- **Log in** with a name and password puts a returning player straight on
+  the street, with no character choice: where they left off, or else at their
+  usual district (the map's first district if they have none on this map).
+- **Register** creates the account and then, once only, shows the look
+  picker: the camera stops at the starting district and aims at a temporary
+  animated human; Left/Right (or the arrow buttons) change the look (thirteen
+  stock models, each checked against the native skeleton first), C turns the
+  camera and Enter begins. What a player becomes after that comes from play;
+  the look they spawn with is the record's `model` field, which gameplay can
+  change with `profiles.setField(player, "model", file)`.
+- **Remember me** (ticked by default) keeps the player logged in on that
+  computer. The next start shows "Welcome back, *name*" over the flight and
+  enters after five seconds or on Enter; "Not you? Switch account" (or Esc)
+  logs out on that computer and shows the form.
+
+A player who has not logged in runs no commands. Logging in renames the
+player to the account's name (a guest who joined under that name becomes
+"Guest *id*"), and an account can be in town only once. After a map change a
+logged-in player goes straight back in; a restart of the resource keeps the
+logins of the players in town for ten minutes.
+
+### Accounts
+
+`server/lib/accounts.js` keeps the accounts in the database document
+`accounts`. Names are 3 to 24 letters, digits, spaces, dots, dashes or
+underscores and are unique regardless of case; passwords are 6 to 128
+characters and may not be the name. A password is stored only as an scrypt
+hash (N 2^15, r 8, p 1, 64 bytes) with a random 16-byte salt per account,
+checked with a timing-safe comparison; an unknown name costs the same
+derivation as a wrong password and gets the same answer. Attempts are
+limited: five failed logins per name and twenty per address in fifteen
+minutes, ten failed remember tokens per address in fifteen minutes, three new
+accounts per address an hour, and one request a second per player.
+
+A remember token is 32 random bytes the server issues at login. The server
+keeps only its SHA-256, the hardware ID it was issued to and its expiry (30
+days); each use replaces it with a new one, a token from another machine is
+refused and thrown away, an account holds at most five, and "Switch account"
+revokes it. The client keeps the token, never the password, in the browser
+storage of its web views, per server: that storage is the CEF profile under
+the client's own `cache/profiles` folder, which the Framework keeps across
+launches (`gui/cef/runtime.cpp`). Every server's pages share that one
+`fw://resources` origin, which is why a token is bound to the hardware ID and
+works only on the server that issued it.
+
+Player records from before accounts were keyed by nickname on one machine.
+The first registration of that name *from the same machine* takes that record
+over, so its cash, career, cars and admin rights carry on; a claimed record
+that already has a look skips the look picker. A record from another machine
+is never claimed by its name alone; the server console moves one over.
+
+Console: `account list`, `account revoke <name>` (all remembered logins),
+`account password <name> <new password>` (also revokes them) and
+`account claim <name> <record key>` (record keys as `fr admin` prints them).
+
+### Where they come in
+
+Districts use the stock Free Ride scene frames `emeth_1`, `emeth_3` and
+`emeth_4` for Little Italy, Downtown and Hoboken. The client reads the actual
+frames, and the server offers a district only when the reported position
+matches that mission's stock frame, so no client can pick its own spawn
+point. Each waiting player is placed in a private virtual world, so another
+player's ped never walks into the preview.
+
+Where they left off is the spot on this map's streets where they last stood,
+with the health, weapons and ammunition and the wanted level they had. The
+server saves it every five seconds while they are on the street and not busy
+with a race, a duel, a job or a sentence, so those never become the place to
+come back to; a player with time left to serve goes back to jail instead, and
+an arrest takes the guns and the wanted level out of the saved spot. After a
+death they come back at their usual district.
+
+### The login flight
+
+Each map has its own loop of ground-track points in `server/lib/flyover.js`:
+Lost Heaven circles the city from Little Italy over the north of the
+island, Downtown and Hoboken to the villas on the eastern hill, then back
+along the south shore (7.8 km, under eight minutes a lap); Lost Heaven
+Extended swings north over the fields between the city and the mountain
+instead (9.4 km); the countryside rings its road network well clear of the
+mountain (8.3 km). The heights come from the map itself, never from a
+guess: `tools/export_skyline.py` reads the mission's `scene.4ds`,
+`scene2.bin` and `cache.bin` with every model they place (stock `A1.dta`
+and `A2.dta`, and the mod's mission folder and `mods/freeride-extended.zip`
+for Extended) and writes `server/data/skyline_<map>.js`, the highest
+geometry in each 32 m cell (the camera-relative backdrop left out; trees
+count as the sphere their billboards sweep). Every road crossing and road
+point lies at or below its cell, and the prison and hospital placements
+quoted elsewhere in this guide come out where `cache.bin` puts them.
+
+At start the server lifts each point 28 m above the highest cell within
+48 m of it and of the stretches to its neighbours, smooths the heights
+upwards only, resamples the centripetal Catmull-Rom curve (alpha 0.5,
+`server/lib/spline.js`) every 8 m of arc length, and raises points until
+every sample clears the cells within 48 m of it by 28 m; a track that cannot
+clear its skyline is refused and logged, and the client then holds a still
+view. The camera looks at a second loop 150 m ahead and 14° down, flies
+17 m/s and banks into the turns by the lean of a craft at that speed,
+smoothed over 60 m and held within 15°. The client plays the table back with
+`Camera.lock(position, direction, roll)` on every render, interpolating
+between the evenly spaced samples, and unlocks the camera on spawn, resource
+stop and mission unload (which a disconnect also brings). The flights run
+85 to 175 m high, 29 m or more above anything below them.
+
+Regenerate a skyline with, for example,
+`python tools/export_skyline.py freeride resources/freeride/server/data/skyline_freeride.js --game <Mafia folder> --roads resources/freeride/server/data/roads_freeride.js --report`;
+for Extended add `--mod-dir <mod mission folder> --mod-zip mods/freeride-extended.zip`.
 
 Each life starts with a baseball bat; guns are bought at Yellow Pete's. Dead players come back where
 they entered the city after five seconds (`server/lib/life.js`).
 
 ## Career
 
-A player record belongs to a nickname on one machine (nickname plus the
-framework hardware ID). It keeps cash, experience, kills, deaths, best kill
+A player record belongs to an account (see "Accounts" above). It keeps cash, experience, kills, deaths, best kill
 streak, race wins and records, deliveries, bounties, event wins, duel wins,
 play time, owned cars, stashes found, speed-trap bests, a jail sentence still
 to serve, and where the player last was. New players start with $800. Experience comes from kills, races,
@@ -297,7 +391,7 @@ The Jobs tab of the city menu shows every one of these with its live state.
   otherwise, then burning themselves out after nine): a house front (flames
   up the facade), a burning car that explodes after four minutes, or a crash
   with one or two people lying in the road; a resident may crouch at a
-  burning house's door. Everyone sees the fires on the map and in the feed.
+  burning house's door. Everyone sees the fires and the feed; only firefighters on duty get them on the city map (medics likewise for their calls).
   Hold G within 35 m of a fire truck to spray the hose onto the nearest fire
   in front of you (24 m reach), or at a truck's wheel to use its roof cannon
   (32 m): the water arcs onto the flames, the fire shrinks as it goes down and
@@ -752,7 +846,8 @@ development mode is on.
 | `server/main.js` | Player lifecycle, profiles on join, the admin motor pool, `/repair`, `/help`, menu requests, console commands. |
 | `server/dealership.js`, `economy.js` | The car lot, the garage and car locks; `/pay` and the street wage. |
 | `server/lib/` | Shared rules: the database (`store.js`), commands, profiles and ranks, respawn and activities, invitations, notifications, nametags, the road graph, admins, car prices, and the county jail building and its warden (`prison.js`, `warden.js`). |
-| `server/selector.js`, `ambience.js`, `shops.js`, `police.js`, `props.js`, `doors.js` | Entering the city, clock and weather, shops and courier, police outcomes, prop repair, the door lab. |
+| `server/selector.js`, `lib/accounts.js`, `lib/flyover.js`, `lib/spline.js` | Logging in and registering, the one-time look and entering the city; accounts and remember tokens; the login flight. |
+| `server/ambience.js`, `shops.js`, `police.js`, `props.js`, `doors.js` | Clock and weather, shops and courier, police outcomes, prop repair, the door lab. |
 | `server/races.js`, `combat.js`, `duels.js`, `crews.js`, `world_events.js`, `social.js` | Races, bounties, duels, crews, city events, rides, messages and dice. |
 | `server/export.js`, `police_duty.js`, `police_backup.js`, `taxi.js`, `robbery.js` | The jobs; `police_backup.js` is police duty's call boxes and backup. |
 | `server/firefighters.js`, `ambulance.js`, `lib/stations.js`, `lib/jobkey.js`, `client/rescue.js` | The fire brigade and the ambulance; their stations (sign-on points and parked vehicles); the job key (G) and its prompt. |
@@ -764,7 +859,8 @@ development mode is on.
 | `server/championship.js`, `jail.js`, `jail_visits.js`, `hospital.js` | The Autodrom championship, jail sentences, jail visits and hospital respawns. |
 | `client/hud.js`, `client/hud.html` | One transparent web view for toasts, feed, activity cards, race panel, level strip and the city menu; it also arbitrates the single native compass by priority. |
 | `client/markers.js` | Beacons, checkpoint and crate markers, door arrows, turf rings, station arrows, bounty labels, and the city map blips (`CityMap`). World labels show only near and in sight. |
-| `client/selector.js`, `shops.js`, `car_picker.js`, `radio.js`, `police.js`, `jail.js`, `main.js` | The selector, shop staff, the car lot, garage and motor pool, radio, police HUD, the jail countdown, fades and race countdown. |
+| `client/selector.js`, `client/selector.html` | The login flight, the login and register ticket and the one-time look. |
+| `client/shops.js`, `car_picker.js`, `radio.js`, `police.js`, `jail.js`, `main.js` | Shop staff, the car lot, garage and motor pool, radio, police HUD, the jail countdown, fades and race countdown. |
 | `client/bars.js`, `client/drunk.js` | The drink menu at a bar counter; the sway, view wobble, haze and blackout of a drunk player. |
 
 Gameplay requests use `Events.emitServer` and are checked again on the

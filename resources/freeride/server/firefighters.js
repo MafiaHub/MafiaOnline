@@ -8,8 +8,8 @@
 // (hold G within reach of any fire truck, or from a truck's roof cannon while
 // at its wheel): the native water jet arcs onto the fire and every hose on it
 // takes the flames down, so a crew is faster than one. Trapped civilians are
-// led out with G. Everyone sees the fires; the pay for one is split by how
-// much water each firefighter put on it.
+// led out with G. Everyone sees the fires, the crew on duty on the city map
+// too; the pay for one is split by how much water each firefighter put on it.
 //
 // With a crew on duty bigger calls come in too: a filling station alight,
 // whose pumps go up if the flames are not knocked down in time; a fire in a
@@ -30,7 +30,7 @@ const barRoom = require("./lib/bar_room.js");
 const interiors = require("./interiors.js");
 const bars = require("./bars.js");
 const policeDuty = require("./police_duty.js");
-const {toast, toastAll, card, compass, markers, markersAll, feed, name, text, COLORS} = require("./lib/notify.js");
+const {toast, toastAll, card, compass, markers, crewMarkers, feed, name, text, COLORS} = require("./lib/notify.js");
 const {MAIN_WORLD, distance, flatDistance, playable, playerById, vehicleById, formatMoney, formatMinutes, headingOf, pick, onStart, onStop, inFreeRide} =
     require("./lib/util.js");
 
@@ -147,8 +147,8 @@ let nextFireAt = 0;
 let timer = null;
 let lastCardAt = 0;
 let ambulance = null;
-let lastMarkers = "";
-let lastItems = [];
+// playerId -> the fire markers last sent (lib/notify.js crewMarkers).
+const sentMarkers = new Map();
 // Civilians walking home after a rescue, removed a little later.
 const strays = new Set();
 // Officers on duty shown the grab prompt, by player id.
@@ -291,12 +291,8 @@ function presentIncidents() {
                 range: 400, near: 60, map: {icon: "triangle", label: "Arsonist"}});
         }
     }
-    // Sent again only when something on it changed.
-    const payload = JSON.stringify(items);
-    if (payload === lastMarkers) return;
-    lastMarkers = payload;
-    lastItems = items;
-    markersAll("fires", items);
+    // Everyone sees the flames; only the crew on duty gets them on the map.
+    crewMarkers("fires", sentMarkers, items, (player) => crews.has(player.id));
 }
 
 // The retail voices of men (26-28) and women (29-31), one per person.
@@ -1196,11 +1192,12 @@ onStop(() => {
     arsonPrompts.clear();
 });
 Events.on("playerSpawn", (player) => {
-    // The fires burning before this player came: markersAll sends only changes.
-    if (lastItems.length) markers(player, "fires", lastItems);
+    // The fires burning before this player came go out on the next tick.
+    sentMarkers.delete(player.id);
 });
 Events.on("playerDisconnect", (player) => {
     arsonPrompts.delete(player.id);
+    sentMarkers.delete(player.id);
     const crew = crews.get(player.id);
     if (!crew) return;
     crews.delete(player.id);
@@ -1212,8 +1209,7 @@ Events.on("missionChange", () => {
     incidents.clear();
     strays.clear();
     arsonPrompts.clear();
-    lastMarkers = "";
-    lastItems = [];
+    sentMarkers.clear();
     nextFireAt = Date.now() + FIRST_FIRE_MS;
 });
 
