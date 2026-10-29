@@ -1722,6 +1722,8 @@ namespace Mafia1Online::Features::Car {
         const float dt = static_cast<float>(std::clamp(frameMs, 1u, 83u)) * 0.001f;
         auto *frame = nativeCar->second.frame;
         auto &vehicle = car->Vehicle();
+        const auto massCenter = vehicle.MassCenter();
+        stream.poses.SetMassCenter({massCenter.x, massCenter.y, massCenter.z});
         Stream::PoseSample pose;
         // A car placed from the network is immovable to local physics: a car
         // this client simulates would hit it like a wall. Near one, run it on

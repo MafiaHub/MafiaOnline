@@ -212,6 +212,11 @@ namespace Mafia1Online::SDK::Car {
         Player::Vector3 WorldCenter() const {
             return _worldCenter;
         }
+        // In the frame: UpdateImportantVariables puts the world centre at
+        // m_vMassCenter * m_mWorld.
+        Player::Vector3 MassCenter() const {
+            return _massCenter;
+        }
         uint32_t LightState() const {
             return _lightStateFlags & kReplicatedLightMask;
         }

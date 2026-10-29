@@ -406,7 +406,8 @@ namespace {
         snap.Push(CarAt(1000.0, 0.0f, 10.0f), 1000.0, false);
         snap.Push(CarAt(1033.0, 0.33f, 10.0f), 1033.0, false);
         Features::Car::CarPoseSample shown;
-        CHECK(snap.Present(1150.0, 0.016f, shown) && Near(shown.position.x, 1.5f, 0.01f)); // Extrapolated 117 ms.
+        // Extrapolated 117 ms: 100 at 10 m/s, easing for the rest.
+        CHECK(snap.Present(1150.0, 0.016f, shown) && Near(shown.position.x, 0.33f + 1.0f + 0.5f * (1.0f - std::exp(-17.0f / 50.0f)), 0.001f));
         snap.Push(CarAt(1150.0, 0.5f, 0.0f), 1150.0, false);                              // It had stopped.
         CHECK(snap.Present(1150.0, 0.016f, shown) && shown.position.x > 1.2f);
         CHECK(snap.Present(1150.0, 0.2f, shown) && shown.position.x < 0.6f);
@@ -414,6 +415,72 @@ namespace {
         CHECK(snap.Present(1250.0, 0.016f, shown) && shown.position.x < 0.6f);
         snap.Push(CarAt(1200.0, 20.0f, 0.0f), 1200.0, false);
         CHECK(snap.Present(1250.0, 0.016f, shown) && Near(shown.position.x, 20.0f, 0.001f));
+    }
+
+    // A car 10 m/s forward (+z) yawing at 1 rad/s, its mass centre 1 m
+    // ahead of the frame origin. Native physics turns it by angleAxis(-wt)
+    // about the mass centre (r x w): heading (-sin t, 0, cos t), the centre
+    // on a 10 m circle, the origin starting off at v + w x (q m) = (1, 0, 10).
+    void CarArcMotion() {
+        const glm::vec3 massCenter(0.0f, 0.0f, 1.0f);
+        const glm::vec3 yaw(0.0f, 1.0f, 0.0f);
+        const auto exact = [&](float t) {
+            Features::Car::CarPoseSample pose;
+            pose.time            = 1000.0 + t * 1000.0;
+            pose.rotation        = glm::angleAxis(-t, yaw);
+            const glm::vec3 centre = massCenter + 10.0f * glm::vec3(std::cos(t) - 1.0f, 0.0f, std::sin(t));
+            pose.position        = centre - pose.rotation * massCenter;
+            pose.velocity        = 10.0f * glm::vec3(-std::sin(t), 0.0f, std::cos(t));
+            pose.angularVelocity = yaw;
+            return pose;
+        };
+        Features::Car::CarPoseBuffer buffer;
+        buffer.SetMassCenter(massCenter);
+        buffer.Push(exact(0.0f), 1000.0, false);
+        Features::Car::CarPoseSample out;
+        // Extrapolated along the arc, turning the way native physics does.
+        CHECK(buffer.Sample(1100.0, out) && Near(out.position, exact(0.1f).position, 1e-4f));
+        CHECK(std::abs(glm::dot(out.rotation, exact(0.1f).rotation)) > 0.99999f);
+        CHECK(Near(out.velocity, exact(0.1f).velocity, 1e-3f));
+        // Hermite between poses on it with the origin's own velocities
+        // stays on it; the mass centre's velocities would cut the corner.
+        buffer.Push(exact(0.1f), 1100.0, false);
+        CHECK(buffer.Sample(1050.0, out) && Near(out.position, exact(0.05f).position, 2e-4f));
+        CHECK(std::abs(glm::dot(out.rotation, exact(0.05f).rotation)) > 0.99999f);
+        CHECK(Near(out.velocity, exact(0.05f).velocity, 0.02f));
+
+        // Spinning on the spot about the mass centre: the origin circles it.
+        Features::Car::CarPoseBuffer spin;
+        spin.SetMassCenter(massCenter);
+        const auto spun = [&](float t) {
+            Features::Car::CarPoseSample pose;
+            pose.time            = 1000.0 + t * 1000.0;
+            pose.rotation        = glm::angleAxis(-2.0f * t, yaw);
+            pose.position        = massCenter - pose.rotation * massCenter;
+            pose.angularVelocity = 2.0f * yaw;
+            return pose;
+        };
+        spin.Push(spun(0.0f), 1000.0, false);
+        spin.Push(spun(0.1f), 1100.0, false);
+        CHECK(spin.Sample(1050.0, out) && Near(out.position, spun(0.05f).position, 1e-4f) && Near(out.velocity, glm::vec3(0.0f), 0.01f));
+        CHECK(std::abs(glm::dot(out.rotation, spun(0.05f).rotation)) > 0.99999f);
+    }
+
+    void CarExtrapolationEase() {
+        // Full speed to 100 ms past the newest pose, then easing to a stop at
+        // 150 ms worth instead of halting there.
+        Features::Car::CarPoseBuffer buffer;
+        buffer.Push(CarAt(1000.0, 0.0f, 20.0f), 1000.0, false);
+        Features::Car::CarPoseSample out;
+        CHECK(buffer.Sample(1100.0, out) && Near(out.position.x, 2.0f, 1e-4f) && Near(out.velocity.x, 20.0f, 1e-4f));
+        float last      = out.position.x;
+        float lastSpeed = out.velocity.x;
+        for (double t = 1105.0; t <= 1600.0; t += 5.0) {
+            CHECK(buffer.Sample(t, out) && out.position.x >= last && out.velocity.x <= lastSpeed && out.position.x - last <= 0.1f + 1e-4f);
+            last      = out.position.x;
+            lastSpeed = out.velocity.x;
+        }
+        CHECK(last <= 3.0f && last > 2.99f && lastSpeed < 0.01f);
     }
 
     void RideBlend() {
@@ -456,6 +523,8 @@ int main() {
     CarResumeAfterHeartbeat();
     CarBandChange();
     CarLateCorrection();
+    CarArcMotion();
+    CarExtrapolationEase();
     RideBlend();
     if (failures == 0) {
         std::printf("network wire tests passed\n");

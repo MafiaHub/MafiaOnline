@@ -11,7 +11,8 @@
 
 namespace Mafia1Online::Features::Car {
     // One replicated car pose, dated on the local clock (ms) from the
-    // controller's physics clock.
+    // controller's physics clock: the frame origin and rotation, and the
+    // native C_Vehicle velocities, which are the mass centre's.
     struct CarPoseSample {
         double time = 0.0;
         glm::vec3 position {0.0f};
@@ -34,14 +35,21 @@ namespace Mafia1Online::Features::Car {
     //    past a pose that braked, say) does not move it there at once: the
     //    jump becomes a correction that decays over ~200 ms, in position and
     //    rotation. One beyond kSnapDistance or kSnapCos is applied at once.
+    //  - Motion is native physics': the body turns about its mass centre
+    //    (reM C_Vehicle_kernel.cpp:2677-2709), so the frame origin moves at
+    //    the mass centre's velocity plus the turn, and past the newest pose
+    //    the car runs on along an arc.
     class CarPoseBuffer final {
       public:
         static constexpr float kRestartGapMs     = 250.0f;
         static constexpr float kRestSpeed        = 0.1f;
         static constexpr float kRestCoverage     = 0.25f;
         static constexpr float kMaxEstimateGapMs = 1000.0f;
-        // Extrapolation past the newest pose, at most.
-        static constexpr double kMaxExtrapolationMs = 150.0;
+        // Extrapolation past the newest pose, at most: at its velocities, then
+        // easing to a stop over the last kExtrapolationEaseMs of it rather
+        // than halting at once.
+        static constexpr double kMaxExtrapolationMs  = 150.0;
+        static constexpr double kExtrapolationEaseMs = 50.0;
         // Above this span Hermite tangents overshoot: interpolate linearly.
         static constexpr float kHermiteSpanSeconds = 0.3f;
         static constexpr float kMinDelayMs         = 40.0f;
@@ -71,6 +79,23 @@ namespace Mafia1Online::Features::Car {
 
         float IntervalMs() const {
             return _intervalMs;
+        }
+
+        // The native car's mass centre in its frame (C_Vehicle 0x3f8).
+        void SetMassCenter(const glm::vec3 &local) {
+            _massCenter = local;
+        }
+
+        // The world rotation native physics turns a car by over `seconds` at
+        // `angular`: C_Vehicle::Move multiplies its basis by the matrix as a
+        // row vector, so a point moves by r x w (reM C_Vehicle_kernel.cpp:
+        // 2677-2690), the opposite sense to glm::angleAxis about w.
+        static glm::quat Spin(const glm::vec3 &angular, float seconds) {
+            const float spin = glm::length(angular);
+            if (spin < 0.0001f) {
+                return glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+            }
+            return glm::angleAxis(-spin * seconds, angular / spin);
         }
 
         // `arrival` is the local clock the pose was received at; `reset`
@@ -127,8 +152,8 @@ namespace Mafia1Online::Features::Car {
         }
 
         // The pose at local clock `time`: Hermite between the bracketing
-        // poses, the oldest before them, and up to kMaxExtrapolationMs along
-        // the newest's velocities after.
+        // poses, the oldest before them, and on along the newest's velocities
+        // after (Extrapolate).
         bool Sample(double time, CarPoseSample &out) const {
             if (_poses.empty()) {
                 return false;
@@ -139,38 +164,82 @@ namespace Mafia1Online::Features::Car {
             }
             const auto &newest = _poses.back();
             if (time >= newest.time) {
-                const float dt = static_cast<float>(std::min(time - newest.time, kMaxExtrapolationMs)) * 0.001f;
-                out            = newest;
-                out.position += newest.velocity * dt;
-                if (const float spin = glm::length(newest.angularVelocity); spin > 0.0001f) {
-                    out.rotation = glm::normalize(glm::angleAxis(spin * dt, newest.angularVelocity / spin) * newest.rotation);
-                }
-                out.time = time;
+                out = Extrapolate(newest, time);
                 return true;
             }
-            const auto next  = std::upper_bound(_poses.begin(), _poses.end(), time, [](double t, const CarPoseSample &p) { return t < p.time; });
-            const auto &b    = *next;
-            const auto &a    = *std::prev(next);
-            const float span = static_cast<float>(b.time - a.time) * 0.001f;
-            const float u    = static_cast<float>((time - a.time) / (b.time - a.time));
-            out.time         = time;
+            const auto next    = std::upper_bound(_poses.begin(), _poses.end(), time, [](double t, const CarPoseSample &p) { return t < p.time; });
+            const auto &b      = *next;
+            const auto &a      = *std::prev(next);
+            const float span   = static_cast<float>(b.time - a.time) * 0.001f;
+            const float u      = static_cast<float>((time - a.time) / (b.time - a.time));
+            const glm::quat to = glm::dot(a.rotation, b.rotation) < 0.0f ? -b.rotation : b.rotation;
+            out.time            = time;
+            out.angularVelocity = glm::mix(a.angularVelocity, b.angularVelocity, u);
             if (span > kHermiteSpanSeconds) {
                 out.position = glm::mix(a.position, b.position, u);
                 out.velocity = glm::mix(a.velocity, b.velocity, u);
+                out.rotation = glm::slerp(a.rotation, to, u);
+                return true;
+            }
+            // Each pose turned on at its own angular velocity to this time,
+            // blended with zero slope at both ends, so the rotation leaves and
+            // reaches the poses at their angular velocities. A pair those do
+            // not explain (a collision between them) is slerped.
+            if (std::abs(glm::dot(Spin(a.angularVelocity, span) * a.rotation, to)) < kSnapCos ||
+                std::abs(glm::dot(Spin(b.angularVelocity, -span) * to, a.rotation)) < kSnapCos) {
+                out.rotation = glm::slerp(a.rotation, to, u);
             }
             else {
-                // Cubic Hermite through both poses with their velocities, so
-                // the path and its derivative stay continuous across samples.
-                const float u2 = u * u;
-                const float u3 = u2 * u;
-                out.position   = (2.0f * u3 - 3.0f * u2 + 1.0f) * a.position + (u3 - 2.0f * u2 + u) * span * a.velocity + (-2.0f * u3 + 3.0f * u2) * b.position +
-                               (u3 - u2) * span * b.velocity;
-                out.velocity = ((6.0f * u2 - 6.0f * u) * a.position + (-6.0f * u2 + 6.0f * u) * b.position) / span + (3.0f * u2 - 4.0f * u + 1.0f) * a.velocity +
-                               (3.0f * u2 - 2.0f * u) * b.velocity;
+                const glm::quat fromA = glm::normalize(Spin(a.angularVelocity, span * u) * a.rotation);
+                const glm::quat fromB = glm::normalize(Spin(b.angularVelocity, span * (u - 1.0f)) * to);
+                out.rotation          = glm::normalize(glm::slerp(fromA, glm::dot(fromA, fromB) < 0.0f ? -fromB : fromB, u * u * (3.0f - 2.0f * u)));
             }
-            out.rotation        = glm::slerp(a.rotation, glm::dot(a.rotation, b.rotation) < 0.0f ? -b.rotation : b.rotation, u);
-            out.angularVelocity = glm::mix(a.angularVelocity, b.angularVelocity, u);
+            // Cubic Hermite through both frame origins with their velocities,
+            // so the path and its derivative stay continuous across samples.
+            const glm::vec3 va = OriginVelocity(a);
+            const glm::vec3 vb = OriginVelocity(b);
+            const float u2     = u * u;
+            const float u3     = u2 * u;
+            out.position = (2.0f * u3 - 3.0f * u2 + 1.0f) * a.position + (u3 - 2.0f * u2 + u) * span * va + (-2.0f * u3 + 3.0f * u2) * b.position + (u3 - u2) * span * vb;
+            const glm::vec3 origin =
+                ((6.0f * u2 - 6.0f * u) * a.position + (-6.0f * u2 + 6.0f * u) * b.position) / span + (3.0f * u2 - 4.0f * u + 1.0f) * va + (3.0f * u2 - 2.0f * u) * vb;
+            out.velocity = origin - glm::cross(out.angularVelocity, out.rotation * _massCenter);
             return true;
+        }
+
+        // `from` carried on to local clock `time`: its mass centre along an
+        // arc (the tyres turn the velocity with the heading, so by the yaw
+        // about the car's up axis alone), the body turning about it, at most
+        // kMaxExtrapolationMs worth.
+        CarPoseSample Extrapolate(const CarPoseSample &from, double time) const {
+            constexpr double kFullMs = kMaxExtrapolationMs - kExtrapolationEaseMs;
+            const double reach       = std::abs(time - from.time);
+            double run               = reach;
+            float rate               = 1.0f;
+            if (reach > kFullMs) {
+                const double fade = std::exp(-(reach - kFullMs) / kExtrapolationEaseMs);
+                run               = kFullMs + kExtrapolationEaseMs * (1.0 - fade);
+                rate              = static_cast<float>(fade);
+            }
+            const float dt      = static_cast<float>(time < from.time ? -run : run) * 0.001f;
+            const glm::vec3 up  = from.rotation * glm::vec3(0.0f, 1.0f, 0.0f);
+            const glm::vec3 yaw = up * glm::dot(from.angularVelocity, up);
+            // The turning velocity's integral: straight along the turn axis,
+            // round a circle of radius v / w across it.
+            glm::vec3 travel = from.velocity * dt;
+            if (const float spin = glm::length(yaw); spin > 0.0001f) {
+                const glm::vec3 axis   = -yaw / spin;
+                const glm::vec3 along  = axis * glm::dot(from.velocity, axis);
+                const glm::vec3 across = from.velocity - along;
+                travel = along * dt + across * (std::sin(spin * dt) / spin) + glm::cross(axis, across) * ((1.0f - std::cos(spin * dt)) / spin);
+            }
+            CarPoseSample out;
+            out.time            = time;
+            out.rotation        = glm::normalize(Spin(from.angularVelocity, dt) * from.rotation);
+            out.position        = from.position + from.rotation * _massCenter + travel - out.rotation * _massCenter;
+            out.velocity        = Spin(yaw, dt) * from.velocity * rate;
+            out.angularVelocity = from.angularVelocity * rate;
+            return out;
         }
 
         // This frame's render time, `now` less the delay, which then moves
@@ -213,6 +282,12 @@ namespace Mafia1Online::Features::Car {
         }
 
       private:
+        // The frame origin's velocity: a point r from the mass centre moves
+        // at v - w x r (reM C_Vehicle_kernel.cpp:657, 1653).
+        glm::vec3 OriginVelocity(const CarPoseSample &pose) const {
+            return pose.velocity + glm::cross(pose.angularVelocity, pose.rotation * _massCenter);
+        }
+
         void Append(const CarPoseSample &pose) {
             _poses.push_back(pose);
             while (_poses.size() > 64) {
@@ -225,6 +300,7 @@ namespace Mafia1Online::Features::Car {
         float _latenessPeak = 0.0f;
         float _intervalMs   = 33.0f;
         float _jitterMs     = 0.0f;
+        glm::vec3 _massCenter {0.0f};
         glm::vec3 _offset {0.0f};
         glm::quat _turn {1.0f, 0.0f, 0.0f, 0.0f};
         double _lastRender = 0.0;
