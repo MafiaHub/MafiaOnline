@@ -98,6 +98,7 @@ namespace Mafia1Online::Features::Car {
         _motion.clear();
         _mesh.clear();
         _hitPoses.clear();
+        _lastContact.clear();
         _lastSeatIntent.clear();
         _authoredDamageRevision.clear();
     }
@@ -300,6 +301,77 @@ namespace Mafia1Online::Features::Car {
             }
         }
         return acceptedSpeed;
+    }
+
+    std::optional<float> CarService::ValidateContact(const Shared::Car::ContactReport &report, std::chrono::steady_clock::time_point receivedAt) {
+        const auto *car          = Find(report.carId);
+        const auto *striker      = Find(report.strikerId);
+        const auto carPoses      = _hitPoses.find(report.carId);
+        const auto strikerPoses  = _hitPoses.find(report.strikerId);
+        if (!car || !striker || report.carId == report.strikerId || car->missionGeneration != report.missionGeneration ||
+            striker->missionGeneration != report.missionGeneration || car->terminalState != Shared::Entities::CarEntity::TerminalState::Active ||
+            striker->terminalState != Shared::Entities::CarEntity::TerminalState::Active || carPoses == _hitPoses.end() || strikerPoses == _hitPoses.end() ||
+            !IsFinite(report.position) || !IsFinite(report.localPosition) || !IsFinite(report.localImpulse) || !IsFinite(report.localNormal) ||
+            !std::isfinite(report.mass) || report.mass <= 0.0f || report.mass > 100000.0f || glm::length(report.localImpulse) > 1.0e7f ||
+            glm::length(report.localNormal) < 0.5f || glm::length(report.localNormal) > 1.5f) {
+            return std::nullopt;
+        }
+        // On the hit car's body: the stock-car extents of
+        // ValidateVehicleImpactGeometry, half a metre wider for the sweep's
+        // emitter radius.
+        const auto onBody = [](const glm::vec3 &local) {
+            return std::abs(local.x) <= 2.9f && local.y >= -2.0f && local.y <= 3.3f && std::abs(local.z) <= 5.0f;
+        };
+        if (!onBody(report.localPosition)) {
+            return std::nullopt;
+        }
+        // The poses around the report, and the one in force when they begin:
+        // a car at rest reports only once a second (its idle heartbeat).
+        const auto forPoses = [&](const std::deque<HitPose> &poses, uint64_t controllerGuid, const auto &visit) {
+            const HitPose *inForce = nullptr;
+            for (const auto &pose : poses) {
+                if (pose.controllerGuid != controllerGuid || !IsFinite(pose.velocity) ||
+                    pose.observedAt > receivedAt + std::chrono::milliseconds(Shared::Car::kContactPoseAfterMs)) {
+                    continue;
+                }
+                if (pose.observedAt + std::chrono::milliseconds(Shared::Car::kContactPoseBeforeMs) < receivedAt) {
+                    inForce = &pose;
+                    continue;
+                }
+                visit(pose);
+            }
+            if (inForce) {
+                visit(*inForce);
+            }
+        };
+        // The point lies where the reporter put it on the hit car and on the
+        // striker's body, each at one of those poses, and the cars' fastest
+        // speeds then bound what the hit may do.
+        float carSpeed = 0.0f;
+        bool onCar     = false;
+        forPoses(carPoses->second, car->simulationControllerGuid, [&](const HitPose &pose) {
+            carSpeed = std::max(carSpeed, glm::length(pose.velocity));
+            onCar    = onCar || glm::distance(pose.position + pose.rotation * report.localPosition, report.position) <= 2.5f;
+        });
+        float strikerSpeed = 0.0f;
+        bool onStriker     = false;
+        forPoses(strikerPoses->second, striker->simulationControllerGuid, [&](const HitPose &pose) {
+            strikerSpeed = std::max(strikerSpeed, glm::length(pose.velocity));
+            onStriker    = onStriker || onBody(glm::inverse(pose.rotation) * (report.position - pose.position));
+        });
+        if (!onCar || !onStriker) {
+            return std::nullopt;
+        }
+        const auto key = std::make_pair(report.carId, report.strikerId);
+        if (const auto last = _lastContact.find(key);
+            last != _lastContact.end() && receivedAt - last->second < std::chrono::milliseconds(Shared::Car::kContactReportGapMs)) {
+            return std::nullopt;
+        }
+        if (_lastContact.size() > 1024) {
+            std::erase_if(_lastContact, [&](const auto &entry) { return receivedAt - entry.second > std::chrono::seconds(2); });
+        }
+        _lastContact[key] = receivedAt;
+        return Shared::Car::MaxContactDeltaV(strikerSpeed, carSpeed);
     }
 
     void CarService::ResetMeshSender(uint64_t networkId) {

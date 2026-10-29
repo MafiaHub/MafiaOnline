@@ -2,6 +2,7 @@
 
 #include "car_pose_buffer.h"
 #include "game/entities/native_object_registry.h"
+#include "shared/features/car/car_contact.h"
 #include "shared/features/car/car_damage_state.h"
 #include "shared/features/car/car_hit_report.h"
 #include "shared/features/car/car_mesh_checkpoint.h"
@@ -15,6 +16,7 @@
 #include <chrono>
 #include <cstdint>
 #include <deque>
+#include <map>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -25,6 +27,10 @@ namespace Mafia1Online::SDK::Scene {
 namespace Mafia1Online::SDK::Car {
     struct NativeCar;
     struct NativeVehicle;
+}
+namespace Mafia1Online::SDK::Player {
+    struct NativeActor;
+    struct Vector3;
 }
 namespace Mafia1Online::Shared::Entities {
     class CarEntity;
@@ -48,6 +54,13 @@ namespace Mafia1Online::Features::Car {
         void OnNativeWorldCollision(World::WorldService &world, SDK::Car::NativeCar *car, uint8_t material);
         void OnLocalHumanDeath(World::WorldService &world, void *human);
         void OnNativeDeformed(SDK::Car::NativeCar *car);
+        // C_car::Call_Collision: `car`'s sweep hit `other`.
+        void OnCarCollision(SDK::Car::NativeCar *car, SDK::Player::NativeActor *other);
+        // C_car::Collision: `striker`'s sweep hit `car` with `impulse`. A car
+        // another client simulates, hit by one this client does, is reported
+        // to its controller, which applies it unless its own physics had it.
+        void OnCarHit(SDK::Car::NativeCar *car, SDK::Player::NativeActor *striker, const SDK::Player::Vector3 &position,
+                      const SDK::Player::Vector3 &impulse, const SDK::Player::Vector3 &normal, float mass);
         // C_car::AI detour. An observer car skips native physics: the
         // interpolated pose is written inside the actor tick, before the
         // camera reads it, and only wheels and engine sound are refreshed.
@@ -166,6 +179,14 @@ namespace Mafia1Online::Features::Car {
             uint64_t lastQueuedHitSequence = 0;
             uint64_t lastAppliedHitSequence = 0;
             std::deque<PendingHit> pendingHits;
+            struct PendingContact {
+                Shared::Car::ContactImpact impact;
+                // Local clock times it arrived, and when the reporter had it.
+                double arrival   = 0.0;
+                double contactAt = 0.0;
+            };
+            uint64_t lastContactSequence = 0;
+            std::deque<PendingContact> pendingContacts;
         };
         struct NativeCar {
             Game::Entities::NativeObjectHandle handle;
@@ -195,6 +216,10 @@ namespace Mafia1Online::Features::Car {
         void OnMeshCheckpoint(const Shared::Car::MeshCheckpointChunk &chunk);
         void OnAuthoritativeHit(const Shared::Car::AuthoritativeHit &hit);
         void ApplyAuthoritativeHits(World::WorldService &world, uint64_t networkId, Stream &stream);
+        void OnContactImpact(const Shared::Car::ContactImpact &impact);
+        void ApplyContactImpacts(World::WorldService &world, uint64_t networkId, Stream &stream);
+        // Records a contact between two network cars, one this client's.
+        void RecordContact(uint64_t first, uint64_t second);
         void QueueRemoval(World::WorldService &world, uint64_t networkId);
         void ApplyPose(World::WorldService &world, uint64_t networkId, const Framework::Utils::TransformSnapshot &pose, bool forceSnap = false);
         void ResetNativePhysics(SDK::Car::NativeCar &actor, uint64_t networkId);
@@ -233,5 +258,14 @@ namespace Mafia1Online::Features::Car {
         // the current actor tick.
         std::vector<std::pair<glm::vec3, glm::vec3>> _simulatedCars;
         uint64_t _simulatedSerial = ~0ull;
+        // Local clock times of the contacts between each pair of network
+        // cars (lower id first) one of which this client simulates.
+        std::map<std::pair<uint64_t, uint64_t>, std::vector<double>> _contacts;
+        // Each (hit car, striker) pair's current reported contact.
+        struct ReportedContact {
+            double lastAt = -1.0e9;
+            float peak    = 0.0f;
+        };
+        std::map<std::pair<uint64_t, uint64_t>, ReportedContact> _reportedContacts;
     };
 } // namespace Mafia1Online::Features::Car

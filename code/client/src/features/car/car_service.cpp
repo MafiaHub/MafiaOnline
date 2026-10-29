@@ -144,6 +144,8 @@ namespace Mafia1Online::Features::Car {
             [this](const Shared::Car::MeshCheckpointChunk &chunk, MafiaNet::Packet *) { OnMeshCheckpoint(chunk); });
         Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Car::AuthoritativeHit>(
             [this](const Shared::Car::AuthoritativeHit &hit, MafiaNet::Packet *) { OnAuthoritativeHit(hit); });
+        Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Car::ContactImpact>(
+            [this](const Shared::Car::ContactImpact &impact, MafiaNet::Packet *) { OnContactImpact(impact); });
         // Another player's accepted strike: the sound its own C_human::AI
         // played (the dent arrives with the controller's mesh).
         Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Car::MeleeImpact>([this](const Shared::Car::MeleeImpact &impact, MafiaNet::Packet *) {
@@ -352,6 +354,7 @@ namespace Mafia1Online::Features::Car {
                     SyncDamage(world, it->first, it->second);
                     SyncMesh(world, it->first, it->second);
                     ApplyAuthoritativeHits(world, it->first, it->second);
+                    ApplyContactImpacts(world, it->first, it->second);
                     SyncDynamics(world, it->first, it->second);
                     ReportMovement(world, it->first, it->second);
                     ReportDamage(world, it->first, it->second);
@@ -807,6 +810,157 @@ namespace Mafia1Online::Features::Car {
         }
         stream.lastQueuedHitSequence = hit.serverSequence;
         stream.pendingHits.push_back({hit, std::chrono::steady_clock::now()});
+    }
+
+    void CarService::RecordContact(uint64_t first, uint64_t second) {
+        const double now = LocalClockMs();
+        auto &times      = _contacts[std::minmax(first, second)];
+        std::erase_if(times, [&](double at) { return now - at > Shared::Car::kContactExpiryMs; });
+        times.push_back(now);
+        if (_contacts.size() > 256) {
+            std::erase_if(_contacts, [&](const auto &entry) { return entry.second.empty() || now - entry.second.back() > Shared::Car::kContactExpiryMs; });
+        }
+    }
+
+    void CarService::OnCarCollision(SDK::Car::NativeCar *car, SDK::Player::NativeActor *other) {
+        const auto id      = _idByNative.find(car);
+        const auto otherId = _idByNative.find(other);
+        if (id == _idByNative.end() || otherId == _idByNative.end()) {
+            return;
+        }
+        if (const auto stream = _streams.find(id->second); stream != _streams.end() && stream->second.simulationController) {
+            RecordContact(id->second, otherId->second);
+        }
+    }
+
+    void CarService::OnCarHit(SDK::Car::NativeCar *car, SDK::Player::NativeActor *striker, const SDK::Player::Vector3 &position,
+                              const SDK::Player::Vector3 &impulse, const SDK::Player::Vector3 &normal, float mass) {
+        const auto id        = _idByNative.find(car);
+        const auto strikerId = _idByNative.find(striker);
+        if (!_world || !_world->IsReady() || id == _idByNative.end() || strikerId == _idByNative.end()) {
+            return;
+        }
+        const auto stream        = _streams.find(id->second);
+        const auto strikerStream = _streams.find(strikerId->second);
+        if (stream == _streams.end() || strikerStream == _streams.end()) {
+            return;
+        }
+        if (stream->second.simulationController) {
+            RecordContact(id->second, strikerId->second);
+            return;
+        }
+        // Here the hit car's dent and damage are dropped (VehicleDeformHook)
+        // and its shove lasts only until its controller's poses pull it
+        // back: if the controller's physics missed the contact (the cars a
+        // little apart there), the hit never happened for anyone.
+        const auto *state = Framework::CoreModules::GetReplication()->GetEntity<Shared::Entities::CarEntity>(id->second);
+        auto *frame       = car->Frame();
+        const glm::vec3 shove(impulse.x, impulse.y, impulse.z);
+        const float strength = glm::length(shove);
+        if (!strikerStream->second.simulationController || !state || !frame || state->missionGeneration != _world->LoadedMissionGeneration() ||
+            state->terminalState != Shared::Entities::CarEntity::TerminalState::Active || state->simulationControllerGuid == 0 || !std::isfinite(strength) ||
+            !(Shared::Car::ContactDeltaV(strength, car->Vehicle().Mass()) >= Shared::Car::kContactMinDeltaV)) {
+            return;
+        }
+        auto &reported = _reportedContacts[{id->second, strikerId->second}];
+        if (!Shared::Car::ContactReportDue(LocalClockMs(), strength, reported.lastAt, reported.peak)) {
+            return;
+        }
+        const auto center = frame->WorldPosition();
+        const auto basis  = frame->GetWorldBasis();
+        const glm::vec3 right(basis.right.x, basis.right.y, basis.right.z);
+        const glm::vec3 up(basis.up.x, basis.up.y, basis.up.z);
+        const glm::vec3 forward(basis.forward.x, basis.forward.y, basis.forward.z);
+        const auto local = [&](const glm::vec3 &vector) { return glm::vec3(glm::dot(vector, right), glm::dot(vector, up), glm::dot(vector, forward)); };
+        Shared::Car::ContactReport report;
+        report.carId             = id->second;
+        report.strikerId         = strikerId->second;
+        report.missionGeneration = state->missionGeneration;
+        report.position          = {position.x, position.y, position.z};
+        report.localPosition     = local(report.position - glm::vec3(center.x, center.y, center.z));
+        report.localImpulse      = local(shove);
+        report.localNormal       = local(glm::vec3(normal.x, normal.y, normal.z));
+        report.mass              = mass;
+        if (!IsFiniteVector(report.position) || !IsFiniteVector(report.localPosition) || !IsFiniteVector(report.localImpulse) ||
+            !IsFiniteVector(report.localNormal) || !std::isfinite(report.mass)) {
+            return;
+        }
+        Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(report);
+    }
+
+    void CarService::OnContactImpact(const Shared::Car::ContactImpact &impact) {
+        const auto *state = Framework::CoreModules::GetReplication()->GetEntity<Shared::Entities::CarEntity>(impact.carId);
+        if (!state || state->missionGeneration != impact.missionGeneration || impact.controllerGuid == 0 || impact.serverSequence == 0 ||
+            !IsFiniteVector(impact.localPosition) || glm::length(impact.localPosition) > 6.0f || !IsFiniteVector(impact.localImpulse) ||
+            !IsFiniteVector(impact.localNormal) || glm::length(impact.localNormal) < 0.5f || glm::length(impact.localNormal) > 1.5f ||
+            !std::isfinite(impact.mass) || impact.mass <= 0.0f || !std::isfinite(impact.maxDeltaV) || impact.maxDeltaV < 0.0f) {
+            return;
+        }
+        auto &stream = _streams[impact.carId];
+        if (impact.serverSequence <= stream.lastContactSequence || stream.pendingContacts.size() >= 32) {
+            return;
+        }
+        stream.lastContactSequence = impact.serverSequence;
+        const double now           = LocalClockMs();
+        stream.pendingContacts.push_back({impact, now, now - static_cast<double>(impact.ageMs)});
+    }
+
+    void CarService::ApplyContactImpacts(World::WorldService &world, uint64_t networkId, Stream &stream) {
+        const auto myGuid = static_cast<uint64_t>(Framework::CoreModules::GetReplication()->GetMyGUID());
+        const double now  = LocalClockMs();
+        while (!stream.pendingContacts.empty()) {
+            const auto &pending = stream.pendingContacts.front();
+            const auto &impact  = pending.impact;
+            if (impact.controllerGuid != myGuid || impact.missionGeneration != world.LoadedMissionGeneration() ||
+                now - pending.arrival > Shared::Car::kContactExpiryMs) {
+                stream.pendingContacts.pop_front();
+                continue;
+            }
+            // Its own physics had this contact: it is in the car already.
+            if (const auto seen = _contacts.find(std::minmax(networkId, impact.strikerId));
+                seen != _contacts.end() && Shared::Car::ContactSeenLocally(seen->second, pending.contactAt)) {
+                stream.pendingContacts.pop_front();
+                continue;
+            }
+            // It may yet: the striker's replica is predicted to the present,
+            // but the estimate of when is only as good as the pings.
+            if (now < pending.contactAt + Shared::Car::kContactWindowMs) {
+                return;
+            }
+            const auto native = _nativeById.find(networkId);
+            if (native == _nativeById.end() || native->second.removalQueued || !native->second.frame) {
+                return;
+            }
+            auto *car     = static_cast<SDK::Car::NativeCar *>(world.NativeObjects().Resolve(native->second.handle));
+            auto *striker = static_cast<SDK::Player::NativeActor *>(world.NativeObjects().Resolve(world.NativeObjects().FindByNetwork(impact.strikerId)));
+            if (!car) {
+                return;
+            }
+            if (!striker || striker->GetType() != SDK::Player::NativeActor::Type::Car) {
+                stream.pendingContacts.pop_front();
+                continue;
+            }
+            // Where the reporter had it on this car, in this car's frame now;
+            // no faster than the server allows from both cars' speeds.
+            auto *frame       = native->second.frame;
+            const auto center = frame->WorldPosition();
+            const auto basis  = frame->GetWorldBasis();
+            const glm::vec3 right(basis.right.x, basis.right.y, basis.right.z);
+            const glm::vec3 up(basis.up.x, basis.up.y, basis.up.z);
+            const glm::vec3 forward(basis.forward.x, basis.forward.y, basis.forward.z);
+            const auto toWorld       = [&](const glm::vec3 &local) { return right * local.x + up * local.y + forward * local.z; };
+            const glm::vec3 position = glm::vec3(center.x, center.y, center.z) + toWorld(impact.localPosition);
+            const glm::vec3 impulse  = Shared::Car::ClampContactImpulse(toWorld(impact.localImpulse), car->Vehicle().Mass(), impact.maxDeltaV);
+            const glm::vec3 normal   = toWorld(impact.localNormal);
+            const float mass         = impact.mass;
+            stream.pendingContacts.pop_front();
+            if (!IsFiniteVector(position) || !IsFiniteVector(impulse) || !IsFiniteVector(normal)) {
+                continue;
+            }
+            ApplyCarContact(car, static_cast<SDK::Car::NativeCar *>(static_cast<void *>(striker)), {position.x, position.y, position.z},
+                            {impulse.x, impulse.y, impulse.z}, {normal.x, normal.y, normal.z}, mass);
+            stream.meshDirty = true;
+        }
     }
 
     void CarService::ApplyAuthoritativeHits(World::WorldService &world, uint64_t networkId, Stream &stream) {
@@ -1628,6 +1782,7 @@ namespace Mafia1Online::Features::Car {
         stream.hasReportedMesh = false;
         stream.meshDirty = stream.simulationController;
         stream.pendingHits.clear();
+        stream.pendingContacts.clear();
     }
 
     bool CarService::Adopt(World::WorldService &world, uint64_t networkId, SDK::Car::NativeCar *car, Origin origin) {
@@ -1843,9 +1998,12 @@ namespace Mafia1Online::Features::Car {
             // Until the controller's poses carry its own answer to the
             // impact, the prediction still runs along the pre-impact path:
             // pulling to it drives the car back into what it hit. Ease
-            // toward it slowly and keep the local impulse meanwhile.
-            const bool yielding = stream.impactAt > 0.0 && _frameClock - stream.impactAt < kImpactHoldMs &&
-                                  stream.poses.Newest().time < stream.impactRenderAt + kImpactResponseMs;
+            // toward it slowly and keep the local impulse meanwhile. An answer
+            // to this client's report of it (OnCarHit) comes later: the report
+            // reaches the controller a transit after it had the contact, and
+            // waits out ContactImpact's window there.
+            const double answered = stream.impactRenderAt + std::max(Shared::Car::kContactWindowMs, static_cast<double>(stream.transitMs)) + kImpactResponseMs;
+            const bool yielding   = stream.impactAt > 0.0 && _frameClock - stream.impactAt < kImpactHoldMs && stream.poses.Newest().time < answered;
             const auto current = frame->WorldPosition();
             const glm::vec3 position(current.x, current.y, current.z);
             const glm::quat rotation = FrameRotation(*frame);
@@ -1921,5 +2079,7 @@ namespace Mafia1Online::Features::Car {
         _world = nullptr;
         _waterCamera.reset();
         _streams.clear();
+        _contacts.clear();
+        _reportedContacts.clear();
     }
 } // namespace Mafia1Online::Features::Car

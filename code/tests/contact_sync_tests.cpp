@@ -1,5 +1,6 @@
 // Car bumps, police arrests and railway shots: the wire messages and the
 // pure rules both ends of them apply.
+#include "shared/features/car/car_contact.h"
 #include "shared/features/combat/vehicle_impact.h"
 #include "shared/features/npc/npc_animation.h"
 #include "shared/features/npc/npc_report.h"
@@ -137,6 +138,60 @@ namespace {
         CHECK(rate.Admit(start + std::chrono::milliseconds(1000)));
         CHECK(!rate.Admit(start + std::chrono::milliseconds(1005)));
         CHECK(rate.Admit(start + std::chrono::milliseconds(2500)));
+    }
+
+    // A car this client simulates hitting one another client does: what is
+    // reported, what the server allows and when the controller applies it.
+    void CarContacts() {
+        using namespace Shared::Car;
+        Shared::Car::ContactReport report;
+        report.carId             = 21;
+        report.strikerId         = 22;
+        report.missionGeneration = 5;
+        report.position          = {100.0f, 2.0f, -300.0f};
+        report.localPosition     = {0.9f, 0.4f, 2.1f};
+        report.localImpulse      = {-1200.0f, 0.0f, 3400.0f};
+        report.localNormal       = {0.0f, 0.0f, 1.0f};
+        report.mass              = 1400.0f;
+        const auto readReport    = RoundTrip(report);
+        CHECK(readReport.carId == 21 && readReport.strikerId == 22 && readReport.missionGeneration == 5 && readReport.position == report.position &&
+              readReport.localPosition == report.localPosition && readReport.localImpulse == report.localImpulse &&
+              readReport.localNormal == report.localNormal && readReport.mass == 1400.0f);
+        Shared::Car::ContactImpact impact;
+        impact.carId          = 21;
+        impact.strikerId      = 22;
+        impact.controllerGuid = 77;
+        impact.serverSequence = 9;
+        impact.localImpulse   = report.localImpulse;
+        impact.maxDeltaV      = 31.0f;
+        impact.ageMs          = 120;
+        const auto readImpact = RoundTrip(impact);
+        CHECK(readImpact.controllerGuid == 77 && readImpact.serverSequence == 9 && readImpact.localImpulse == impact.localImpulse &&
+              readImpact.maxDeltaV == 31.0f && readImpact.ageMs == 120);
+
+        // DoCollision: 1.2 x the impulse over the hit car's mass.
+        CHECK(Near(ContactDeltaV(1000.0f, 1200.0f), 1.0f) && ContactDeltaV(1000.0f, 0.0f) == 0.0f);
+        // A report can move the car no faster than the server allows; one
+        // within it is left alone.
+        const glm::vec3 shove(0.0f, 0.0f, 30000.0f);
+        CHECK(Near(ContactDeltaV(glm::length(ClampContactImpulse(shove, 1200.0f, 10.0f)), 1200.0f), 10.0f, 1e-3f));
+        CHECK(ClampContactImpulse(shove, 1200.0f, 40.0f) == shove);
+        CHECK(Near(MaxContactDeltaV(10.0f, 4.0f), 22.0f) && Near(MaxContactDeltaV(0.0f, 0.0f), 1.0f));
+
+        // Only a stronger hit than any before in one contact is reported; a
+        // pause over the episode gap starts another.
+        double lastAt = -1.0e9;
+        float peak    = 0.0f;
+        CHECK(ContactReportDue(1000.0, 500.0f, lastAt, peak));
+        CHECK(!ContactReportDue(1010.0, 400.0f, lastAt, peak) && !ContactReportDue(1020.0, 500.0f, lastAt, peak));
+        CHECK(ContactReportDue(1030.0, 900.0f, lastAt, peak) && Near(peak, 900.0f));
+        CHECK(!ContactReportDue(1400.0, 100.0f, lastAt, peak));
+        CHECK(ContactReportDue(1400.0 + kContactEpisodeGapMs + 1.0, 100.0f, lastAt, peak));
+
+        // The controller's own contact within the window is the reported one.
+        const double seen[] = {5000.0, 5600.0};
+        CHECK(ContactSeenLocally(seen, 5100.0) && ContactSeenLocally(seen, 5600.0 + kContactWindowMs));
+        CHECK(!ContactSeenLocally(seen, 5300.0) && !ContactSeenLocally(std::span<const double> {}, 5000.0));
     }
 
     void SeizedMessage() {
@@ -323,6 +378,7 @@ int main() {
     ImpactMessages();
     ContactRules();
     ContactRate();
+    CarContacts();
     SeizedMessage();
     RailwayShots();
     ScriptClips();

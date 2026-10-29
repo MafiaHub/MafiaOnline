@@ -178,6 +178,7 @@ namespace Mafia1Online::Core {
         // Last hand-off of an empty car, which follows the nearest player.
         std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> _emptyCarHandoff;
         uint64_t _carHitSequence = 0;
+        uint64_t _carContactSequence = 0;
         bool _allReadyNotified = false;
     };
 } // namespace Mafia1Online::Core

@@ -52,6 +52,13 @@ namespace Mafia1Online::SDK::Car {
     // float __stdcall S_vector::AngleTo(const S_vector *this, const S_vector &),
     // the LS3DF import thunk Call_Collision measures a ram's angle with.
     inline constexpr uintptr_t kVectorAngleTo       = 0x60FC7E;
+    // bool __thiscall C_car::Collision(C_actor *other, const S_vector &
+    // position, const S_vector &impulse, const S_vector &normal, float mass,
+    // I3D_frame *), ret 18h: another car's sweep hit this one (Call_Collision
+    // passes the impulse it took); for a car, train or wagon it is
+    // C_Vehicle::DoCollision with force 1.2: the impulse, Deform and
+    // DamageVehicle at the contact.
+    inline constexpr uintptr_t kCarCollision        = 0x425040;
     inline constexpr uintptr_t kInitDamage          = 0x4D54E0;
     inline constexpr uintptr_t kInitDeform          = 0x4D51F0;
     inline constexpr uintptr_t kSwitchSpecialProjectorTexture = 0x4D6580;
@@ -218,6 +225,11 @@ namespace Mafia1Online::SDK::Car {
         }
         Player::Vector3 WorldCenter() const {
             return _worldCenter;
+        }
+        // m_fMassCopy: what C_Vehicle::DoCollision (0x4cbd70) divides an
+        // impulse by.
+        float Mass() const {
+            return _mass;
         }
         // In the frame: UpdateImportantVariables puts the world centre at
         // m_vMassCenter * m_mWorld.
@@ -646,7 +658,9 @@ namespace Mafia1Online::SDK::Car {
         float _clutch;
         std::byte _unused5E4[0x5f0 - 0x5e4];
         bool _engineDestroyed;
-        std::byte _unused5F1[0x610 - 0x5f1];
+        std::byte _unused5F1[0x5f4 - 0x5f1];
+        float _mass;
+        std::byte _unused5F8[0x610 - 0x5f8];
         float _currentSteeringAngle;
         std::byte _unused614[0x624 - 0x614];
         float _steeringInput;
@@ -690,6 +704,7 @@ namespace Mafia1Online::SDK::Car {
     static_assert(offsetof(NativeVehicle, _engineHealthMaximum) == 0x1b8);
     static_assert(offsetof(NativeVehicle, _engineHealth) == 0x1b4);
     static_assert(offsetof(NativeVehicle, _engineDestroyed) == 0x5f0);
+    static_assert(offsetof(NativeVehicle, _mass) == 0x5f4);
     static_assert(offsetof(NativeVehicle, _gearboxHealth) == 0x1ec);
     static_assert(offsetof(NativeVehicle, _gearboxHealthMaximum) == 0x1f0);
     static_assert(offsetof(NativeVehicle, _deformZones) == 0x214);

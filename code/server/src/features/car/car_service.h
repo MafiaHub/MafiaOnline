@@ -1,5 +1,6 @@
 #pragma once
 
+#include "shared/features/car/car_contact.h"
 #include "shared/features/car/car_entity.h"
 #include "shared/features/car/car_hit_report.h"
 #include "shared/features/car/car_mesh_checkpoint.h"
@@ -12,6 +13,7 @@
 #include <chrono>
 #include <cstdint>
 #include <deque>
+#include <map>
 #include <optional>
 #include <string_view>
 #include <unordered_map>
@@ -49,6 +51,11 @@ namespace Mafia1Online::Features::Car {
                                                             const glm::vec3 &contact, const glm::vec3 &targetPosition,
                                                             std::chrono::steady_clock::time_point receivedAt,
                                                             float minSpeed = Shared::Combat::kVehicleImpactMinSpeed) const;
+        // A car's report that it hit another (ContactReport): the contact
+        // must lie on both cars' recent poses. The bound on the hit car's
+        // velocity change (MaxContactDeltaV), or nothing; at most one per
+        // pair every kContactReportGapMs.
+        std::optional<float> ValidateContact(const Shared::Car::ContactReport &report, std::chrono::steady_clock::time_point receivedAt);
         void SendMeshCheckpoint(uint64_t networkId, uint64_t recipientGuid) const;
         void TransferController(uint64_t formerGuid, uint64_t replacementGuid);
         void AssignUncontrolled(uint64_t controllerGuid);
@@ -142,6 +149,8 @@ namespace Mafia1Online::Features::Car {
         std::unordered_map<uint64_t, MeshAssembly> _mesh;
         std::unordered_map<uint64_t, uint64_t> _authoredDamageRevision;
         std::unordered_map<uint64_t, std::deque<HitPose>> _hitPoses;
+        // The last accepted ContactReport of each (hit car, striker) pair.
+        std::map<std::pair<uint64_t, uint64_t>, std::chrono::steady_clock::time_point> _lastContact;
         uint64_t _seatEventSequence = 0;
     };
 } // namespace Mafia1Online::Features::Car

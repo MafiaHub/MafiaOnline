@@ -3,6 +3,7 @@
 #include "interest_config.h"
 #include "shared/features/car/car_engine_state.h"
 #include "shared/features/car/car_damage_state.h"
+#include "shared/features/car/car_contact.h"
 #include "shared/features/car/car_debris.h"
 #include "shared/features/car/car_explosion_intent.h"
 #include "shared/features/car/car_siren_intent.h"
@@ -400,6 +401,37 @@ namespace Mafia1Online::Core {
                 gone.missionGeneration == MissionGeneration()) {
                 _debris.ApplyGone(gone, static_cast<uint64_t>(sender));
             }
+        });
+        // A car one client simulates hit a car another simulates: the hit car's
+        // controller replays it unless its own physics had it too.
+        Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Car::ContactReport>([this](const Shared::Car::ContactReport &report, MafiaNet::Packet *packet) {
+            const auto sender   = MafiaNet::ToPeerGuid(packet->guid);
+            const auto *car     = _cars.Find(report.carId);
+            const auto *striker = _cars.Find(report.strikerId);
+            if (!CarPeer(sender) || report.missionGeneration != MissionGeneration() || !car || !striker ||
+                striker->simulationControllerGuid != static_cast<uint64_t>(sender) || car->simulationControllerGuid == 0 ||
+                car->simulationControllerGuid == static_cast<uint64_t>(sender)) {
+                return;
+            }
+            const auto maxDeltaV = _cars.ValidateContact(report, std::chrono::steady_clock::now());
+            if (!maxDeltaV) {
+                return;
+            }
+            const auto controller = MafiaNet::ToGuid(static_cast<MafiaNet::PeerGuid>(car->simulationControllerGuid));
+            auto *peer            = Framework::CoreModules::GetNetworkPeer();
+            Shared::Car::ContactImpact impact;
+            impact.carId             = report.carId;
+            impact.strikerId         = report.strikerId;
+            impact.missionGeneration = report.missionGeneration;
+            impact.controllerGuid    = car->simulationControllerGuid;
+            impact.serverSequence    = ++_carContactSequence;
+            impact.localPosition     = report.localPosition;
+            impact.localImpulse      = report.localImpulse;
+            impact.localNormal       = report.localNormal;
+            impact.mass              = report.mass;
+            impact.maxDeltaV         = *maxDeltaV;
+            impact.ageMs             = static_cast<uint16_t>(std::clamp((std::max(peer->GetPing(packet->guid), 0) + std::max(peer->GetPing(controller), 0)) / 2, 0, 1000));
+            peer->SendRPC(impact, controller);
         });
         Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Car::HitReport>([this](const Shared::Car::HitReport &report, MafiaNet::Packet *packet) {
             const auto sender = MafiaNet::ToPeerGuid(packet->guid);
