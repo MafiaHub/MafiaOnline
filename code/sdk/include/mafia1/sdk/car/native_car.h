@@ -492,10 +492,6 @@ namespace Mafia1Online::SDK::Car {
         void KeepPhysicsActive() {
             _stateFlags |= 1u;
         }
-        void SetSteering(float mappedAngle) {
-            _steeringInput  = mappedAngle;
-            _steeringTarget = mappedAngle;
-        }
         void SetEngineRotations(float rotations) {
             _engineRotations = rotations;
         }

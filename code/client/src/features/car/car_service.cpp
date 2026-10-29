@@ -1811,8 +1811,11 @@ namespace Mafia1Online::Features::Car {
         vehicle.SetMotion({pose.velocity.x, pose.velocity.y, pose.velocity.z}, {pose.angularVelocity.x, pose.angularVelocity.y, pose.angularVelocity.z});
         vehicle.UpdateImportantVariables();
         vehicle.KeepPhysicsActive();
+        // The input only, as retail replay's SetSteer: C_car::Update's
+        // C_Vehicle::Update (UpdateSteeringWheels 0x4ddc60) turns the wheels
+        // toward it at the car's own steering rates.
         if (std::isfinite(state->steeringInput) && std::abs(state->steeringInput) <= 2.0f) {
-            vehicle.SetSteering(state->steeringInput);
+            vehicle.ApplySteeringInput(state->steeringInput);
         }
         if (std::isfinite(state->engineRotations) && state->engineRotations >= 0.0f) {
             vehicle.SetEngineRotations(state->engineRotations);
