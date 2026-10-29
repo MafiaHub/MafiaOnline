@@ -255,11 +255,15 @@ namespace Mafia1Online::Shared::Npc {
         uint8_t pelletCount = 0;
         std::array<float, Combat::kMaximumShotPellets * 2> scatterRandom {};
         std::array<Combat::PelletTrajectory, Combat::kMaximumShotPellets> pellets {};
+        // When it fired, on the host's sample clock (Shared::Net::SampleClock):
+        // players replay it once the NPC's replica gets there.
+        uint16_t hostClockMs = 0;
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {
             stream->Serialize(write, missionGeneration);
             stream->Serialize(write, key);
             stream->Serialize(write, weaponId);
+            stream->Serialize(write, hostClockMs);
             stream->Serialize(write, directionX);
             stream->Serialize(write, directionY);
             stream->Serialize(write, directionZ);
@@ -298,11 +302,14 @@ namespace Mafia1Online::Shared::Npc {
         uint64_t missionGeneration = 0;
         uint32_t key = 0;
         uint8_t weaponId = 0;
+        // When Do_Reload ran, on the host's sample clock, as Fire's.
+        uint16_t hostClockMs = 0;
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {
             stream->Serialize(write, missionGeneration);
             stream->Serialize(write, key);
             stream->Serialize(write, weaponId);
+            stream->Serialize(write, hostClockMs);
         }
     };
 

@@ -108,10 +108,10 @@ namespace Mafia1Online::Features::Death {
             const float speed = std::sqrt(event.directionX * event.directionX + event.directionY * event.directionY + event.directionZ * event.directionZ);
             static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->Npcs().ReportCarContact(car, victim, speed, killed);
         };
-        // An NPC's blow lands when its replica swings it (the attack waits
-        // for the replica in CombatService::ReplayEvents), and its damage
-        // shows, or kills, only then: until that moment each target keeps
-        // the health it had.
+        // An NPC's blow or bullet lands when its replica swings or fires it
+        // (the attack waits for the replica in CombatService::ReplayEvents),
+        // and its damage shows, or kills, only then: until that moment each
+        // target keeps the health it had. The server applied it on arrival.
         const auto &npcReplicas = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->NpcReplicas();
         std::unordered_map<uint64_t, float> heldDamage;
         for (auto it = _pendingDamage.begin(); it != _pendingDamage.end();) {
@@ -120,7 +120,7 @@ namespace Mafia1Online::Features::Death {
                 it = _pendingDamage.erase(it);
                 continue;
             }
-            if (event.hitType == 1 && event.sourceNpcId != 0 && (heldDamage.contains(event.targetNetworkId) || !npcReplicas.Reached(event.sourceNpcId, event.sourceClock, it->received))) {
+            if (event.sourceNpcId != 0 && (heldDamage.contains(event.targetNetworkId) || !npcReplicas.Reached(event.sourceNpcId, event.sourceClock, it->received))) {
                 heldDamage[event.targetNetworkId] += std::isfinite(event.damage) ? std::max(event.damage, 0.0f) : 0.0f;
                 ++it;
                 continue;

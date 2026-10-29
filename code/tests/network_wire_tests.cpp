@@ -312,6 +312,20 @@ namespace {
         Shared::Combat::Event shotRead;
         shotRead.Serialize(&one, false);
         CHECK(shotRead.pelletCount == 1 && shotRead.scatterRandom[1] == 0.25f && shotRead.pellets[0].x == 4.0f && shotRead.pellets[0].hitY == 2.0f);
+        // An NPC's shot and reload carry the host clock they are played by.
+        shot.pelletCount = 1;
+        shot.sampleClock = 40000;
+        CHECK(RoundTrip(shot).sampleClock == 40000);
+        Shared::Combat::Event reload;
+        reload.action      = Shared::Combat::Action::Reload;
+        reload.sampleClock = 123;
+        CHECK(RoundTrip(reload).sampleClock == 123);
+        Shared::Npc::Fire fire;
+        fire.hostClockMs = 777;
+        CHECK(RoundTrip(fire).hostClockMs == 777);
+        Shared::Npc::Reload npcReload;
+        npcReload.hostClockMs = 65535;
+        CHECK(RoundTrip(npcReload).hostClockMs == 65535);
     }
 
     void SampleClocks() {

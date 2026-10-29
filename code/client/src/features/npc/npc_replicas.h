@@ -44,7 +44,7 @@ namespace Mafia1Online::Features::Npc {
         // The pose stream stays off it until the track ends.
         void PlaySeizing(World::WorldService &world, uint64_t officerId, const Shared::Npc::Seized::Pose &pose, Shared::Npc::Caught::Outcome outcome);
         // Whether an action the host dated `hostClock` on the clock it samples
-        // this NPC's poses by (a melee attack, or its blow landing), received
+        // this NPC's poses by (an attack, a shot or reload, a hit landing), received
         // at `received`, may play now: once the replica, drawn a render delay
         // behind the host, shows that moment. True for anything else.
         [[nodiscard]] bool Reached(uint64_t networkId, uint16_t hostClock, std::chrono::steady_clock::time_point received) const;

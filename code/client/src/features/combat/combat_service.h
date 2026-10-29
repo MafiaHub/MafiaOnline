@@ -70,7 +70,7 @@ namespace Mafia1Online::Features::Combat {
         bool Submit(uint64_t networkId, Shared::Combat::Action action, uint8_t weaponId, uint64_t targetNetworkId, uint64_t targetSpawnGeneration, float directionX, float directionY, float directionZ, bool aiming = false,
                     bool crouching = false, float poseTargetOffsetX = 0.0f, float poseTargetOffsetY = 0.0f, float poseTargetOffsetZ = 0.0f, const NativeShotData *shot = nullptr);
         bool PopEvent(Shared::Combat::Event &event);
-        // NPC blows DeathService holds until they land, per target: its
+        // NPC blows and bullets DeathService holds until they land, per target: its
         // health shows that much more until then.
         void HoldDamage(std::unordered_map<uint64_t, float> held) {
             _heldDamage = std::move(held);

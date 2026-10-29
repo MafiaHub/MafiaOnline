@@ -534,12 +534,13 @@ namespace Mafia1Online::Features::Combat {
                 && (event.weaponId == 0 || (event.weaponId >= 2 && event.weaponId <= 4));
             const bool throwAction   = event.action == Shared::Combat::Action::Throw && (event.weaponId == 5 || event.weaponId == 15);
             // An NPC's replica is drawn a render delay behind its host, where
-            // the AI struck from within reach: its swing plays once the
-            // replica gets there, not ahead of the steps that brought it.
+            // the AI struck from within reach, or fired from where it stood
+            // and aimed: its swing, shot or reload plays once the replica
+            // gets there, not ahead of the steps that brought it.
             if (meleeAction && localId != 0 && event.targetNetworkId == localId && event.action != Shared::Combat::Action::MeleeCancel) {
                 npcReplicas.Engage(event.networkId, now + kEngageHold);
             }
-            if (meleeAction && !npcReplicas.Reached(event.networkId, event.sampleClock, it->received)) {
+            if ((meleeAction || firearmAction) && !npcReplicas.Reached(event.networkId, event.sampleClock, it->received)) {
                 waiting.insert(event.networkId);
                 ++it;
                 continue;

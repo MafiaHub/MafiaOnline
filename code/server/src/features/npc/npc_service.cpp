@@ -368,6 +368,7 @@ namespace Mafia1Online::Features::Npc {
             event.pelletCount = fire.pelletCount;
             event.scatterRandom = fire.scatterRandom;
             event.pellets = fire.pellets;
+            event.sampleClock = fire.hostClockMs;
             Emit(*npc, event);
         });
         network->RegisterRPC<Shared::Npc::Melee>([this](const Shared::Npc::Melee &melee, MafiaNet::Packet *packet) {
@@ -409,6 +410,7 @@ namespace Mafia1Online::Features::Npc {
             Shared::Combat::Event event;
             event.action = Shared::Combat::Action::Reload;
             event.weaponId = reload.weaponId;
+            event.sampleClock = reload.hostClockMs;
             Emit(*npc, event);
         });
         network->RegisterRPC<Shared::Npc::Speech>([this](const Shared::Npc::Speech &speech, MafiaNet::Packet *packet) {

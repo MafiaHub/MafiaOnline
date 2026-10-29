@@ -1313,6 +1313,7 @@ namespace Mafia1Online::Features::Npc {
             reload.missionGeneration = _missionGeneration;
             reload.key = tracked.key;
             reload.weaponId = weapon;
+            reload.hostClockMs = Shared::Net::SampleClock(MafiaNet::GetTime());
             network->BroadcastRPC(reload, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
         }
         Shared::Npc::InventoryChanged changed;
@@ -1410,6 +1411,7 @@ namespace Mafia1Online::Features::Npc {
         fire.pelletCount = shot.pelletCount;
         fire.scatterRandom = shot.scatterRandom;
         fire.pellets = shot.pellets;
+        fire.hostClockMs = Shared::Net::SampleClock(MafiaNet::GetTime());
         Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(fire, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
     }
 
