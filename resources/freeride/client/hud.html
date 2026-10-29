@@ -215,9 +215,22 @@
     };
     const minutes = (seconds) => `${Math.floor(seconds / 60)}:${String(Math.max(0, seconds) % 60).padStart(2, "0")}`;
 
+    // The level strip shows only for a while after XP comes in; the full
+    // level is on the menu's career page. Kept off the bottom of the screen
+    // otherwise, where shop and bar counter panels draw.
+    const XP_SHOW_MS = 6000;
+    let xpShownUntil = 0;
+    let xpHideTimer = null;
+    function showXp() {
+      xpShownUntil = Date.now() + XP_SHOW_MS;
+      clearTimeout(xpHideTimer);
+      xpHideTimer = setTimeout(applyVisibility, XP_SHOW_MS + 50);
+      applyVisibility();
+    }
+
     function applyVisibility() {
       const onStreet = state.player.spawned && !state.hidden;
-      document.getElementById("xp").classList.toggle("hidden", !onStreet || !state.profile);
+      document.getElementById("xp").classList.toggle("hidden", !onStreet || !state.profile || Date.now() >= xpShownUntil);
       document.getElementById("cards").classList.toggle("hidden", !onStreet);
       document.getElementById("feed").classList.toggle("hidden", state.hidden);
       document.getElementById("voice").classList.toggle("hidden", state.hidden);
@@ -326,8 +339,10 @@
       gain.classList.add("show");
       clearTimeout(gainTimer);
       gainTimer = setTimeout(() => gain.classList.remove("show"), 2600);
+      showXp();
     });
     on("levelup", () => {
+      showXp();
       const badge = document.getElementById("xp-level");
       badge.animate([{transform: "scale(1)"}, {transform: "scale(1.5)"}, {transform: "scale(1)"}], {duration: 700});
     });
