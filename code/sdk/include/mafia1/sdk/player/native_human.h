@@ -184,9 +184,13 @@ namespace Mafia1Online::SDK::Player {
         }
         // The release branch reads the press time and combo index. Preserve
         // the controlling player's measured hold when replaying that branch.
+        // A heavy blow (-1) replays as the last combo index: the release
+        // plays the finisher for it as for a long hold (C_human::Do_Shoot,
+        // index == HUMAN_SHOOT_MELEE_LAST_INDEX), which an AI's fourth hit
+        // reports with no hold at all.
         void PrepareMeleeRelease(int32_t index, uint32_t gameTime, uint16_t holdMs) {
             _meleeActive      = true;
-            _meleeAttackIndex = index < 0 ? 0 : index;
+            _meleeAttackIndex = index < 0 ? kMeleeLastAttackIndex : index;
             _meleeAttackTime  = static_cast<int32_t>(gameTime - holdMs);
         }
         void CancelMeleeRelease() {
@@ -201,6 +205,8 @@ namespace Mafia1Online::SDK::Player {
             uint16_t itemId;
         };
         static constexpr int32_t kHeavyMeleeAttackIndex = -1;
+        // HUMAN_SHOOT_MELEE_LAST_INDEX: the combo's finishing blow.
+        static constexpr int32_t kMeleeLastAttackIndex = 3;
         MeleeAttack ExchangeMeleeAttack(MeleeAttack attack) {
             const MeleeAttack previous {_meleeAttackIndex, _inventory.Selected().itemId};
             _meleeAttackIndex           = attack.index;
