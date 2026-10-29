@@ -97,6 +97,8 @@ namespace Mafia1Online::Features::Combat {
         _world                 = nullptr;
         _sequence              = 0;
         _lastLocalFireSequence = 0;
+        _lastLocalMeleeSequence = 0;
+        _meleeReports.Reset();
         _localFires.clear();
         _localGrenades.clear();
         _remoteGrenades.clear();

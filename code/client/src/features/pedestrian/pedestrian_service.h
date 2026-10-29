@@ -42,6 +42,14 @@ namespace Mafia1Online::Features::Pedestrian {
       public:
         // Players: a car hit a walker replica (C_don_ocas::Collision).
         void OnReplicaCollision(SDK::Player::NativeActor *actor, const SDK::Player::Vector3 &direction, SDK::Scene::NativeFrame *model);
+        // Players: the local player's melee swing hit a walker replica
+        // (C_human::AI's sweep through C_don_ocas::Hit). The walker is the
+        // host's, so the swing is reported for the server to check and the
+        // host to apply.
+        void OnReplicaMelee(SDK::Scene::NativeFrame *model, const SDK::Player::Vector3 &direction, const SDK::Player::Vector3 &position);
+        // Host: a player's replayed swing here only plays; the hit that
+        // player's own client saw arrives as a MeleeHit.
+        bool IsNetworkPlayer(const SDK::Player::NativeActor *actor) const;
         bool IsNetworkObject(void *native) const;
         struct Stats {
             uint32_t walkers          = 0;

@@ -3,6 +3,7 @@
 #include "shared/features/combat/aim_update.h"
 #include "shared/features/combat/combat_protocol.h"
 #include "shared/features/combat/detonation.h"
+#include "shared/features/combat/melee_rules.h"
 
 #include <array>
 #include <chrono>
@@ -53,6 +54,11 @@ namespace Mafia1Online::Features::Combat {
         // The local melee attack a native swing hit belongs to, while it can
         // still land (the server accepts one hit within 1.8 s).
         [[nodiscard]] std::optional<uint32_t> OpenLocalMelee() const;
+        // One walker hit report per local swing; Reset restarts the swing
+        // sequence, and the gate with it.
+        bool ClaimLocalMeleeReport(uint32_t swingSequence) {
+            return _meleeReports.Admit(swingSequence);
+        }
         struct LocalPelletMatch { uint32_t shotSequence; uint8_t pelletIndex; };
         std::optional<LocalPelletMatch> MatchLocalPellet(float directionX, float directionY, float directionZ, float hitX, float hitY, float hitZ);
         [[nodiscard]] uint32_t LastLocalFireSequence() const {
@@ -163,6 +169,7 @@ namespace Mafia1Online::Features::Combat {
         uint32_t _sequence              = 0;
         uint32_t _lastLocalFireSequence = 0;
         uint32_t _lastLocalMeleeSequence = 0;
+        Shared::Combat::MeleeReportGate _meleeReports;
         struct LocalThrow {
             uint64_t networkId = 0;
             uint64_t missionGeneration = 0;

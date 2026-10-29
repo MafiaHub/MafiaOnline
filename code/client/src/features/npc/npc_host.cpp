@@ -207,6 +207,16 @@ namespace Mafia1Online::Features::Npc {
                                   hit.hitType == Shared::Npc::Hit::kCarImpact ? SDK::Player::NativeHitType::Sniper : SDK::Player::NativeHitType::Generic;
                 const float before = AsHuman(native).Health();
                 Death::ApplyAuthoritativeHit(AsHuman(native), type, direction, contact, hit.damage, attacker, hit.bodyPart);
+                // C_human::AI follows a swing's Hit on a human with the
+                // attacker's boxing crime while the police are on
+                // (0x5714cd-0x5714e6); the player's own sweep ran on its
+                // client, whose police are off.
+                if (hit.hitType == Shared::Npc::Hit::kMeleeKnockdown && attacker && attacker->GetType() != NativeActor::Type::Car) {
+                    const Combat::ValidatedMeleeScope validated;
+                    if (auto *police = SDK::Police::PoliceManager(SDK::Core::Mission::Get()->Game()); police->IsActive()) {
+                        police->ReportBoxing(attacker);
+                    }
+                }
                 if (hit.hitType == Shared::Npc::Hit::kCarImpact && aliveBefore) {
                     const bool killed = static_cast<NativeActor *>(native)->IsDead() || AsHuman(native).Health() <= 0.0f;
                     ReportCarContact(car, static_cast<NativeActor *>(native), speed, killed);

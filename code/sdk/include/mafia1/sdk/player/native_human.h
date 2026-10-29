@@ -192,6 +192,21 @@ namespace Mafia1Online::SDK::Player {
         void CancelMeleeRelease() {
             _meleeActive = false;
         }
+        // The attack C_don_ocas::Hit's walker backstab reads off its attacker
+        // (0x44cd59-0x44cd78): the combo index (+0x228, -1 for the held heavy
+        // blow) and the selected item (+0x4a0: knife 3 or bat 4). Swapped in
+        // around one such call and back; the weapon model is not rebuilt.
+        struct MeleeAttack {
+            int32_t index;
+            uint16_t itemId;
+        };
+        static constexpr int32_t kHeavyMeleeAttackIndex = -1;
+        MeleeAttack ExchangeMeleeAttack(MeleeAttack attack) {
+            const MeleeAttack previous {_meleeAttackIndex, _inventory.Selected().itemId};
+            _meleeAttackIndex           = attack.index;
+            _inventory.Selected().itemId = attack.itemId;
+            return previous;
+        }
         [[nodiscard]] float Health() const {
             return _health;
         }

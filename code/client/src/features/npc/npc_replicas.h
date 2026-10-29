@@ -1,6 +1,7 @@
 #pragma once
 
 #include "game/entities/native_object_registry.h"
+#include "shared/features/npc/npc_animation.h"
 #include "shared/features/npc/npc_seized.h"
 #include "shared/net/sample_clock.h"
 
@@ -67,6 +68,8 @@ namespace Mafia1Online::Features::Npc {
             // The last npc.say count heard (NpcEntity::speechRevision).
             uint16_t speechRevision = 0;
             std::chrono::steady_clock::time_point animatingUntil {};
+            // The script clip playing on this copy, empty for none.
+            Shared::Npc::ScriptClip clip;
             // A police arrest half (PlaySeizing) holds the pose too: the
             // clip moves the body from the aligned place.
             std::chrono::steady_clock::time_point seizingUntil {};

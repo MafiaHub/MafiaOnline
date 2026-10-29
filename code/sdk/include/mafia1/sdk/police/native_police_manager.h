@@ -95,6 +95,14 @@ namespace Mafia1Online::SDK::Police {
     // void __thiscall DalJsemPochuzkariDoDrzky(C_human *), retn 4: crime
     // 0x2000 (a hit patrolman) on the person's record and an evaluation now.
     inline constexpr uintptr_t kPatrolmanHit = 0x4A0040;
+    // void __thiscall HumanBoxing(C_human *), retn 4: while active, raises
+    // the person's pending level (+0x3e) to arrest with crime message 5,
+    // sets the boxing crime and adds 5000 to its boxing timer
+    // (0x49d030-0x49d0a4). C_human::AI calls it with the attacker while the
+    // manager is on (+0x0): before a melee swing's Hit on a walker's
+    // collision (actor type 0x13, 0x571323-0x571342) and after one on a
+    // player or entity (0x5714cd-0x5714e6); nothing else calls it.
+    inline constexpr uintptr_t kHumanBoxing = 0x49D030;
 
     // A stand-in tDynamicCollObject for CarCollision: the dynamic flag and
     // the owner actor are all it reads.
@@ -319,6 +327,9 @@ namespace Mafia1Online::SDK::Police {
         }
         void ReportPatrolmanHit(Player::NativeActor *offender) {
             reinterpret_cast<void(__thiscall *)(NativePoliceManager *, Player::NativeActor *)>(kPatrolmanHit)(this, offender);
+        }
+        void ReportBoxing(Player::NativeActor *offender) {
+            reinterpret_cast<void(__thiscall *)(NativePoliceManager *, Player::NativeActor *)>(kHumanBoxing)(this, offender);
         }
 
         bool _active;

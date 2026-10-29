@@ -2,6 +2,8 @@
 
 #include <mafianet/types.h>
 
+#include <glm/vec3.hpp>
+
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -81,6 +83,10 @@ namespace Mafia1Online::Features::Pedestrian {
         Shared::Entities::PedestrianEntity *Find(uint64_t networkId) const;
         // Network id of the walker the host reported with this key, or 0.
         uint64_t NetworkIdOfKey(uint32_t key) const;
+        // A player's melee hit the combat service validated: the host applies
+        // it to the walker (Shared::Pedestrian::MeleeHit). False when the
+        // walker or the host is gone.
+        bool SendMeleeHit(uint64_t walkerId, uint64_t attackerId, uint8_t weaponId, bool heavy, float damage, const glm::vec3 &direction, const glm::vec3 &position) const;
         void ForEach(const std::function<void(Shared::Entities::PedestrianEntity &)> &visit) const;
 
         size_t Count() const {

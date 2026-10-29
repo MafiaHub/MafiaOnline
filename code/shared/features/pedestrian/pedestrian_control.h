@@ -84,6 +84,46 @@ namespace Mafia1Online::Shared::Pedestrian {
         }
     };
 
+    // Server -> simulation host: a player's melee swing hit a walker's
+    // replica (the attacker's Combat::HitReport, Kind::Melee, which the
+    // server checked against its accepted swing). The host applies it
+    // through the walker collision's own Hit, as C_human::AI's sweep would.
+    struct MeleeHit {
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::PedestrianMeleeHit");
+
+        uint64_t missionGeneration = 0;
+        uint32_t key = 0;
+        uint64_t attackerId = 0;
+        // The accepted swing's stock item (0 fists, 2-4) and whether it was
+        // the held heavy blow; the host's backstab rule reads both.
+        uint8_t weaponId = 0;
+        bool heavy = false;
+        // The item's retail sweep damage; a walker takes no heavy doubling.
+        float damage = 0.0f;
+        // The unit swing direction and where it struck the replica.
+        float directionX = 0.0f;
+        float directionY = 0.0f;
+        float directionZ = 0.0f;
+        float x = 0.0f;
+        float y = 0.0f;
+        float z = 0.0f;
+
+        void Serialize(MafiaNet::BitStream *stream, bool write) {
+            stream->Serialize(write, missionGeneration);
+            stream->Serialize(write, key);
+            stream->Serialize(write, attackerId);
+            stream->Serialize(write, weaponId);
+            stream->Serialize(write, heavy);
+            stream->Serialize(write, damage);
+            stream->Serialize(write, directionX);
+            stream->Serialize(write, directionY);
+            stream->Serialize(write, directionZ);
+            stream->Serialize(write, x);
+            stream->Serialize(write, y);
+            stream->Serialize(write, z);
+        }
+    };
+
     // Simulation host -> server: retail C_traffic_element::Hit ran on a walker.
     struct Damaged {
         static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::PedestrianDamaged");

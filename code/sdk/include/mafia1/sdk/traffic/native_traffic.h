@@ -53,6 +53,26 @@ namespace Mafia1Online::SDK::Traffic {
     // actor hit a walker's collision. The vtable entry (0x623f70) is
     // 0x44ca50; IDA's function start at 0x44ca4a is a mis-decode.
     inline constexpr uintptr_t kWalkerCollision = 0x44CA50;
+    // bool __thiscall C_don_ocas::Hit(E_hit_type, const S_vector &direction,
+    // const S_vector &position, const S_vector &normal, float damage,
+    // C_actor *attacker, unsigned flags, I3D_frame *model), retn 20h: the
+    // walker collision's vtable Hit (slot 0x7c, entry 0x623f74). It finds
+    // the walker by model (GetElemFromFrame 0x450830) and ends its taxi
+    // wave. For hit type 1 a held heavy blow (attacker +0x228 == -1) with a
+    // knife or bat (+0x4a0 3 or 4), from within 1.2566 rad of the walker's
+    // facing and behind it (0.9425 rad), becomes its health + 1; then
+    // C_traffic_element::Hit(1, direction, torso 5, attacker, damage), the
+    // hit particle and, for a beat cop (type 1 or 3), DalJsemPochuzkari
+    // (0x44cd28-0x44d135). `this` is never read: its first instruction
+    // loads the frame argument into ecx.
+    inline constexpr uintptr_t kWalkerHit = 0x44CCF0;
+    // C_game::m_pDonOcas, the one walker collision actor (C_game::Init
+    // 0x5a1ac6).
+    inline constexpr uintptr_t kGameDonOcas = 0x2A1C;
+    // C_human::AI's melee sweep on a walker (0x571323-0x571377): hit type 1,
+    // the swing segment as direction, the item damage times the attacker's
+    // strength (+0x640), flags 0 and the collision's owner frame (the model).
+    inline constexpr int32_t kHardKnockdownHit = 1;
     // Hit's bullet blood (0x458dba-0x458e30): C_blood_manager::AddBlood
     // (0x412140, thiscall, ret 14h) on C_game +0x2d90 with the walker's
     // position 1.0 up and the shot direction scaled by 3.0, while the
@@ -493,6 +513,16 @@ namespace Mafia1Online::SDK::Traffic {
     inline void PlayScream(int32_t voice, int32_t screamId, Player::Vector3 position, float minimumRange, float maximumRange, float curve, float minimumVolume) {
         using Call = void(__fastcall *)(int32_t, int32_t, Player::Vector3 *, float, float, float, float);
         reinterpret_cast<Call>(kElementNewScream)(voice, screamId, &position, minimumRange, maximumRange, curve, minimumVolume);
+    }
+
+    // A melee swing's hit on a walker, through the walker collision's own Hit
+    // exactly as C_human::AI makes it.
+    inline bool HitWalker(void *game, const Player::Vector3 &direction, const Player::Vector3 &position, const Player::Vector3 &normal, float damage,
+                          Player::NativeActor *attacker, Scene::NativeFrame *model) {
+        void *collision = *reinterpret_cast<void **>(static_cast<std::byte *>(game) + kGameDonOcas);
+        using Call = bool(__thiscall *)(void *, int32_t, const Player::Vector3 &, const Player::Vector3 &, const Player::Vector3 &, float, Player::NativeActor *, uint32_t,
+                                        Scene::NativeFrame *);
+        return reinterpret_cast<Call>(kWalkerHit)(collision, kHardKnockdownHit, direction, position, normal, damage, attacker, 0, model);
     }
 
     inline NativeTrafficElement **ElementsBegin() {

@@ -208,6 +208,32 @@ namespace Mafia1Online::Features::Npc {
                 _running.erase(key);
             }
         }
+        // A clip with a displacement track plays once whatever its loop
+        // flag (Shared::Npc::ScriptClip): a loop starts again where it ended.
+        for (auto it = _animating.begin(); it != _animating.end();) {
+            auto *npc = _host.FindByKey(it->first);
+            if (!npc || Dead(npc)) {
+                it = _animating.erase(it);
+                continue;
+            }
+            auto &human = Human(npc);
+            const int32_t work = human.Melee().canWork;
+            // A reaction or move replaced the clip: the script's next
+            // playAnimation starts it again instead of being kept.
+            if (!Shared::Npc::ScriptClip::Holds(work)) {
+                it = _animating.erase(it);
+                continue;
+            }
+            if (it->second.NeedsReplay(true, work)) {
+                human.PlayScriptAnimation(it->second.name.c_str(), true);
+            }
+            else if (!it->second.loop && !it->second.Running(work)) {
+                // A finished one-shot leaves the NPC to its own idle.
+                it = _animating.erase(it);
+                continue;
+            }
+            ++it;
+        }
     }
 
     bool ScriptedNpcHost::Apply(World::WorldService &world, uint64_t, Message &message) {
@@ -346,12 +372,17 @@ namespace Mafia1Online::Features::Npc {
             Finish(animation.key, running->second, Result::Cancelled);
             _running.erase(running);
         }
+        // A routine refreshing the loop it already plays keeps it running.
+        if (const auto current = _animating.find(animation.key);
+            current != _animating.end() && current->second.Continues(animation.name, animation.loop, human.Melee().canWork)) {
+            return;
+        }
         // As PERSON_PLAYANIM (reM C_program_process_000_132.inl 1967,
         // 0x470393): Do_PlayAnim(name, simple, 1). Without a displacement
         // track the clip plays on the animation stage and the human stays in
         // its idle work state, which C_entity's own Do_Breath leaves alone.
         human.PlayScriptAnimation(animation.name.c_str(), animation.loop);
-        _animating.insert(animation.key);
+        _animating[animation.key] = {animation.name, animation.loop, human.IsPlayingAnimation()};
     }
 
     void ScriptedNpcHost::Destroy(uint32_t key) {

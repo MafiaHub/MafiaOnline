@@ -237,6 +237,18 @@ namespace Mafia1Online::Core {
             [this](uint32_t requestId, uint64_t playerId, bool sent) { Features::Script::EmitPoliceBackup(*this, requestId, playerId, sent); },
         });
         _npcs.SetWalkerLookup([this](uint32_t key) { return _pedestrians.NetworkIdOfKey(key); });
+        _combat.SetWalkerTargets({
+            [this](uint64_t walkerId) -> std::optional<Features::Combat::CombatService::WalkerTarget> {
+                const auto *walker = _pedestrians.Find(walkerId);
+                if (!walker) {
+                    return std::nullopt;
+                }
+                return Features::Combat::CombatService::WalkerTarget {walker->position, walker->velocity, walker->missionGeneration, walker->alive};
+            },
+            [this](uint64_t walkerId, uint64_t attackerId, uint8_t weaponId, bool heavy, float damage, const glm::vec3 &direction, const glm::vec3 &position) {
+                _pedestrians.SendMeleeHit(walkerId, attackerId, weaponId, heavy, damage, direction, position);
+            },
+        });
         // The host is trusted with its NPCs' shots, as with their hits on
         // players; the car must still be a live car of this mission.
         _npcs.SetCarHit([this](uint64_t npcId, const Shared::Npc::CarHit &npcHit) {

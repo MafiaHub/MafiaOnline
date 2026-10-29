@@ -1,6 +1,7 @@
 // Car bumps, police arrests and railway shots: the wire messages and the
 // pure rules both ends of them apply.
 #include "shared/features/combat/vehicle_impact.h"
+#include "shared/features/npc/npc_animation.h"
 #include "shared/features/npc/npc_report.h"
 #include "shared/features/npc/npc_seized.h"
 #include "shared/features/railway/railway_report.h"
@@ -282,6 +283,40 @@ namespace {
         CHECK(read.index == 12 && read.part == 1 && read.damage == 18.5f);
         CHECK(Near(read.localHit, localHit, 0.0f) && Near(read.hit, hit, 0.0f) && Near(read.localDirection, localDirection, 0.0f));
     }
+    // A looping npc.playAnimation clip on the host and every replica.
+    void ScriptClips() {
+        using Shared::Npc::kScriptClipIdleWorkState;
+        using Shared::Npc::kScriptClipPlayingWorkState;
+        constexpr int32_t kHitReaction = 6;
+        const Shared::Npc::ScriptClip tracked {"GestSklNapitise.i3d", true, true};
+        const Shared::Npc::ScriptClip untracked {"GestSklStativ.i3d", true, false};
+        const Shared::Npc::ScriptClip once {"GestSkl01.i3d", false, true};
+        // Do_PlayAnim forced the tracked clip to play once: replay it when it
+        // ended on a living, idle NPC, not over a hit reaction or a corpse.
+        CHECK(!tracked.NeedsReplay(true, kScriptClipPlayingWorkState));
+        CHECK(tracked.NeedsReplay(true, kScriptClipIdleWorkState));
+        CHECK(!tracked.NeedsReplay(false, kScriptClipIdleWorkState));
+        CHECK(!tracked.NeedsReplay(true, kHitReaction));
+        // The untracked clip loops on the stage by itself; a one-shot ends.
+        CHECK(!untracked.NeedsReplay(true, kScriptClipIdleWorkState));
+        CHECK(untracked.Running(kScriptClipIdleWorkState));
+        CHECK(!once.NeedsReplay(true, kScriptClipIdleWorkState));
+        CHECK(once.Running(kScriptClipPlayingWorkState) && !once.Running(kScriptClipIdleWorkState));
+        // A routine's 30 s refresh of the running loop does not restart it;
+        // another clip, a one-shot or an ended loop does.
+        CHECK(untracked.Continues("gestsklstativ.I3D", true, kScriptClipIdleWorkState));
+        CHECK(tracked.Continues("GestSklNapitise.i3d", true, kScriptClipPlayingWorkState));
+        CHECK(!tracked.Continues("GestSklNapitise.i3d", true, kScriptClipIdleWorkState));
+        CHECK(!untracked.Continues("GestSkl01.i3d", true, kScriptClipIdleWorkState));
+        CHECK(!untracked.Continues("GestSklStativ.i3d", false, kScriptClipIdleWorkState));
+        CHECK(!once.Continues("GestSkl01.i3d", false, kScriptClipPlayingWorkState));
+        CHECK(!Shared::Npc::ScriptClip {}.Continues("", true, kScriptClipIdleWorkState));
+        // A hit reaction replaced the clip: its record goes, and a refresh
+        // during the reaction is not swallowed.
+        CHECK(Shared::Npc::ScriptClip::Holds(kScriptClipIdleWorkState) && Shared::Npc::ScriptClip::Holds(kScriptClipPlayingWorkState));
+        CHECK(!Shared::Npc::ScriptClip::Holds(kHitReaction) && !Shared::Npc::ScriptClip::Holds(2) && !Shared::Npc::ScriptClip::Holds(8));
+        CHECK(!untracked.Continues("GestSklStativ.i3d", true, kHitReaction));
+    }
 } // namespace
 
 int main() {
@@ -290,6 +325,7 @@ int main() {
     ContactRate();
     SeizedMessage();
     RailwayShots();
+    ScriptClips();
     if (failures == 0) {
         std::printf("contact sync tests passed\n");
     }

@@ -16,6 +16,7 @@
 #include <networking/network_peer.h>
 #include <networking/replication/replication_manager.h>
 
+#include <glm/geometric.hpp>
 #include <glm/gtc/quaternion.hpp>
 
 #include <cmath>
@@ -212,6 +213,31 @@ namespace Mafia1Online::Features::Pedestrian {
         _walkers.clear();
         _keyByNetworkId.clear();
         _lastCarImpact.clear();
+    }
+
+    bool PedestrianService::SendMeleeHit(uint64_t walkerId, uint64_t attackerId, uint8_t weaponId, bool heavy, float damage, const glm::vec3 &direction,
+                                         const glm::vec3 &position) const {
+        const auto host = _simulation->Host();
+        const auto key  = _keyByNetworkId.find(walkerId);
+        const float length = glm::length(direction);
+        if (!host || key == _keyByNetworkId.end() || !std::isfinite(damage) || damage < 0.0f || !std::isfinite(length) || length < 0.5f || length > 1.5f) {
+            return false;
+        }
+        Shared::Pedestrian::MeleeHit hit;
+        hit.missionGeneration = _missionGeneration;
+        hit.key = key->second;
+        hit.attackerId = attackerId;
+        hit.weaponId = weaponId;
+        hit.heavy = heavy;
+        hit.damage = damage;
+        hit.directionX = direction.x / length;
+        hit.directionY = direction.y / length;
+        hit.directionZ = direction.z / length;
+        hit.x = position.x;
+        hit.y = position.y;
+        hit.z = position.z;
+        Framework::CoreModules::GetNetworkPeer()->SendRPC(hit, MafiaNet::ToGuid(*host), MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
+        return true;
     }
 
     void PedestrianService::OnHostAttached() {

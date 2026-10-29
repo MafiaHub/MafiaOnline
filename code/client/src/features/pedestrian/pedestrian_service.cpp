@@ -3,9 +3,15 @@
 #include "pedestrian_service.h"
 
 #include "core/application.h"
+#include "features/combat/combat_hooks.h"
+#include "features/combat/combat_service.h"
+#include "features/pedestrian/pedestrian_replicas.h"
 #include "features/simulation/simulation_config.h"
 #include "shared/features/car/car_entity.h"
 #include "features/world/world_service.h"
+#include "shared/features/combat/hit_report.h"
+#include "shared/features/combat/melee_rules.h"
+#include "shared/features/pedestrian/pedestrian_entity.h"
 #include "shared/features/pedestrian/pedestrian_control.h"
 #include "shared/features/pedestrian/pedestrian_scream.h"
 #include "shared/features/player/player_entity.h"
@@ -15,6 +21,7 @@
 #include <logging/logger.h>
 #include <mafia1/sdk/core/game.h>
 #include <mafia1/sdk/core/mission.h>
+#include <mafia1/sdk/player/native_human.h>
 #include <mafia1/sdk/police/native_police_manager.h>
 #include <mafia1/sdk/seat/native_seat.h>
 #include <mafia1/sdk/traffic/native_traffic.h>
@@ -38,6 +45,8 @@ namespace Mafia1Online::Features::Pedestrian {
         using ElementHit        = void(__thiscall *)(SDK::Traffic::NativeTrafficElement *, int32_t, const SDK::Player::Vector3 *, uint32_t, SDK::Player::NativeActor *, float);
         using WalkerCollision   = bool(__thiscall *)(void *, SDK::Player::NativeActor *, const SDK::Player::Vector3 *, const SDK::Player::Vector3 *,
                                                      const SDK::Player::Vector3 *, float, SDK::Scene::NativeFrame *);
+        using WalkerHit         = bool(__thiscall *)(void *, int32_t, const SDK::Player::Vector3 &, const SDK::Player::Vector3 &, const SDK::Player::Vector3 &, float,
+                                               SDK::Player::NativeActor *, uint32_t, SDK::Scene::NativeFrame *);
 
         GeneratorGameInit gGeneratorGameInitOriginal = nullptr;
         GeneratorAI gGeneratorAIOriginal             = nullptr;
@@ -47,9 +56,11 @@ namespace Mafia1Online::Features::Pedestrian {
         RecruitPolice gRecruitPoliceOriginal         = nullptr;
         uint64_t gScreamMissionGeneration            = 0;
         WalkerCollision gWalkerCollisionOriginal     = nullptr;
+        WalkerHit gWalkerHitOriginal                 = nullptr;
         PedestrianService *gService                  = nullptr;
         constexpr uintptr_t kHookAddresses[] {SDK::Traffic::kGeneratorGameInit, SDK::Traffic::kGeneratorAI, SDK::Traffic::kTickElements,
-                                              SDK::Traffic::kElementHit, SDK::Traffic::kWalkerCollision, SDK::Traffic::kElementNewScream};
+                                              SDK::Traffic::kElementHit, SDK::Traffic::kWalkerCollision, SDK::Traffic::kElementNewScream,
+                                              SDK::Traffic::kWalkerHit};
 
         // Retail selects the nearest distance-selected generator with no
         // range limit: the search starts at 1e30 (C_game::Tick 0x5a5962).
@@ -182,6 +193,28 @@ namespace Mafia1Online::Features::Pedestrian {
             return gWalkerCollisionOriginal(proxy, actor, position, direction, normal, force, frame);
         }
 
+        // A melee swing reaches a walker through its collision's Hit
+        // (C_human::AI 0x571377, hit type 1). On a player the walker is a
+        // replica whose element Hit does nothing, so the local player's
+        // swing is reported instead; the hit particle still plays. On the
+        // host a player's replica only replays that player's swing, which
+        // need not line up with the walker here: the hit the player saw
+        // arrives as a MeleeHit, so the replay's own hit is dropped.
+        bool __fastcall WalkerHitHook(void *collision, void *, int32_t type, const SDK::Player::Vector3 &direction, const SDK::Player::Vector3 &position,
+                                      const SDK::Player::Vector3 &normal, float damage, SDK::Player::NativeActor *attacker, uint32_t flags, SDK::Scene::NativeFrame *model) {
+            if (type == SDK::Traffic::kHardKnockdownHit && attacker) {
+                if (!Simulation::IsHost()) {
+                    if (attacker == SDK::Player::CurrentPlayer()) {
+                        gService->OnReplicaMelee(model, direction, position);
+                    }
+                }
+                else if (!Combat::ValidatedMeleeScope::Active() && gService->IsNetworkPlayer(attacker)) {
+                    return true;
+                }
+            }
+            return gWalkerHitOriginal(collision, type, direction, position, normal, damage, attacker, flags, model);
+        }
+
         // Swaps the active camera and C_game's player speed for one
         // observer's around a retail call that reads them, then restores both.
         class ObserverView final {
@@ -223,7 +256,8 @@ namespace Mafia1Online::Features::Pedestrian {
             MH_CreateHook(reinterpret_cast<void *>(SDK::Traffic::kTickElements), reinterpret_cast<void *>(&TickElementsHook), reinterpret_cast<void **>(&gTickElementsOriginal)) != MH_OK ||
             MH_CreateHook(reinterpret_cast<void *>(SDK::Traffic::kElementHit), reinterpret_cast<void *>(&ElementHitHook), reinterpret_cast<void **>(&gElementHitOriginal)) != MH_OK ||
             MH_CreateHook(reinterpret_cast<void *>(SDK::Traffic::kWalkerCollision), reinterpret_cast<void *>(&WalkerCollisionHook), reinterpret_cast<void **>(&gWalkerCollisionOriginal)) != MH_OK ||
-            MH_CreateHook(reinterpret_cast<void *>(SDK::Traffic::kElementNewScream), reinterpret_cast<void *>(&ElementNewScreamHook), reinterpret_cast<void **>(&gElementNewScreamOriginal)) != MH_OK) {
+            MH_CreateHook(reinterpret_cast<void *>(SDK::Traffic::kElementNewScream), reinterpret_cast<void *>(&ElementNewScreamHook), reinterpret_cast<void **>(&gElementNewScreamOriginal)) != MH_OK ||
+            MH_CreateHook(reinterpret_cast<void *>(SDK::Traffic::kWalkerHit), reinterpret_cast<void *>(&WalkerHitHook), reinterpret_cast<void **>(&gWalkerHitOriginal)) != MH_OK) {
             Uninstall();
             return false;
         }
@@ -336,6 +370,36 @@ namespace Mafia1Online::Features::Pedestrian {
                 police->CountRunOver(driver);
             }
         });
+        // Host: a player's melee hit on a walker's replica that the server
+        // checked. C_human::AI's walker branch (0x571323-0x571377): the
+        // boxing crime while the police are on, then the walker collision's
+        // Hit, whose backstab reads the swing the server accepted.
+        network->RegisterRPC<Shared::Pedestrian::MeleeHit>([this](const Shared::Pedestrian::MeleeHit &hit, MafiaNet::Packet *) {
+            if (!Simulation::IsHost() || !_world || !_world->IsReady() || hit.missionGeneration != _world->LoadedMissionGeneration() || !std::isfinite(hit.damage) ||
+                hit.damage < 0.0f || !std::isfinite(hit.directionX) || !std::isfinite(hit.directionY) || !std::isfinite(hit.directionZ) || !std::isfinite(hit.x) ||
+                !std::isfinite(hit.y) || !std::isfinite(hit.z)) {
+                return;
+            }
+            auto *element = _reporter.ActiveElement(hit.key);
+            auto *attacker = static_cast<SDK::Player::NativeActor *>(_world->NativeObjects().Resolve(_world->NativeObjects().FindByNetwork(hit.attackerId)));
+            if (!element || !element->Model() || element->IsDead() || !attacker || attacker->IsDead() ||
+                (attacker->GetType() != SDK::Player::NativeActor::Type::Player && attacker->GetType() != SDK::Player::NativeActor::Type::Entity)) {
+                return;
+            }
+            auto *game = SDK::Core::Mission::Get()->Game();
+            const Combat::ValidatedMeleeScope validated;
+            if (auto *police = SDK::Police::PoliceManager(game); police->IsActive()) {
+                police->ReportBoxing(attacker);
+            }
+            auto &human = *static_cast<SDK::Player::NativeHuman *>(static_cast<void *>(attacker));
+            using Attack = SDK::Player::NativeHuman::MeleeAttack;
+            const Attack previous = human.ExchangeMeleeAttack(Attack {hit.heavy ? SDK::Player::NativeHuman::kHeavyMeleeAttackIndex : 0, hit.weaponId});
+            const SDK::Player::Vector3 direction {hit.directionX, hit.directionY, hit.directionZ};
+            const SDK::Player::Vector3 position {hit.x, hit.y, hit.z};
+            const SDK::Player::Vector3 normal {-hit.directionX, -hit.directionY, -hit.directionZ};
+            SDK::Traffic::HitWalker(game, direction, position, normal, hit.damage, attacker, element->Model());
+            human.ExchangeMeleeAttack(previous);
+        });
         network->RegisterRPC<Shared::Pedestrian::Remove>([this](const Shared::Pedestrian::Remove &remove, MafiaNet::Packet *) {
             if (Simulation::IsHost() && _world && remove.missionGeneration == _world->LoadedMissionGeneration()) {
                 _reporter.Retire(remove.key);
@@ -353,6 +417,48 @@ namespace Mafia1Online::Features::Pedestrian {
 
     bool PedestrianService::IsNetworkObject(void *native) const {
         return _world && _world->NativeObjects().FindByNative(native).networkId != 0;
+    }
+
+    bool PedestrianService::IsNetworkPlayer(const SDK::Player::NativeActor *actor) const {
+        auto *replication = Framework::CoreModules::GetReplication();
+        const uint64_t id = _world && replication ? _world->NativeObjects().FindByNative(const_cast<SDK::Player::NativeActor *>(actor)).networkId : 0;
+        return id != 0 && replication->GetEntity<Shared::Entities::PlayerEntity>(id) != nullptr;
+    }
+
+    void PedestrianService::OnReplicaMelee(SDK::Scene::NativeFrame *model, const SDK::Player::Vector3 &direction, const SDK::Player::Vector3 &position) {
+        auto *replication = Framework::CoreModules::GetReplication();
+        if (!_world || !_world->IsReady() || !replication || !model) {
+            return;
+        }
+        auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
+        const uint64_t walkerId = application->PedestrianReplicas().WalkerOfModel(model);
+        const auto *walker = walkerId ? replication->GetEntity<Shared::Entities::PedestrianEntity>(walkerId) : nullptr;
+        auto &combat = application->Combat();
+        const auto sequence = combat.OpenLocalMelee();
+        const auto *attacker = combat.GetLocalState(*_world);
+        // The sweep direction is the swing segment, not a unit vector.
+        const float length = std::sqrt(direction.x * direction.x + direction.y * direction.y + direction.z * direction.z);
+        if (!walker || !walker->alive || walker->missionGeneration != _world->LoadedMissionGeneration() || !sequence || !attacker || !attacker->spawned ||
+            !attacker->alive || !(length > 0.0001f) || !combat.ClaimLocalMeleeReport(*sequence)) {
+            return;
+        }
+        Shared::Combat::HitReport report;
+        report.kind                   = Shared::Combat::HitReport::Kind::Melee;
+        report.shooterNetworkId       = attacker->networkId;
+        report.targetNetworkId        = walkerId;
+        report.missionGeneration      = attacker->missionGeneration;
+        report.shooterSpawnGeneration = attacker->spawnGeneration;
+        // A walker life is its own entity.
+        report.targetSpawnGeneration  = 0;
+        report.shotSequence           = *sequence;
+        report.bodyPart               = Shared::Combat::kWalkerMeleeBodyPart;
+        report.directionX             = direction.x / length;
+        report.directionY             = direction.y / length;
+        report.directionZ             = direction.z / length;
+        report.hitX                   = position.x;
+        report.hitY                   = position.y;
+        report.hitZ                   = position.z;
+        Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(report);
     }
 
     void PedestrianService::OnReplicaCollision(SDK::Player::NativeActor *actor, const SDK::Player::Vector3 &direction, SDK::Scene::NativeFrame *model) {

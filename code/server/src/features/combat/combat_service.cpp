@@ -3,6 +3,7 @@
 #include "features/car/car_service.h"
 #include "features/player/player_service.h"
 #include "shared/features/player/player_entity.h"
+#include "shared/features/combat/melee_rules.h"
 #include "shared/features/combat/weapon_inventory.h"
 #include "shared/features/npc/npc_report.h"
 
@@ -985,7 +986,11 @@ namespace Mafia1Online::Features::Combat {
 
     void CombatService::OnNpcHitReport(const Shared::Combat::HitReport &report, Shared::Entities::PlayerEntity &shooter, Session &session) {
         const auto npc = _npcTargets.find ? _npcTargets.find(report.targetNetworkId) : std::nullopt;
-        if (!npc || !npc->alive || npc->missionGeneration != report.missionGeneration || npc->spawnGeneration != report.targetSpawnGeneration) {
+        if (!npc) {
+            OnWalkerHitReport(report, shooter, session);
+            return;
+        }
+        if (!npc->alive || npc->missionGeneration != report.missionGeneration || npc->spawnGeneration != report.targetSpawnGeneration) {
             return;
         }
         const HitTarget hitTarget {npc->position, npc->rotation, npc->health, false};
@@ -1005,6 +1010,30 @@ namespace Mafia1Online::Features::Combat {
         if (const auto bullet = ValidateBullet(report, session, hitTarget)) {
             _npcTargets.hit(report.targetNetworkId, report.shooterNetworkId, 0, report.bodyPart, bullet->damage, direction, hit, bullet->weaponId);
         }
+    }
+
+    void CombatService::OnWalkerHitReport(const Shared::Combat::HitReport &report, Shared::Entities::PlayerEntity &shooter, Session &session) {
+        // A walker life is its own entity and has no spawn generation.
+        if (report.kind != Shared::Combat::HitReport::Kind::Melee || report.targetSpawnGeneration != 0 || report.bodyPart != Shared::Combat::kWalkerMeleeBodyPart ||
+            !_walkerTargets.find || !_walkerTargets.hit) {
+            return;
+        }
+        const auto walker = _walkerTargets.find(report.targetNetworkId);
+        if (!walker || !walker->alive || walker->missionGeneration != report.missionGeneration ||
+            _cars->SeatForPlayer(report.shooterNetworkId, report.shooterSpawnGeneration).has_value()) {
+            return;
+        }
+        const HitTarget hitTarget {walker->position, glm::quat(1.0f, 0.0f, 0.0f, 0.0f), 0.0f, false};
+        const auto melee = ValidateMelee(report, shooter, session, hitTarget, Shared::Combat::WalkerMeleeLagAllowance(walker->velocity));
+        if (!melee) {
+            return;
+        }
+        // C_human::AI's walker branch (0x571347-0x571377) passes the item
+        // damage on without the heavy doubling; C_don_ocas::Hit on the host
+        // applies the backstab from the walker's own facing.
+        const glm::vec3 direction(report.directionX, report.directionY, report.directionZ);
+        _walkerTargets.hit(report.targetNetworkId, report.shooterNetworkId, melee->weaponId, melee->heavy, kRules[melee->weaponId].damage, direction,
+                           glm::vec3(report.hitX, report.hitY, report.hitZ));
     }
 
     std::optional<CombatService::ValidatedHit> CombatService::ValidateBullet(const Shared::Combat::HitReport &report, Session &session, const HitTarget &target) {
@@ -1296,7 +1325,7 @@ namespace Mafia1Online::Features::Combat {
     }
 
     std::optional<CombatService::ValidatedHit> CombatService::ValidateMelee(const Shared::Combat::HitReport &report, const Shared::Entities::PlayerEntity &attacker, Session &session,
-                                                                            const HitTarget &target) {
+                                                                            const HitTarget &target, float lagAllowance) {
         // C_human::AI sweeps the swing points after the attack animation's
         // strike note and hits torso (5) or head (6) with hit type 1.
         if (report.targetNetworkId == report.shooterNetworkId || (report.bodyPart != 5 && report.bodyPart != 6)) {
@@ -1308,20 +1337,13 @@ namespace Mafia1Online::Features::Combat {
         if (record == session.melee.end() || record->used || now - record->acceptedAt > std::chrono::milliseconds(1800)) {
             return std::nullopt;
         }
-        // Retail reach is the animation itself; the item range is 2 units.
+        const glm::vec3 facing = Facing(attacker);
+        if (!Shared::Combat::MeleeHitPlausible(attacker.position, facing, target.position, glm::vec3(report.hitX, report.hitY, report.hitZ), lagAllowance)) {
+            return std::nullopt;
+        }
         const glm::vec3 offset = target.position - attacker.position;
         const glm::vec3 flat(offset.x, 0.0f, offset.z);
         const float distance   = glm::length(flat);
-        const glm::vec3 hit(report.hitX, report.hitY, report.hitZ);
-        if (!std::isfinite(distance) || distance > 2.6f || std::abs(offset.y) > 1.5f || !std::isfinite(hit.x) || !std::isfinite(hit.y) || !std::isfinite(hit.z) ||
-            glm::length(glm::vec3(hit.x - target.position.x, 0.0f, hit.z - target.position.z)) > 1.6f ||
-            hit.y < target.position.y - 0.5f || hit.y > target.position.y + 2.5f) {
-            return std::nullopt;
-        }
-        const glm::vec3 facing = Facing(attacker);
-        if (distance > 0.2f && glm::dot(glm::normalize(flat), facing) < -0.17f) {
-            return std::nullopt;
-        }
         record->used = true;
         float damage = kRules[record->weaponId].damage * (record->heavy ? 2.0f : 1.0f);
         // A heavy knife or bat blow from behind is lethal in retail when the
@@ -1333,7 +1355,7 @@ namespace Mafia1Online::Features::Combat {
                 damage = target.health + 1.0f;
             }
         }
-        return ValidatedHit {record->weaponId, damage};
+        return ValidatedHit {record->weaponId, damage, record->heavy};
     }
 
     std::optional<CombatService::CarImpactEvidence> CombatService::InspectShot(const ShotClaim &claim, MafiaNet::PeerGuid sender) const {

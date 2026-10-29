@@ -58,3 +58,7 @@ endif()
 add_executable(Mafia1OnlineContactSyncTests contact_sync_tests.cpp)
 target_include_directories(Mafia1OnlineContactSyncTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(Mafia1OnlineContactSyncTests PRIVATE Framework::Framework)
+
+add_executable(Mafia1OnlineMeleeTests melee_tests.cpp)
+target_include_directories(Mafia1OnlineMeleeTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+target_link_libraries(Mafia1OnlineMeleeTests PRIVATE Framework::Framework)

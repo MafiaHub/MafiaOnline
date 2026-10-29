@@ -109,7 +109,7 @@ namespace Mafia1Online::Features::Npc {
         uint64_t _generation = 0;
         std::deque<Message> _queue;
         std::unordered_map<uint32_t, Running> _running;
-        // NPCs playing a script clip.
-        std::unordered_set<uint32_t> _animating;
+        // NPCs playing a script clip, and how it was started.
+        std::unordered_map<uint32_t, Shared::Npc::ScriptClip> _animating;
     };
 } // namespace Mafia1Online::Features::Npc

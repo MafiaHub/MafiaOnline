@@ -235,20 +235,40 @@ namespace Mafia1Online::Features::Npc {
     }
 
     void NpcReplicaService::ApplyAnimation(Replica &replica, void *native, const Shared::Entities::NpcEntity &npc) {
+        auto *human = static_cast<SDK::Player::NativeHuman *>(native);
+        const int32_t work = human->Melee().canWork;
         if (replica.animationSynced && replica.animationRevision == npc.animationRevision) {
+            // A clip with a displacement track plays once whatever its loop
+            // flag (Shared::Npc::ScriptClip), as on the host, which starts
+            // it again: so does this copy, instead of standing in the stop
+            // pose with the host's idle held off.
+            if (replica.clip.name.empty()) {
+                return;
+            }
+            // A hit reaction or a move replaced the clip: it no longer holds
+            // the host's locomotion off, and a re-sent clip plays again.
+            if (!Shared::Npc::ScriptClip::Holds(work)) {
+                replica.clip = {};
+                replica.animatingUntil = {};
+                return;
+            }
+            if (replica.clip.NeedsReplay(npc.alive && !static_cast<SDK::Player::NativeActor *>(native)->IsDead(), work)) {
+                human->PlayScriptAnimation(replica.clip.name.c_str(), true);
+            }
             return;
         }
         const bool first = !replica.animationSynced;
         replica.animationSynced = true;
         replica.animationRevision = npc.animationRevision;
-        auto *human = static_cast<SDK::Player::NativeHuman *>(native);
         if (!npc.alive) {
+            replica.clip = {};
             return;
         }
         if (npc.animation.empty()) {
             if (!first) {
                 human->StopAnimation();
             }
+            replica.clip = {};
             replica.animatingUntil = {};
             return;
         }
@@ -256,7 +276,19 @@ namespace Mafia1Online::Features::Npc {
         if (first && !npc.animationLoop) {
             return;
         }
+        // A routine refreshing the loop already playing keeps it running.
+        if (replica.clip.Continues(npc.animation, npc.animationLoop, work)) {
+            return;
+        }
         const uint32_t duration = human->PlayScriptAnimation(npc.animation.c_str(), npc.animationLoop);
+        replica.clip = {npc.animation, npc.animationLoop, human->IsPlayingAnimation()};
+        // A clip this client cannot load holds nothing off: the host's idle
+        // shows instead of a frozen pose.
+        if (duration == 0) {
+            replica.clip = {};
+            replica.animatingUntil = {};
+            return;
+        }
         replica.animatingUntil = npc.animationLoop ? std::chrono::steady_clock::time_point::max()
                                                    : std::chrono::steady_clock::now() + std::chrono::milliseconds(duration);
     }

@@ -137,6 +137,24 @@ namespace Mafia1Online::Features::Combat {
         void SetNpcTargets(NpcTargets targets) {
             _npcTargets = std::move(targets);
         }
+        // The simulation host's walkers. A player's validated melee hit on
+        // a walker's replica goes to hit() with the swing's stock item,
+        // whether it was the held heavy blow and the item's retail sweep
+        // damage (C_human::AI hits a walker without the heavy doubling).
+        // Bullets reach walkers through the host's own replay of the shot.
+        struct WalkerTarget {
+            glm::vec3 position {0.0f};
+            glm::vec3 velocity {0.0f};
+            uint64_t missionGeneration = 0;
+            bool alive = false;
+        };
+        struct WalkerTargets {
+            std::function<std::optional<WalkerTarget>(uint64_t)> find;
+            std::function<void(uint64_t walkerId, uint64_t attackerId, uint8_t weaponId, bool heavy, float damage, const glm::vec3 &direction, const glm::vec3 &position)> hit;
+        };
+        void SetWalkerTargets(WalkerTargets targets) {
+            _walkerTargets = std::move(targets);
+        }
         // Script world effects, damaging players from their server positions
         // with the retail explosion falloff and fire tick.
         void ApplyExplosion(uint64_t sourceId, uint64_t missionGeneration, const glm::vec3 &position, float radius, float damage);
@@ -229,12 +247,16 @@ namespace Mafia1Online::Features::Combat {
             uint8_t weaponId;
             // Before the body part scale.
             float damage;
+            // Melee: the held heavy blow.
+            bool heavy = false;
         };
         // A reported bullet or melee impact against the shooter's accepted
         // action; marks it used and returns the weapon and its damage.
         std::optional<ValidatedHit> ValidateBullet(const Shared::Combat::HitReport &report, Session &session, const HitTarget &target);
-        std::optional<ValidatedHit> ValidateMelee(const Shared::Combat::HitReport &report, const Shared::Entities::PlayerEntity &attacker, Session &session, const HitTarget &target);
+        std::optional<ValidatedHit> ValidateMelee(const Shared::Combat::HitReport &report, const Shared::Entities::PlayerEntity &attacker, Session &session, const HitTarget &target,
+                                                  float lagAllowance = 0.0f);
         void OnNpcHitReport(const Shared::Combat::HitReport &report, Shared::Entities::PlayerEntity &shooter, Session &session);
+        void OnWalkerHitReport(const Shared::Combat::HitReport &report, Shared::Entities::PlayerEntity &shooter, Session &session);
         void ApplyNpcVehicleImpact(const Shared::Combat::VehicleImpact &report, MafiaNet::PeerGuid sender, std::chrono::steady_clock::time_point receivedAt);
         // One contact per car and target each 500 ms (C_Vehicle reports it
         // every physics step while the bodies touch); an impact may follow a
@@ -288,6 +310,7 @@ namespace Mafia1Online::Features::Combat {
         Player::PlayerService *_players = nullptr;
         Car::CarService *_cars = nullptr;
         NpcTargets _npcTargets;
+        WalkerTargets _walkerTargets;
         std::unordered_map<uint64_t, Session> _sessions;
         std::map<std::pair<uint64_t, uint64_t>, std::chrono::steady_clock::time_point> _vehicleImpacts;
         struct LastVehicleContact {
