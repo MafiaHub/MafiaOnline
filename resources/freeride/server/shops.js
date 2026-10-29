@@ -47,7 +47,10 @@ const SHOPS = [
             {id: "petrol", name: "A full tank", price: null,
                 note: `$${FUEL_PRICE_PER_LITRE} per litre · stop at a pump, engine off, and ask the attendant`},
         ]},
-    {id: "pharmacy", name: "The Dispensary", tagline: "The city keeps its own hours", position: {x: -761.3176, y: 14.813, z: 762.4796},
+    // The "lekarna" frame floats 1.5 m over the hospital's front landing,
+    // whose floor is at y 13.2 (the door 3DVERE4 at z 763.5): the clerk
+    // stands on the landing below it.
+    {id: "pharmacy", name: "The Dispensary", tagline: "The city keeps its own hours", position: {x: -761.3176, y: 13.25, z: 762.4796},
         model: "recep.i3d", animation: null, offers: [
             {id: "bandage", name: "Bandages & tincture", price: 65, note: "Restore up to 45 health"},
         ]},
