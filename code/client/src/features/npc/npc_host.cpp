@@ -52,6 +52,10 @@ namespace Mafia1Online::Features::Npc {
         // own ai_logs, which sits at C_entity +0xe88.
         constexpr uintptr_t kGetMaxAngryCharacter = 0x4F7850;
         constexpr uintptr_t kEntityLogs = 0xE88;
+        // C_entity::m_pMaxAngryActor (+0x1280), StateSwitcher's (0x5291d0)
+        // copy of that pick: the enemy its fight actions are made for, which
+        // actionTick's strike branch steps toward and swings at.
+        constexpr uintptr_t kEntityMaxAngryActor = 0x1280;
         using GetMaxAngry = void *(__thiscall *)(void *);
         GetMaxAngry gGetMaxAngryOriginal = nullptr;
 
@@ -1422,6 +1426,9 @@ namespace Mafia1Online::Features::Npc {
         melee.directionY = direction.y;
         melee.directionZ = direction.z;
         melee.hostClockMs = Shared::Net::SampleClock(MafiaNet::GetTime());
+        if (auto *enemy = *reinterpret_cast<NativeActor **>(reinterpret_cast<std::byte *>(&human.Actor()) + kEntityMaxAngryActor); enemy && IsPlayerReplica(enemy)) {
+            melee.targetNetworkId = _world->NativeObjects().FindByNative(enemy).networkId;
+        }
         Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(melee, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
     }
 

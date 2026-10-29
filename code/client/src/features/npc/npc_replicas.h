@@ -7,6 +7,8 @@
 
 #include <utils/snapshot_buffer.h>
 
+#include <glm/vec3.hpp>
+
 #include <chrono>
 #include <cstdint>
 #include <deque>
@@ -45,6 +47,10 @@ namespace Mafia1Online::Features::Npc {
         // at `received`, may play now: once the replica, drawn a render delay
         // behind the host, shows that moment. True for anything else.
         [[nodiscard]] bool Reached(uint64_t networkId, uint16_t hostClock, std::chrono::steady_clock::time_point received) const;
+        // This NPC's attack is aimed at the local player: until `until` its
+        // replica closes to striking range of it (ApplyContact). Only this
+        // screen's picture; the server checks hits by the host's poses.
+        void Engage(uint64_t networkId, std::chrono::steady_clock::time_point until);
 
       private:
         // The host reports every 100 ms, and the server's far band every
@@ -78,11 +84,20 @@ namespace Mafia1Online::Features::Npc {
             // A police arrest half (PlaySeizing) holds the pose too: the
             // clip moves the body from the aligned place.
             std::chrono::steady_clock::time_point seizingUntil {};
+            // Engage: how far (0..1) the replica stands at `contactSpot`
+            // instead of its pose, and when that was last eased.
+            std::chrono::steady_clock::time_point engagedUntil {};
+            float contact = 0.0f;
+            glm::vec3 contactSpot {0.0f};
+            std::chrono::steady_clock::time_point contactAt {};
             bool failed = false;
         };
 
         void Remove(World::WorldService &world, uint64_t networkId, const Replica &replica);
         void ApplyPose(Replica &replica, void *actor, bool alive);
+        // Eases the pose toward striking range of the local player while
+        // engaged, and back to the pose after.
+        void ApplyContact(Replica &replica, const Framework::Utils::TransformSnapshot &pose, glm::vec3 &position, glm::vec3 &direction);
         // Replays npc.playAnimation / stopAnimation as PERSON_PLAYANIM and
         // PERSON_STOPANIM do on the host.
         void ApplyAnimation(Replica &replica, void *actor, const Shared::Entities::NpcEntity &npc);

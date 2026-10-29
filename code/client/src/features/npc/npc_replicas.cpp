@@ -7,6 +7,7 @@
 #include "features/seat/seat_service.h"
 #include "features/simulation/simulation_config.h"
 #include "features/world/world_service.h"
+#include "shared/features/combat/melee_rules.h"
 #include "shared/features/npc/npc_entity.h"
 
 #include <core_modules.h>
@@ -52,6 +53,17 @@ namespace Mafia1Online::Features::Npc {
         // (no pose change for longer than the 16-bit range) and plays now.
         constexpr auto kReachWaitLimit = std::chrono::milliseconds(700);
         constexpr double kReachLeadLimitMs = 1000.0;
+
+        // The host's NPC struck from within reach of where it saw its
+        // target, the target itself a pose behind; on the target's screen
+        // the replica trails both. Within the server's melee reach, widened
+        // by how far the replica moves in its render delay, it closes to
+        // just outside the metre inside which retail's fighter steps away
+        // (C_entity::actionTick, ENTITY_ACTION_FIGHT_CLOSE_EVADE_DISTANCE_SQ).
+        constexpr float kContactDistance = 1.1f;
+        constexpr float kContactLagLimit = 1.5f;
+        constexpr float kContactEaseInSeconds = 0.2f;
+        constexpr float kContactEaseOutSeconds = 0.3f;
 
         // reM HUMAN_THROW_CAR_SCREAM_BASE and _COUNT.
         constexpr uint32_t kThrownOutFirstLine = 161;
@@ -225,11 +237,13 @@ namespace Mafia1Online::Features::Npc {
         else {
             replica.pullingUntil = {};
         }
-        const auto direction = glm::mat3_cast(pose.rotation) * glm::vec3(0.0f, 0.0f, 1.0f);
-        replica.frame->SetWorldPosition({pose.position.x, pose.position.y, pose.position.z});
+        auto position = pose.position;
+        auto direction = glm::mat3_cast(pose.rotation) * glm::vec3(0.0f, 0.0f, 1.0f);
+        ApplyContact(replica, pose, position, direction);
+        replica.frame->SetWorldPosition({position.x, position.y, position.z});
         replica.frame->SetDirection({direction.x, direction.y, direction.z});
         replica.frame->Update();
-        actor->SetStoredTransform({pose.position.x, pose.position.y, pose.position.z}, {direction.x, direction.y, direction.z});
+        actor->SetStoredTransform({position.x, position.y, position.z}, {direction.x, direction.y, direction.z});
 
         // Leave retail's hit reactions, reloads and timed actions to
         // C_human::Movement, which restores locomotion when they finish.
@@ -262,6 +276,48 @@ namespace Mafia1Online::Features::Npc {
             human->SetLocomotionAnimation(static_cast<SDK::Player::LocomotionAnimation>(animation.state));
         }
         replica.lastAnimation = animation.state;
+    }
+
+    void NpcReplicaService::ApplyContact(Replica &replica, const Framework::Utils::TransformSnapshot &pose, glm::vec3 &position, glm::vec3 &direction) {
+        const auto now = std::chrono::steady_clock::now();
+        const float seconds = replica.contactAt == std::chrono::steady_clock::time_point {} ? 0.0f : std::min(std::chrono::duration<float>(now - replica.contactAt).count(), 0.1f);
+        replica.contactAt = now;
+        auto *player = SDK::Player::CurrentPlayer();
+        if (!player || (now >= replica.engagedUntil && replica.contact <= 0.0f)) {
+            replica.contact = 0.0f;
+            return;
+        }
+        const auto at = SDK::Player::WorldPosition(player);
+        const glm::vec3 target(at.x, at.y, at.z);
+        const glm::vec3 flat(position.x - target.x, 0.0f, position.z - target.z);
+        const float distance = glm::length(flat);
+        const float speed = glm::length(glm::vec3(pose.velocity.x, 0.0f, pose.velocity.z));
+        const float lag = std::isfinite(speed) ? std::min(speed * replica.snapshots.EffectiveDelayMs() * 0.001f, kContactLagLimit) : 0.0f;
+        const bool closing = now < replica.engagedUntil && distance > kContactDistance && distance <= Shared::Combat::kMeleeReach + lag &&
+                             std::abs(position.y - target.y) <= Shared::Combat::kMeleeHeightDifference;
+        if (closing) {
+            replica.contactSpot = {target.x + flat.x / distance * kContactDistance, position.y, target.z + flat.z / distance * kContactDistance};
+        }
+        replica.contact = std::clamp(replica.contact + (closing ? seconds / kContactEaseInSeconds : -seconds / kContactEaseOutSeconds), 0.0f, 1.0f);
+        if (replica.contact <= 0.0f) {
+            return;
+        }
+        position = glm::mix(position, replica.contactSpot, replica.contact);
+        // Facing the player, as the host's fighter turned to strike.
+        const glm::vec3 facing(target.x - position.x, 0.0f, target.z - position.z);
+        if (glm::length(facing) > 0.01f) {
+            const glm::vec3 turned = glm::mix(direction, glm::normalize(facing), replica.contact);
+            if (glm::length(turned) > 0.01f) {
+                direction = glm::normalize(turned);
+            }
+        }
+    }
+
+    void NpcReplicaService::Engage(uint64_t networkId, std::chrono::steady_clock::time_point until) {
+        const auto found = _replicas.find(networkId);
+        if (found != _replicas.end()) {
+            found->second.engagedUntil = std::max(found->second.engagedUntil, until);
+        }
     }
 
     void NpcReplicaService::ApplyAnimation(Replica &replica, void *native, const Shared::Entities::NpcEntity &npc) {

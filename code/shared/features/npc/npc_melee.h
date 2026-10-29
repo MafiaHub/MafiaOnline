@@ -30,6 +30,9 @@ namespace Mafia1Online::Shared::Npc {
         // (Shared::Net::SampleClock): players replay it once the NPC's
         // replica, drawn one render delay behind, gets there.
         uint16_t hostClockMs = 0;
+        // The player (network id) its AI fights, else 0: that player's
+        // client closes the replica to striking range for the swing.
+        uint64_t targetNetworkId = 0;
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {
             auto actionValue = static_cast<uint8_t>(action);
@@ -43,6 +46,7 @@ namespace Mafia1Online::Shared::Npc {
             stream->Serialize(write, directionY);
             stream->Serialize(write, directionZ);
             stream->Serialize(write, hostClockMs);
+            stream->Serialize(write, targetNetworkId);
             if (!write) {
                 action = static_cast<Combat::Action>(actionValue);
             }

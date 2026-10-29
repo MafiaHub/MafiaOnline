@@ -384,6 +384,7 @@ namespace Mafia1Online::Features::Npc {
             event.meleeIndex = melee.meleeIndex;
             event.meleeHoldMs = melee.holdMs;
             event.sampleClock = melee.hostClockMs;
+            event.targetNetworkId = melee.targetNetworkId;
             Emit(*npc, event);
         });
         network->RegisterRPC<Shared::Npc::Reload>([this](const Shared::Npc::Reload &reload, MafiaNet::Packet *packet) {

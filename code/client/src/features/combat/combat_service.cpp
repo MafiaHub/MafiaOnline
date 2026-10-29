@@ -503,10 +503,16 @@ namespace Mafia1Online::Features::Combat {
             return std::tie(left.networkId, left.missionGeneration, left.spawnGeneration, left.revision) < std::tie(right.networkId, right.missionGeneration, right.spawnGeneration, right.revision);
         });
         const auto now = std::chrono::steady_clock::now();
-        const auto &npcReplicas = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->NpcReplicas();
+        auto &npcReplicas = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->NpcReplicas();
         // Bodies with an NPC attack waiting for their replica: their later
         // events wait behind it.
         std::unordered_set<uint64_t> waiting;
+        // An NPC attacking the local player closes in from when its attack
+        // arrives until this long after it plays, through each swing of a
+        // combo (NpcReplicaService::Engage).
+        constexpr auto kEngageHold = std::chrono::milliseconds(1000);
+        const auto *localPlayer = GetLocalState(world);
+        const uint64_t localId = localPlayer ? localPlayer->networkId : 0;
         for (auto it = _events.begin(); it != _events.end();) {
             const auto &event = it->event;
             if (now - it->received > std::chrono::seconds(2) || event.missionGeneration < world.LoadedMissionGeneration()) {
@@ -530,6 +536,9 @@ namespace Mafia1Online::Features::Combat {
             // An NPC's replica is drawn a render delay behind its host, where
             // the AI struck from within reach: its swing plays once the
             // replica gets there, not ahead of the steps that brought it.
+            if (meleeAction && localId != 0 && event.targetNetworkId == localId && event.action != Shared::Combat::Action::MeleeCancel) {
+                npcReplicas.Engage(event.networkId, now + kEngageHold);
+            }
             if (meleeAction && !npcReplicas.Reached(event.networkId, event.sampleClock, it->received)) {
                 waiting.insert(event.networkId);
                 ++it;
