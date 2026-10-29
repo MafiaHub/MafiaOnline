@@ -213,6 +213,12 @@ namespace Mafia1Online::SDK::Player {
         void SetHealth(float health) {
             _health = health;
         }
+        // m_pBaseMesh (+0x57c): the model's "base" child, looked up again
+        // whenever the model changes; DabingSetHuman lip-syncs it when it is
+        // a single-morph visual.
+        [[nodiscard]] Scene::NativeFrame *BaseMesh() const {
+            return _baseMesh;
+        }
         // m_iRailwayFrameIndex: the railway frame a rider is linked to, 0
         // the body and n wagon n - 1 (NativeRailway::Vagon).
         [[nodiscard]] uint32_t RailwayFrameIndex() const {
@@ -480,7 +486,9 @@ namespace Mafia1Online::SDK::Player {
         int32_t _actionTimeRemaining;
         std::byte _unused450[0x480 - 0x450];
         NativeInventory _inventory;
-        std::byte _unused564[0x584 - 0x564];
+        std::byte _unused564[0x57c - 0x564];
+        Scene::NativeFrame *_baseMesh;
+        std::byte _unused580[0x584 - 0x580];
         uint32_t _railwayFrameIndex;
         std::byte _unused588[0x640 - 0x588];
         float _strength;
@@ -517,6 +525,7 @@ namespace Mafia1Online::SDK::Player {
     static_assert(offsetof(NativeHuman, _fallSpeed) == 0x418);
     static_assert(offsetof(NativeHuman, _inventory) == 0x480);
     static_assert(offsetof(NativeHuman, _health) == 0x644);
+    static_assert(offsetof(NativeHuman, _baseMesh) == 0x57c);
     static_assert(offsetof(NativeHuman, _railwayFrameIndex) == 0x584);
     static_assert(offsetof(NativeHuman, _voice) == 0x680);
     static_assert(offsetof(NativeHuman, _screamDisabled) == 0x684);

@@ -199,6 +199,7 @@ namespace Mafia1Online::Core {
             _fires.OnMissionClosing();
             _hud.OnMissionClosing();
             _environment.OnMissionClosing();
+            _mouths.Reset();
         });
         if (!Features::Car::InstallDebrisHooks()) {
             ExitProcess(1);
@@ -298,6 +299,7 @@ namespace Mafia1Online::Core {
         }
         _webUi.Update(_world);
         _voiceInput.Update(_chat.IsInputActive() || _webUi.IsCapturingInput());
+        _mouths.Update(_world);
         _gameplayMenus.Update();
         while (auto line = _webUi.TakeOutgoing()) {
             SubmitChatLine(*line);
@@ -420,6 +422,7 @@ namespace Mafia1Online::Core {
         _environment.Reset();
         _chat.Reset();
         _nametags.Reset();
+        _mouths.Reset();
         _pickups.Reset();
         _doors.Reset();
         _mapObjects.Reset();

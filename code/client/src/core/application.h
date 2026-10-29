@@ -36,6 +36,7 @@
 #include "features/world/world_service.h"
 #include "features/mod/mod_service.h"
 #include "features/gameplay_menu/gameplay_menu_service.h"
+#include "features/voice/mouth_service.h"
 #include "features/voice/voice_input.h"
 #include "features/settings/remapped_input.h"
 #include "features/settings/settings_service.h"
@@ -177,6 +178,7 @@ namespace Mafia1Online::Core {
         Features::Hud::HudService _hud;
         Features::Script::ScriptService _script;
         Features::Voice::VoiceInput _voiceInput;
+        Features::Voice::MouthService _mouths;
         Features::Settings::SettingsService _settings;
         uint64_t _settingsMissionGeneration = 0;
         std::string _projectPath;
