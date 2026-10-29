@@ -155,6 +155,8 @@ namespace Mafia1Online::Features::Combat {
         struct WalkerTargets {
             std::function<std::optional<WalkerTarget>(uint64_t)> find;
             std::function<void(uint64_t walkerId, uint64_t attackerId, uint8_t weaponId, bool heavy, float damage, const glm::vec3 &direction, const glm::vec3 &position)> hit;
+            // A checked bullet: the body part the shooter's replica took it on.
+            std::function<void(uint64_t walkerId, uint64_t attackerId, uint8_t bodyPart, float damage, const glm::vec3 &position)> shot;
         };
         void SetWalkerTargets(WalkerTargets targets) {
             _walkerTargets = std::move(targets);

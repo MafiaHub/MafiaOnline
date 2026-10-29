@@ -87,6 +87,7 @@ namespace Mafia1Online::Features::Pedestrian {
         // it to the walker (Shared::Pedestrian::MeleeHit). False when the
         // walker or the host is gone.
         bool SendMeleeHit(uint64_t walkerId, uint64_t attackerId, uint8_t weaponId, bool heavy, float damage, const glm::vec3 &direction, const glm::vec3 &position) const;
+        bool SendShotHit(uint64_t walkerId, uint64_t attackerId, uint8_t bodyPart, float damage, const glm::vec3 &position) const;
         void ForEach(const std::function<void(Shared::Entities::PedestrianEntity &)> &visit) const;
 
         size_t Count() const {

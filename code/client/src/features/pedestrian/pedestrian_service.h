@@ -47,6 +47,9 @@ namespace Mafia1Online::Features::Pedestrian {
         // host's, so the swing is reported for the server to check and the
         // host to apply.
         void OnReplicaMelee(SDK::Scene::NativeFrame *model, const SDK::Player::Vector3 &direction, const SDK::Player::Vector3 &position);
+        // The local player's bullet hit a walker replica on that body part:
+        // reported against the shot it belongs to.
+        void OnReplicaShot(SDK::Traffic::NativeTrafficElement *element, const SDK::Player::Vector3 &direction, const SDK::Player::Vector3 &position, uint32_t bodyPart);
         // Host: a player's replayed swing here only plays; the hit that
         // player's own client saw arrives as a MeleeHit.
         bool IsNetworkPlayer(const SDK::Player::NativeActor *actor) const;

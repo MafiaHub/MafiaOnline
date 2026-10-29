@@ -1014,16 +1014,26 @@ namespace Mafia1Online::Features::Combat {
 
     void CombatService::OnWalkerHitReport(const Shared::Combat::HitReport &report, Shared::Entities::PlayerEntity &shooter, Session &session) {
         // A walker life is its own entity and has no spawn generation.
-        if (report.kind != Shared::Combat::HitReport::Kind::Melee || report.targetSpawnGeneration != 0 || report.bodyPart != Shared::Combat::kWalkerMeleeBodyPart ||
-            !_walkerTargets.find || !_walkerTargets.hit) {
+        if (report.targetSpawnGeneration != 0 || !_walkerTargets.find || !_walkerTargets.hit || !_walkerTargets.shot) {
             return;
         }
         const auto walker = _walkerTargets.find(report.targetNetworkId);
-        if (!walker || !walker->alive || walker->missionGeneration != report.missionGeneration ||
-            _cars->SeatForPlayer(report.shooterNetworkId, report.shooterSpawnGeneration).has_value()) {
+        if (!walker || !walker->alive || walker->missionGeneration != report.missionGeneration) {
             return;
         }
         const HitTarget hitTarget {walker->position, glm::quat(1.0f, 0.0f, 0.0f, 0.0f), 0.0f, false};
+        // A bullet the host's replay of the shot missed: the walker there
+        // stood a render delay and a report ahead of the one the player hit.
+        if (report.kind == Shared::Combat::HitReport::Kind::Bullet) {
+            if (const auto bullet = ValidateBullet(report, session, hitTarget)) {
+                _walkerTargets.shot(report.targetNetworkId, report.shooterNetworkId, report.bodyPart, bullet->damage, glm::vec3(report.hitX, report.hitY, report.hitZ));
+            }
+            return;
+        }
+        if (report.kind != Shared::Combat::HitReport::Kind::Melee || report.bodyPart != Shared::Combat::kWalkerMeleeBodyPart ||
+            _cars->SeatForPlayer(report.shooterNetworkId, report.shooterSpawnGeneration).has_value()) {
+            return;
+        }
         const auto melee = ValidateMelee(report, shooter, session, hitTarget, Shared::Combat::WalkerMeleeLagAllowance(walker->velocity));
         if (!melee) {
             return;

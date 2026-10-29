@@ -124,6 +124,37 @@ namespace Mafia1Online::Shared::Pedestrian {
         }
     };
 
+    // Server -> simulation host: a player's bullet hit a walker's replica
+    // (Combat::HitReport, Kind::Bullet, checked against the accepted shot).
+    // The host's own replay of the shot need not line up with its walker, so
+    // it applies this straight to C_traffic_element::Hit with the body part
+    // the player hit; a gangster walker becomes its armed C_entity there.
+    struct ShotHit {
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::PedestrianShotHit");
+
+        uint64_t missionGeneration = 0;
+        uint32_t key = 0;
+        uint64_t attackerId = 0;
+        // C_ShotSkeleton's body type on the player's replica (1-6).
+        uint8_t bodyPart = 0;
+        // The pellet's damage after retail's range falloff.
+        float damage = 0.0f;
+        float x = 0.0f;
+        float y = 0.0f;
+        float z = 0.0f;
+
+        void Serialize(MafiaNet::BitStream *stream, bool write) {
+            stream->Serialize(write, missionGeneration);
+            stream->Serialize(write, key);
+            stream->Serialize(write, attackerId);
+            stream->Serialize(write, bodyPart);
+            stream->Serialize(write, damage);
+            stream->Serialize(write, x);
+            stream->Serialize(write, y);
+            stream->Serialize(write, z);
+        }
+    };
+
     // Simulation host -> server: retail C_traffic_element::Hit ran on a walker.
     struct Damaged {
         static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::PedestrianDamaged");

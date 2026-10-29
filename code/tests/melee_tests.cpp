@@ -78,6 +78,19 @@ namespace {
         hit.heavy = false;
         hit.weaponId = 0;
         CHECK(!RoundTrip(hit).heavy && RoundTrip(hit).weaponId == 0);
+
+        Shared::Pedestrian::ShotHit shot;
+        shot.missionGeneration = 3;
+        shot.key = 12;
+        shot.attackerId = 41;
+        shot.bodyPart = 2;
+        shot.damage = 26.5f;
+        shot.x = -1520.25f;
+        shot.y = 1.4f;
+        shot.z = 610.5f;
+        const auto readShot = RoundTrip(shot);
+        CHECK(readShot.missionGeneration == 3 && readShot.key == 12 && readShot.attackerId == 41 && readShot.bodyPart == 2 && Near(readShot.damage, 26.5f));
+        CHECK(Near(readShot.x, -1520.25f) && Near(readShot.y, 1.4f) && Near(readShot.z, 610.5f));
     }
 
     void Reach() {

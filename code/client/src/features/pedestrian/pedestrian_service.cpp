@@ -58,6 +58,12 @@ namespace Mafia1Online::Features::Pedestrian {
         WalkerCollision gWalkerCollisionOriginal     = nullptr;
         WalkerHit gWalkerHitOriginal                 = nullptr;
         PedestrianService *gService                  = nullptr;
+        // Player: the local player's bullet on a walker replica, between the
+        // walker collision's Hit (which has its direction) and the element
+        // Hit it calls with the body part.
+        const SDK::Player::Vector3 *gReplicaShotDirection = nullptr;
+        // Host: a ShotHit the server checked is being applied.
+        bool gApplyingShotHit = false;
         constexpr uintptr_t kHookAddresses[] {SDK::Traffic::kGeneratorGameInit, SDK::Traffic::kGeneratorAI, SDK::Traffic::kTickElements,
                                               SDK::Traffic::kElementHit, SDK::Traffic::kWalkerCollision, SDK::Traffic::kElementNewScream,
                                               SDK::Traffic::kWalkerHit};
@@ -131,7 +137,17 @@ namespace Mafia1Online::Features::Pedestrian {
                 if (type == kBulletHit) {
                     auto *mission = SDK::Core::Mission::Get();
                     SDK::Traffic::AddWalkerBlood(mission, mission->Game(), *element, *position);
+                    // The server checks it against the shot and the host applies it.
+                    if (gReplicaShotDirection && attacker && attacker == SDK::Player::CurrentPlayer()) {
+                        gService->OnReplicaShot(element, *gReplicaShotDirection, *position, part);
+                    }
                 }
+                return;
+            }
+            // A player's bullet arrives checked as a ShotHit; the host's own
+            // replay of the shot, aimed at where the walker stood for the
+            // player, is dropped.
+            if (type == kBulletHit && !gApplyingShotHit && gService->IsNetworkPlayer(attacker)) {
                 return;
             }
             // A gangster walker is not damaged: CreateMafianos retires it for
@@ -202,6 +218,12 @@ namespace Mafia1Online::Features::Pedestrian {
         // arrives as a MeleeHit, so the replay's own hit is dropped.
         bool __fastcall WalkerHitHook(void *collision, void *, int32_t type, const SDK::Player::Vector3 &direction, const SDK::Player::Vector3 &position,
                                       const SDK::Player::Vector3 &normal, float damage, SDK::Player::NativeActor *attacker, uint32_t flags, SDK::Scene::NativeFrame *model) {
+            if (type == kBulletHit && attacker && !Simulation::IsHost() && attacker == SDK::Player::CurrentPlayer()) {
+                gReplicaShotDirection = &direction;
+                const bool hit = gWalkerHitOriginal(collision, type, direction, position, normal, damage, attacker, flags, model);
+                gReplicaShotDirection = nullptr;
+                return hit;
+            }
             if (type == SDK::Traffic::kHardKnockdownHit && attacker) {
                 if (!Simulation::IsHost()) {
                     if (attacker == SDK::Player::CurrentPlayer()) {
@@ -400,6 +422,25 @@ namespace Mafia1Online::Features::Pedestrian {
             SDK::Traffic::HitWalker(game, direction, position, normal, hit.damage, attacker, element->Model());
             human.ExchangeMeleeAttack(previous);
         });
+        // Host: a player's bullet the server checked. Straight to the element
+        // Hit (the walker collision's would test the ray against the walker
+        // here, which stood elsewhere for the player); a gangster walker
+        // becomes its armed C_entity in there.
+        network->RegisterRPC<Shared::Pedestrian::ShotHit>([this](const Shared::Pedestrian::ShotHit &hit, MafiaNet::Packet *) {
+            if (!Simulation::IsHost() || !_world || !_world->IsReady() || hit.missionGeneration != _world->LoadedMissionGeneration() || !std::isfinite(hit.damage) ||
+                hit.damage < 0.0f || hit.bodyPart < 1 || hit.bodyPart > 6 || !std::isfinite(hit.x) || !std::isfinite(hit.y) || !std::isfinite(hit.z)) {
+                return;
+            }
+            auto *element = _reporter.ActiveElement(hit.key);
+            auto *attacker = static_cast<SDK::Player::NativeActor *>(_world->NativeObjects().Resolve(_world->NativeObjects().FindByNetwork(hit.attackerId)));
+            if (!element || !element->Model() || element->IsDead() || !attacker || attacker->IsDead()) {
+                return;
+            }
+            const SDK::Player::Vector3 position {hit.x, hit.y, hit.z};
+            gApplyingShotHit = true;
+            reinterpret_cast<ElementHit>(SDK::Traffic::kElementHit)(element, kBulletHit, &position, hit.bodyPart, attacker, hit.damage);
+            gApplyingShotHit = false;
+        });
         network->RegisterRPC<Shared::Pedestrian::Remove>([this](const Shared::Pedestrian::Remove &remove, MafiaNet::Packet *) {
             if (Simulation::IsHost() && _world && remove.missionGeneration == _world->LoadedMissionGeneration()) {
                 _reporter.Retire(remove.key);
@@ -452,6 +493,45 @@ namespace Mafia1Online::Features::Pedestrian {
         report.targetSpawnGeneration  = 0;
         report.shotSequence           = *sequence;
         report.bodyPart               = Shared::Combat::kWalkerMeleeBodyPart;
+        report.directionX             = direction.x / length;
+        report.directionY             = direction.y / length;
+        report.directionZ             = direction.z / length;
+        report.hitX                   = position.x;
+        report.hitY                   = position.y;
+        report.hitZ                   = position.z;
+        Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(report);
+    }
+
+    void PedestrianService::OnReplicaShot(SDK::Traffic::NativeTrafficElement *element, const SDK::Player::Vector3 &direction, const SDK::Player::Vector3 &position,
+                                          uint32_t bodyPart) {
+        auto *replication = Framework::CoreModules::GetReplication();
+        if (!_world || !_world->IsReady() || !replication || !element || !element->Model() || bodyPart < 1 || bodyPart > 6) {
+            return;
+        }
+        auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
+        const uint64_t walkerId = application->PedestrianReplicas().WalkerOfModel(element->Model());
+        const auto *walker = walkerId ? replication->GetEntity<Shared::Entities::PedestrianEntity>(walkerId) : nullptr;
+        auto &combat = application->Combat();
+        const auto *attacker = combat.GetLocalState(*_world);
+        const float length = std::sqrt(direction.x * direction.x + direction.y * direction.y + direction.z * direction.z);
+        if (!walker || !walker->alive || walker->missionGeneration != _world->LoadedMissionGeneration() || !attacker || !attacker->spawned || !attacker->alive ||
+            !(length > 0.0001f)) {
+            return;
+        }
+        const auto pellet = combat.MatchLocalPellet(direction.x / length, direction.y / length, direction.z / length, position.x, position.y, position.z);
+        if (!pellet) {
+            return;
+        }
+        Shared::Combat::HitReport report;
+        report.kind                   = Shared::Combat::HitReport::Kind::Bullet;
+        report.shooterNetworkId       = attacker->networkId;
+        report.targetNetworkId        = walkerId;
+        report.missionGeneration      = attacker->missionGeneration;
+        report.shooterSpawnGeneration = attacker->spawnGeneration;
+        report.targetSpawnGeneration  = 0;
+        report.shotSequence           = pellet->shotSequence;
+        report.pelletIndex            = pellet->pelletIndex;
+        report.bodyPart               = static_cast<uint8_t>(bodyPart);
         report.directionX             = direction.x / length;
         report.directionY             = direction.y / length;
         report.directionZ             = direction.z / length;

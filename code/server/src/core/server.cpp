@@ -248,6 +248,9 @@ namespace Mafia1Online::Core {
             [this](uint64_t walkerId, uint64_t attackerId, uint8_t weaponId, bool heavy, float damage, const glm::vec3 &direction, const glm::vec3 &position) {
                 _pedestrians.SendMeleeHit(walkerId, attackerId, weaponId, heavy, damage, direction, position);
             },
+            [this](uint64_t walkerId, uint64_t attackerId, uint8_t bodyPart, float damage, const glm::vec3 &position) {
+                _pedestrians.SendShotHit(walkerId, attackerId, bodyPart, damage, position);
+            },
         });
         // The host is trusted with its NPCs' shots, as with their hits on
         // players; the car must still be a live car of this mission.

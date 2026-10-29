@@ -240,6 +240,26 @@ namespace Mafia1Online::Features::Pedestrian {
         return true;
     }
 
+    bool PedestrianService::SendShotHit(uint64_t walkerId, uint64_t attackerId, uint8_t bodyPart, float damage, const glm::vec3 &position) const {
+        const auto host = _simulation->Host();
+        const auto key  = _keyByNetworkId.find(walkerId);
+        if (!host || key == _keyByNetworkId.end() || !std::isfinite(damage) || damage < 0.0f || bodyPart < 1 || bodyPart > 6 || !std::isfinite(position.x) ||
+            !std::isfinite(position.y) || !std::isfinite(position.z)) {
+            return false;
+        }
+        Shared::Pedestrian::ShotHit hit;
+        hit.missionGeneration = _missionGeneration;
+        hit.key = key->second;
+        hit.attackerId = attackerId;
+        hit.bodyPart = bodyPart;
+        hit.damage = damage;
+        hit.x = position.x;
+        hit.y = position.y;
+        hit.z = position.z;
+        Framework::CoreModules::GetNetworkPeer()->SendRPC(hit, MafiaNet::ToGuid(*host), MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
+        return true;
+    }
+
     void PedestrianService::OnHostAttached() {
         SendSettings();
     }
