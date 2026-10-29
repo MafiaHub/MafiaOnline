@@ -3,7 +3,10 @@
 
 Build it first with `builds\\build.bat Mafia1OnlineClient 32 Release` and
 `builds\\build.bat Mafia1OnlineLauncher 32 Release`. --bin-dir packages another
-Release or RelWithDebInfo tree; a Debug tree is refused. The MSVC runtime DLLs
+Release or RelWithDebInfo tree; a Debug tree is refused. --channel stamps the
+MafiaHub build channel the launcher patches from (.mafiahub/channel), and
+--stage also writes the files to a folder, which tools/release.py publishes.
+The MSVC runtime DLLs
 ship app-local from the Visual Studio redist folder matching the tree's
 compiler, so players need no separate VC++ redistributable: the x86 runtime
 next to the client, the x64 one in cef64/ next to the 64-bit CEF host the
@@ -12,6 +15,7 @@ client starts for its web UI.
 
 import argparse
 import re
+import shutil
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -41,6 +45,8 @@ OUTPUT = PROJECT_ROOT / "builds" / "releases" / f"Mafia1OnlineClient-{VERSION}-w
 
 RUNTIME_FILES = (
     "Mafia1OnlineLauncher.exe",
+    # Replaces the files the launcher holds open when it patches (MafiaHub Services).
+    "MafiaHubUpdater.exe",
     "Mafia1OnlineClient.dll",
     "FrameworkLoaderData.dll",
     "cef_subprocess.exe",
@@ -83,6 +89,10 @@ a game profile with the original game first if you do not already have one.
 To start a specific copy, set the MAFIA1ONLINE_GAME_ROOT environment variable
 to the folder containing Game.exe or the folder containing a nested
 Mafia\\Game.exe before starting the launcher.
+
+The launcher keeps itself up to date: when a newer release is out it
+downloads only the changed files and restarts. Without an internet
+connection it starts the version you have.
 
 Enter your server address in the game's online menu. For automatic joining,
 copy config\\client.example.json to config\\client.json and edit the host,
@@ -134,7 +144,12 @@ def find_crt_dir(compiler: Path, arch: str = "x86") -> Path:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Package the 32-bit Windows client build.")
     parser.add_argument("--bin-dir", type=Path, default=DEFAULT_BIN_DIR, help="build output to package")
-    bin_dir = parser.parse_args().bin_dir.resolve()
+    parser.add_argument("--channel", help="MafiaHub build channel to stamp into .mafiahub/channel")
+    parser.add_argument("--stage", type=Path, help="also write the packaged files to this (new) folder")
+    arguments = parser.parse_args()
+    bin_dir = arguments.bin_dir.resolve()
+    if arguments.channel is not None and not re.fullmatch(r"[a-z0-9._-]{1,32}", arguments.channel):
+        raise SystemExit(f"Invalid channel {arguments.channel!r}")
 
     cache = read_cmake_cache(bin_dir.parent / "CMakeCache.txt")
     if cache.get("CMAKE_BUILD_TYPE") not in ("Release", "RelWithDebInfo"):
@@ -175,16 +190,32 @@ def main() -> None:
         if not source.is_file() or source.is_symlink():
             raise FileNotFoundError(source)
 
+    texts = {"README-CLIENT.txt": README}
+    if arguments.channel is not None:
+        texts[".mafiahub/channel"] = arguments.channel
+
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     temporary = OUTPUT.with_suffix(".zip.tmp")
     try:
         with ZipFile(temporary, "w", compression=ZIP_DEFLATED, compresslevel=6, allowZip64=True) as archive:
-            archive.writestr("README-CLIENT.txt", README)
+            for name, text in texts.items():
+                archive.writestr(name, text)
             for source, name in files:
                 archive.write(source, name)
         temporary.replace(OUTPUT)
     finally:
         temporary.unlink(missing_ok=True)
+
+    if arguments.stage is not None:
+        stage = arguments.stage.resolve()
+        if stage.exists():
+            raise SystemExit(f"{stage} already exists")
+        for name, text in texts.items():
+            (stage / name).parent.mkdir(parents=True, exist_ok=True)
+            (stage / name).write_text(text, encoding="utf-8")
+        for source, name in files:
+            (stage / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, stage / name)
 
     print(OUTPUT)
 

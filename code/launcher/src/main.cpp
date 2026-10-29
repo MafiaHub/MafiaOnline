@@ -1,5 +1,7 @@
 #include <Windows.h>
 
+#include "patcher.h"
+
 #include <launcher/project.h>
 #include <logging/logger.h>
 #include <mafia1/sdk/retail_image.h>
@@ -65,6 +67,11 @@ int main() {
     if (launcherPathLength == 0 || launcherPathLength >= std::size(launcherPath) || !SetCurrentDirectoryW(std::filesystem::path(launcherPath).parent_path().c_str())) {
         MessageBoxW(nullptr, L"Could not use the launcher directory.", L"Mafia1Online", MB_ICONERROR);
         return 1;
+    }
+
+    // Patch first: the updater replaces files this process would hold open.
+    if (!Mafia1Online::Launcher::RunBuildPatcher(std::filesystem::path(std::wstring(launcherPath, launcherPathLength)))) {
+        return 0; // MafiaHubUpdater.exe relaunches us
     }
 
     Framework::Launcher::ProjectConfiguration config;

@@ -176,6 +176,11 @@ folder even when a shortcut has a different working directory. A matching
 Mafia executable and an existing Mafia profile are required. The
 example `127.0.0.1` server address only reaches a server on the same machine.
 
+Releases are published with `tools/release.py`: the launcher of a release
+patches itself from MafiaHub Services (the Framework's build patcher, as in
+Kingdoms Connected) and each tag gets a GitHub release with the client and
+server ZIPs. See [releasing](docs/releasing.md).
+
 ## Two-client local test
 
 On Windows, `tools/run_two_clients.ahk` (AutoHotkey v2) starts the server
