@@ -58,6 +58,12 @@ namespace Mafia1Online::Shared::Entities {
             return static_cast<MafiaNet::PeerGuid>(controllerGuid);
         }
 
+        // The server owns the entity; the controller is the player it is the
+        // avatar of, so voice places that player's speech here.
+        MafiaNet::PeerGuid GetAvatarGuid() const override {
+            return static_cast<MafiaNet::PeerGuid>(controllerGuid);
+        }
+
         // About 18 bytes on foot (61 as raw floats), 26 aboard a railway:
         // position at 1/64 m, yaw in 10 bits, velocity at 1/32 m/s, and the
         // ride only while aboard, its offset at 1/1024 m.
