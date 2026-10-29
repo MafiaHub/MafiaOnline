@@ -89,11 +89,11 @@ namespace Mafia1Online::Shared::Bridge {
     }
 
     // Simulation host -> server at kSnapshotHz, and at once (reliable) when a
-    // bridge changes phase; server -> every spawned player. hostTimeMs dates
-    // it on the host's clock for the players' interpolation.
+    // bridge changes phase; server -> every player in the mission. hostTimeMs
+    // dates it on the host's clock for the players' interpolation.
     struct Snapshot {
         static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::BridgeSnapshot");
-        static constexpr int kSnapshotHz = 5;
+        static constexpr int kSnapshotHz = 10;
 
         uint64_t missionGeneration = 0;
         // The host's process id (Simulation::HostSession) and its clock.

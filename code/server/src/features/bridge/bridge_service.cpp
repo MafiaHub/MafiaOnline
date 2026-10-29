@@ -48,7 +48,9 @@ namespace Mafia1Online::Features::Bridge {
             auto snapshot = received;
             auto *peer = Framework::CoreModules::GetNetworkPeer();
             _players->ForEach([&](Shared::Entities::PlayerEntity *player) {
-                if (player->spawned && player->missionGeneration == _missionGeneration) {
+                // Dead or respawning players keep the bridge too: without
+                // reports it closes, and opens again in a jump on respawn.
+                if (player->missionGeneration == _missionGeneration) {
                     peer->SendRPC(snapshot, MafiaNet::ToGuid(_players->GuidForNetworkId(player->GetNetworkID())), MafiaNet::Priority::High, reliability);
                 }
             });

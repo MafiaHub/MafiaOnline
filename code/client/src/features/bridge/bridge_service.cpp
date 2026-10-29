@@ -33,6 +33,9 @@ namespace Mafia1Online::Features::Bridge {
 
         // Two host reports behind: one lost packet still leaves a bracket.
         constexpr double kRenderDelayMs = 2000.0 / Shared::Bridge::Snapshot::kSnapshotHz;
+        // Past the newest report the leaves keep moving as the last two did,
+        // within one phase, rather than stop until the next arrives.
+        constexpr double kMaxExtrapolationMs = 300.0;
         // Update divides a steamer's progress past 1 by its step; it never
         // gets there with the speed of 0 players give it.
         constexpr float kMaxProgress = 0.999f;
@@ -354,11 +357,17 @@ namespace Mafia1Online::Features::Bridge {
         const double target = static_cast<double>(static_cast<int32_t>(static_cast<uint32_t>(static_cast<int64_t>(hostTime)) - newestTime));
         const auto time = [&](const Sample &sample) { return -static_cast<double>(static_cast<int32_t>(newestTime - sample.hostTimeMs)); };
         // The first pair whose later sample is not before the render time;
-        // past the newest the bridge holds it, before the oldest it clamps.
+        // past the newest the last pair is carried on (u above 1), before the
+        // oldest it clamps.
         const Sample *a = &_samples.back();
         const Sample *b = a;
         float u = 1.0f;
-        if (target < 0.0 && _samples.size() > 1) {
+        if (target >= 0.0 && _samples.size() > 1) {
+            a = &_samples[_samples.size() - 2];
+            const double span = -time(*a);
+            u = span > 0.0 ? static_cast<float>(1.0 + std::min(target, kMaxExtrapolationMs) / span) : 1.0f;
+        }
+        else if (target < 0.0 && _samples.size() > 1) {
             size_t later = 1;
             while (later + 1 < _samples.size() && time(_samples[later]) < target) {
                 ++later;
@@ -377,13 +386,18 @@ namespace Mafia1Online::Features::Bridge {
         if (!from) {
             return;
         }
+        // Across a phase change the motion of the last pair says nothing
+        // about the next phase's.
+        if (u > 1.0f && from->phase != to->phase) {
+            u = 1.0f;
+        }
         // The phase changes when the later report is reached; the leaves and
         // the timer move between the two.
         const auto phase = static_cast<NativeBridge::Phase>(u < 1.0f ? from->phase : to->phase);
         if (bridge->GetPhase() != phase) {
             bridge->EnterPhase(phase);
         }
-        bridge->SetPhaseTimer(static_cast<int32_t>(std::lround(from->phaseTimerMs + (to->phaseTimerMs - from->phaseTimerMs) * static_cast<double>(u))));
+        bridge->SetPhaseTimer(static_cast<int32_t>(std::max<long>(0, std::lround(from->phaseTimerMs + (to->phaseTimerMs - from->phaseTimerMs) * static_cast<double>(u)))));
         bridge->SetRuntimeOpen(phase == NativeBridge::Phase::Open);
         bridge->PlaceLeaves(from->angle + (to->angle - from->angle) * u);
 
@@ -391,6 +405,8 @@ namespace Mafia1Online::Features::Bridge {
             return;
         }
         auto &runtime = NativeBridgeRuntime::Get();
+        // Steamers wrap onto new routes, so they stop at the newest report.
+        u = std::min(u, 1.0f);
         for (uint8_t i = 0; i < Shared::Bridge::kSteamerCount; ++i) {
             const auto &steamerA = a->snapshot.steamers[i];
             const auto &steamerB = b->snapshot.steamers[i];

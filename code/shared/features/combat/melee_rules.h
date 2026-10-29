@@ -51,6 +51,23 @@ namespace Mafia1Online::Shared::Combat {
         return distance <= 0.2f || glm::dot(flat / distance, attackerFacing) >= kMeleeFacingDot;
     }
 
+    // A strike on a car lands on its body, which is too big for a target
+    // position: the hit point itself must be within reach in front of the
+    // attacker (the server matches it against the car's body separately).
+    inline constexpr float kMeleeCarReach = kMeleeReach + 0.6f;
+    inline constexpr float kMeleeCarHitBelowFeet = 0.5f;
+    inline constexpr float kMeleeCarHitAboveFeet = 2.5f;
+
+    inline bool MeleeCarHitPlausible(const glm::vec3 &attacker, const glm::vec3 &attackerFacing, const glm::vec3 &hit) {
+        const glm::vec3 offset = hit - attacker;
+        const glm::vec3 flat(offset.x, 0.0f, offset.z);
+        const float distance = glm::length(flat);
+        if (!std::isfinite(distance) || distance > kMeleeCarReach || offset.y < -kMeleeCarHitBelowFeet || offset.y > kMeleeCarHitAboveFeet) {
+            return false;
+        }
+        return distance <= 0.2f || glm::dot(flat / distance, attackerFacing) >= kMeleeFacingDot;
+    }
+
     // C_human::AI books HumanBoxing for every swing that strikes a walker's
     // collision or a human (0x571342, 0x5714e6). On the simulation host a
     // player's replica only replays that player's swing, so its own strikes

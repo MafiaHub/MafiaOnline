@@ -69,8 +69,10 @@ namespace Mafia1Online::Shared::Car {
             stream->Serialize(write, clockMs);
             glm::vec3 position {x, y, z};
             glm::quat rotation {qw, qx, qy, qz};
-            Net::SerializeWorldPosition(stream, write, position);
-            Net::SerializeQuat(stream, write, rotation, 10);
+            // As fine as CarEntity relays it: coarser here would put the
+            // 1/64 m, 10-bit noise back into every observer's pose.
+            Net::SerializeWorldPosition(stream, write, position, Net::kCarPlaneBits, Net::kCarHeightBits);
+            Net::SerializeQuat(stream, write, rotation, 12);
             Net::SerializeFixed(stream, write, velocityX, -128.0f, 128.0f, 16);
             Net::SerializeFixed(stream, write, velocityY, -128.0f, 128.0f, 16);
             Net::SerializeFixed(stream, write, velocityZ, -128.0f, 128.0f, 16);

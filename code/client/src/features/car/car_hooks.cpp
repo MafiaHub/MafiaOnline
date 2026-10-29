@@ -6,6 +6,7 @@
 #include "features/simulation/simulation_config.h"
 #include "shared/features/car/car_entity.h"
 #include "shared/features/car/car_hit_report.h"
+#include "shared/features/combat/melee_rules.h"
 #include "shared/features/combat/vehicle_impact.h"
 #include "shared/features/npc/npc_entity.h"
 #include "shared/features/player/player_entity.h"
@@ -174,6 +175,59 @@ namespace Mafia1Online::Features::Car {
             Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(report);
         }
 
+        // The local player's melee strike on a network car, against the
+        // swing the server accepted (one car report per swing).
+        void ReportLocalMeleeCarHit(Core::Application &application, SDK::Car::NativeCar &car, uint64_t carId,
+                                    const SDK::Player::Vector3 &direction, const SDK::Player::Vector3 &position,
+                                    const SDK::Player::Vector3 &normal, SDK::Player::NativeActor *attacker) {
+            static Shared::Combat::MeleeReportGate gate;
+            if (!application.World().IsReady()) {
+                return;
+            }
+            const auto attackerHandle = application.World().NativeObjects().FindByNative(attacker);
+            const auto *attackerState = application.Combat().GetLocalState(application.World());
+            const auto swing = application.Combat().OpenLocalMelee();
+            if (!attackerState || attackerHandle.networkId == 0 || attackerHandle.networkId != attackerState->networkId || !attackerState->spawned ||
+                !attackerState->alive || !swing) {
+                return;
+            }
+            // Retail's swing direction is not a unit vector; the server checks
+            // the hit point, so a unit one does.
+            const glm::vec3 swingDirection(direction.x, direction.y, direction.z);
+            const float length = glm::length(swingDirection);
+            if (!(length > 0.0001f)) {
+                return;
+            }
+            const SDK::Player::Vector3 unit {swingDirection.x / length, swingDirection.y / length, swingDirection.z / length};
+            const auto local = LocalCarHit(car, unit, position);
+            if (!local || !gate.Admit(*swing)) {
+                return;
+            }
+            Shared::Car::HitReport report;
+            report.kind = Shared::Car::HitKind::Melee;
+            report.carId = carId;
+            report.missionGeneration = application.World().LoadedMissionGeneration();
+            report.shooterId = attackerHandle.networkId;
+            report.shooterSpawnGeneration = attackerState->spawnGeneration;
+            report.shotSequence = *swing;
+            report.directionX = unit.x;
+            report.directionY = unit.y;
+            report.directionZ = unit.z;
+            report.hitX = position.x;
+            report.hitY = position.y;
+            report.hitZ = position.z;
+            report.normalX = normal.x;
+            report.normalY = normal.y;
+            report.normalZ = normal.z;
+            report.localHitX = local->hit.x;
+            report.localHitY = local->hit.y;
+            report.localHitZ = local->hit.z;
+            report.localDirectionX = local->direction.x;
+            report.localDirectionY = local->direction.y;
+            report.localDirectionZ = local->direction.z;
+            Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(report);
+        }
+
         bool IsRemoteNetworkCar(Core::Application &application, SDK::Car::NativeVehicle *vehicle) {
             auto *car = vehicle->Owner();
             if (!car) {
@@ -254,8 +308,24 @@ namespace Mafia1Online::Features::Car {
             }
             const auto *state = Framework::CoreModules::GetReplication()->GetEntity<Shared::Entities::CarEntity>(handle.networkId);
             if (hitType != 0) {
-                if (state && state->missionGeneration == application->World().LoadedMissionGeneration() &&
-                    state->simulationControllerGuid == static_cast<uint64_t>(Framework::CoreModules::GetReplication()->GetMyGUID())) {
+                const bool current = state && state->missionGeneration == application->World().LoadedMissionGeneration();
+                const bool controller = current && state->simulationControllerGuid == static_cast<uint64_t>(Framework::CoreModules::GetReplication()->GetMyGUID());
+                if (hitType == Shared::Car::NativeHitType(Shared::Car::HitKind::Melee) && current) {
+                    if (attacker && attacker == SDK::Player::CurrentPlayer()) {
+                        // The server sends it on to the controller and has
+                        // everyone else hear it.
+                        if (direction && position && normal) {
+                            ReportLocalMeleeCarHit(*application, *car, handle.networkId, *direction, *position, *normal, attacker);
+                        }
+                    }
+                    else if (attacker && Framework::CoreModules::GetReplication()->GetEntity<Shared::Entities::PlayerEntity>(
+                                             application->World().NativeObjects().FindByNative(attacker).networkId)) {
+                        // A remote player's replayed swing: that player
+                        // reports its own strike.
+                        return true;
+                    }
+                }
+                if (controller) {
                     return gCarHitOriginal(car, hitType, direction, position, normal, damage, attacker, flags, frame);
                 }
                 return true;
@@ -493,7 +563,7 @@ namespace Mafia1Online::Features::Car {
 
     bool ApplyAuthoritativeCarHit(SDK::Car::NativeCar *car, const SDK::Player::Vector3 &direction,
                                   const SDK::Player::Vector3 &position, const SDK::Player::Vector3 &normal, float damage,
-                                  SDK::Scene::NativeFrame *frame, SDK::Player::NativeActor *attacker) {
-        return gCarHitOriginal(car, 0, &direction, &position, &normal, damage, attacker, 0, frame);
+                                  SDK::Scene::NativeFrame *frame, SDK::Player::NativeActor *attacker, int hitType) {
+        return gCarHitOriginal(car, hitType, &direction, &position, &normal, damage, attacker, 0, frame);
     }
 } // namespace Mafia1Online::Features::Car

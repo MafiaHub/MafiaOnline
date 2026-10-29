@@ -181,7 +181,10 @@ namespace Mafia1Online::Features::Car {
             const double renderTime = now - _delayMs;
             const bool underrun     = !_poses.empty() && renderTime > _poses.back().time;
             const float step        = frameMs * (underrun ? 0.1f : 0.01f);
-            _delayMs += std::clamp(target - _delayMs, -step, underrun ? step * 2.0f : step);
+            // Growing by a fifth of every frame slowed a car to 80% on screen
+            // through the gap; extrapolation carries it, and the delay grows
+            // by 5% a frame.
+            _delayMs += std::clamp(target - _delayMs, -step, underrun ? step * 0.5f : step);
             return renderTime;
         }
 

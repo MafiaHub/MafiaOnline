@@ -219,6 +219,20 @@ namespace {
         car.slowFields = true;
         carRead        = RoundTrip(car);
         CHECK(carRead.slowFields && carRead.fuel == 12.5f && carRead.maximumGear == 5 && carRead.doorTargets == car.doorTargets);
+        // The controller's pose keeps CarEntity's precision (1/256 m, 12-bit
+        // rotation), so the relay has none to lose.
+        const glm::quat turned = glm::normalize(glm::quat(0.93f, 0.05f, 0.36f, 0.02f));
+        car.x  = 1234.567f;
+        car.y  = 12.3456f;
+        car.z  = -987.654f;
+        car.qw = turned.w;
+        car.qx = turned.x;
+        car.qy = turned.y;
+        car.qz = turned.z;
+        carRead = RoundTrip(car);
+        CHECK(Near(carRead.x, car.x, 0.0021f) && Near(carRead.y, car.y, 0.0021f) && Near(carRead.z, car.z, 0.0021f));
+        const float carDot = std::abs(carRead.qw * turned.w + carRead.qx * turned.x + carRead.qy * turned.y + carRead.qz * turned.z);
+        CHECK(carDot > 0.99999f);
 
         Shared::Railway::State railway;
         railway.index            = 63;

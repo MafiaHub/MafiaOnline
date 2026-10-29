@@ -402,6 +402,26 @@ namespace Mafia1Online::Core {
                 car->terminalState != Shared::Entities::CarEntity::TerminalState::Active) {
                 return;
             }
+            if (report.kind == Shared::Car::HitKind::Melee) {
+                const auto now = std::chrono::steady_clock::now();
+                if (!_cars.ValidateHitGeometry(report, now)) {
+                    return;
+                }
+                const auto damage = _combat.ConsumeMeleeCarHit(report, sender);
+                if (!damage) {
+                    return;
+                }
+                // A controller's own strike is in its native car already.
+                if (car->simulationControllerGuid != static_cast<uint64_t>(sender)) {
+                    SendCarHit(report, *damage);
+                }
+                else {
+                    Features::Script::EmitCarHitEvent(*this, report, *damage);
+                }
+                Shared::Car::MeleeImpact impact {report.carId, report.missionGeneration, report.hitX, report.hitY, report.hitZ};
+                Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(impact, MafiaNet::Priority::High, MafiaNet::Reliability::Unreliable, MafiaNet::ToGuid(sender));
+                return;
+            }
             const auto evidence = _combat.InspectCarImpact(report, sender);
             if (!evidence || evidence->damage <= 0.0f ||
                 !_cars.ValidateHitGeometry(report, evidence->acceptedAt) ||
@@ -500,10 +520,29 @@ namespace Mafia1Online::Core {
             // takeover, done once the seat intent itself is accepted; nobody
             // else sits in it.
             const auto gate = _traffic.CheckSeatIntent(intent, *player);
+            // A refused entry leaves the player getting in on screen until
+            // reconciliation pulls them out: say why.
+            const auto logRefusal = [&](const char *by) {
+                using Action = Shared::Car::SeatAction;
+                if (intent.action != Action::Enter && intent.action != Action::EnterBegin) {
+                    return;
+                }
+                const auto *car = _cars.Find(intent.carId);
+                Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->info(
+                    "Seat {} of car {} refused to player {} by {} (action {}, seat count {}, occupant {}, host driven {}, distance {:.1f} m)", intent.seat, intent.carId,
+                    player->GetNetworkID(), by, static_cast<int>(intent.action), car ? car->seatCount : 0,
+                    car && intent.seat < Shared::Entities::CarEntity::kMaxSeats ? car->occupantIds[intent.seat] : 0, car && car->hostDriven,
+                    car ? glm::distance(player->position, car->position) : -1.0f);
+            };
             if (gate == Features::Traffic::TrafficService::SeatGate::Reject) {
+                logRefusal("traffic");
                 return;
             }
-            if (auto event = _cars.ApplySeatIntent(intent, *player, MissionGeneration())) {
+            auto event = _cars.ApplySeatIntent(intent, *player, MissionGeneration());
+            if (!event) {
+                logRefusal("cars");
+            }
+            if (event) {
                 if (gate == Features::Traffic::TrafficService::SeatGate::Takeover) {
                     _traffic.CompleteTakeover(intent.carId, *player);
                 }
@@ -582,6 +621,7 @@ namespace Mafia1Online::Core {
         hit.controllerGuid = car->simulationControllerGuid;
         hit.serverSequence = ++_carHitSequence;
         hit.shooterId = report.shooterId;
+        hit.kind = report.kind;
         hit.damage = damage;
         hit.directionX = report.directionX;
         hit.directionY = report.directionY;

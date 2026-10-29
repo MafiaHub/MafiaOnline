@@ -305,12 +305,16 @@ namespace Mafia1Online::Features::Seat {
         }
         for (uint8_t occupied = 0; occupied < state->seatCount && occupied < Shared::Entities::CarEntity::kMaxSeats; ++occupied) {
             if (state->occupantIds[occupied] && replication->GetEntity<Shared::Entities::NpcEntity>(state->occupantIds[occupied])) {
+                Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Seat {} of traffic car {} refused here: host NPC {} in seat {}", seat, vehicle.networkId,
+                                                                            state->occupantIds[occupied], occupied);
                 return false;
             }
         }
         const bool driverIn = state->driverState == Crew::Seated || state->driverState == Crew::Dead;
         const bool passengerIn = state->passengerState == Crew::Seated || state->passengerState == Crew::Dead;
         if (seat != 0 && (driverIn || (seat == 1 && passengerIn))) {
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Seat {} of traffic car {} refused here: crew driver {}, passenger {} (host driven)", seat,
+                                                                        vehicle.networkId, static_cast<int>(state->driverState), static_cast<int>(state->passengerState));
             return false;
         }
         if (seat == 0 && driverIn) {

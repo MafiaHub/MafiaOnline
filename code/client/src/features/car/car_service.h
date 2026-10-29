@@ -107,6 +107,8 @@ namespace Mafia1Online::Features::Car {
             uint32_t poseClockMs                 = 0;
             double poseClockOffset               = 0.0;
             std::chrono::steady_clock::time_point lastSent;
+            // When the next report is due (ReportMovement's 30 Hz schedule).
+            std::chrono::steady_clock::time_point nextSend;
             // The last report sent, and the last one that carried the slow
             // fields, for the idle and slow-field tests (ReportMovement).
             std::optional<Shared::Car::Movement> lastMovement;

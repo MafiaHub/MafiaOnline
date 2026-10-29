@@ -95,6 +95,10 @@ namespace Mafia1Online::Features::Combat {
         // after that check; human hits and car hits share the pellet mask.
         std::optional<CarImpactEvidence> InspectCarImpact(const Shared::Car::HitReport &report, MafiaNet::PeerGuid sender) const;
         bool ConsumeCarImpact(const Shared::Car::HitReport &report, MafiaNet::PeerGuid sender);
+        // A melee report on a car: one strike of the sender's accepted swing
+        // of the last 1.8 s, within reach in front of it. Marks the swing's
+        // car strike used and returns the damage C_car::Hit gets.
+        std::optional<float> ConsumeMeleeCarHit(const Shared::Car::HitReport &report, MafiaNet::PeerGuid sender);
         // A bullet impact the shooter reported on something the server keeps
         // no health for (a car, a railway): one unused pellet of an accepted
         // firearm shot of the last 2 s, flying along that pellet within its
@@ -219,6 +223,8 @@ namespace Mafia1Online::Features::Combat {
                 bool heavy        = false;
                 std::chrono::steady_clock::time_point acceptedAt;
                 bool used = false;
+                // A swing also lands once on a car (MeleeCarHit).
+                bool carUsed = false;
             };
             std::deque<MeleeRecord> melee;
             std::chrono::steady_clock::time_point lastMelee;

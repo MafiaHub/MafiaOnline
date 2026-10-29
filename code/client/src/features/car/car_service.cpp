@@ -9,6 +9,7 @@
 #include "shared/features/car/car_engine_state.h"
 #include "shared/features/car/car_entity.h"
 #include "shared/features/car/car_explosion_intent.h"
+#include "shared/features/car/car_hit_report.h"
 #include "shared/features/car/car_terminal_intent.h"
 #include "shared/features/car/car_load_failure.h"
 #include "shared/features/car/car_movement.h"
@@ -23,6 +24,7 @@
 #include <mafia1/sdk/scene/native_scene.h>
 #include <mafia1/sdk/seat/native_seat.h>
 #include <mafia1/sdk/ui/native_indicators.h>
+#include <mafia1/sdk/world/native_fire.h>
 #include <networking/network_peer.h>
 #include <networking/replication/replication_manager.h>
 
@@ -39,6 +41,12 @@
 namespace Mafia1Online::Features::Car {
     namespace {
         constexpr auto kMovementSendInterval = std::chrono::milliseconds(33);
+        // A frame ending this close before a scheduled send sends it.
+        constexpr auto kMovementSendSlack = std::chrono::milliseconds(2);
+        // The observers' frame clock (DriveObserver): the share of its gap
+        // to the wall clock closed each frame, and the gap it jumps over.
+        constexpr double kFrameClockPull    = 0.02;
+        constexpr double kFrameClockResetMs = 250.0;
         // A car at rest with nothing changing reports only this often, so
         // its pose stops changing on the server and observers stop being
         // sent it; the slow fields refresh as often.
@@ -125,6 +133,20 @@ namespace Mafia1Online::Features::Car {
             [this](const Shared::Car::MeshCheckpointChunk &chunk, MafiaNet::Packet *) { OnMeshCheckpoint(chunk); });
         Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Car::AuthoritativeHit>(
             [this](const Shared::Car::AuthoritativeHit &hit, MafiaNet::Packet *) { OnAuthoritativeHit(hit); });
+        // Another player's accepted strike: the sound its own C_human::AI
+        // played (the dent arrives with the controller's mesh).
+        Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Car::MeleeImpact>([this](const Shared::Car::MeleeImpact &impact, MafiaNet::Packet *) {
+            auto *mission = SDK::Core::Mission::Get();
+            if (!_world || !_world->IsReady() || impact.missionGeneration != _world->LoadedMissionGeneration() || !mission || !mission->Game() ||
+                !std::isfinite(impact.x) || !std::isfinite(impact.y) || !std::isfinite(impact.z)) {
+                return;
+            }
+            if (auto *sound = SDK::World::Fire::CreateTableSound(Shared::Car::kMeleeCarSound)) {
+                sound->Frame()->SetWorldPosition({impact.x, impact.y, impact.z});
+                sound->Frame()->Update();
+                SDK::World::Fire::PlayOwnedSound(mission->Game(), sound);
+            }
+        });
     }
 
     void CarService::Update(World::WorldService &world) {
@@ -179,6 +201,7 @@ namespace Mafia1Online::Features::Car {
             if (stream.simulationController != simulationController) {
                 stream.simulationController   = simulationController;
                 stream.lastSent               = {};
+                stream.nextSend               = {};
                 stream.lastMovement.reset();
                 stream.lastSlowMovement.reset();
                 stream.sequence               = 0;
@@ -214,6 +237,7 @@ namespace Mafia1Online::Features::Car {
                     ApplyPose(world, id, forced, true);
                     stream.appliedTransformRevision = car->transformRevision;
                     stream.lastSent = {};
+                    stream.nextSend = {};
                 }
             }
             if (car->lastUpdateTime == 0 && stream.lastPacketTime != 0) {
@@ -818,7 +842,7 @@ namespace Mafia1Online::Features::Car {
             }
             if (!ApplyAuthoritativeCarHit(car, {worldDirection.x, worldDirection.y, worldDirection.z},
                                           {worldHit.x, worldHit.y, worldHit.z}, {normal.x, normal.y, normal.z}, hit.damage,
-                                          hitFrame, attacker)) {
+                                          hitFrame, attacker, Shared::Car::NativeHitType(hit.kind))) {
                 return;
             }
             stream.lastAppliedHitSequence = hit.serverSequence;
@@ -903,7 +927,10 @@ namespace Mafia1Online::Features::Car {
 
     void CarService::ReportMovement(World::WorldService &world, uint64_t networkId, Stream &stream) {
         const auto now = std::chrono::steady_clock::now();
-        if (stream.lastSent != std::chrono::steady_clock::time_point {} && now - stream.lastSent < kMovementSendInterval) {
+        // Against a schedule, not the last send: checked once a frame, "33 ms
+        // since the last" turns into 50 or 66 ms gaps whenever a frame ends
+        // just short, and the uneven cadence raises every observer's delay.
+        if (stream.nextSend != std::chrono::steady_clock::time_point {} && now + kMovementSendSlack < stream.nextSend) {
             return;
         }
         const auto native = _nativeById.find(networkId);
@@ -1023,6 +1050,10 @@ namespace Mafia1Online::Features::Car {
             state->angularVelocity = {movement.angularVelocityX, movement.angularVelocityY, movement.angularVelocityZ};
         }
         Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(movement, MafiaNet::Priority::High, MafiaNet::Reliability::Unreliable);
+        // A schedule far behind (a hitch, a car at rest) starts over.
+        stream.nextSend     = stream.nextSend != std::chrono::steady_clock::time_point {} && now - stream.nextSend < kMovementSendInterval
+                                  ? stream.nextSend + kMovementSendInterval
+                                  : now + kMovementSendInterval;
         stream.lastSent     = now;
         stream.lastMovement = movement;
         if (movement.slowFields) {
@@ -1675,7 +1706,18 @@ namespace Mafia1Online::Features::Car {
         auto &stream = streamIt->second;
         if (_clockSerial != _updateSerial) {
             _clockSerial = _updateSerial;
-            _frameClock  = LocalClockMs();
+            // Remote cars step by the game's frame time, as the local car
+            // and the camera do; reading the wall clock wherever the first
+            // car ticks puts its jitter (3 cm a millisecond at speed) between
+            // them. The wall clock only steers it, or takes over after a stall.
+            const double wall = LocalClockMs();
+            if (_frameClock <= 0.0 || std::abs(wall - _frameClock) > kFrameClockResetMs) {
+                _frameClock = wall;
+            }
+            else {
+                _frameClock += static_cast<double>(frameMs);
+                _frameClock += (wall - _frameClock) * kFrameClockPull;
+            }
         }
         const float dt = static_cast<float>(std::clamp(frameMs, 1u, 83u)) * 0.001f;
         auto *frame = nativeCar->second.frame;

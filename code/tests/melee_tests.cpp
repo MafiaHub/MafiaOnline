@@ -1,5 +1,6 @@
 // Melee hits on the simulation host's walkers: the wire messages and the
 // pure rules the attacker and the server apply to them.
+#include "shared/features/car/car_hit_report.h"
 #include "shared/features/combat/hit_report.h"
 #include "shared/features/combat/melee_rules.h"
 #include "shared/features/pedestrian/pedestrian_control.h"
@@ -141,11 +142,43 @@ namespace {
         gate.Reset();
         CHECK(gate.Admit(6));
     }
+
+    void CarReach() {
+        using Shared::Combat::MeleeCarHitPlausible;
+        const glm::vec3 attacker(0.0f, 0.0f, 0.0f);
+        const glm::vec3 facing(0.0f, 0.0f, 1.0f);
+        // A door panel in front, at fist height.
+        CHECK(MeleeCarHitPlausible(attacker, facing, {0.3f, 1.0f, 1.1f}));
+        // Too far, behind the attacker, under the feet or over the head.
+        CHECK(!MeleeCarHitPlausible(attacker, facing, {0.0f, 1.0f, 3.5f}));
+        CHECK(!MeleeCarHitPlausible(attacker, facing, {0.0f, 1.0f, -1.5f}));
+        CHECK(!MeleeCarHitPlausible(attacker, facing, {0.0f, -1.0f, 1.0f}));
+        CHECK(!MeleeCarHitPlausible(attacker, facing, {0.0f, 3.0f, 1.0f}));
+        CHECK(!MeleeCarHitPlausible(attacker, facing, {std::numeric_limits<float>::quiet_NaN(), 1.0f, 1.0f}));
+    }
+
+    void CarMessages() {
+        Shared::Car::HitReport report;
+        report.kind = Shared::Car::HitKind::Melee;
+        report.carId = 12;
+        report.shotSequence = 9;
+        report.hitY = 1.25f;
+        const auto read = RoundTrip(report);
+        CHECK(read.kind == Shared::Car::HitKind::Melee && read.carId == 12 && read.shotSequence == 9 && Near(read.hitY, 1.25f));
+        Shared::Car::AuthoritativeHit hit;
+        hit.kind = Shared::Car::HitKind::Melee;
+        hit.damage = 40.0f;
+        const auto readHit = RoundTrip(hit);
+        CHECK(readHit.kind == Shared::Car::HitKind::Melee && Near(readHit.damage, 40.0f));
+        CHECK(Shared::Car::NativeHitType(Shared::Car::HitKind::Melee) == 1 && Shared::Car::NativeHitType(Shared::Car::HitKind::Bullet) == 0);
+    }
 } // namespace
 
 int main() {
     Messages();
     Reach();
+    CarReach();
+    CarMessages();
     Lag();
     Boxing();
     Gate();

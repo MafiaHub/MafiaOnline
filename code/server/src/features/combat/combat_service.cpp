@@ -1358,6 +1358,23 @@ namespace Mafia1Online::Features::Combat {
         return ValidatedHit {record->weaponId, damage, record->heavy};
     }
 
+    std::optional<float> CombatService::ConsumeMeleeCarHit(const Shared::Car::HitReport &report, MafiaNet::PeerGuid sender) {
+        auto *attacker = _players->FindByGuid(sender);
+        const auto session = _sessions.find(report.shooterId);
+        if (report.kind != Shared::Car::HitKind::Melee || !attacker || session == _sessions.end() || attacker->GetNetworkID() != report.shooterId || !attacker->spawned ||
+            !attacker->alive || attacker->missionGeneration != report.missionGeneration || attacker->spawnGeneration != report.shooterSpawnGeneration) {
+            return std::nullopt;
+        }
+        auto &melee = session->second.melee;
+        const auto record = std::find_if(melee.begin(), melee.end(), [&](const Session::MeleeRecord &candidate) { return candidate.sequence == report.shotSequence; });
+        if (record == melee.end() || record->carUsed || Clock::now() - record->acceptedAt > std::chrono::milliseconds(1800) ||
+            !Shared::Combat::MeleeCarHitPlausible(attacker->position, Facing(*attacker), glm::vec3(report.hitX, report.hitY, report.hitZ))) {
+            return std::nullopt;
+        }
+        record->carUsed = true;
+        return kRules[record->weaponId].damage * (record->heavy ? 2.0f : 1.0f);
+    }
+
     std::optional<CombatService::CarImpactEvidence> CombatService::InspectShot(const ShotClaim &claim, MafiaNet::PeerGuid sender) const {
         auto *shooter = _players->FindByGuid(sender);
         const auto session = _sessions.find(claim.shooterId);
