@@ -1122,6 +1122,14 @@ namespace Mafia1Online::Scripting {
         }
     } // namespace
 
+    std::string ScriptOwner(v8::Isolate *isolate) {
+        return Owner(isolate);
+    }
+
+    std::string ToNativeText(const std::string &utf8) {
+        return NativeText(utf8);
+    }
+
     void JS_FindWorldFrame(const v8::FunctionCallbackInfo<v8::Value> &info) {
         auto *isolate = info.GetIsolate();
         if (info.Length() != 1 || !info[0]->IsString()) {

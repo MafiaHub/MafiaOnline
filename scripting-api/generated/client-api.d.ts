@@ -1237,6 +1237,38 @@ declare global {
   };
 
   /**
+   * Blips on the retail city map the player holds TAB for. Each resource has its own blips; they are drawn over the map in the game's own projection and cleared when the resource stops or the mission unloads. Nothing here is visible to other players.
+   */
+  const CityMap: {
+    /**
+     * Adds or replaces a blip.
+     * @param id This resource's name for the blip, 1 to 64 characters; setting it again replaces it.
+     * @param target A fixed point, or a streamed player or vehicle the blip follows; an entity blip hides while it is not streamed.
+     * @param options 0xRRGGBB color (white), a label of at most 40 characters drawn beside it, the icon (dot), its radius in 600-line pixels from 2 to 16 (5), whether a blip outside the shown part of the map becomes an arrow at the map border (false), and whether it pulses (false).
+     * @returns False when no resource is running the call or 256 blips are already set.
+     */
+    setBlip(id: string, target: Vector3 | { x: number; y: number; z: number } | Player | Vehicle, options?: { color?: number; label?: string; icon?: "dot" | "square" | "diamond" | "triangle"; size?: number; edge?: boolean; flash?: boolean }): boolean;
+
+    /**
+     * Removes one of this resource's blips.
+     * @param id The blip's id.
+     * @returns False when it had no such blip.
+     */
+    removeBlip(id: string): boolean;
+
+    /**
+     * Removes every blip this resource set.
+     */
+    clearBlips(): void;
+
+    /**
+     * Whether the player is holding the city map open.
+     * @returns False while no mission is loaded.
+     */
+    isOpen(): boolean;
+  };
+
+  /**
    * Mutable two-dimensional vector exposed as the global Vector2.
    */
   class Vector2 {

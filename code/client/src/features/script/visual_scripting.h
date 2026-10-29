@@ -2,6 +2,8 @@
 
 #include <v8.h>
 
+#include <string>
+
 namespace Mafia1Online::SDK::Scene {
     struct NativeFrame;
 }
@@ -23,4 +25,8 @@ namespace Mafia1Online::Scripting {
     bool IsSolidLocalHumanActor(const void *actor);
     SDK::Scene::NativeFrame *OnLocalHumanDestroyed(void *actor);
     void JS_FindWorldFrame(const v8::FunctionCallbackInfo<v8::Value> &info);
+    // The resource whose script is calling; empty outside a resource.
+    std::string ScriptOwner(v8::Isolate *isolate);
+    // UTF-8 to the game's ANSI code page, control characters blanked.
+    std::string ToNativeText(const std::string &utf8);
 } // namespace Mafia1Online::Scripting

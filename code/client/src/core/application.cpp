@@ -15,6 +15,7 @@
 #include "features/simulation/simulation_config.h"
 #include "features/startup_video/startup_video_hooks.h"
 #include "features/script/door_scripting.h"
+#include "features/script/map_scripting.h"
 #include "features/script/pickup_scripting.h"
 #include "features/script/player_scripting.h"
 #include "features/script/script_runtime.h"
@@ -140,7 +141,11 @@ namespace Mafia1Online::Core {
             ExitProcess(1);
         }
         if (!host) {
-            _chat.SetOverlay([this] { _nametags.Render(_world); Scripting::RenderDrawCommands(); });
+            _chat.SetOverlay([this] {
+                _nametags.Render(_world);
+                Scripting::RenderDrawCommands();
+                Scripting::ClientCityMap::Render();
+            });
             // Optional: without CEF, quick join and the native chat stay in charge.
             if (!_webUi.Install(*this, _chat, _projectPath)) {
                 Features::Menu::SetNativeControlsSuppressed(false);
@@ -444,6 +449,7 @@ namespace Mafia1Online::Core {
     void Application::PostScriptInit() {
         if (_visualResourceCleanupRegistered) return;
         Scripting::RegisterVisualResourceCleanup(*GetScriptingModule()->GetResourceManager());
+        Scripting::ClientCityMap::RegisterResourceCleanup(*GetScriptingModule()->GetResourceManager());
         // Every resource runs in an isolate of its own; the bindings' classes go with it.
         GetScriptingModule()->GetEngine()->AddRuntimeDisposingListener([](v8::Isolate *isolate) {
             Scripting::Player::UnregisterIsolate(isolate);
