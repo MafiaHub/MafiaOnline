@@ -390,6 +390,26 @@ namespace {
         CHECK(mapper.Shows(static_cast<uint16_t>(65500 + 10 * 50 + 5000), render));
         // A clock long past (a corpse that lay for a while): shown.
         CHECK(mapper.Shows(static_cast<uint16_t>(65500 - 20000), render));
+
+        // A walker's animations: the first shows at once, a change once the
+        // picture reaches its clock, in order, or after the wait limit.
+        using Clock = std::chrono::steady_clock;
+        const auto start = Clock::now();
+        Shared::Net::TimedChanges<int> walk;
+        walk.Observe(7, 65500, start);
+        CHECK(walk.Shown(mapper, render, start) == 7);
+        walk.Observe(8, static_cast<uint16_t>(65500 + 9 * 50), start);
+        walk.Observe(8, static_cast<uint16_t>(65500 + 9 * 50), start); // A repeat.
+        walk.Observe(9, static_cast<uint16_t>(65500 + 10 * 50), start);
+        CHECK(walk.Shown(mapper, render, start) == 7);
+        CHECK(walk.Shown(mapper, render + 150.0, start) == 8);
+        CHECK(walk.Shown(mapper, render + 150.0, start + std::chrono::milliseconds(100)) == 8);
+        CHECK(walk.Shown(mapper, render + 150.0, start + Shared::Net::kEventWaitLimit) == 9);
+        // The same clip played again, dated anew, plays again.
+        walk.Observe(9, static_cast<uint16_t>(65500 + 10 * 50 + 30), start);
+        walk.Observe(7, static_cast<uint16_t>(65500 + 10 * 50 + 40), start);
+        CHECK(walk.Shown(mapper, render + 225.0, start) == 9);
+        CHECK(walk.Shown(mapper, render + 245.0, start) == 7);
     }
 
     Features::Car::CarPoseSample CarAt(double time, float x, float speed) {

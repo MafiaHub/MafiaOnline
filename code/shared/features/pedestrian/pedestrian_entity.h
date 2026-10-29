@@ -24,6 +24,10 @@ namespace Mafia1Online::Shared::Entities {
         bool alive = true;
         int16_t animation = 0;
         bool animationFlag = false;
+        // When the animation, its flag or alive last changed, on the host's
+        // sample clock (sampleClock's): a copy plays it once it draws the
+        // body at that moment, so the clip starts where the body does.
+        uint16_t animationClock = 0;
         bool umbrella = false;
         uint8_t alpha = 0;
         // Waving for a taxi (Shared::Taxi::kWave*): the retail "MavaniNN
@@ -62,6 +66,7 @@ namespace Mafia1Online::Shared::Entities {
             fields.Field(alive);
             fields.Field(animation);
             fields.Field(animationFlag);
+            fields.Field(animationClock);
             fields.Field(umbrella);
             fields.Field(alpha);
             fields.Field(taxiWave);
@@ -71,11 +76,13 @@ namespace Mafia1Online::Shared::Entities {
         }
 
         // The animation travels with the reliable fields: a one-shot reaction
-        // or death must not be skipped by a lost pose.
+        // or death must not be skipped by a lost pose. Its clock dates it on
+        // the poses' timeline.
         void SerializeFields(Framework::Networking::Replication::FieldSerializer &fields) override {
             fields.Field(alive);
             fields.Field(animation);
             fields.Field(animationFlag);
+            fields.Field(animationClock);
             fields.Field(umbrella);
             fields.Field(alpha);
             fields.Field(taxiWave);

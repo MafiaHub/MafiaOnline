@@ -151,4 +151,50 @@ namespace Mafia1Online::Shared::Net {
         double _mapped    = 0.0;
         std::deque<double> _window;
     };
+
+    // A sender's discrete state (a walker's animation) that changes with its
+    // poses, each change dated on the sample clock they carry: the receiver
+    // shows each one once its picture of the sender gets there
+    // (SampleClockMapper::Shows), at most kEventWaitLimit after it came, in
+    // order. The first state seen shows at once: it began before this copy.
+    template <typename T>
+    class TimedChanges final {
+      public:
+        using Clock = std::chrono::steady_clock;
+
+        // The sender's state now, dated `clock`; a new value or date queues.
+        void Observe(const T &value, uint16_t clock, Clock::time_point now) {
+            if (_newest && *_newest == value && _newestClock == clock) {
+                return;
+            }
+            if (_shown) {
+                _pending.push_back({value, clock, now});
+            }
+            else {
+                _shown = value;
+            }
+            _newest = value;
+            _newestClock = clock;
+        }
+
+        // What to show with the picture drawn at `renderTime`.
+        const T &Shown(const SampleClockMapper &mapper, double renderTime, Clock::time_point now) {
+            while (!_pending.empty() && (now - _pending.front().received >= kEventWaitLimit || mapper.Shows(_pending.front().clock, renderTime))) {
+                _shown = _pending.front().value;
+                _pending.pop_front();
+            }
+            return *_shown;
+        }
+
+      private:
+        struct Change {
+            T value;
+            uint16_t clock = 0;
+            Clock::time_point received;
+        };
+        std::optional<T> _shown;
+        std::optional<T> _newest;
+        uint16_t _newestClock = 0;
+        std::deque<Change> _pending;
+    };
 } // namespace Mafia1Online::Shared::Net

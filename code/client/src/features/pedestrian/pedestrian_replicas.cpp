@@ -129,19 +129,28 @@ namespace Mafia1Online::Features::Pedestrian {
                 replica.newestTime = static_cast<double>(sampleTime);
                 replica.newestVelocity = snapshot.velocity;
             }
+            // The host played each animation from the pose it sampled with
+            // it, while this copy draws a render delay behind: a clip plays,
+            // and a death lays the walker down, once the body gets there.
+            replica.animation.Observe({walker->animation, walker->animationFlag, walker->alive}, walker->animationClock, now);
+            // The buffer's presentation clock slews as the adaptive delay
+            // moves with each packet's jitter; subtracting that delay here
+            // instead stepped the walker on every late or early packet.
+            const double renderTime = replica.snapshots.RenderTimeMs(clockNow);
+            const auto shown = replica.animation.Shown(replica.clock, renderTime, now);
             if (!replica.element && !replica.failed) {
                 replica.element = Borrow(generators, *walker, snapshot);
                 replica.failed = !replica.element;
                 // Streamed in after the host's walker died: it lies where
                 // it fell rather than fall again.
-                replica.fallen = replica.element && !walker->alive;
+                replica.fallen = replica.element && !shown.alive;
             }
             auto *element = replica.element;
             if (!element) {
                 return;
             }
             auto *game = SDK::Core::Mission::Get()->Game();
-            if (!walker->alive && !replica.dead) {
+            if (!shown.alive && !replica.dead) {
                 replica.dead = true;
                 element->Die(game);
             }
@@ -169,21 +178,17 @@ namespace Mafia1Online::Features::Pedestrian {
             if (replica.settled) {
                 return;
             }
-            // The buffer's presentation clock slews as the adaptive delay
-            // moves with each packet's jitter; subtracting that delay here
-            // instead stepped the walker on every late or early packet.
-            const double renderTime = replica.snapshots.RenderTimeMs(clockNow);
             // Held at the extrapolation bound: retail's idle (SetAnim
             // blends to it) until the stream resumes, not a walk on the spot.
-            const bool stopped = walker->alive && Player::MovingGait(walker->animation) &&
+            const bool stopped = shown.alive && Player::MovingGait(shown.id) &&
                                  Player::Stalled(renderTime, replica.newestTime, kSnapshotConfig.maxExtrapolationMs, replica.newestVelocity);
-            const int32_t animation = stopped ? Player::kStopState : walker->animation;
-            const bool animationFlag = stopped ? false : walker->animationFlag;
+            const int32_t animation = stopped ? Player::kStopState : shown.id;
+            const bool animationFlag = stopped ? false : shown.flag;
             if (animation != element->CurrentAnimation()) {
                 element->PlayAnimation(animation, animationFlag);
                 replica.holding = false;
             }
-            else if (replica.holding && walker->alive && now - replica.holdingSince > kLivingHoldLimit) {
+            else if (replica.holding && shown.alive && now - replica.holdingSince > kLivingHoldLimit) {
                 element->RestartAnimation(animation, animationFlag);
                 replica.holding = false;
             }

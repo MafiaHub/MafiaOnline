@@ -125,6 +125,10 @@ namespace Mafia1Online::Features::Pedestrian {
                     SetPose(entity, pose.x, pose.y, pose.z, pose.yaw, moving ? pose.velocityX : 0.0f, moving ? pose.velocityZ : 0.0f);
                 });
                 entity.poseSource = MafiaNet::ToPeerGuid(packet->guid);
+                // Sampled with this pose: dated by its clock.
+                if (entity.animation != pose.animation || entity.animationFlag != pose.animationFlag || (pose.dead && entity.alive)) {
+                    entity.animationClock = snapshot.hostClockMs;
+                }
                 entity.animation = pose.animation;
                 entity.animationFlag = pose.animationFlag;
                 // A dropped umbrella never comes back to that life.

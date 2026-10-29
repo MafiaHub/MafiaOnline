@@ -68,6 +68,15 @@ namespace Mafia1Online::Features::Pedestrian {
             glm::vec3 newestVelocity {0.0f};
             // Dates each pose by when the host sampled it.
             Shared::Net::SampleClockMapper clock;
+            // The host's animation and life, each change played when this
+            // copy draws the body at its moment (animationClock).
+            struct Animation {
+                int16_t id = 0;
+                bool flag = false;
+                bool alive = true;
+                bool operator==(const Animation &) const = default;
+            };
+            Shared::Net::TimedChanges<Animation> animation;
             SDK::Traffic::NativeTrafficElement *element = nullptr;
             // A clip ended: hold its last pose until the host plays the next
             // animation. A corpse never gets one.
