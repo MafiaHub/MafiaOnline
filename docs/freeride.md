@@ -55,13 +55,13 @@ first start and left in place.
 | --- | --- |
 | F2 | City menu: events, jobs, race lobbies, bounties, players, crews, leaderboards and help. Esc or F2 closes it; 1–7 switch tabs. |
 | F1 (hold) | The mod's own list of who is in town. |
-| Tab | The retail city map. |
+| Tab (hold) | The retail city map, with blips for job stations, fires and ambulance calls, your objectives (an arrow at the border when off the shown part) and your crewmates. |
 | T | Chat. Every command below can also be typed. |
 | N / B | At a shop or bar counter: next offer / buy or accept it. |
 | F9 | Car radio on or off. |
 | K | Siren, in a police car. |
 | U | At a telephone booth, on police duty: call for backup. |
-| G | On fire duty: hold to spray the hose (or the truck's roof cannon from its wheel), press next to a trapped civilian to lead them out. On ambulance duty: hold next to a patient to treat them. Down and waiting for a medic: press to give up and wake at the hospital. |
+| G | Under a station's arrow: sign on or clock off. On fire duty: hold to spray the hose (or the truck's roof cannon from its wheel), press next to a trapped civilian to lead them out. On ambulance duty: hold next to a patient to treat them. Down and waiting for a medic: press to give up and wake at the hospital. On the tobacco farm: press on an empty plot to plant, hold to water, pick off hornworms or pick ripe leaves. At the rum still: press to fire it up, tap to vent the pressure, hold to bottle, patch or steal; press beside a character to talk, and in a car stopped at the village store to buy molasses. |
 
 Every button in the city menu sends the same command a player could type, so
 chat and menu share one set of server checks (`server/lib/commands.js`).
@@ -185,7 +185,7 @@ eight minutes without a winner is a draw with stakes returned.
 `/crew create <TAG> [name]` founds a crew with its own colour. `/crew invite`,
 `/crew leave`, `/crew kick` (leader) and `/crew info` manage it; `/c <message>`
 is the crew radio. Members wear `[TAG]` and the colour on their nametags and
-car markers, and see each other labelled across the city.
+car markers, and see each other on the city map (hold Tab).
 
 ## City events
 
@@ -282,45 +282,240 @@ The Jobs tab of the city menu shows every one of these with its live state.
   a shift and brings a cab. With no walkers about (no simulation host, the
   countryside) or no hail for 45 seconds, dispatch sends you to a fare
   waiting at a street corner instead. Any number of cabs work at once.
-- **Fire brigade** (`/fire`, the city maps). Report to the fire station in
-  the Works Quarter (the stock `9hasic` building the city scenes place at
-  (-1158.6, -5.9, 306.5), its garage doors on the street at z 296.5; a FIRE
-  STATION marker shows it), put on the stock fireman's clothes (`Hasic01`)
-  and take the stock truck (`fire00`) from the apron. Fires break out on the
+- **Fire brigade** (the city maps). At the fire station in the Works Quarter
+  (the stock `9hasic` building the city scenes place at (-1158.6, -5.9,
+  306.5), its garage doors on the street at z 296.5) the retail mission arrow
+  spins over a spot on the apron, and the station is on the city map. Stand
+  under the arrow and press G to sign on: you put on the stock fireman's clothes
+  (`Hasic01`), the only fireman model the game has. Two stock fire trucks
+  (`fire00`) stand in front of the doors; only firefighters on duty drive
+  them, anyone may ride along. A truck that burns out, or is left empty away
+  from the station for three minutes, is replaced at its spot. Press G under
+  the arrow again to clock off; `/fire` shows the way there, or clocks off
+  from anywhere. Fires break out on the
   road graph every four minutes while anyone is on duty (every eleven
   otherwise, then burning themselves out after nine): a house front (flames
   up the facade), a burning car that explodes after four minutes, or a crash
   with one or two people lying in the road; a resident may crouch at a
   burning house's door. Everyone sees the fires on the map and in the feed.
-  Hold G within 35 m of your truck to spray the hose onto the nearest fire in
-  front of you (24 m reach), or at the truck's wheel to use its roof cannon
+  Hold G within 35 m of a fire truck to spray the hose onto the nearest fire
+  in front of you (24 m reach), or at a truck's wheel to use its roof cannon
   (32 m): the water arcs onto the flames, the fire shrinks as it goes down and
   grows back slowly if left alone, and every hose on it counts, so a crew is
-  quicker. A house takes one firefighter about 45 seconds. The fire pays
+  quicker. A house takes one firefighter about 45 seconds. G is the
+  brigade's only near a fire, a trapped person or at a truck's wheel;
+  anywhere else it does what it would off duty. The fire pays
   $420 (house), $320 (crash) or $260 (car), split by the water each
   firefighter put on it (at least $25 each). G next to a trapped person gets
   them up to follow you; 12 m clear of the fire they are safe ($120); with a
   medic on duty they become an ambulance call. `/fires` lists the fires.
-- **Ambulance** (`/medic`, the city maps). Report to Lost Heaven Hospital
-  (the stock `9medic` building at (-759.2, 11.6, 779.0); an AMBULANCE marker
-  at the steps) and take the stock ambulance (`ambulance00`) from the street.
-  Calls come in every three minutes while a medic is on duty: someone dazed
+
+  With a crew on duty the bigger calls come in too (the toast says what to
+  do, the card shows the next step):
+  - *A filling station alight.* A car burns at the pumps of one of the
+    three stock filling stations (the `_pumpa_pumpaN` pumps of both city
+    scenes, the Night Pump among them) and the pump itself is on fire. The
+    card counts down to the pumps going up: at least two and a half minutes,
+    more for a crew far away, with a warning at thirty seconds. Get every
+    flame there down to a third and the pumps are safe: $380 for the car,
+    $40 for the pump and a $160 bonus for the crew ($580 for one
+    firefighter). Too late, the car explodes and a bigger fire takes the
+    forecourt ($40 more), with no bonus.
+  - *A bar on fire.* Morello's Bar on Lost Heaven Extended, Salieri's back
+    room on stock Lost Heaven. Flames come out of the front and burn in
+    two places in the room, and the barman and two drinkers (the bar's own
+    people, at their own places) cower inside, crying for help; the bar
+    serves nobody until it is over. Hose the front ($260), walk in through
+    the door arrow and hose the room ($40 a fire): the hose reaches in from a
+    truck within 35 m of the door. G next to someone gets them to follow
+    you; at the exit arrow they come out with you onto the pavement ($50
+    each), where a medic on duty takes them (an ambulance call with $40
+    more). Leave without them and they stay behind. Everyone out alive
+    pays the crew a $160 bonus, half by water, half evenly ($650 in all for
+    one firefighter).
+  - *Arson.* A house fire may have its arsonist running off down the street,
+    marked on the map. Police officers on duty within 1.5 km hear it on the
+    radio and their compass points at him. A firefighter or an officer on
+    duty grabs him with G next to him, or hits him or knocks him over with a
+    car: $150. Anyone else who hits him stops him too, for no reward. He
+    gets away after 100 seconds.
+  - *A burning wreck at a pile-up* (see the ambulance below).
+- **Ambulance** (the city maps). Sign on with G under the arrow at the
+  foot of Lost Heaven Hospital's steps (the stock `9medic` building at
+  (-759.2, 11.6, 779.0); the hospital is on the city map) and take one of
+  the two stock ambulances (`ambulance00`) at the kerb in front. They work
+  like the fire trucks: medics on duty drive them, a lost one is replaced,
+  G under the arrow clocks off and `/medic` shows the way or clocks off. The game
+  has no medic clothes, so medics keep their own. A badly hurt patient rides
+  in the ambulance you last drove. Calls come in every three minutes while a medic is on duty: someone dazed
   on the pavement or someone badly hurt lying there, plus the fire brigade's
   smoke victims. Hold G beside the patient for five seconds to treat them.
   The dazed get up and walk off ($140, 40% more if you got there within four
   minutes); the badly hurt get into the ambulance's front seat (or onto the
   stretcher, out of sight, when they cannot) and must reach the hospital's
-  street front: $220 plus 25 cents a metre, and a 40% tip inside the time on
-  the card. While a medic is on duty a player who goes down outside a duel or
+  street front: $220 plus 10 cents a metre, and a 25% tip inside the time on
+  the card (about $300 to $460). Without an ambulance the badly hurt stay
+  where they lie: treating them pays nothing until one is brought up. While a medic is on duty a player who goes down outside a duel or
   race waits up to a minute for one instead of respawning: a medic who holds
   G beside them for four seconds brings them back where they fell with 60
   health and the starting kit, no hospital bill ($200 to the medic); G gives
   up and respawns as usual.
+
+  Some calls are more than that. Patients talk in their own voices (the
+  retail voice lines: moaning while they wait, crying out at a bump).
+  - *A woman in labour.* Treat her (G, five seconds), then drive her in: a
+    shorter tip window, $330 plus the distance, the tip and a 20% tip for a
+    smooth ride (about $510 to $700). Every crash or knock on the ambulance
+    costs that tip.
+  - *A heart attack.* He lies unconscious with four minutes to live (more
+    when you are far away), on the card. Tap G steadily beside him, about
+    twice a second: eighteen good compressions start his heart; too fast
+    takes one back, a pause keeps what you did; one medic does the CPR at a
+    time. Then he rides in ($400 plus the distance and the tip, about $520 to
+    $690). Too late and he is lost.
+  - *A pile-up.* Two wrecks across a street and three people hurt around
+    them, labelled CRITICAL, SERIOUS and MINOR up close (one blip on the
+    map). The critical one bleeds out in three and a half minutes unless
+    treated, then rides in ($160 plus the distance and the tip); the other
+    two are patched up where they sit ($100 and $70, no quick tip). Treating
+    the critical one first pays $40 for good triage; everyone seen to with
+    nobody lost pays $100, split between the medics who treated one (about
+    $530 to $700 for one medic). With the fire brigade on duty one
+    wreck burns beside them, a fire call of its own ($260): it does not
+    explode, and the wrecks are towed once it is out.
+- **Tobacco farm** (Lost Heaven Extended and The Countryside, `server/farm.js`).
+  The farm is the stock barn (`4stodola`) both countryside scenes place in
+  the lowlands at (-2295.3, -3.6, 711.6), beside the road north-west of
+  crossing (-2306.2, -5.9, 668.8); it is on the city map. Sign on with G
+  under the arrow at its lean-to side. Two stock flatbed trucks
+  (`trucka00`) stand on the apron towards the road; only farmhands on duty
+  drive an empty one. The field is the open grass east of the barn: seven
+  rows of eight plots with a round hay bale (`baliksena`) at each corner.
+  Press G on an empty plot to plant a seedling ($10, up to eight plants each);
+  the plants are stock bushes (`s_ker`) every player sees, growing through
+  seedling, young, leafy and ripe (about 70, 90 and 90 seconds). A plant
+  grows only once watered, and needs water again at every stage: hold G
+  within 9 m of dry plants, with a farm truck within 30 m, and its hose
+  waters them one after another (2.5 seconds each). Rain waters the whole
+  field. Left dry for a minute a plant droops and loses quality (15% a
+  minute); hornworms appear on about one plant in three and eat 20% a minute
+  until picked off (hold G at it). Only drooping or infested plants carry a
+  label. A ripe plant is picked with G (two seconds) and keeps for 15
+  minutes, then rots. Anyone on the farm may water anyone's plants (a $5
+  tip each) or pick off their hornworms; only the planter and their crew
+  pick the leaves. Carry the leaves to the barn's arrow: they cure in two
+  and a half minutes. Then stop a farm truck at the loading bay in front of
+  the barn for six seconds and drive the load to a buyer: the village co-op
+  on the countryside main street pays $110 a bundle at full quality (35% of
+  that at none), and on Lost Heaven Extended the container docks pay 70%
+  more. Within 900 m of the docks the whole city is told and sees the truck
+  on the map, and a loaded farm truck can be driven by anyone: whoever stops
+  it at a buyer is paid. A wrecked truck loses its load; a loaded truck left
+  standing is towed back and unloaded at the barn. `/farm` shows the way to
+  the barn, or clocks off from anywhere.
+
+  The farm keeps its own clock: plants grow and cure only while a map with
+  the farm is loaded, so a crop waits through the city map or a restart,
+  but not through its owner leaving town. Plants, picked leaves, curing
+  batches and cured tobacco are saved in the database by player record; a
+  load on a truck goes back to the barn when the map changes or the resource
+  stops. Both maps share the same field.
 - **Courier.** Salieri's back window, as before.
 - **Bootleg run** (`/bootleg`, Lost Heaven Extended). Drive to the still in
   the hills, wait eight seconds while the crates are loaded (the police are
   tipped off), then reach Salieri's bar within ten minutes in the same car:
-  $700.
+  $700. A one-off delivery for Salieri; the rum distillery below is a
+  business of your own.
+- **Rum distillery** (`/rum`, Lost Heaven Extended, `server/distillery.js`
+  and `client/distillery.js`). A hidden still that no map shows until a
+  player learns of it, run by old Hank (a scripted NPC, voice 27) at the
+  woodcutters' clearing in the lowland woods: the sheds (`@bouda06`) and log
+  piles (`klady`) both countryside scenes place around (-1736, 15.2, 1260),
+  130 m west of the lowland road beyond a fenced pasture (cars get there
+  round its north side). Its gear is stock models placed as map objects in
+  the open ground between the log piles: the pot (`xv sud`), a pipe
+  (`xv trubka4`), the worm tub (`xsud 01`), mash vats (`tutsud`), molasses
+  sacks (`xpytel2`), casks (`sud01`) and crates (`bedna01`).
+
+  The way in is a five-step quest. *A sailor's tale*: the F2 Jobs tab and
+  `/rum` point to Salieri's, where Ernesto, bars.js's sailor in the billiard
+  room, gives directions (G next to him). *The woodcutters' clearing*: the
+  compass leads to the camp; arriving on foot or in a stopped car plays a
+  short locked camera shot of the still and Hank asks for copper. *Copper*: a hardware dealer's truck
+  (`truckb00`) parks on the road north of the village store with its driver
+  smoking beside it; hold G at it for four seconds to unbolt the copper
+  worm (the driver shouts and the police are called, wanted level 1), then
+  bring it to the still on foot or by car ($100, once per player). The
+  still now belongs to the player's operation: their crew's if they are in
+  one (crewmates share stock, heat and progress), otherwise their own. A
+  player who brought the copper runs the still in any operation they are in
+  later, without the quest again; joining a crew brings their own stock,
+  loads and heat into the crew's (what the crew's shed has no room for
+  stays theirs, for when they leave). *First fire* and
+  *Luigi's thirst*: the first batch, bottling and sale, after which Ernesto
+  introduces Paco at the docks.
+
+  The loop: press G in a car stopped at the village store to buy molasses
+  ($40 for three sacks; Hank keeps six), and stop the car in the clearing
+  east of the sheds to unload. At the still, G fires a batch (one sack). Its
+  pressure climbs on its own with sudden surges; the prompt bar is the gauge
+  and G vents it (22%) anywhere within 4 m of the pot, before anything else
+  G would do there. Between 45% and 80% the batch runs at full speed and
+  counts as good; below it crawls at 40%; above it the steam whistle blows;
+  at 100% the still explodes (a fire, up to 60 damage within 7 m, a white
+  flash, +15 heat) and stays wrecked for two minutes unless someone holds G
+  at it and pays $80. A batch takes about 45 seconds of tending; walking
+  away banks the fire (any member can take over within three minutes). The
+  cask ages for two and a half minutes, then holding G at the casks bottles
+  four cases at the batch's quality (the share of time in the green). Stop
+  any car in the clearing for five seconds to load up to twelve cases (the
+  hotter the operation, the likelier someone on the road calls the police),
+  and stop at a buyer: Luigi at Salieri's ($30 a case, +1 heat a case),
+  the speakeasy at Morello's ($45, +2, a one-in-three chance a patrolman
+  notices) or Paco at the container docks ($60, +6; within 900 m the city
+  is told, the car shows on everyone's map and whoever stops it there is
+  paid). Quality scales the price from 40% to 100%: a full car of the best
+  pays $360, $540 or $720, and a docks run adds 72 heat. No buyer deals
+  with a driver the police are after.
+
+  Heat (0-100) rises with every batch and sale and cools a point every 20
+  seconds; above 75 buyers pay 15% less. `/rum bribe` at Salieri's door
+  pays Luigi's man at the precinct (3 x heat, at least $100) for 40 points,
+  once in five minutes. At 55 or more Sergeant Doyle may walk up to the camp
+  while a member is there: G next to him pays 2 x heat (at least $80) for 50
+  points, unless the member is tending a batch (G vents); ignoring him for a
+  minute brings the police and 10 heat, shooting him a wanted level 2. At
+  100 the revenue men set out once a member is on the street (not in an
+  interior, a duel, a race or the jail): the members are warned with the
+  choice, defend the still or `/rum bribe` at Salieri's (which turns them
+  back), and the card counts down four and a half minutes, time to drive
+  there from the docks. The clock stops while no member is on the street
+  and resumes with at least two minutes. A member within 250 m of the
+  still when the first minute is up, or when the time runs out, meets three
+  armed agents trying to reach the crates; killing them pays $100 each
+  defender and leaves heat at 60. Nobody there when the time runs out, and
+  every cask, case and sack stored at the camp is seized and heat drops to
+  30. An operation with nobody in town is never raided. With six or more cases in the shed and a
+  member at the camp, Morello's boys may come for them (three armed
+  gangsters; $150 each defender for seeing them off, six cases lost if
+  nobody does). Now and then the Kowalskis' village wedding orders four
+  cases for $260 (`/rum wedding` takes the order, eight minutes to deliver
+  to the village crossing), and Salieri's has a party night when Luigi pays
+  half again. A player who knows the camp but is not in the operation may
+  hold G at the crates for eight seconds to steal four cases while one of
+  its members is in town (once in ten minutes per operation); the members
+  are told at once (once in 30 seconds), and the cases ride in the thief's
+  next car, marked on everyone's map, until sold or smashed by the thief's
+  death. Stolen rum sold heats the thief's own still, if they run one, not
+  its owners'.
+
+  Labels stay small and close: the spinning arrow over the still or the
+  casks when that is the next step, a label over the clearing's stop, and
+  map blips only for the known camp and the current objective. `/rum hide`
+  puts the quest aside (no card, compass or markers) until `/rum`. Quest
+  progress, stock, ageing casks and heat are saved; a batch on the still,
+  loads in cars and stolen cases in hand go back to their operation when the
+  map changes or the resource stops.
 - **Hold-ups.** Draw a firearm at a shop counter and `/rob`. The police are
   called at once (wanted for arrest); keep the counter for 15 seconds to take
   $250–$450 and leave wanted dead or alive. A till takes ten minutes to refill.
@@ -560,13 +755,15 @@ development mode is on.
 | `server/selector.js`, `ambience.js`, `shops.js`, `police.js`, `props.js`, `doors.js` | Entering the city, clock and weather, shops and courier, police outcomes, prop repair, the door lab. |
 | `server/races.js`, `combat.js`, `duels.js`, `crews.js`, `world_events.js`, `social.js` | Races, bounties, duels, crews, city events, rides, messages and dice. |
 | `server/export.js`, `police_duty.js`, `police_backup.js`, `taxi.js`, `robbery.js` | The jobs; `police_backup.js` is police duty's call boxes and backup. |
-| `server/firefighters.js`, `ambulance.js`, `lib/jobkey.js`, `client/rescue.js` | The fire brigade and the ambulance, and their job key (G) and prompt. |
+| `server/firefighters.js`, `ambulance.js`, `lib/stations.js`, `lib/jobkey.js`, `client/rescue.js` | The fire brigade and the ambulance; their stations (sign-on points and parked vehicles); the job key (G) and its prompt. |
+| `server/farm.js` | The tobacco farm: its plots, plants (map objects), curing, loads and buyers. |
+| `server/distillery.js`, `client/distillery.js` | The hidden rum distillery: its quest, still minigame, casks, loads and buyers, heat, raids and characters; the reveal shot and blast flash. |
 | `server/turf.js`, `stashes.js`, `speed_traps.js`, `interiors.js` | Turf, cash stashes, speed traps and building entrances, each per map. |
 | `server/bars.js`, `drunk.js`, `lib/bar_room.js` | Bars, their staff and drink counters; drunkenness, blackouts and drunk driving; the stock map's back-room bar. |
 | `server/map_vote.js`, `bootleg.js`, `lib/maps.js` | The default map, map votes, the bootleg run and the map registry. |
 | `server/championship.js`, `jail.js`, `jail_visits.js`, `hospital.js` | The Autodrom championship, jail sentences, jail visits and hospital respawns. |
 | `client/hud.js`, `client/hud.html` | One transparent web view for toasts, feed, activity cards, race panel, level strip and the city menu; it also arbitrates the single native compass by priority. |
-| `client/markers.js` | Beacons, checkpoint and crate markers, door arrows, turf rings, bounty and crewmate labels. |
+| `client/markers.js` | Beacons, checkpoint and crate markers, door arrows, turf rings, station arrows, bounty labels, and the city map blips (`CityMap`). World labels show only near and in sight. |
 | `client/selector.js`, `shops.js`, `car_picker.js`, `radio.js`, `police.js`, `jail.js`, `main.js` | The selector, shop staff, the car lot, garage and motor pool, radio, police HUD, the jail countdown, fades and race countdown. |
 | `client/bars.js`, `client/drunk.js` | The drink menu at a bar counter; the sway, view wobble, haze and blackout of a drunk player. |
 

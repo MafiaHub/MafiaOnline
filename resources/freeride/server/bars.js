@@ -137,6 +137,8 @@ const lastPurchase = new Map();
 const lastBar = new Map();
 // Players whose compass /bar pointed at a bar.
 const pointed = new Set();
+// Bars the fire brigade is working in (firefighters.js): no staff, no drinks.
+const closed = new Set();
 let timer = null;
 
 function canSpawn() {
@@ -210,7 +212,8 @@ function tick() {
     const now = Date.now();
     for (const bar of bars) {
         const place = venue(bar);
-        if (guests(bar).length) {
+        // A burning bar's people are the fire brigade's to get out.
+        if (guests(bar).length && !closed.has(bar.id)) {
             place.emptySince = 0;
             staffUp(bar);
         } else if (place.staff.some((member) => member.npc)) {
@@ -290,6 +293,10 @@ function buy(player, request) {
     const now = Date.now();
     if (now - (lastPurchase.get(player.id) ?? 0) < PURCHASE_COOLDOWN_MS) return;
     lastPurchase.set(player.id, now);
+    if (closed.has(bar.id)) {
+        toast(player, "The bar is on fire. Get out!", {tone: "bad"});
+        return;
+    }
     const barman = venue(bar).staff[0];
     if (canSpawn() && !(barman.npc && barman.ready)) {
         toast(player, "Nobody is behind the counter right now.", {tone: "bad"});
@@ -352,6 +359,19 @@ function reset() {
     venues.clear();
     lastBar.clear();
     pointed.clear();
+    closed.clear();
+}
+
+// A fire in the bar (firefighters.js): the staff go at once and come back
+// with the next guest after it reopens.
+function setClosed(barId, shut) {
+    if (!shut) {
+        closed.delete(barId);
+        return;
+    }
+    closed.add(barId);
+    const bar = bars.find((candidate) => candidate.id === barId);
+    if (bar) standDown(bar);
 }
 
 Events.on("npcSpawn", (npc) => {
@@ -405,4 +425,4 @@ Events.on("playerDisconnect", (player) => {
 });
 onClient("fr:bar:buy", buy);
 
-module.exports = {DRINKS, ROUND_PER_HEAD, barOf, bars: () => bars};
+module.exports = {DRINKS, ROUND_PER_HEAD, barOf, bars: () => bars, setClosed, isClosed: (barId) => closed.has(barId)};

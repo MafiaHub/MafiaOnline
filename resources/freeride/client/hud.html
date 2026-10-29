@@ -375,12 +375,39 @@
         (data.places ?? []).length ? panel("Around town", data.places.map((place) => line(place.name, place.offers.join(" · ")))) : null);
     }
 
+    // The hidden rum distillery (server/distillery.js): a rumour until the
+    // player has talked to the sailor, then the quest and the operation.
+    function rumPanel(rum) {
+      if (!rum?.available) return null;
+      if (!rum.stage) {
+        return panel("Cuban rum",
+          el("p", {}, "Word in town is that somebody cooks real Cuban rum out in the woods. Ernesto, the sailor who drinks in Salieri's billiard room, might know more."),
+          button("Ask around", "/rum", true));
+      }
+      const running = rum.unlocked;
+      return panel("Rum distillery",
+        rum.stage < rum.quests ? el("p", {class: "big"}, `Quest ${rum.stage + 1}/${rum.quests} · ${rum.quest}`) : null,
+        el("p", {}, `${rum.step}.`),
+        running ? el("p", {}, `Molasses ${rum.molasses} · casks ${rum.casks}${rum.ready ? ` (${rum.ready} ready)` : ""} · cases ${rum.cases} · heat ${rum.heat}% (${rum.heatWord})`) : null,
+        running && rum.raid ? el("p", {class: "big"}, "The revenue men are coming for the still: defend it at the camp, or bribe them off at Salieri's.") : null,
+        running ? el("p", {}, `Fire the still with G and tap G to keep the gauge between 45% and 80%. Buyers, a case of the best: Luigi at Salieri's (${money(rum.prices?.salieri ?? 30)}, safe), ` +
+          `the speakeasy at Morello's (${money(rum.prices?.morello ?? 45)}, the police may notice)` +
+          (rum.docks ? `, Paco at the docks (${money(rum.prices?.docks ?? 60)}, the hottest: the city sees the car and anyone may take it).` : ".") +
+          " Every batch and sale heats things up; at full heat the revenue men raid the still.") : null,
+        el("div", {class: "actions"},
+          button(rum.hidden ? "Pick it up again" : "Show me the way", "/rum", true),
+          rum.wedding === "offered" ? button("Take the wedding order", "/rum wedding", true) : null,
+          running && rum.heat >= 5 ? button("Bribe at Salieri's", "/rum bribe") : null,
+          !rum.hidden ? button("Put it aside", "/rum hide") : null));
+    }
+
     function jobsPage(data) {
       const exportList = data.export;
       const duty = data.duty ?? {};
       const taxi = data.taxi ?? {};
       const fire = data.fire ?? {};
       const medic = data.medic ?? {};
+      const farm = data.farm ?? {};
       const stashes = data.stashes ?? {found: 0, total: 30};
       return el("div", {class: "grid"},
         panel("Lucas's export list", exportList
@@ -397,17 +424,23 @@
           taxi.active ? el("p", {}, `On shift · ${taxi.fares} fare${taxi.fares === 1 ? "" : "s"}`) : null,
           button(taxi.active ? "End shift" : "Start a shift", "/taxi", !taxi.active)),
         fire.available ? panel("Fire brigade",
-          el("p", {}, "Report to the fire station in the Works Quarter, take the truck and put out fires across the city with the hose (hold G). Lead trapped people out. The pay for a fire is split by the water each firefighter put on it."),
+          el("p", {}, "Sign on with G under the arrow in front of the fire station (Works Quarter), then take one of the fire trucks parked there. Put out fires across the city with the hose (hold G) and lead trapped people out. The pay for a fire is split by the water each firefighter put on it. On duty you also get the big calls: a filling station before its pumps go up, a bar with people inside (in through the door), and arsonists to grab with G."),
           el("p", {}, `${fire.crew ?? 0} on duty · ${fire.fires ?? 0} fire${fire.fires === 1 ? "" : "s"} burning${fire.onDuty ? ` · ${money(fire.earned ?? 0)} this shift` : ""}`),
-          button(fire.onDuty ? "Clock off" : "Go on duty", "/fire", !fire.onDuty), button("Where is it burning?", "/fires")) : null,
+          button(fire.onDuty ? "Clock off" : "Show me the station", "/fire", !fire.onDuty), button("Where is it burning?", "/fires")) : null,
         medic.available ? panel("Ambulance",
-          el("p", {}, "Report to Lost Heaven Hospital and take the ambulance. Hold G beside a patient to treat them, and drive the badly hurt in quickly for a tip. Players who go down wait a minute for you."),
+          el("p", {}, "Sign on with G under the arrow at the foot of Lost Heaven Hospital's steps, then take one of the ambulances at the kerb. Hold G beside a patient to treat them, and drive the badly hurt in quickly for a tip. Some calls are special: a woman in labour (drive smoothly), a heart attack (tap G steadily for CPR) and pile-ups (the critical one first). Players who go down wait a minute for you."),
           el("p", {}, `${medic.medics ?? 0} on duty · ${medic.calls ?? 0} call${medic.calls === 1 ? "" : "s"} waiting${medic.onDuty ? ` · ${money(medic.earned ?? 0)} this shift` : ""}`),
-          button(medic.onDuty ? "Clock off" : "Go on duty", "/medic", !medic.onDuty)) : null,
+          button(medic.onDuty ? "Clock off" : "Show me the hospital", "/medic", !medic.onDuty)) : null,
+        farm.available ? panel("Tobacco farm",
+          el("p", {}, "Sign on with G under the arrow at the barn in the lowlands. Press G on an empty plot in the field beside it to plant a seedling ($10), water the plants with a farm truck's hose (hold G) at every stage, pick off hornworms and pick the ripe leaves. Carry them to the barn to cure, then load a farm truck at the loading bay and sell the tobacco in the village" +
+            (farm.export ? ", or export it at the docks for much more, if nobody takes the truck off you on the way." : ".")),
+          el("p", {}, `${farm.farmers ?? 0} on the farm · your plants ${farm.plants ?? 0}${farm.ripe ? ` (${farm.ripe} ripe)` : ""} · curing ${farm.curing ?? 0} · cured ${farm.cured ?? 0}${farm.onDuty ? ` · ${money(farm.earned ?? 0)} this shift` : ""}`),
+          button(farm.onDuty ? "Clock off" : "Show me the farm", "/farm", !farm.onDuty)) : null,
         panel("Courier", el("p", {}, "Salieri's back window has sealed envelopes for Yellow Pete. Eight minutes, $180."), button("Check my run", "/courier")),
         data.bootleg?.available ? panel("Bootleg run",
           el("p", {}, `Drive out to the still in the hills, wait while the crates go in, then bring the whisky to Salieri's within ten minutes. ${money(data.bootleg.pay)}. Loading tips off the police.`),
           button(data.bootleg.active ? "Call it off" : "Start a run", data.bootleg.active ? "/bootleg cancel" : "/bootleg", !data.bootleg.active)) : null,
+        rumPanel(data.rum),
         panel("Hold-ups", el("p", {}, "Draw a gun at a shop counter and /rob it. The police come at once; keep the counter fifteen seconds."),
           (data.robbery ?? []).map((shop) => line(shop.name, shop.readyInSeconds ? `Till empty · ${minutes(shop.readyInSeconds)}` : "Till full"))),
         panel("Turf", el("p", {}, "Crews take street corners by holding them for a minute. Each corner pays its crew every three minutes."),
@@ -584,7 +617,10 @@
     });
     document.addEventListener("keydown", (event) => {
       if (!state.menuOpen) return;
-      if (event.key === "Escape" || event.key === "F2") { event.preventDefault(); send("hud:close"); return; }
+      // F2 belongs to hud.js's Key.bind, which sees it focused or not; also
+      // closing here raced it and reopened the menu.
+      if (event.key === "F2") { event.preventDefault(); return; }
+      if (event.key === "Escape") { event.preventDefault(); send("hud:close"); return; }
       if (document.activeElement?.tagName === "INPUT") return;
       const index = Number(event.key) - 1;
       if (Number.isInteger(index) && TABS[index]) selectTab(TABS[index][0]);

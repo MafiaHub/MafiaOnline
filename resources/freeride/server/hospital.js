@@ -17,7 +17,7 @@ life.setHospital(() => hospital()?.spawn ?? null);
 
 function marker(player) {
     const place = hospital();
-    markers(player, "hospital", place ? [{id: "hospital", position: place.door, label: place.name.toUpperCase(), color: COLORS.green, range: 150}] : []);
+    markers(player, "hospital", place ? [{id: "hospital", position: place.door, label: place.name.toUpperCase(), color: COLORS.green, range: 150, map: false}] : []);
 }
 
 Events.on("playerSpawn", marker);
