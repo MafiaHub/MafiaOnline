@@ -14,9 +14,11 @@
 ;                                             also start the simulation host
 ;     tools\run_two_clients.ahk --players=N  start N player clients (0-2, default 2)
 ;     tools\run_two_clients.ahk --pool-scale=N  pedestrian pool scale of the host (1-16, default 16)
+;     tools\run_two_clients.ahk --release    run the Release builds (build-prod-32/64)
 ;
 ; Build first: builds\build.bat Mafia1OnlineServer 64, Mafia1OnlineClient 32 and
-; Mafia1OnlineLauncher 32. The game comes from Steam discovery, or from
+; Mafia1OnlineLauncher 32, each with Release as a third argument for --release.
+; The game comes from Steam discovery, or from
 ; MAFIA1ONLINE_GAME_ROOT when that is set. Mafia needs an existing profile;
 ; both clients use profile 0 and the mod suppresses profile and save writes.
 ;
@@ -37,8 +39,9 @@ if HasArg("--validate") {
 }
 
 ProjectDir := NormalizePath(A_ScriptDir "\..")
-ClientBin := ProjectDir "\builds\build-32\bin"
-ServerBin := ProjectDir "\builds\build-64\bin"
+BuildTree := HasArg("--release") ? "build-prod" : "build"
+ClientBin := ProjectDir "\builds\" BuildTree "-32\bin"
+ServerBin := ProjectDir "\builds\" BuildTree "-64\bin"
 RuntimeDir := ProjectDir "\builds\runtime"
 LauncherExe := ClientBin "\Mafia1OnlineLauncher.exe"
 ServerExe := ServerBin "\Mafia1OnlineServer.exe"
