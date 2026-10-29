@@ -44,7 +44,7 @@ python tools\release.py            :: v8.0.0
 2. Packages `builds/releases/Mafia1OnlineClient-<version>-windows-x86.zip`
    (stamped with the channel) and `Mafia1OnlineServer-<version>-windows-x64.zip`.
 3. Publishes the client folder to the Services `testing` channel with
-   `@mafiahub/services-cli` (version in `scripting-api/services-cli.version`).
+   `@mafiahub/services-cli` (0.10.0, as KCDC; `M1O_SERVICES_CLI_VERSION` overrides).
 4. Tags `v<version>` (or `-rc.N`), pushes the tag and creates the GitHub
    release (a prerelease for a candidate) with both ZIPs.
 5. Builds the launcher again without the patcher.

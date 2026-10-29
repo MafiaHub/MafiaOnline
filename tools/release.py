@@ -23,8 +23,9 @@ Environment (not needed for --dry-run, which then builds without the patcher):
     M1O_SERVICES_MOD_ID          Mafia1Online's mod UUID in MafiaHub Services
     M1O_BUILD_DOWNLOAD_TOKEN     download token compiled into the launcher
     MAFIAHUB_BUILD_UPLOAD_TOKEN  upload token for publishing the client build
-    M1O_SERVICES_CLI_VERSION     optional; @mafiahub/services-cli version
-                                 (default: scripting-api/services-cli.version)
+    M1O_SERVICES_CLI_VERSION     optional; @mafiahub/services-cli version for
+                                 `builds publish` (default: the one KCDC
+                                 publishes with)
 """
 
 import argparse
@@ -46,6 +47,9 @@ SERVER_BIN = PROJECT_ROOT / "builds" / "build-prod-64" / "bin"
 SERVER_RUNTIME = ("Mafia1OnlineServer.exe", "libnode.dll", "crashpad_handler.exe")
 UPLOAD_CHANNEL = "testing"
 GITHUB_REPOSITORY = "MafiaHub/MafiaOnline"
+# KCDC's release workflow publishes builds with this CLI; the scripting docs
+# keep their own pin in scripting-api/services-cli.version.
+SERVICES_CLI_VERSION = "0.10.0"
 
 sys.path.insert(0, str(PROJECT_ROOT / "tools"))
 import package_client  # noqa: E402  (CRT lookup shared with the client package)
@@ -175,7 +179,7 @@ def main():
     if arguments.dry_run:
         return
 
-    cli_version = os.environ.get("M1O_SERVICES_CLI_VERSION") or (PROJECT_ROOT / "scripting-api" / "services-cli.version").read_text(encoding="utf-8").strip()
+    cli_version = os.environ.get("M1O_SERVICES_CLI_VERSION") or SERVICES_CLI_VERSION
     commit = output(["git", "rev-parse", "HEAD"])
     run(["cmd", "/c", "pnpm", "dlx", f"@mafiahub/services-cli@{cli_version}", "builds", "publish",
          "--api-url", os.environ["M1O_SERVICES_API_URL"], "--mod-id", os.environ["M1O_SERVICES_MOD_ID"],
