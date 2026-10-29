@@ -372,6 +372,9 @@ namespace Mafia1Online::Features::Npc {
             if (!npc || !npc->state.alive || npc->state.selectedWeapon != melee.weaponId) {
                 return;
             }
+            // Retail AI presses and releases in one tick: each event needs its
+            // own revision, or players drop the release as a repeat of the press.
+            Publish(*npc);
             Shared::Combat::Event event;
             event.action = melee.action;
             event.weaponId = melee.weaponId;
