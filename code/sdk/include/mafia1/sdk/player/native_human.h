@@ -19,6 +19,9 @@ namespace Mafia1Online::SDK::Player {
     // idle (work state 1, PersonAnim of the stop state) while alive.
     inline constexpr uintptr_t kHumanDoStopAnimation = 0x57D2E0;
     inline constexpr uintptr_t kHumanResetActions    = 0x58B870;
+    // C_human::Do_Breath, __thiscall, plain ret: stands a living human that
+    // is idle or walking (work state 1 to 3) and stops its move.
+    inline constexpr uintptr_t kHumanDoBreath        = 0x57D310;
     inline constexpr uintptr_t kEntityHoldForCutscene = 0x52FF50;
     inline constexpr uintptr_t kHumanDeactivateCollisions = 0x575F60;
     inline constexpr uintptr_t kChangeWeaponModel   = 0x57EC20;
@@ -315,6 +318,9 @@ namespace Mafia1Online::SDK::Player {
         uint32_t PlayScriptAnimation(const char *filename, bool loop) {
             using Call = uint32_t(__thiscall *)(NativeHuman *, const char *, bool, bool);
             return reinterpret_cast<Call>(kHumanDoPlayAnimation)(this, filename, !loop, true);
+        }
+        void Breathe() {
+            reinterpret_cast<void(__thiscall *)(NativeHuman *)>(kHumanDoBreath)(this);
         }
         // PERSON_STOPANIM.
         void StopAnimation() {

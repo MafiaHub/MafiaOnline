@@ -21,17 +21,22 @@ namespace Mafia1Online::Shared::Npc {
         DriveTo = 5,
         // Entity_ActionFire at a player or NPC, until it is dead.
         Attack = 6,
+        // Straight to a point without the pedestrian paths: AI_human_goto_target
+        // once a frame, as C_entity::scriptTick walks its script path, with
+        // the entity's AI asleep (set_state SLEEP). Scripts see it as walkTo.
+        WalkDirect = 7,
     };
 
     inline bool KnownTaskType(TaskType type) {
-        return static_cast<uint8_t>(type) <= static_cast<uint8_t>(TaskType::Attack);
+        return static_cast<uint8_t>(type) <= static_cast<uint8_t>(TaskType::WalkDirect);
     }
 
     inline const char *TaskName(TaskType type) {
         switch (type) {
         case TaskType::Stop: return "stop";
         case TaskType::Follow: return "follow";
-        case TaskType::WalkTo: return "walkTo";
+        case TaskType::WalkTo:
+        case TaskType::WalkDirect: return "walkTo";
         case TaskType::EnterVehicle: return "enterVehicle";
         case TaskType::ExitVehicle: return "exitVehicle";
         case TaskType::DriveTo: return "driveTo";
@@ -57,7 +62,7 @@ namespace Mafia1Online::Shared::Npc {
         float x = 0.0f;
         float y = 0.0f;
         float z = 0.0f;
-        // Follow distance, or how close WalkTo must come.
+        // Follow distance, or how close WalkTo or WalkDirect must come.
         float distance = 0.0f;
         bool run = false;
         uint8_t seat = 0;

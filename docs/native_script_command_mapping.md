@@ -33,6 +33,7 @@ ask one client to show a local effect.
 | Mission enemy or companion (`C_entity` with its own program) | `Npc.spawn` | Server; simulation host runs the AI |
 | `Entity_ActionFollow` | `npc.follow` | Server; simulation host |
 | `EntityMoveToFrame`, `Entity_Move` | `npc.walkTo` | Server; simulation host |
+| `C_entity::scriptTick`'s step along its script path (`AI_human_goto_target`) with the AI asleep (`set_state SLEEP`) | `npc.walkTo(position, { direct: true })` | Server; simulation host |
 | `Entity_MoveToCar` + `Enemy_UseCar` | `npc.enterVehicle` | Server; simulation host drives the car |
 | `Enemy_UseCar` (leave) | `npc.exitVehicle` | Server; simulation host |
 | `Entity_CarMoveTo` | `npc.driveTo` | Server; simulation host |

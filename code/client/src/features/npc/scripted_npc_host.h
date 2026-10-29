@@ -40,6 +40,12 @@ namespace Mafia1Online::Features::Npc {
         static constexpr std::chrono::seconds kSeatTimeout {10};
         // Enemy_UseCar enters within 3 of the car (reM C_entity.cpp 3431).
         static constexpr float kEnterReachSq = 9.0f;
+        // A straight walk that has not come this far closer within
+        // kDirectStall is blocked (a wall, a closed door) and fails.
+        static constexpr std::chrono::seconds kDirectStall {3};
+        static constexpr float kDirectProgress = 0.3f;
+        // The longest step one update takes (a hitch, the first update).
+        static constexpr uint32_t kDirectMaxStepMs = 100;
 
         explicit ScriptedNpcHost(NpcHost &host): _host(host) {}
 
@@ -72,6 +78,11 @@ namespace Mafia1Online::Features::Npc {
             bool driving = false;
             std::chrono::steady_clock::time_point issuedAt;
             std::chrono::steady_clock::time_point phaseAt;
+            // WalkDirect: the game clock of the last step, and where it last
+            // made progress.
+            uint32_t gameTime = 0;
+            float progressX = 0.0f;
+            float progressZ = 0.0f;
         };
 
         // false: the message must wait (world not ready, mission not yet

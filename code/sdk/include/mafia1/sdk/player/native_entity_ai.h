@@ -30,6 +30,17 @@ namespace Mafia1Online::SDK::Player {
     //     AddModifier(NewCarJump(1, follow uid)); ForceAI(0, 1, 0, 0). flags
     //     is ((m_uAIFlags & 0x8000) | 0x10000) >> 14.
     //   Entity_ActionsClear: m_ActionManager.Clear(false).
+    // Every move action finds its way over the mission's pedestrian paths
+    // (ai_wayfind::FindWaySHORTEST over check.bin); a point with no path
+    // node in reach gets none. Retail walks a human straight to a point with
+    // AI_human_goto_target (0x446470), the step ai_path::Tick and
+    // C_entity::scriptTick (0x5236a6) take towards each waypoint once a
+    // frame: it turns the human towards the point, Go_Front walks or runs it
+    // with its own animation and collision, and on the last waypoint it
+    // stands it on the point. The entity's own AI must not run meanwhile:
+    // with no job, actionsTick stands it (Do_Breath) every frame. The entity
+    // script's set_state SLEEP (DecodeParams 0x51c4a4) is ForceAI(idle, 2):
+    // C_entity::AI then runs only the program and returns.
     // Every ai_action_manager call is __thiscall on the manager; ret sizes
     // are those of the retail functions.
     namespace EntityAi {
@@ -76,6 +87,11 @@ namespace Mafia1Online::SDK::Player {
         // and, for an entity, WeaponChoose(selected item).
         inline constexpr uintptr_t kInventoryInsert = 0x6092B0;
 
+        // bool __fastcall AI_human_goto_target(C_human *, S_vector &target,
+        // unsigned frameTime, bool run, unsigned stuckCounter, bool
+        // finalWaypoint, bool turningNode), ret 14h; true while it moves.
+        inline constexpr uintptr_t kGotoTarget    = 0x446470;
+
         // C_entity fields (reM C_entity.h layout asserts, IDA ForceAI).
         inline constexpr uintptr_t kProcessInterval = 0xAFC;
         inline constexpr uintptr_t kAiFlags         = 0xF08;
@@ -100,6 +116,7 @@ namespace Mafia1Online::SDK::Player {
         // substate, default priority) and C_entity's script path type.
         inline constexpr uint32_t kStateIdle   = 0;
         inline constexpr uint32_t kSubstateFull = 1;
+        inline constexpr uint32_t kSubstateSleep = 2;
         inline constexpr uint32_t kScriptPathType = 19;
         // ai_action_move m_uMoveState: run, arrive within the radius.
         inline constexpr uint32_t kMoveRun    = 0x01;
@@ -208,6 +225,23 @@ namespace Mafia1Online::SDK::Player {
         inline void ForceIdle(NativeActor *entity) {
             using Call = void(__thiscall *)(NativeActor *, uint32_t, uint32_t, uint32_t, float);
             reinterpret_cast<Call>(kForceAI)(entity, kStateIdle, kSubstateFull, 0, 0.0f);
+        }
+        // set_state SLEEP: only the entity's program runs; its AI leaves the
+        // human alone.
+        inline void Sleep(NativeActor *entity) {
+            using Call = void(__thiscall *)(NativeActor *, uint32_t, uint32_t, uint32_t, float);
+            reinterpret_cast<Call>(kForceAI)(entity, kStateIdle, kSubstateSleep, 0, 0.0f);
+        }
+        inline bool Sleeping(NativeActor *entity) {
+            return Field<uint32_t>(entity, kAiState) == kStateIdle && Field<uint32_t>(entity, kAiSubstate) == kSubstateSleep;
+        }
+        // One frame's step towards target, as C_entity::scriptTick walks its
+        // script path: false once it stands there.
+        inline bool GotoTarget(NativeActor *human, const Vector &target, uint32_t frameTime, bool run) {
+            using Call = bool(__fastcall *)(NativeActor *, Vector *, uint32_t, bool, uint32_t, bool, bool);
+            // Retail writes the human's height into the target on arrival.
+            Vector point = target;
+            return reinterpret_cast<Call>(kGotoTarget)(human, &point, frameTime, run, 0, true, true);
         }
         // In the idle state's full substate, where actionsTick runs jobs.
         inline bool RunsActions(NativeActor *entity) {

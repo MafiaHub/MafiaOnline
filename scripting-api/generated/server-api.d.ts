@@ -2241,12 +2241,12 @@ declare global {
     follow(target: Player | Npc, distance?: number): number;
 
     /**
-     * Walks over the mission's pedestrian paths to the point (EntityMoveToFrame). The task replaces the current one; npcTaskComplete reports how it ends. Scripted NPCs only.
+     * Walks over the mission's pedestrian paths to the point (EntityMoveToFrame). With direct it walks straight there instead, the way retail steps a human along its script path (AI_human_goto_target), for rooms the paths do not reach; it fails when something blocks it for 3 seconds. The task replaces the current one; npcTaskComplete reports how it ends. Scripted NPCs only.
      * @param position Where to go; three numbers are accepted too.
-     * @param options run: run instead of walking; radius: how close it must come, 0.3 to 20 (default 0.5).
+     * @param options run: run instead of walking; radius: how close it must come, 0.3 to 20 (default 0.5); direct: walk in a straight line without the pedestrian paths.
      * @returns The task id, or 0 when refused (not a living scripted NPC, no host, a target that is gone).
      */
-    walkTo(position: Vector3 | { x: number; y: number; z: number }, options?: { run?: boolean; radius?: number }): number;
+    walkTo(position: Vector3 | { x: number; y: number; z: number }, options?: { run?: boolean; radius?: number; direct?: boolean }): number;
 
     /**
      * Walks to the car's door and gets in (Entity_MoveToCar, Enemy_UseCar). The simulation host drives the car while a scripted NPC boards or sits in it, and players cannot get in meanwhile; in a passenger seat of a car a player drives, the player keeps driving and the NPC rides along on every client. The task replaces the current one; npcTaskComplete reports how it ends. Scripted NPCs only.

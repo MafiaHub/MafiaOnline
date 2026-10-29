@@ -11,6 +11,7 @@
 
 #include <core_modules.h>
 #include <logging/logger.h>
+#include <mafia1/sdk/core/game.h>
 #include <mafia1/sdk/core/mission.h>
 #include <mafia1/sdk/player/native_entity_ai.h>
 #include <mafia1/sdk/player/native_human.h>
@@ -74,6 +75,10 @@ namespace Mafia1Online::Features::Npc {
             auto *replication = Framework::CoreModules::GetReplication();
             const auto *car = replication ? replication->GetEntity<Shared::Entities::CarEntity>(carId) : nullptr;
             return !car || glm::length(car->velocity) < kStillSpeed;
+        }
+
+        uint32_t GameTime() {
+            return SDK::Core::Mission::Get()->Game()->GameTime();
         }
 
         void ChangeWeaponModel(NativeActor *actor) {
@@ -376,6 +381,12 @@ namespace Mafia1Online::Features::Npc {
         }
         Ai::DelFollower(npc);
         Ai::ClearActions(npc);
+        // A straight walk put its AI to sleep: awake, standing where it is.
+        // An AI that woke up into a fight keeps it.
+        if (running.task.type == TaskType::WalkDirect && Ai::Sleeping(npc)) {
+            Human(npc).Breathe();
+            Ai::ForceIdle(npc);
+        }
     }
 
     NativeActor *ScriptedNpcHost::ResolveTarget(World::WorldService &world, const Shared::Npc::Task &task) const {
@@ -498,6 +509,25 @@ namespace Mafia1Online::Features::Npc {
             running.jobUid = move->uid;
             return true;
         }
+        case TaskType::WalkDirect: {
+            // Nothing to find a way over: Tick steps it towards the point
+            // once a frame (AI_human_goto_target) while its AI sleeps, so
+            // actionsTick does not stand it again (set_state SLEEP).
+            if (Seat(npc).usedActorEnter) {
+                return false;
+            }
+            Ai::DelFollower(npc);
+            Ai::ClearActions(npc);
+            human.SetCrouching(false);
+            human.SetAiming(false);
+            Ai::Sleep(npc);
+            const auto position = SDK::Player::WorldPosition(npc);
+            running.gameTime = GameTime();
+            running.progressX = position.x;
+            running.progressZ = position.z;
+            running.phaseAt = running.issuedAt;
+            return true;
+        }
         case TaskType::EnterVehicle: {
             // Entity_MoveToCar (0x52063f).
             auto *car = ResolveCar(world, task.targetId);
@@ -600,6 +630,54 @@ namespace Mafia1Online::Features::Npc {
                 return true;
             }
             return retry(true);
+        }
+        case TaskType::WalkDirect: {
+            const SDK::Player::Vector3 target {running.task.x, running.task.y, running.task.z};
+            const auto position = SDK::Player::WorldPosition(npc);
+            const float reach = std::max(running.task.distance, 0.3f);
+            const uint32_t gameTime = GameTime();
+            const uint32_t frameTime = std::min(gameTime - running.gameTime, kDirectMaxStepMs);
+            running.gameTime = gameTime;
+            if (seat.usedActorEnter) {
+                return end(Result::Failed);
+            }
+            if (FlatDistanceSq(position, target) <= reach * reach && std::abs(position.y - target.y) < 2.0f) {
+                return end(Result::Completed);
+            }
+            const auto held = [&] {
+                running.progressX = position.x;
+                running.progressZ = position.z;
+                running.phaseAt = now;
+                return false;
+            };
+            // A fight or a fright took the AI over; the walk goes on once it
+            // is idle again.
+            if (!Ai::Idle(npc)) {
+                return held();
+            }
+            if (!Ai::Sleeping(npc)) {
+                Ai::Sleep(npc);
+            }
+            // A hit reaction owns the human until it ends (actionsTick moves
+            // its entity only in the same work states, reM C_entity.cpp
+            // 19057).
+            if (!ReadyForCar(npc)) {
+                return held();
+            }
+            if (frameTime == 0) {
+                return false;
+            }
+            // As C_entity::scriptTick (0x5236a6) steps along its script
+            // path: false once it stands on the point.
+            if (!Ai::GotoTarget(npc, {target.x, target.y, target.z}, frameTime, running.task.run)) {
+                return end(Result::Completed);
+            }
+            const float dx = position.x - running.progressX;
+            const float dz = position.z - running.progressZ;
+            if (dx * dx + dz * dz >= kDirectProgress * kDirectProgress) {
+                return held();
+            }
+            return now - running.phaseAt > kDirectStall ? end(Result::Failed) : false;
         }
         case TaskType::EnterVehicle: {
             auto *car = ResolveCar(world, running.task.targetId);

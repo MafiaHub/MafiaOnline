@@ -205,10 +205,11 @@ namespace Mafia1Online::Scripting {
         // npc.walkTo(position, options?)
         void JS_NpcWalkTo(const v8::FunctionCallbackInfo<v8::Value> &info) {
             auto *isolate = info.GetIsolate();
-            constexpr const char *kUsage = "Npc.walkTo(position, options?) expects a finite position and { run?: boolean, radius?: number from 0.3 to 20 }";
+            constexpr const char *kUsage = "Npc.walkTo(position, options?) expects a finite position and { run?: boolean, radius?: number from 0.3 to 20, direct?: boolean }";
             Shared::Npc::Task task;
             task.type = Shared::Npc::TaskType::WalkTo;
             task.distance = 0.5f;
+            bool direct = false;
             glm::vec3 position;
             int next = 0;
             if (!ScriptArgs::ReadPosition(info, 0, position, next) || info.Length() > next + 1) {
@@ -217,9 +218,12 @@ namespace Mafia1Online::Scripting {
             }
             const v8::Local<v8::Value> options = info.Length() > next ? info[next] : v8::Undefined(isolate).As<v8::Value>();
             if (!OptionsOrNothing(options) || !ReadOptionalBool(isolate, options, "run", task.run) || !ReadOptionalFloat(isolate, options, "radius", task.distance) ||
-                task.distance < 0.3f || task.distance > 20.0f) {
+                !ReadOptionalBool(isolate, options, "direct", direct) || task.distance < 0.3f || task.distance > 20.0f) {
                 ScriptArgs::Throw(isolate, kUsage);
                 return;
+            }
+            if (direct) {
+                task.type = Shared::Npc::TaskType::WalkDirect;
             }
             task.x = position.x;
             task.y = position.y;
@@ -518,8 +522,10 @@ namespace Mafia1Online::Scripting {
                 taskReturns));
         cls.prototype_function("walkTo", &JS_NpcWalkTo,
             docs("number", {param("position", "Vector3 | { x: number; y: number; z: number }", false, "Where to go; three numbers are accepted too."),
-                               param("options", "{ run?: boolean; radius?: number }", true, "run: run instead of walking; radius: how close it must come, 0.3 to 20 (default 0.5).")},
-                task("Walks over the mission's pedestrian paths to the point (EntityMoveToFrame)."), taskReturns));
+                               param("options", "{ run?: boolean; radius?: number; direct?: boolean }", true,
+                                   "run: run instead of walking; radius: how close it must come, 0.3 to 20 (default 0.5); direct: walk in a straight line without the pedestrian paths.")},
+                task("Walks over the mission's pedestrian paths to the point (EntityMoveToFrame). With direct it walks straight there instead, the way retail steps a human along its script path (AI_human_goto_target), for rooms the paths do not reach; it fails when something blocks it for 3 seconds."),
+                taskReturns));
         cls.prototype_function("enterVehicle", &JS_NpcEnterVehicle,
             docs("number", {param("vehicle", "Vehicle", false, "A script's vehicle with no player in it, not a traffic car; or any car a player drives, for a passenger seat."), param("seat", "number", true, "Seat index; 0, the driver's, by default."),
                                param("options", "{ run?: boolean }", true, "run: run to the car.")},
