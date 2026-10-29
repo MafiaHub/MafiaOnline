@@ -1,8 +1,11 @@
 #pragma once
 
+#include "shared/net/quantize.h"
+
 #include <networking/rpc/rpc.h>
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <string>
 
@@ -15,7 +18,7 @@ namespace Mafia1Online::Shared::Railway {
     inline constexpr uint8_t kMaxWagons = 4;
     // Players are sent the railways this close to them in every snapshot,
     // and every other one (seen from afar, the metro's raised track most of
-    // all) in one snapshot of kFarSnapshotDivider.
+    // all) in one snapshot of kFarSnapshotDivider, a slice of them at a time.
     inline constexpr float kStreamRange = 600.0f;
     inline constexpr uint32_t kFarSnapshotDivider = 5;
 
@@ -57,22 +60,39 @@ namespace Mafia1Online::Shared::Railway {
         std::array<Vector, kMaxWagons> wagonPositions {};
         std::array<Vector, kMaxWagons> wagonDirections {};
 
+        // About 20 bytes plus 10 a wagon (39 plus 24 before): the body at
+        // 1/64 m, wagons as offsets from it at 1/512 m, directions as yaw
+        // and pitch, speed at 1/16 m/s.
         void Serialize(MafiaNet::BitStream *stream, bool write) {
-            stream->Serialize(write, index);
+            stream->SerializeBitsFromIntegerRange(write, index, uint8_t {0}, static_cast<uint8_t>(kMaxRailways - 1));
             stream->Serialize(write, nameHash);
             stream->Serialize(write, state);
-            stream->Serialize(write, speed);
-            stream->Serialize(write, doorAngle);
-            position.Serialize(stream, write);
-            direction.Serialize(stream, write);
-            stream->Serialize(write, wagonCount);
+            Net::SerializeFixed(stream, write, speed, -32.0f, 32.0f, 10);
+            Net::SerializeFixed(stream, write, doorAngle, 0.0f, 1.6f, 8);
+            glm::vec3 body {position.x, position.y, position.z};
+            glm::vec3 facing {direction.x, direction.y, direction.z};
+            Net::SerializeWorldPosition(stream, write, body);
+            Net::SerializeDirection(stream, write, facing, 12, 11);
+            if (!write) {
+                position  = {body.x, body.y, body.z};
+                direction = {facing.x, facing.y, facing.z};
+            }
+            stream->SerializeBitsFromIntegerRange(write, wagonCount, uint8_t {0}, kMaxWagons);
             if (wagonCount > kMaxWagons) {
                 wagonCount = 0;
                 return;
             }
             for (uint8_t i = 0; i < wagonCount; ++i) {
-                wagonPositions[i].Serialize(stream, write);
-                wagonDirections[i].Serialize(stream, write);
+                glm::vec3 offset {wagonPositions[i].x - body.x, wagonPositions[i].y - body.y, wagonPositions[i].z - body.z};
+                glm::vec3 wagonFacing {wagonDirections[i].x, wagonDirections[i].y, wagonDirections[i].z};
+                Net::SerializeFixed(stream, write, offset.x, -128.0f, 128.0f, 17);
+                Net::SerializeFixed(stream, write, offset.y, -128.0f, 128.0f, 17);
+                Net::SerializeFixed(stream, write, offset.z, -128.0f, 128.0f, 17);
+                Net::SerializeDirection(stream, write, wagonFacing, 12, 11);
+                if (!write) {
+                    wagonPositions[i]  = {body.x + offset.x, body.y + offset.y, body.z + offset.z};
+                    wagonDirections[i] = {wagonFacing.x, wagonFacing.y, wagonFacing.z};
+                }
             }
         }
     };
@@ -283,4 +303,161 @@ namespace Mafia1Online::Shared::Railway {
             direction.Serialize(stream, write);
         }
     };
+
+    // A player's bullet that hit a railway on that player's own screen.
+    // Players draw each railway a render delay plus a trip behind the host,
+    // so the host's replay of the bullet against its own railway misses a
+    // passenger on a moving one. The shooter reports the hit in the yaw frame
+    // of the part it struck (YawFrame; 0 the body, n wagon n - 1);
+    // the server checks the shot against the shooter's accepted fire and the
+    // railway's place, sets the damage and forwards it to the simulation
+    // host, which replays C_railway::Hit at the same place in that part.
+    struct ShotHit {
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::RailwayShotHit");
+
+        uint64_t missionGeneration = 0;
+        uint64_t shooterId = 0;
+        uint64_t shooterSpawnGeneration = 0;
+        uint32_t shotSequence = 0;
+        uint8_t pelletIndex = 0;
+        uint8_t index = 0;
+        uint8_t part = 0;
+        // The world shot direction (unit) and hit point, as the shooter's
+        // TickShoot passed them, for the server's check against the fire.
+        Vector direction;
+        Vector hit;
+        // The same in the part's YawFrame (FrameLocal).
+        Vector localDirection;
+        Vector localHit;
+        // Server -> host only: the bullet's damage after range falloff.
+        float damage = 0.0f;
+
+        void Serialize(MafiaNet::BitStream *stream, bool write) {
+            stream->Serialize(write, missionGeneration);
+            stream->Serialize(write, shooterId);
+            stream->Serialize(write, shooterSpawnGeneration);
+            stream->Serialize(write, shotSequence);
+            stream->Serialize(write, pelletIndex);
+            stream->Serialize(write, index);
+            stream->Serialize(write, part);
+            direction.Serialize(stream, write);
+            hit.Serialize(stream, write);
+            localDirection.Serialize(stream, write);
+            localHit.Serialize(stream, write);
+            stream->Serialize(write, damage);
+        }
+    };
+
+    // A railway part frame's world matrix as I3D keeps it: rows right, up,
+    // forward (scaled) and the origin.
+    struct FrameMatrix {
+        Vector right;
+        Vector up;
+        Vector forward;
+        Vector origin;
+    };
+
+    // A world point (or, with point false, a direction) in the frame's own
+    // coordinates: the inverse of the matrix for its orthogonal rows, as
+    // RideOf takes a rider's pose. False for a degenerate matrix.
+    inline bool FrameLocal(const FrameMatrix &frame, const Vector &world, bool point, Vector &local) {
+        const auto dot = [](const Vector &a, const Vector &b) { return a.x * b.x + a.y * b.y + a.z * b.z; };
+        const float rr = dot(frame.right, frame.right);
+        const float uu = dot(frame.up, frame.up);
+        const float ff = dot(frame.forward, frame.forward);
+        if (!(rr > 1e-6f) || !(uu > 1e-6f) || !(ff > 1e-6f)) {
+            return false;
+        }
+        const Vector offset = point ? Vector {world.x - frame.origin.x, world.y - frame.origin.y, world.z - frame.origin.z} : world;
+        local = {dot(offset, frame.right) / rr, dot(offset, frame.up) / uu, dot(offset, frame.forward) / ff};
+        return std::isfinite(local.x) && std::isfinite(local.y) && std::isfinite(local.z);
+    }
+
+    // The way back, on another client's copy of the frame.
+    inline Vector FrameWorld(const FrameMatrix &frame, const Vector &local, bool point) {
+        Vector world {frame.right.x * local.x + frame.up.x * local.y + frame.forward.x * local.z, frame.right.y * local.x + frame.up.y * local.y + frame.forward.y * local.z,
+                      frame.right.z * local.x + frame.up.z * local.y + frame.forward.z * local.z};
+        if (point) {
+            world.x += frame.origin.x;
+            world.y += frame.origin.y;
+            world.z += frame.origin.z;
+        }
+        return world;
+    }
+
+    // A reported hit no farther than this from its part's origin: half a
+    // metro wagon with room for the shot's entry point on its hull.
+    inline constexpr float kShotHitPartReach = 20.0f;
+
+    // A part's yaw frame: its reported position (C_actor +0x24 for the body,
+    // the wagon arrays +0xbc for a wagon) with unit rows built from its
+    // direction and the world up, as passengers' rides are (Passenger). The
+    // part's frames hang rigidly from that pose (C_railway::Update places
+    // them from it), so a point kept in this frame lands on the same spot of
+    // the model on every copy, and the server can build it from the State
+    // it holds. Right is up x forward, as the client's MakeBasis.
+    inline FrameMatrix YawFrame(const Vector &origin, const Vector &direction) {
+        float fx = direction.x;
+        float fy = direction.y;
+        float fz = direction.z;
+        float length = std::sqrt(fx * fx + fy * fy + fz * fz);
+        if (!(length > 0.0001f) || !std::isfinite(length)) {
+            fx = 0.0f;
+            fy = 0.0f;
+            fz = 1.0f;
+            length = 1.0f;
+        }
+        fx /= length;
+        fy /= length;
+        fz /= length;
+        // up (0, 1, 0) x forward.
+        float rx = fz;
+        float rz = -fx;
+        const float rightLength = std::sqrt(rx * rx + rz * rz);
+        if (rightLength > 0.0001f) {
+            rx /= rightLength;
+            rz /= rightLength;
+        }
+        else {
+            rx = 1.0f;
+            rz = 0.0f;
+        }
+        // forward x right.
+        const Vector up {fy * rz, fz * rx - fx * rz, -fy * rx};
+        return {{rx, 0.0f, rz}, up, {fx, fy, fz}, origin};
+    }
+
+    // How far the reported spot may be from where the server's newest pose
+    // of the part puts it. The shooter draws the railway a render delay and
+    // a trip behind (lagSeconds); along the track that is the speed times
+    // it, across it and up only a curve's bend, plus the slack of the hull
+    // point itself.
+    inline constexpr float kShotHitSlack = 2.0f;
+    inline constexpr float kShotHitCurveSlack = 2.5f;
+    inline constexpr float kShotHitDirectionMatch = 0.95f;
+
+    // The server's check of a ShotHit against the part's newest yaw frame:
+    // the local spot, put on that frame, lies where the shot's validated
+    // world hit is, and the local direction is the shot's.
+    inline bool ShotHitMatchesPart(const FrameMatrix &part, const ShotHit &shot, float speed, float lagSeconds) {
+        const auto dot = [](const Vector &a, const Vector &b) { return a.x * b.x + a.y * b.y + a.z * b.z; };
+        const float localLength = std::sqrt(dot(shot.localHit, shot.localHit));
+        const float directionLength = std::sqrt(dot(shot.localDirection, shot.localDirection));
+        if (!std::isfinite(localLength) || localLength > kShotHitPartReach || !std::isfinite(directionLength) || directionLength < 0.8f || directionLength > 1.2f ||
+            !std::isfinite(speed) || !std::isfinite(lagSeconds)) {
+            return false;
+        }
+        const Vector placed = FrameWorld(part, shot.localHit, true);
+        const Vector residual {shot.hit.x - placed.x, shot.hit.y - placed.y, shot.hit.z - placed.z};
+        const float along = std::abs(dot(residual, part.forward));
+        const float across = std::abs(dot(residual, part.right));
+        const float vertical = std::abs(dot(residual, part.up));
+        if (!(along <= std::abs(speed) * lagSeconds + kShotHitSlack) || !(across <= kShotHitCurveSlack) || !(vertical <= kShotHitSlack)) {
+            return false;
+        }
+        const Vector direction = FrameWorld(part, shot.localDirection, false);
+        const float worldLength = std::sqrt(dot(shot.direction, shot.direction));
+        const float placedLength = std::sqrt(dot(direction, direction));
+        return worldLength > 0.0001f && placedLength > 0.0001f && dot(direction, shot.direction) / (worldLength * placedLength) >= kShotHitDirectionMatch;
+    }
 } // namespace Mafia1Online::Shared::Railway

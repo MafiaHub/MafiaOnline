@@ -66,11 +66,23 @@ namespace Mafia1Online::Features::Railway {
             float yaw = 0.0f;
         };
         // The local player's ride, when it is aboard one of the mission's
-        // railways (C_human +0x98).
+        // railways (C_human +0x98): the frame Intern_UseRailway linked it to
+        // (C_human +0x584) and the pose in that frame's full matrix.
         [[nodiscard]] std::optional<Ride> RideOf(void *human) const;
-        // A remote rider's world pose on this client's copy of the railway;
-        // false when this client does not have that railway placed.
+        // A host passenger's world pose (Ride in the nearest part's yaw
+        // basis) on this client's copy of the railway; false when this client
+        // does not have that railway placed.
         [[nodiscard]] bool PlaceRide(const Ride &ride, glm::vec3 &position, glm::vec3 &direction) const;
+        // A remote player's world pose from a RideOf ride, through the
+        // linked frame's world matrix on this client's copy.
+        [[nodiscard]] bool PlaceRider(const Ride &ride, glm::vec3 &position, glm::vec3 &direction) const;
+        // Players: the local player's bullet hit a part of this railway on
+        // this screen (C_railway::Hit), after the native trace; reported in
+        // that part's yaw frame unless a rider's replica took the pellet.
+        void OnLocalShotHit(SDK::Rail::NativeRailway *railway, const SDK::Player::Vector3 &direction, const SDK::Player::Vector3 &point, SDK::Scene::NativeFrame *frame);
+        // Simulation host: the attacker is a player's replica, whose bullets
+        // reach its railways only as that player's ShotHit.
+        [[nodiscard]] bool IsPlayerShot(SDK::Player::NativeActor *attacker) const;
         // A human natively aboard a railway goes back to world space first
         // (Intern_UseRailway(false)): its frame is the wagon's child and its
         // collisions sit in the wagon's list, so neither may outlive the other.
@@ -133,9 +145,14 @@ namespace Mafia1Online::Features::Railway {
             std::chrono::steady_clock::time_point until {};
         };
 
+        // This client has railway `index` placed from recent reports (or hosts it).
+        [[nodiscard]] bool Placed(uint8_t index) const;
         void Prepare(Entry &entry);
         void SendSnapshot(World::WorldService &world);
         void SendPassengers(World::WorldService &world);
+        // Host: a player's checked ShotHit, replayed as C_railway::Hit at the
+        // same place in this copy of the part.
+        void ApplyShotHit(const Shared::Railway::ShotHit &shot);
         void ApplyPassengers(const Shared::Railway::Passengers &passengers);
         void UpdatePuppets(Entry &entry, int frameMs);
         void ShowPuppet(Puppet &puppet, const Shared::Railway::Passenger &passenger);

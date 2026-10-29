@@ -1,6 +1,7 @@
 #pragma once
 
 #include <mafianet/virtual_world.h>
+#include "shared/features/combat/aim_update.h"
 #include "shared/features/combat/combat_protocol.h"
 #include "shared/features/combat/damage_event.h"
 #include "shared/features/combat/detonation.h"
@@ -22,6 +23,10 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+namespace Framework::Networking::Replication {
+    class NetworkEntity;
+}
 
 namespace Mafia1Online::Features::Player {
     class PlayerService;
@@ -90,6 +95,21 @@ namespace Mafia1Online::Features::Combat {
         // after that check; human hits and car hits share the pellet mask.
         std::optional<CarImpactEvidence> InspectCarImpact(const Shared::Car::HitReport &report, MafiaNet::PeerGuid sender) const;
         bool ConsumeCarImpact(const Shared::Car::HitReport &report, MafiaNet::PeerGuid sender);
+        // A bullet impact the shooter reported on something the server keeps
+        // no health for (a car, a railway): one unused pellet of an accepted
+        // firearm shot of the last 2 s, flying along that pellet within its
+        // native range. The evidence carries the damage after range falloff.
+        struct ShotClaim {
+            uint64_t shooterId = 0;
+            uint64_t missionGeneration = 0;
+            uint64_t shooterSpawnGeneration = 0;
+            uint32_t shotSequence = 0;
+            uint8_t pelletIndex = 0;
+            glm::vec3 direction {0.0f};
+            glm::vec3 hit {0.0f};
+        };
+        std::optional<CarImpactEvidence> InspectShot(const ShotClaim &claim, MafiaNet::PeerGuid sender) const;
+        bool ConsumeShot(const ShotClaim &claim, MafiaNet::PeerGuid sender);
         void SetTransitionCallback(std::function<void(uint64_t, uint64_t, std::optional<uint8_t>, DamageCause, float, float, uint16_t)> callback) {
             _transitionCallback = std::move(callback);
         }
@@ -100,7 +120,7 @@ namespace Mafia1Online::Features::Combat {
         // Server NPCs players can hit, such as the simulation host's
         // NPCs. A player's validated hit on one goes to hit() with the
         // NPC's native Hit damage before its body part scale; hitType is 0
-        // bullet, 1 melee knockdown or 4 car impact (from the car's id).
+        // bullet, 1 melee knockdown, 4 car impact or 5 car bump (Npc::Hit).
         struct NpcTarget {
             glm::vec3 position {0.0f};
             glm::quat rotation {1.0f, 0.0f, 0.0f, 0.0f};
@@ -140,6 +160,25 @@ namespace Mafia1Online::Features::Combat {
         // Returns whether the hit was applied.
         bool ApplyRailwayHit(uint64_t targetId, uint64_t missionGeneration, uint64_t targetSpawnGeneration, float damage, const glm::vec3 &direction);
 
+        // One body's relayed aim: once it stops moving, the aim it settled
+        // on goes out once more, reliably, so a lost last update cannot
+        // leave observers pointing where it was.
+        struct AimRelay {
+            static constexpr std::chrono::milliseconds kSettleAfter {150};
+            std::chrono::steady_clock::time_point lastRelay;
+            MafiaNet::PeerGuid except = MafiaNet::UNASSIGNED_PEER_GUID;
+            bool settlePending        = false;
+        };
+
+        // Sends `state`'s current aim, unreliably, to the peers that stream
+        // `body` (but `except`), and counts it into state.aimSequence so a
+        // later State tells receivers which relay it includes. Arms `relay`.
+        static void RelayAim(Framework::Networking::Replication::NetworkEntity &body, Shared::Combat::State &state, MafiaNet::PeerGuid except, AimRelay &relay);
+        // Per tick: once `relay`'s aim has not moved for kSettleAfter, sends
+        // it reliably (unordered: the sequence drops it behind a newer one).
+        static void SettleAim(Framework::Networking::Replication::NetworkEntity &body, Shared::Combat::State &state, AimRelay &relay,
+                              std::chrono::steady_clock::time_point now);
+
       private:
         struct Session {
             struct FireRecord {
@@ -150,6 +189,10 @@ namespace Mafia1Online::Features::Combat {
             Shared::Combat::State state;
             uint32_t lastSequence = 0;
             bool hasSequence      = false;
+            // The controller's AimUpdate count, apart from its intents'.
+            uint16_t lastAimUpdate = 0;
+            bool hasAimUpdate      = false;
+            AimRelay aimRelay;
             std::chrono::steady_clock::time_point lastAction;
             std::deque<FireRecord> fires;
             struct MeleeRecord {
@@ -174,6 +217,7 @@ namespace Mafia1Online::Features::Combat {
         };
 
         void OnIntent(const Shared::Combat::Intent &intent, MafiaNet::PeerGuid sender);
+        void OnAimUpdate(const Shared::Combat::AimUpdate &update, MafiaNet::PeerGuid sender);
         void OnHitReport(const Shared::Combat::HitReport &report, MafiaNet::PeerGuid sender);
         struct HitTarget {
             glm::vec3 position;
@@ -192,6 +236,10 @@ namespace Mafia1Online::Features::Combat {
         std::optional<ValidatedHit> ValidateMelee(const Shared::Combat::HitReport &report, const Shared::Entities::PlayerEntity &attacker, Session &session, const HitTarget &target);
         void OnNpcHitReport(const Shared::Combat::HitReport &report, Shared::Entities::PlayerEntity &shooter, Session &session);
         void ApplyNpcVehicleImpact(const Shared::Combat::VehicleImpact &report, MafiaNet::PeerGuid sender, std::chrono::steady_clock::time_point receivedAt);
+        // One contact per car and target each 500 ms (C_Vehicle reports it
+        // every physics step while the bodies touch); an impact may follow a
+        // bump at once (VehicleContactDue).
+        bool AdmitVehicleContact(uint64_t carId, uint64_t targetId, Shared::Combat::VehicleContact kind);
         void PublishDamage(const Shared::Combat::HitReport &report, float damage, uint8_t hitType, std::optional<uint8_t> weaponId);
         void OnFatalFallReport(const Shared::Combat::FatalFallReport &report, MafiaNet::PeerGuid sender);
         void OnDetonationReport(const Shared::Combat::DetonationReport &report, MafiaNet::PeerGuid sender);
@@ -242,6 +290,13 @@ namespace Mafia1Online::Features::Combat {
         NpcTargets _npcTargets;
         std::unordered_map<uint64_t, Session> _sessions;
         std::map<std::pair<uint64_t, uint64_t>, std::chrono::steady_clock::time_point> _vehicleImpacts;
+        struct LastVehicleContact {
+            std::chrono::steady_clock::time_point at;
+            Shared::Combat::VehicleContact kind = Shared::Combat::VehicleContact::Impact;
+        };
+        std::map<std::pair<uint64_t, uint64_t>, LastVehicleContact> _vehicleContacts;
+        // Contacts each driver's client reported in the last second.
+        std::unordered_map<MafiaNet::PeerGuid, Shared::Combat::VehicleContactRate> _vehicleContactRates;
         std::function<void(uint64_t, uint64_t, std::optional<uint8_t>, DamageCause, float, float, uint16_t)> _transitionCallback;
         std::function<void(const Shared::Combat::Event &)> _actionCallback;
         std::function<uint64_t(uint64_t, uint8_t, uint16_t, uint16_t, const glm::vec3 &, float)> _dropCallback;

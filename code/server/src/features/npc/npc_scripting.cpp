@@ -120,7 +120,7 @@ namespace Mafia1Online::Scripting {
             auto *isolate = info.GetIsolate();
             constexpr const char *kUsage =
                 "Npc.spawn(model, position, heading?, options?) expects an .i3d model, a finite position, a heading in radians and "
-                "{ health?, behaviour?: \"neutral\" | \"friendly\" | \"hostile\", weapon?, ammo?, reserve?, virtualWorld? }";
+                "{ health?, behaviour?: \"neutral\" | \"friendly\" | \"hostile\", weapon?, ammo?, reserve?, virtualWorld?, voice?: 0 to 39 }";
             Features::Npc::NpcService::SpawnRequest request;
             int next = 0;
             if (info.Length() < 2 || !info[0]->IsString() || !ScriptArgs::ReadPosition(info, 1, request.position, next) || info.Length() > next + 2) {
@@ -158,7 +158,10 @@ namespace Mafia1Online::Scripting {
             const auto ammoValue = Option(isolate, options, "ammo");
             const auto reserveValue = Option(isolate, options, "reserve");
             const auto worldValue = Option(isolate, options, "virtualWorld");
-            if ((!weaponValue.IsEmpty() && (!ScriptArgs::ReadUInt(weaponValue, Shared::Combat::kWeaponSlots - 1, weapon) || !Weapon::IsSupported(weapon))) ||
+            const auto voiceValue = Option(isolate, options, "voice");
+            uint32_t voice = 0;
+            if ((!voiceValue.IsEmpty() && !ScriptArgs::ReadUInt(voiceValue, Shared::Entities::NpcEntity::kVoiceCount - 1, voice)) ||
+                (!weaponValue.IsEmpty() && (!ScriptArgs::ReadUInt(weaponValue, Shared::Combat::kWeaponSlots - 1, weapon) || !Weapon::IsSupported(weapon))) ||
                 (!ammoValue.IsEmpty() && !ScriptArgs::ReadUInt(ammoValue, std::numeric_limits<uint16_t>::max(), ammo)) ||
                 (!reserveValue.IsEmpty() && !ScriptArgs::ReadUInt(reserveValue, std::numeric_limits<uint16_t>::max(), reserve)) ||
                 (!worldValue.IsEmpty() && !ScriptArgs::ReadUInt(worldValue, std::numeric_limits<uint32_t>::max(), world))) {
@@ -170,6 +173,9 @@ namespace Mafia1Online::Scripting {
             request.reserve = static_cast<uint16_t>(reserve);
             if (!worldValue.IsEmpty()) {
                 request.virtualWorld = world;
+            }
+            if (!voiceValue.IsEmpty()) {
+                request.voice = static_cast<uint8_t>(voice);
             }
             request.owner = ResourceOf(isolate);
             auto *npc = GetServer().Npcs().Spawn(request);
@@ -376,6 +382,17 @@ namespace Mafia1Online::Scripting {
             info.GetReturnValue().Set(self && GetServer().Npcs().SetAnimation(self->GetId(), name, loop));
         }
 
+        // npc.say(line)
+        void JS_NpcSay(const v8::FunctionCallbackInfo<v8::Value> &info) {
+            uint32_t line = 0;
+            if (info.Length() != 1 || !ScriptArgs::ReadUInt(info[0], Shared::Entities::NpcEntity::kMaxSpeechLine, line) || line < Shared::Entities::NpcEntity::kMinSpeechLine) {
+                ScriptArgs::Throw(info.GetIsolate(), "Npc.say(line) expects a voice line id from 2 to 1023");
+                return;
+            }
+            auto *self = SelfNpc(info);
+            info.GetReturnValue().Set(self && GetServer().Npcs().Say(self->GetId(), static_cast<uint16_t>(line)));
+        }
+
         // npc.stopAnimation()
         void JS_NpcStopAnimation(const v8::FunctionCallbackInfo<v8::Value> &info) {
             auto *self = SelfNpc(info);
@@ -418,6 +435,11 @@ namespace Mafia1Online::Scripting {
     std::string Npc::GetModel() const {
         const auto *npc = ResolveNpc();
         return npc ? npc->model : std::string {};
+    }
+
+    uint32_t Npc::GetVoice() const {
+        const auto *npc = ResolveNpc();
+        return npc ? npc->voice : Shared::Entities::NpcEntity::kDefaultVoice;
     }
 
     Framework::Scripting::Builtins::Vector3 Npc::GetNpcPosition() const {
@@ -559,6 +581,18 @@ namespace Mafia1Online::Scripting {
                 "False when it is not a living scripted NPC, it sits in a car or no host is attached."));
         cls.prototype_function("stopAnimation", &JS_NpcStopAnimation,
             docs("boolean", {}, "Stops a script clip and returns it to standing (PERSON_STOPANIM).", "False when it is not a living scripted NPC or no host is attached."));
+        cls.prototype_function("say", &JS_NpcSay,
+            docs("boolean",
+                {param("line", "number", false,
+                    "A retail voice line: the id C_human::NewScream takes, a tables/voices.def group plus 2. Ones the game itself uses: 6-8 a group "
+                    "event, 15-16 seeing a body, 21-23 finding someone, 33-36 ready to fight, 45-50 a fight spotted, 61-65 freezing, 66-69 panic, "
+                    "70-74 searching, 75-78 giving up, 79-83 hit, 84 a strong leg hit, 85-91 pain, 92-93 hit while dying, 132-134 a car steal refused, "
+                    "137-138 out of fuel, 139-144 police halt, 145-146 police grab, 147-149 police grab of an armed man, 150-151 a police car warning, "
+                    "152-157 police notifying a crime, 161-167 thrown out of a car.")},
+                "Says a line in this NPC's voice (the voice spawn option) on every player that streams it, positioned on its head, cutting off "
+                "the line it was saying. A line with no sound for that voice says nothing.",
+                "False when it is not a living NPC or the line is out of range."));
+        cls.property("voice", &Npc::GetVoice, property_docs("number", "Retail voice (C_human m_uVoice), 0 to 39, fixed at spawn: police 10-11, gangsters 12-16, thrown-out drivers 26-28, 12 otherwise unless the spawn option chose one."));
         cls.prototype_function("getTask", &JS_NpcGetTask,
             docs("{ id: number; task: string } | null", {}, "Returns the scripted NPC's running task.", "The task, or null when it runs none."));
         cls.prototype_function("getVehicle", &JS_NpcGetVehicle, docs("Vehicle | null", {}, "Returns the car it sits in.", "The vehicle, or null on foot."));
@@ -579,8 +613,9 @@ namespace Mafia1Online::Scripting {
                 {param("model", "string", false, "Stock human .i3d filename, such as \"pol01.i3d\" for a policeman."),
                     param("position", "Vector3 | { x: number; y: number; z: number }", false, "Where it stands; three numbers are accepted too."),
                     param("heading", "number", true, "Facing in radians; defaults to 0."),
-                    param("options", "{ health?: number; behaviour?: \"neutral\" | \"friendly\" | \"hostile\"; weapon?: number; ammo?: number; reserve?: number; virtualWorld?: number }", true,
-                        "health: defaults to 100; behaviour: how the retail AI rates players (default neutral); weapon, ammo, reserve: a weapon to hold; virtualWorld: the only world whose players see it (default every world).")},
+                    param("options", "{ health?: number; behaviour?: \"neutral\" | \"friendly\" | \"hostile\"; weapon?: number; ammo?: number; reserve?: number; virtualWorld?: number; voice?: number }", true,
+                        "health: defaults to 100; behaviour: how the retail AI rates players (default neutral); weapon, ammo, reserve: a weapon to hold; virtualWorld: the only world whose players see it (default every world); "
+                        "voice: the retail voice 0 to 39 its say() lines use (default 12; retail police use 10-11, gangsters 12-16, men 26-28, women 29-31).")},
                 "Spawns a human the simulation host runs with the retail AI and that scripts give tasks. The handle is usable at once; npcSpawn follows once the host created it, npcRetire if it could not.",
                 "The NPC, or null when no simulation host is attached, no mission is loaded, 64 scripted NPCs exist or an argument is unusable."));
         auto context = isolate->GetCurrentContext();

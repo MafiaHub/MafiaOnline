@@ -51,7 +51,11 @@ namespace Mafia1Online::Features::Car {
                 return std::hash<uint64_t> {}(key.carId) ^ (std::hash<uint64_t> {}(key.targetId) << 1);
             }
         };
-        std::unordered_map<ImpactKey, std::chrono::steady_clock::time_point, ImpactKeyHash> gLastPedestrianImpact;
+        struct LastContact {
+            std::chrono::steady_clock::time_point at;
+            Shared::Combat::VehicleContact kind;
+        };
+        std::unordered_map<ImpactKey, LastContact, ImpactKeyHash> gLastPedestrianImpact;
         using CarAI = void(__thiscall *)(SDK::Car::NativeCar *, unsigned int);
         CarAI gCarAIOriginal = nullptr;
 
@@ -346,16 +350,15 @@ namespace Mafia1Online::Features::Car {
                 targetMission != world.LoadedMissionGeneration()) {
                 return gCollisionFilterBodyOriginal(car, collision, position, normal);
             }
-            if (carState->simulationControllerGuid == static_cast<uint64_t>(replication->GetMyGUID()) && targetAlive) {
-                const auto velocity = car->Vehicle().LinearVelocity();
-                const float speed = std::hypot(velocity.x, velocity.y, velocity.z);
-                if (!std::isfinite(speed) || speed < 3.0f) {
-                    // Retail uses this contact for a low speed pedestrian
-                    // side jump. Keep the original filter in that case.
-                    // C_human::Collision 0x5784a0 hits only above 3 (damage
-                    // (|v| - 2.5) * 4.2), the server's impact gate as well.
-                    return gCollisionFilterBodyOriginal(car, collision, position, normal);
-                }
+            const bool controlled = carState->simulationControllerGuid == static_cast<uint64_t>(replication->GetMyGUID());
+            const auto velocity = car->Vehicle().LinearVelocity();
+            const float speed = std::hypot(velocity.x, velocity.y, velocity.z);
+            // C_human::Collision 0x5784a0 hits only from 3 m/s (damage
+            // (|v| - 2.5) * 4.2); slower it pushes the human out and starts
+            // a side jump. Below 3 the original filter keeps the body rigid,
+            // as before; the dodge itself is the target's owner's to play.
+            const bool slow = !std::isfinite(speed) || speed < Shared::Combat::kVehicleImpactMinSpeed;
+            if (controlled && targetAlive) {
                 const auto angular = car->Vehicle().AngularVelocity();
                 const auto center = car->Vehicle().WorldCenter();
                 const glm::vec3 offset(position.x - center.x, position.y - center.y, position.z - center.z);
@@ -363,32 +366,40 @@ namespace Mafia1Online::Features::Car {
                 const glm::vec3 linear(velocity.x, velocity.y, velocity.z);
                 const glm::vec3 relative = linear - glm::cross(spin, offset);
                 const glm::vec3 contactNormal(normal.x, normal.y, normal.z);
-                const float approach = glm::dot(relative, contactNormal);
                 // C_Vehicle::BodyCollision only handles an approaching
                 // contact after its callback filter has returned.
-                if (!std::isfinite(approach) || approach >= 0.0f) {
-                    return nullptr;
-                }
-                const ImpactKey key {carHandle.networkId, targetHandle.networkId};
-                const auto now = std::chrono::steady_clock::now();
-                auto previous = gLastPedestrianImpact.find(key);
-                if (previous == gLastPedestrianImpact.end() || now - previous->second >= std::chrono::milliseconds(500)) {
-                    if (gLastPedestrianImpact.size() > 1024) {
-                        gLastPedestrianImpact.clear();
+                const float approach = glm::dot(relative, contactNormal);
+                Shared::Combat::VehicleContact kind;
+                if (Shared::Combat::ClassifyVehicleContact(speed, approach, kind)) {
+                    const ImpactKey key {carHandle.networkId, targetHandle.networkId};
+                    const auto now = std::chrono::steady_clock::now();
+                    const auto previous = gLastPedestrianImpact.find(key);
+                    if (previous == gLastPedestrianImpact.end() ||
+                        Shared::Combat::VehicleContactDue(now - previous->second.at, previous->second.kind, kind)) {
+                        if (gLastPedestrianImpact.size() > 1024) {
+                            gLastPedestrianImpact.clear();
+                        }
+                        gLastPedestrianImpact[key] = {now, kind};
+                        Shared::Combat::VehicleImpact report;
+                        report.carId = carHandle.networkId;
+                        report.targetId = targetHandle.networkId;
+                        report.missionGeneration = world.LoadedMissionGeneration();
+                        report.targetSpawnGeneration = targetSpawn;
+                        report.contactX = position.x;
+                        report.contactY = position.y;
+                        report.contactZ = position.z;
+                        report.kind = kind;
+                        Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(report);
+                        if (kind == Shared::Combat::VehicleContact::Impact) {
+                            // Retail C_human::Collision hits the human in this
+                            // same contact; the server's answer is a round
+                            // trip away.
+                            application->Death().PredictVehicleImpact(carHandle.networkId, targetHandle.networkId, velocity);
+                        }
                     }
-                    gLastPedestrianImpact[key] = now;
-                    Shared::Combat::VehicleImpact report;
-                    report.carId = carHandle.networkId;
-                    report.targetId = targetHandle.networkId;
-                    report.missionGeneration = world.LoadedMissionGeneration();
-                    report.targetSpawnGeneration = targetSpawn;
-                    report.contactX = position.x;
-                    report.contactY = position.y;
-                    report.contactZ = position.z;
-                    Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(report);
-                    // Retail C_human::Collision hits the human in this same
-                    // contact; the server's answer is a round trip away.
-                    application->Death().PredictVehicleImpact(carHandle.networkId, targetHandle.networkId, velocity);
+                }
+                if (slow) {
+                    return gCollisionFilterBodyOriginal(car, collision, position, normal);
                 }
             }
             return nullptr;

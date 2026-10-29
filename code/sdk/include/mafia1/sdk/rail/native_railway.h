@@ -79,6 +79,10 @@ namespace Mafia1Online::SDK::Rail {
         static constexpr uintptr_t kRemoveInnerEntries = 0x495220;
         static constexpr uintptr_t kRemoveOuterEntries = 0x4951c0;
         // ++/-- (if above 0) the lock count +0x288 that holds a departure.
+        // I3D_frame* __thiscall GetVagon(unsigned index), retn 4 (reM
+        // C_railway.cpp:5654): 0 the body frame, n wagon n - 1's model, null
+        // past the wagon count.
+        static constexpr uintptr_t kGetVagon = 0x496e10;
         static constexpr uintptr_t kLock = 0x497980;
         static constexpr uintptr_t kUnlock = 0x497990;
         // AI returns at once while this C_game police freeze is set
@@ -96,6 +100,24 @@ namespace Mafia1Online::SDK::Rail {
         static constexpr size_t kStateOffset = 0xdc;
         static constexpr size_t kPreviousStateOffset = 0xe0;
         static constexpr size_t kWagonCountOffset = 0x1a8;
+        // bool __thiscall C_railway::Hit(E_hit_type, const S_vector& a,
+        // const S_vector& b, const S_vector& normal, float damage, C_actor*
+        // attacker, unsigned flags, I3D_frame* frame), vtable Hit, eight
+        // stack arguments (IDA 0x490b40, named Collide there). C_game::
+        // TickShoot passes a bullet (HIT_TYPE_GENERIC 0) as a = its unit
+        // direction and b = the hit point (reM C_game.cpp:2297-2305); Hit
+        // casts b + a * 100 through `frame`'s hierarchy, kills the rail human
+        // or driver it meets and breaks the windows on the way. `frame` is
+        // the struck part's collision owner, which it looks up among the
+        // parts' dynamic collisions (0x490e7f-0x490eb5).
+        static constexpr uintptr_t kHit = 0x490b40;
+        static constexpr uint32_t kGenericHit = 0;
+        // m_pDynamicCollisions: one tDynamicCollObject (0x48 bytes) per
+        // part, the body first and each wagon after it; the owner frame Hit
+        // matches sits at +4 of each (0x490e9e-0x490eac).
+        static constexpr size_t kDynamicCollisionsOffset = 0xe8;
+        static constexpr size_t kDynamicCollisionStride = 0x48;
+        static constexpr size_t kDynamicCollisionOwnerFrame = 0x04;
         // m_bMetro: isInStop (0x496db0) offers no doorways off a station.
         static constexpr size_t kMetroOffset = 0x1d8;
         // rail_doors at +0x1e8: TickSwingState (0x496900) moves the angle at
@@ -117,6 +139,30 @@ namespace Mafia1Online::SDK::Rail {
         }
         [[nodiscard]] int32_t WagonCount() const {
             return Field<int32_t>(kWagonCountOffset);
+        }
+        // The frame a rider of `index` is linked to (C_human +0x584, as
+        // Intern_UseRailway links it).
+        [[nodiscard]] Scene::NativeFrame *Vagon(uint32_t index) {
+            return reinterpret_cast<Scene::NativeFrame *(__thiscall *)(NativeRailway *, uint32_t)>(kGetVagon)(this, index);
+        }
+        // The collision owner frame of part 0..WagonCount, the `frame` a
+        // bullet's Hit on that part carries; null past the parts.
+        [[nodiscard]] Scene::NativeFrame *PartCollisionFrame(int32_t part) const {
+            auto *collisions = Field<std::byte *>(kDynamicCollisionsOffset);
+            if (!collisions || part < 0 || part > WagonCount()) {
+                return nullptr;
+            }
+            return *reinterpret_cast<Scene::NativeFrame **>(collisions + part * kDynamicCollisionStride + kDynamicCollisionOwnerFrame);
+        }
+        // The part a Hit's frame belongs to, as Hit finds it; -1 for none
+        // (a boarding passenger's own collision).
+        [[nodiscard]] int32_t PartOfCollisionFrame(const Scene::NativeFrame *frame) const {
+            for (int32_t part = 0; frame && part <= WagonCount(); ++part) {
+                if (PartCollisionFrame(part) == frame) {
+                    return part;
+                }
+            }
+            return -1;
         }
         // Owned by the railway; WagonCount entries each.
         [[nodiscard]] Player::Vector3 *WagonPositions() const {

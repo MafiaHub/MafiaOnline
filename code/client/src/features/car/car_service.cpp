@@ -39,6 +39,29 @@
 namespace Mafia1Online::Features::Car {
     namespace {
         constexpr auto kMovementSendInterval = std::chrono::milliseconds(33);
+        // A car at rest with nothing changing reports only this often, so
+        // its pose stops changing on the server and observers stop being
+        // sent it; the slow fields refresh as often.
+        constexpr auto kIdleHeartbeat = std::chrono::seconds(1);
+
+        // Nothing an observer could see moved since `last` was sent.
+        bool AtRest(const Shared::Car::Movement &now, const Shared::Car::Movement &last) {
+            const glm::vec3 position(now.x, now.y, now.z);
+            const glm::vec3 lastPosition(last.x, last.y, last.z);
+            const float turn = std::abs(glm::dot(glm::quat(now.qw, now.qx, now.qy, now.qz), glm::quat(last.qw, last.qx, last.qy, last.qz)));
+            return glm::distance(position, lastPosition) < 0.01f && turn > 0.99999f && glm::length(glm::vec3(now.velocityX, now.velocityY, now.velocityZ)) < 0.05f &&
+                   glm::length(glm::vec3(now.angularVelocityX, now.angularVelocityY, now.angularVelocityZ)) < 0.05f && now.gear == last.gear &&
+                   now.lightState == last.lightState && now.hornOn == last.hornOn && now.skidMask == 0 && std::abs(now.steeringInput - last.steeringInput) < 0.01f &&
+                   std::abs(now.engineRotations - last.engineRotations) < 100.0f && std::abs(now.powerInput - last.powerInput) < 0.02f &&
+                   std::abs(now.brakeInput - last.brakeInput) < 0.02f && std::abs(now.handbrakeInput - last.handbrakeInput) < 0.02f &&
+                   std::abs(now.clutchInput - last.clutchInput) < 0.02f;
+        }
+
+        // A slow field the server would act on changed since `last`.
+        bool SlowFieldsChanged(const Shared::Car::Movement &now, const Shared::Car::Movement &last) {
+            return now.maximumGear != last.maximumGear || now.speedLimited != last.speedLimited || now.doorTargets != last.doorTargets ||
+                   std::abs(now.fuelTankCapacity - last.fuelTankCapacity) > 0.01f || last.fuel - now.fuel >= 0.05f || (now.fuel == 0.0f && last.fuel != 0.0f);
+        }
         constexpr float kFuelSyncTolerance = 0.01f;
         // A velocity change faster than this in one physics step (m/s², about
         // 2.5 g) is a collision impulse on a car another client drives.
@@ -54,6 +77,9 @@ namespace Mafia1Online::Features::Car {
         // Impacts closer together than this belong to one contact.
         constexpr double kImpactEpisodeGapMs = 500.0;
         constexpr float kYieldCorrectionSeconds = 1.0f;
+        // How far a controlled car's physics clock may fall behind the local
+        // clock before it rejoins it: more than a frame's read jitter.
+        constexpr int32_t kSimClockSlackMs = 40;
 
         glm::quat FrameRotation(SDK::Scene::NativeFrame &frame) {
             const auto basis = frame.GetWorldBasis();
@@ -153,6 +179,8 @@ namespace Mafia1Online::Features::Car {
             if (stream.simulationController != simulationController) {
                 stream.simulationController   = simulationController;
                 stream.lastSent               = {};
+                stream.lastMovement.reset();
+                stream.lastSlowMovement.reset();
                 stream.sequence               = 0;
                 stream.engineReportSequence   = 0;
                 stream.appliedDynamicsCommandRevision = 0;
@@ -232,7 +260,7 @@ namespace Mafia1Online::Features::Car {
                 return;
             }
             const glm::vec3 angular = IsFiniteVector(car->angularVelocity) && glm::length(car->angularVelocity) <= 30.0f ? car->angularVelocity : glm::vec3(0.0f);
-            PushPose(stream, {poseTime, snapshot.position, snapshot.velocity, glm::normalize(snapshot.rotation), angular}, arrival, clockReset);
+            stream.poses.Push({poseTime, snapshot.position, snapshot.velocity, glm::normalize(snapshot.rotation), angular}, arrival, clockReset);
             stream.lastPoseTime = poseTime;
             stream.lastPacketTime = packetTime;
         });
@@ -361,6 +389,11 @@ namespace Mafia1Online::Features::Car {
         // C_car::NetDirect is empty. The regular AI path calls C_Vehicle::Tick,
         // establishing wheel contact and registering native seat use objects.
         car->SetNetworkControlled(false);
+        // A network pose may be above the ground (scripts spawn with a lift):
+        // the controller's physics lets it land instead of freezing it there.
+        if (const auto stream = _streams.find(networkId); stream != _streams.end() && stream->second.simulationController) {
+            car->SkipFirstUpdateFreeze();
+        }
         const auto handle = world.NativeObjects().Bind(car, networkId);
         _nativeById.emplace(networkId, NativeCar {handle, frame, false});
         _idByNative.emplace(car, networkId);
@@ -973,8 +1006,29 @@ namespace Mafia1Online::Features::Car {
             const float door = actor->Vehicle().DoorTarget(seat);
             movement.doorTargets[seat] = std::isfinite(door) && door > 0.0f ? static_cast<uint8_t>(std::lround(std::clamp(door, 0.0f, 1.0f) * 255.0f)) : 0;
         }
+        auto *state = Framework::CoreModules::GetReplication()->GetEntity<Shared::Entities::CarEntity>(networkId);
+        movement.slowFields = !stream.lastSlowMovement || SlowFieldsChanged(movement, *stream.lastSlowMovement) || now - stream.lastSlowSent >= kIdleHeartbeat ||
+                              (state && !state->dynamicsValid);
+        if (!movement.slowFields && stream.lastMovement && AtRest(movement, *stream.lastMovement) && now - stream.lastSent < kIdleHeartbeat) {
+            --stream.sequence;
+            return;
+        }
+        // The server withholds this client's own pose (CarEntity::
+        // GetTransformSource), so the local replica follows the native car
+        // for everything here that reads it.
+        if (state) {
+            state->position        = {movement.x, movement.y, movement.z};
+            state->rotation        = rotation;
+            state->velocity        = {movement.velocityX, movement.velocityY, movement.velocityZ};
+            state->angularVelocity = {movement.angularVelocityX, movement.angularVelocityY, movement.angularVelocityZ};
+        }
         Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(movement, MafiaNet::Priority::High, MafiaNet::Reliability::Unreliable);
-        stream.lastSent = now;
+        stream.lastSent     = now;
+        stream.lastMovement = movement;
+        if (movement.slowFields) {
+            stream.lastSlowMovement = movement;
+            stream.lastSlowSent     = now;
+        }
     }
 
     void CarService::SyncDynamics(World::WorldService &world, uint64_t networkId, Stream &stream) {
@@ -1446,6 +1500,9 @@ namespace Mafia1Online::Features::Car {
         const auto velocity = vehicle.LinearVelocity();
         const bool engineDestroyed = vehicle.EngineDestroyed();
         actor.Reset(0.0f, false);
+        // Reset(0.0f) re-arms the first-update freeze, which would zero the
+        // velocity restored below and leave the car hanging where it was put.
+        actor.SkipFirstUpdateFreeze();
         for (int i = 0; i < wheelCount; ++i) {
             if (vehicle.Wheel(i)) {
                 vehicle.SetWheelDamage(i, wheels[i].flags, wheels[i].health, wheels[i].deformAngle);
@@ -1536,7 +1593,7 @@ namespace Mafia1Online::Features::Car {
     bool CarService::Sample(uint64_t networkId, Framework::Utils::TransformSnapshot &out) const {
         const auto it = _streams.find(networkId);
         Stream::PoseSample pose;
-        if (it == _streams.end() || !SamplePose(it->second, LocalClockMs() - it->second.delayMs, pose)) {
+        if (it == _streams.end() || !it->second.poses.Sample(LocalClockMs() - it->second.poses.DelayMs(), pose)) {
             return false;
         }
         out = {pose.position, pose.velocity, pose.rotation};
@@ -1549,83 +1606,30 @@ namespace Mafia1Online::Features::Car {
         return static_cast<double>(MafiaNet::GetTimeUS()) * 0.001;
     }
 
-    void CarService::PushPose(Stream &stream, const Stream::PoseSample &pose, double arrival, bool reset) {
-        if (reset) {
-            stream.poses.clear();
-        }
-        if (!stream.poses.empty()) {
-            const auto &last = stream.poses.back();
-            if (pose.time <= last.time) {
-                return;
-            }
-            stream.intervalMs = glm::mix(stream.intervalMs, static_cast<float>(pose.time - last.time), 0.1f);
-        }
-        // How much later than the least-delayed packet this one arrived: the
-        // network and server-tick jitter the delay must cover. A decaying
-        // peak rather than a mean, since one late packet is an underrun.
-        const float lateness = static_cast<float>(std::clamp(arrival - pose.time, 0.0, 500.0));
-        stream.latenessPeak  = std::max(lateness, stream.latenessPeak * 0.97f);
-        stream.poses.push_back(pose);
-        while (stream.poses.size() > 64) {
-            stream.poses.pop_front();
-        }
-    }
-
-    bool CarService::SamplePose(const Stream &stream, double time, Stream::PoseSample &out) {
-        const auto &poses = stream.poses;
-        if (poses.empty()) {
-            return false;
-        }
-        if (time <= poses.front().time) {
-            out = poses.front();
-            return true;
-        }
-        const auto &newest = poses.back();
-        if (time >= newest.time) {
-            // Underrun or prediction: continue along the last linear and
-            // angular velocity, for at most 150 ms.
-            const float dt = static_cast<float>(std::min(time - newest.time, 150.0)) * 0.001f;
-            out = newest;
-            out.position += newest.velocity * dt;
-            if (const float spin = glm::length(newest.angularVelocity); spin > 0.0001f) {
-                out.rotation = glm::normalize(glm::angleAxis(spin * dt, newest.angularVelocity / spin) * newest.rotation);
-            }
-            out.time = time;
-            return true;
-        }
-        auto next = std::upper_bound(poses.begin(), poses.end(), time, [](double t, const Stream::PoseSample &p) { return t < p.time; });
-        const auto &b = *next;
-        const auto &a = *std::prev(next);
-        const float span = static_cast<float>(b.time - a.time) * 0.001f;
-        const float u = static_cast<float>((time - a.time) / (b.time - a.time));
-        out.time = time;
-        if (span > 0.3f) {
-            out.position = glm::mix(a.position, b.position, u);
-            out.velocity = glm::mix(a.velocity, b.velocity, u);
-        }
-        else {
-            // Cubic Hermite through both poses with their velocities, so the
-            // path and its derivative stay continuous across samples.
-            const float u2 = u * u;
-            const float u3 = u2 * u;
-            out.position = (2.0f * u3 - 3.0f * u2 + 1.0f) * a.position + (u3 - 2.0f * u2 + u) * span * a.velocity + (-2.0f * u3 + 3.0f * u2) * b.position +
-                           (u3 - u2) * span * b.velocity;
-            out.velocity = ((6.0f * u2 - 6.0f * u) * a.position + (-6.0f * u2 + 6.0f * u) * b.position) / span + (3.0f * u2 - 4.0f * u + 1.0f) * a.velocity +
-                           (3.0f * u2 - 2.0f * u) * b.velocity;
-        }
-        out.rotation = glm::slerp(a.rotation, glm::dot(a.rotation, b.rotation) < 0.0f ? -b.rotation : b.rotation, u);
-        out.angularVelocity = glm::mix(a.angularVelocity, b.angularVelocity, u);
-        return true;
-    }
-
     void CarService::OnSimulated(SDK::Car::NativeCar *car, unsigned int frameMs) {
         const auto id = _idByNative.find(car);
         if (id == _idByNative.end()) {
             return;
         }
-        if (const auto stream = _streams.find(id->second); stream != _streams.end() && stream->second.simulationController) {
-            // C_car::AI steps physics by at most 83 ms per frame.
-            stream->second.simClockMs += std::min(frameMs, 83u);
+        if (const auto found = _streams.find(id->second); found != _streams.end() && found->second.simulationController) {
+            // C_car::AI steps physics by at most 83 ms per frame, and the
+            // retail game does not tick an inactive car at all. Either puts
+            // the physics clock behind the local one for good, which a
+            // receiver's least-delay mapping would read as every later pose
+            // arriving late (and only slew out at 0.5 ms a pose): rejoin the
+            // local clock once it fell more than a frame behind.
+            auto &stream        = found->second;
+            const auto wall     = static_cast<uint32_t>(MafiaNet::GetTime());
+            stream.simClockMs += std::min(frameMs, 83u);
+            // Wrap-safe: both clocks are 32-bit milliseconds.
+            const auto lag = static_cast<int32_t>(wall - stream.simClockMs);
+            if (!stream.simClockStarted || lag < stream.simClockLag) {
+                stream.simClockStarted = true;
+                stream.simClockLag     = lag;
+            }
+            else if (lag - stream.simClockLag > kSimClockSlackMs) {
+                stream.simClockMs = wall - static_cast<uint32_t>(stream.simClockLag);
+            }
             if (_simulatedSerial != _updateSerial) {
                 _simulatedSerial = _updateSerial;
                 _simulatedCars.clear();
@@ -1665,7 +1669,7 @@ namespace Mafia1Online::Features::Car {
             return true;
         }
         if (streamIt == _streams.end() || streamIt->second.simulationController || nativeCar == _nativeById.end() || nativeCar->second.removalQueued || !state ||
-            state->terminalState != Shared::Entities::CarEntity::TerminalState::Active || streamIt->second.poses.empty()) {
+            state->terminalState != Shared::Entities::CarEntity::TerminalState::Active || streamIt->second.poses.Empty()) {
             return false;
         }
         auto &stream = streamIt->second;
@@ -1716,7 +1720,9 @@ namespace Mafia1Online::Features::Car {
                 }
                 stream.lastImpactAt = _frameClock;
             }
-            if (!SamplePose(stream, _frameClock, pose)) {
+            // Shown through corrected native physics, not Present.
+            stream.poses.ClearCorrection();
+            if (!stream.poses.Sample(_frameClock, pose)) {
                 return true;
             }
             // Until the controller's poses carry its own answer to the
@@ -1724,7 +1730,7 @@ namespace Mafia1Online::Features::Car {
             // pulling to it drives the car back into what it hit. Ease
             // toward it slowly and keep the local impulse meanwhile.
             const bool yielding = stream.impactAt > 0.0 && _frameClock - stream.impactAt < kImpactHoldMs &&
-                                  stream.poses.back().time < stream.impactAt + kImpactResponseMs;
+                                  stream.poses.Newest().time < stream.impactAt + kImpactResponseMs;
             const auto current = frame->WorldPosition();
             const glm::vec3 position(current.x, current.y, current.z);
             const glm::quat rotation = FrameRotation(*frame);
@@ -1747,14 +1753,10 @@ namespace Mafia1Online::Features::Car {
             stream.drivenSerial = _updateSerial;
             return true;
         }
-        // Move the render delay slowly: every change shifts the sample time,
-        // which at speed reads as a jerk. Underruns raise it faster.
-        const float target = std::clamp(stream.intervalMs + stream.latenessPeak + 8.0f, 40.0f, 300.0f);
-        const double renderTime = _frameClock - stream.delayMs;
-        const bool underrun = renderTime > stream.poses.back().time;
-        const float step = static_cast<float>(frameMs) * (underrun ? 0.1f : 0.01f);
-        stream.delayMs += std::clamp(target - stream.delayMs, -step, underrun ? step * 2.0f : step);
-        if (!SamplePose(stream, renderTime, pose)) {
+        // A late pose that lands behind where the car was shown is closed
+        // over ~200 ms (CarPoseBuffer::Present), not jumped to.
+        const double renderTime = stream.poses.AdvanceDelay(_frameClock, static_cast<float>(frameMs));
+        if (!stream.poses.Present(renderTime, dt, pose)) {
             return false;
         }
         const auto current = frame->WorldPosition();

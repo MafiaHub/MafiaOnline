@@ -1,5 +1,8 @@
 #include "death_service.h"
 
+#include "core/application.h"
+#include "features/simulation/simulation_config.h"
+
 #include "features/combat/combat_service.h"
 #include "features/world/world_service.h"
 #include "shared/features/combat/fatal_fall_report.h"
@@ -14,6 +17,7 @@
 #include <networking/replication/replication_manager.h>
 
 #include <algorithm>
+#include <cmath>
 
 namespace Mafia1Online::Features::Death {
     namespace {
@@ -83,6 +87,21 @@ namespace Mafia1Online::Features::Death {
             }
         }
         _impactsToPlay.clear();
+        // The simulation host's police hear of a player's car running a player
+        // down here, as its own NPCs' (NpcHost::ReportCarContact): its copy of
+        // the car runs no collision of its own. A corpse is not run over again.
+        const auto reportCarContact = [&](const Shared::Combat::DamageEvent &event, bool killed) {
+            if (event.hitType != 4 || !event.sourceCarId || !Simulation::IsHost()) {
+                return;
+            }
+            auto *victim = static_cast<NativeActor *>(world.NativeObjects().Resolve(world.NativeObjects().FindByNetwork(event.targetNetworkId)));
+            if (!victim || victim->IsDead() || static_cast<NativeHuman *>(static_cast<void *>(victim))->Health() <= 0.0f) {
+                return;
+            }
+            auto *car = static_cast<NativeActor *>(world.NativeObjects().Resolve(world.NativeObjects().FindByNetwork(event.sourceCarId)));
+            const float speed = std::sqrt(event.directionX * event.directionX + event.directionY * event.directionY + event.directionZ * event.directionZ);
+            static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->Npcs().ReportCarContact(car, victim, speed, killed);
+        };
         for (auto it = _pendingDamage.begin(); it != _pendingDamage.end();) {
             const auto &event = it->event;
             if (event.missionGeneration < world.LoadedMissionGeneration() || now - it->received > std::chrono::seconds(2)) {
@@ -96,6 +115,11 @@ namespace Mafia1Online::Features::Death {
                 continue;
             }
             if (state->missionGeneration != event.missionGeneration || state->spawnGeneration != event.targetSpawnGeneration || !state->spawned || !state->alive) {
+                // A car impact that killed the player: the host's police count
+                // the run-over once, while the replica here is still alive.
+                if (state->missionGeneration == event.missionGeneration && state->spawnGeneration == event.targetSpawnGeneration && state->spawned) {
+                    reportCarContact(event, true);
+                }
                 it = _pendingDamage.erase(it);
                 continue;
             }
@@ -128,7 +152,8 @@ namespace Mafia1Online::Features::Death {
             else if (ReplayAuthoritativeDamage(*human, event)) {
                 human->SetHealth(state->health);
                 actor->RestoreLivingState();
-                applied = {event.missionGeneration, event.targetSpawnGeneration, event.targetRevision};
+                reportCarContact(event, false);
+                applied ={event.missionGeneration, event.targetSpawnGeneration, event.targetRevision};
                 it      = _pendingDamage.erase(it);
             }
             else {

@@ -3,6 +3,8 @@
 #include "shared/features/combat/combat_protocol.h"
 #include "shared/features/npc/npc_entity.h"
 
+#include "shared/net/quantize.h"
+
 #include <networking/rpc/rpc.h>
 
 #include <algorithm>
@@ -71,6 +73,9 @@ namespace Mafia1Online::Shared::Npc {
         // The network car a traffic driver was thrown out of (Corovacka in
         // Do_ThrowCocotFromCar), or 0.
         uint64_t carId = 0;
+        // The host's sample clock for this pose (Shared::Net), so it is a
+        // sample of its own and not a repeat of the one before.
+        uint16_t hostClockMs = 0;
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {
             auto kindValue = static_cast<uint8_t>(kind);
@@ -86,6 +91,7 @@ namespace Mafia1Online::Shared::Npc {
             inventory.Serialize(stream, write);
             stream->Serialize(write, walkerKey);
             stream->Serialize(write, carId);
+            stream->Serialize(write, hostClockMs);
             if (!write) {
                 kind = static_cast<Entities::NpcKind>(kindValue);
             }
@@ -179,11 +185,14 @@ namespace Mafia1Online::Shared::Npc {
         static constexpr uint8_t kMaxNpcs = 16;
 
         uint64_t missionGeneration = 0;
+        // When the host sampled these poses (Shared::Net::SampleClock).
+        uint16_t hostClockMs = 0;
         uint8_t count = 0;
         std::array<Pose, kMaxNpcs> npcs {};
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {
-            stream->Serialize(write, missionGeneration);
+            stream->SerializeCompressed(write, missionGeneration);
+            stream->Serialize(write, hostClockMs);
             stream->Serialize(write, count);
             if (count > kMaxNpcs) {
                 count = 0;
@@ -192,11 +201,15 @@ namespace Mafia1Online::Shared::Npc {
             for (uint8_t i = 0; i < count; ++i) {
                 auto &pose = npcs[i];
                 stream->Serialize(write, pose.key);
-                stream->Serialize(write, pose.x);
-                stream->Serialize(write, pose.y);
-                stream->Serialize(write, pose.z);
-                stream->Serialize(write, pose.yaw);
-                stream->Serialize(write, pose.speed);
+                glm::vec3 position {pose.x, pose.y, pose.z};
+                Net::SerializeWorldPosition(stream, write, position);
+                if (!write) {
+                    pose.x = position.x;
+                    pose.y = position.y;
+                    pose.z = position.z;
+                }
+                Net::SerializeAngle(stream, write, pose.yaw, 12);
+                Net::SerializeFixed(stream, write, pose.speed, -16.0f, 16.0f, 10);
                 stream->Serialize(write, pose.locomotion);
                 stream->Serialize(write, pose.health);
                 stream->Serialize(write, pose.dead);
@@ -587,12 +600,18 @@ namespace Mafia1Online::Shared::Npc {
     struct Hit {
         static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::NpcHit");
 
+        static constexpr uint8_t kBullet = 0;
+        static constexpr uint8_t kMeleeKnockdown = 1;
+        static constexpr uint8_t kCarImpact = 4;
+        // A car below the impact speed: the host runs C_human::Collision's
+        // side-jump branch (damage 0, direction the car's velocity).
+        static constexpr uint8_t kCarBump = 5;
+
         uint64_t missionGeneration = 0;
         uint32_t key = 0;
-        // The player, or for a car impact the car.
+        // The player, or for a car impact or bump the car.
         uint64_t attackerId = 0;
-        // 0 bullet, 1 melee knockdown, 4 car impact.
-        uint8_t hitType = 0;
+        uint8_t hitType = kBullet;
         uint8_t bodyPart = 0;
         // Before the body part scale, which the native Hit applies.
         float damage = 0.0f;

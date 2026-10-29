@@ -1,5 +1,6 @@
 #pragma once
 
+#include "features/combat/combat_service.h"
 #include "shared/features/combat/combat_protocol.h"
 #include "shared/features/npc/npc_animation.h"
 #include "shared/features/npc/npc_create.h"
@@ -102,6 +103,8 @@ namespace Mafia1Online::Features::Npc {
             // players swap the walker for it.
             uint32_t walkerKey = 0;
             uint64_t walkerId = 0;
+            // NpcEntity::voice, 0 to 39; empty picks the default for scripted NPCs.
+            std::optional<uint8_t> voice;
             // The resource that spawned it; it goes when that resource stops.
             std::string owner;
         };
@@ -166,6 +169,9 @@ namespace Mafia1Online::Features::Npc {
         // an empty name; it ends the running task. Every player's copy
         // replays it from the entity's animation fields.
         bool SetAnimation(uint64_t networkId, const std::string &name, bool loop);
+        // npc.say: every player that streams the living NPC hears it say
+        // `line` (NpcEntity::speechLine) in its voice.
+        bool Say(uint64_t networkId, uint16_t line);
         bool IsScripted(uint64_t networkId) const;
         std::optional<Shared::Npc::Behaviour> GetBehaviour(uint64_t networkId) const;
         // The task still running, if any.
@@ -184,6 +190,7 @@ namespace Mafia1Online::Features::Npc {
         struct Record {
             Shared::Entities::NpcEntity *entity = nullptr;
             Shared::Combat::State state;
+            Combat::CombatService::AimRelay aimRelay;
             std::chrono::steady_clock::time_point lastSeen;
             uint64_t lastAttackerId = 0;
             // Script-spawned; confirmed once the host reported it.

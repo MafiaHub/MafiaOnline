@@ -7,6 +7,7 @@
 #include "shared/features/car/car_mesh_checkpoint.h"
 #include "shared/features/npc/npc_entity.h"
 #include "shared/features/player/player_entity.h"
+#include "shared/net/sample_clock.h"
 
 #include <core_modules.h>
 #include <utility>
@@ -101,8 +102,23 @@ namespace Mafia1Online::Features::Car {
         _authoredDamageRevision.clear();
     }
 
-    bool CarService::ApplyMovement(const Shared::Car::Movement &movement, uint64_t senderGuid) {
-        auto *car = Find(movement.networkId);
+    bool CarService::ApplyMovement(const Shared::Car::Movement &report, uint64_t senderGuid) {
+        auto *car = Find(report.networkId);
+        // Without its slow fields a report keeps the server's copy of them,
+        // which needs the car's dynamics established by one that had them.
+        Shared::Car::Movement movement = report;
+        if (!movement.slowFields) {
+            if (!car || !car->dynamicsValid) {
+                return false;
+            }
+            movement.fuel             = car->fuel;
+            movement.fuelTankCapacity = car->fuelTankCapacity;
+            movement.maximumGear      = car->maximumGear;
+            movement.speedLimited     = car->speedLimited;
+            for (uint8_t seat = 0; seat < movement.doorTargets.size(); ++seat) {
+                movement.doorTargets[seat] = car->doorTargets[seat];
+            }
+        }
         if (!car || senderGuid == 0 || car->simulationControllerGuid != senderGuid || car->missionGeneration != movement.missionGeneration ||
             car->transformRevision != movement.transformRevision || movement.dynamicsCommandRevision > car->dynamicsCommandRevision ||
             (car->terminalState != Shared::Entities::CarEntity::TerminalState::Active &&
@@ -142,9 +158,12 @@ namespace Mafia1Online::Features::Car {
             return false;
         }
         const bool initialDynamics = !car->dynamicsValid;
+        // What observers hold now: an unchanged pose keeps its clock (below),
+        // so a parked car's heartbeat is not sent on to them again.
+        MafiaNet::BitStream before;
+        Shared::Net::WriteTransform(*car, before);
         car->velocity      = velocity;
         car->position      = position;
-        car->poseClockMs     = movement.clockMs;
         car->poseClockSource = senderGuid;
         car->rotation      = glm::normalize(rotation);
         car->dynamicsValid = true;
@@ -176,6 +195,9 @@ namespace Mafia1Online::Features::Car {
             }
             car->lightState = movement.lightState;
             car->hornOn = movement.hornOn;
+        }
+        if (!Shared::Net::TransformUnchanged(*car, before)) {
+            car->poseClockMs = movement.clockMs;
         }
         state.lastSequence = movement.sequence;
         state.hasSequence  = true;
@@ -231,7 +253,7 @@ namespace Mafia1Online::Features::Car {
 
     std::optional<float> CarService::ValidateVehicleImpactGeometry(uint64_t carId, uint64_t missionGeneration,
                                                                     const glm::vec3 &contact, const glm::vec3 &targetPosition,
-                                                                    std::chrono::steady_clock::time_point receivedAt) const {
+                                                                    std::chrono::steady_clock::time_point receivedAt, float minSpeed) const {
         const auto *car = Find(carId);
         const auto poses = _hitPoses.find(carId);
         if (!car || car->terminalState != Shared::Entities::CarEntity::TerminalState::Active ||
@@ -259,7 +281,7 @@ namespace Mafia1Online::Features::Car {
                 continue;
             }
             const float speed = glm::length(pose.velocity);
-            if (!std::isfinite(speed) || speed < 3.0f || speed > 120.0f) {
+            if (!std::isfinite(speed) || speed < minSpeed || speed > Shared::Combat::kVehicleImpactMaxSpeed) {
                 continue;
             }
             // Server car models do not expose native collision bounds. These

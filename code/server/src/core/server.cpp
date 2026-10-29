@@ -1,5 +1,6 @@
 #include "server.h"
 
+#include "interest_config.h"
 #include "shared/features/car/car_engine_state.h"
 #include "shared/features/car/car_damage_state.h"
 #include "shared/features/car/car_debris.h"
@@ -56,6 +57,9 @@ namespace Mafia1Online::Core {
 
     void Server::PostInit() {
         Shared::Entities::RegisterEntities();
+        if (auto *replication = Framework::CoreModules::GetReplication()) {
+            ConfigureInterest(*replication);
+        }
         // Every resource runs in an isolate of its own. Handles cross into it as
         // themselves, named apart from the framework's own Entity and Player,
         // and the bindings' classes go with the isolate.

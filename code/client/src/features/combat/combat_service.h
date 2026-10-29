@@ -1,5 +1,6 @@
 #pragma once
 
+#include "shared/features/combat/aim_update.h"
 #include "shared/features/combat/combat_protocol.h"
 #include "shared/features/combat/detonation.h"
 
@@ -66,6 +67,7 @@ namespace Mafia1Online::Features::Combat {
 
       private:
         void OnState(const Shared::Combat::State &state);
+        void OnAimUpdate(const Shared::Combat::AimUpdate &update);
         void OnEvent(const Shared::Combat::Event &event);
         void OnDetonation(const Shared::Combat::Detonation &detonation);
         void ApplyNativeStates(World::WorldService &world);
@@ -111,6 +113,10 @@ namespace Mafia1Online::Features::Combat {
         };
 
         std::unordered_map<uint64_t, Shared::Combat::State> _states;
+        // The newest server aim relay applied to each body (AimUpdate).
+        std::unordered_map<uint64_t, uint16_t> _aimSequences;
+        // The local controller's own count for AimUpdate.
+        uint16_t _aimUpdateSequence = 0;
         std::unordered_map<uint64_t, AppliedNative> _applied;
         std::deque<PendingEvent> _events;
         std::unordered_set<EventKey, EventKeyHash> _seenEvents;
@@ -129,6 +135,9 @@ namespace Mafia1Online::Features::Combat {
             float poseTargetOffsetY     = 0.0f;
             float poseTargetOffsetZ     = 0.0f;
             std::chrono::steady_clock::time_point lastSent {};
+            // An unreliable AimUpdate went out; once the aim rests for
+            // kAimSettleAfter, it goes once more, reliably.
+            bool settlePending = false;
         } _localAim;
         struct LocalCrouch {
             uint64_t networkId         = 0;

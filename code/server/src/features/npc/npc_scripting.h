@@ -25,6 +25,7 @@ namespace Mafia1Online::Scripting {
 
         std::string GetKind() const;
         std::string GetModel() const;
+        uint32_t GetVoice() const;
         Framework::Scripting::Builtins::Vector3 GetNpcPosition() const;
         double GetHeading() const;
         bool GetAlive() const;

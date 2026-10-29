@@ -2209,6 +2209,11 @@ declare global {
     readonly behaviour: string;
 
     /**
+     * Retail voice (C_human m_uVoice), 0 to 39, fixed at spawn: police 10-11, gangsters 12-16, thrown-out drivers 26-28, 12 otherwise unless the spawn option chose one.
+     */
+    readonly voice: number;
+
+    /**
      * Formats this NPC for logging.
      * @returns The NPC ID, kind and model.
      */
@@ -2321,6 +2326,13 @@ declare global {
     stopAnimation(): boolean;
 
     /**
+     * Says a line in this NPC's voice (the voice spawn option) on every player that streams it, positioned on its head, cutting off the line it was saying. A line with no sound for that voice says nothing.
+     * @param line A retail voice line: the id C_human::NewScream takes, a tables/voices.def group plus 2. Ones the game itself uses: 6-8 a group event, 15-16 seeing a body, 21-23 finding someone, 33-36 ready to fight, 45-50 a fight spotted, 61-65 freezing, 66-69 panic, 70-74 searching, 75-78 giving up, 79-83 hit, 84 a strong leg hit, 85-91 pain, 92-93 hit while dying, 132-134 a car steal refused, 137-138 out of fuel, 139-144 police halt, 145-146 police grab, 147-149 police grab of an armed man, 150-151 a police car warning, 152-157 police notifying a crime, 161-167 thrown out of a car.
+     * @returns False when it is not a living NPC or the line is out of range.
+     */
+    say(line: number): boolean;
+
+    /**
      * Returns the scripted NPC's running task.
      * @returns The task, or null when it runs none.
      */
@@ -2357,10 +2369,10 @@ declare global {
      * @param model Stock human .i3d filename, such as "pol01.i3d" for a policeman.
      * @param position Where it stands; three numbers are accepted too.
      * @param heading Facing in radians; defaults to 0.
-     * @param options health: defaults to 100; behaviour: how the retail AI rates players (default neutral); weapon, ammo, reserve: a weapon to hold; virtualWorld: the only world whose players see it (default every world).
+     * @param options health: defaults to 100; behaviour: how the retail AI rates players (default neutral); weapon, ammo, reserve: a weapon to hold; virtualWorld: the only world whose players see it (default every world); voice: the retail voice 0 to 39 its say() lines use (default 12; retail police use 10-11, gangsters 12-16, men 26-28, women 29-31).
      * @returns The NPC, or null when no simulation host is attached, no mission is loaded, 64 scripted NPCs exist or an argument is unusable.
      */
-    static spawn(model: string, position: Vector3 | { x: number; y: number; z: number }, heading?: number, options?: { health?: number; behaviour?: "neutral" | "friendly" | "hostile"; weapon?: number; ammo?: number; reserve?: number; virtualWorld?: number }): Npc | null;
+    static spawn(model: string, position: Vector3 | { x: number; y: number; z: number }, heading?: number, options?: { health?: number; behaviour?: "neutral" | "friendly" | "hostile"; weapon?: number; ammo?: number; reserve?: number; virtualWorld?: number; voice?: number }): Npc | null;
   }
 
   interface Npc extends Entity {}

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "shared/net/sample_clock.h"
+
 #include <utils/snapshot_buffer.h>
 
 #include <chrono>
@@ -47,14 +49,17 @@ namespace Mafia1Online::Features::Pedestrian {
         std::optional<Framework::Utils::TransformSnapshot> HandOff(World::WorldService &world, uint64_t walkerId);
 
       private:
-        // The host reports every 100 ms. Two samples of render delay keep a
-        // bracket for interpolation through one lost packet.
-        inline static const Framework::Utils::SnapshotBufferConfig kSnapshotConfig {200.0f, 250.0f, 4.0f, 4.0f, true, 150.0f, 300.0f};
+        // The host reports every 100 ms, and the server's far band every
+        // 200 ms. Two intervals of render delay, plus how late packets come,
+        // keep a bracket for interpolation through one lost packet.
+        inline static const Framework::Utils::SnapshotBufferConfig kSnapshotConfig {200.0f, 250.0f, 4.0f, 4.0f, true, 150.0f, 600.0f, 2.0f, 0.1f};
 
         struct Replica {
             Replica(): snapshots(&kSnapshotConfig) {}
             Framework::Utils::TransformSnapshotBuffer snapshots;
             MafiaNet::Time lastTransformTime = 0;
+            // Dates each pose by when the host sampled it.
+            Shared::Net::SampleClockMapper clock;
             SDK::Traffic::NativeTrafficElement *element = nullptr;
             // A clip ended: hold its last pose until the host plays the next
             // animation. A corpse never gets one.

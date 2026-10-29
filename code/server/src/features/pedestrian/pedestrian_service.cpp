@@ -9,6 +9,7 @@
 #include "shared/features/pedestrian/pedestrian_report.h"
 #include "shared/features/pedestrian/pedestrian_scream.h"
 #include "shared/features/player/player_entity.h"
+#include "shared/net/sample_clock.h"
 
 #include <core_modules.h>
 #include <logging/logger.h>
@@ -116,7 +117,12 @@ namespace Mafia1Online::Features::Pedestrian {
                     continue;
                 }
                 auto &entity = *walker->second.entity;
-                SetPose(entity, pose.x, pose.y, pose.z, pose.yaw, entity.alive && !pose.dead ? pose.speed : 0.0f);
+                // An unchanged pose keeps its clock, so a standing walker or
+                // a corpse is not sent again every snapshot.
+                Shared::Net::RelayPose(entity, snapshot.hostClockMs, [&] {
+                    SetPose(entity, pose.x, pose.y, pose.z, pose.yaw, entity.alive && !pose.dead ? pose.speed : 0.0f);
+                });
+                entity.poseSource = MafiaNet::ToPeerGuid(packet->guid);
                 entity.animation = pose.animation;
                 entity.animationFlag = pose.animationFlag;
                 // A dropped umbrella never comes back to that life.

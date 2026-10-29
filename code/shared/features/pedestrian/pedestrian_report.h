@@ -1,5 +1,7 @@
 #pragma once
 
+#include "shared/net/quantize.h"
+
 #include <networking/rpc/rpc.h>
 
 #include <array>
@@ -83,11 +85,14 @@ namespace Mafia1Online::Shared::Pedestrian {
         static constexpr uint8_t kMaxWalkers = 32;
 
         uint64_t missionGeneration = 0;
+        // When the host sampled these poses (Shared::Net::SampleClock).
+        uint16_t hostClockMs = 0;
         uint8_t count = 0;
         std::array<WalkerPose, kMaxWalkers> walkers {};
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {
-            stream->Serialize(write, missionGeneration);
+            stream->SerializeCompressed(write, missionGeneration);
+            stream->Serialize(write, hostClockMs);
             stream->Serialize(write, count);
             if (count > kMaxWalkers) {
                 count = 0;
@@ -96,11 +101,15 @@ namespace Mafia1Online::Shared::Pedestrian {
             for (uint8_t i = 0; i < count; ++i) {
                 auto &walker = walkers[i];
                 stream->Serialize(write, walker.key);
-                stream->Serialize(write, walker.x);
-                stream->Serialize(write, walker.y);
-                stream->Serialize(write, walker.z);
-                stream->Serialize(write, walker.yaw);
-                stream->Serialize(write, walker.speed);
+                glm::vec3 position {walker.x, walker.y, walker.z};
+                Net::SerializeWorldPosition(stream, write, position);
+                if (!write) {
+                    walker.x = position.x;
+                    walker.y = position.y;
+                    walker.z = position.z;
+                }
+                Net::SerializeAngle(stream, write, walker.yaw, 12);
+                Net::SerializeFixed(stream, write, walker.speed, -16.0f, 16.0f, 10);
                 stream->Serialize(write, walker.dead);
                 stream->Serialize(write, walker.animation);
                 stream->Serialize(write, walker.animationFlag);

@@ -78,6 +78,33 @@ namespace Mafia1Online::SDK::Police {
 
     inline constexpr uintptr_t kAddOfficer = 0x49F5D0;
 
+    // void __thiscall CarCollision(C_car *car, g_collision_header *collision,
+    // float speed), retn 0Ch: C_car's collision callback calls it while the
+    // police are active (reM C_car.cpp:5597). For the record whose driven car (+0x04)
+    // is the car it reads only the collision's first byte (dynamic flag 0x40)
+    // and its owner actor (+0x44): a human (types 2, 0x13, 0x1b) hit above
+    // 2.8 ORs crime 0x20 in, raises the pending level to minor up to 8.3,
+    // arrest above, lethal after more than five honks (+0x68), and counts
+    // the hit in its 5 s window (0x49cd5a-0x49ce12). Nothing in the first
+    // ten game ticks.
+    inline constexpr uintptr_t kCarCollision = 0x49CC90;
+    inline constexpr float kHumanCrashSpeed = 2.8f;
+    // void __thiscall NextNaSrackySoudruh(C_human *), retn 4: while active,
+    // counts a kill by car on the person's record (+0x68).
+    inline constexpr uintptr_t kCountRunOver = 0x49D220;
+    // void __thiscall DalJsemPochuzkariDoDrzky(C_human *), retn 4: crime
+    // 0x2000 (a hit patrolman) on the person's record and an evaluation now.
+    inline constexpr uintptr_t kPatrolmanHit = 0x4A0040;
+
+    // A stand-in tDynamicCollObject for CarCollision: the dynamic flag and
+    // the owner actor are all it reads.
+    struct NativeCollisionStandIn {
+        uint32_t packed = 0x40;
+        std::byte _unused04[0x44 - 0x04] {};
+        Player::NativeActor *ownerActor = nullptr;
+    };
+    static_assert(offsetof(NativeCollisionStandIn, ownerActor) == 0x44);
+
     // S_shvestky, one person's crime record (0x80 bytes, AddPerson).
     struct NativeCrimeRecord {
         // Levels at +0x3c / +0x3e.
@@ -129,8 +156,12 @@ namespace Mafia1Online::SDK::Police {
         static constexpr int32_t kPartyArrestDispatched = 1;
         static constexpr int32_t kPartyLethalDispatched = 2;
 
+        // m_pDrivenCar: DriveCar (0x49cbb0) sets it when the person takes a
+        // driver's seat; CarCollision finds the record by it (0x49cce4).
+        [[nodiscard]] Player::NativeActor *DrivenCar() const { return _drivenCar; }
+
         Player::NativeActor *_person;
-        std::byte _unused04[0x08 - 0x04];
+        Player::NativeActor *_drivenCar;
         uint16_t _crimes;
         uint16_t _pendingCrimes;
         std::byte _unused0c[0x3c - 0x0c];
@@ -152,6 +183,7 @@ namespace Mafia1Online::SDK::Police {
         Player::NativeActor **_officersBegin;
         Player::NativeActor **_officersEnd;
     };
+    static_assert(offsetof(NativeCrimeRecord, _drivenCar) == 0x04);
     static_assert(offsetof(NativeCrimeRecord, _crimes) == 0x08);
     static_assert(offsetof(NativeCrimeRecord, _level) == 0x3c);
     static_assert(offsetof(NativeCrimeRecord, _pendingLevel) == 0x3e);
@@ -262,6 +294,31 @@ namespace Mafia1Online::SDK::Police {
         bool SendReinforcements(Player::NativeActor *person, uint32_t mode, float radius = kReinforcementRadius) {
             using Call = char(__thiscall *)(NativePoliceManager *, Player::NativeActor *, uint32_t, float);
             return reinterpret_cast<Call>(kSendReinforcements)(this, person, mode, radius) != 0;
+        }
+
+        // Retail's police reaction to the person's car hitting `partner`
+        // at `speed`, as the car's own collision callback reports it. The
+        // record must name the car (DriveCar); it names it for this call
+        // only, whatever seat replay left there (the caller checked the
+        // driver sits at the car's wheel).
+        void ReportCarCollision(Player::NativeActor *driver, Player::NativeActor *car, Player::NativeActor *partner, float speed) {
+            auto *record = FindRecord(driver);
+            if (!_active || !record || !car || !partner) {
+                return;
+            }
+            auto *previous = record->_drivenCar;
+            record->_drivenCar = car;
+            NativeCollisionStandIn collision;
+            collision.ownerActor = partner;
+            using Call = void(__thiscall *)(NativePoliceManager *, Player::NativeActor *, NativeCollisionStandIn *, float);
+            reinterpret_cast<Call>(kCarCollision)(this, car, &collision, speed);
+            record->_drivenCar = previous;
+        }
+        void CountRunOver(Player::NativeActor *driver) {
+            reinterpret_cast<void(__thiscall *)(NativePoliceManager *, Player::NativeActor *)>(kCountRunOver)(this, driver);
+        }
+        void ReportPatrolmanHit(Player::NativeActor *offender) {
+            reinterpret_cast<void(__thiscall *)(NativePoliceManager *, Player::NativeActor *)>(kPatrolmanHit)(this, offender);
         }
 
         bool _active;

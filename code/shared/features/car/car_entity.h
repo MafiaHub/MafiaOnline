@@ -2,6 +2,7 @@
 
 #include <networking/replication/network_entity.h>
 #include "shared/features/car/car_damage_state.h"
+#include "shared/net/quantize.h"
 
 #include <mafianet/string.h>
 
@@ -15,6 +16,9 @@ namespace Mafia1Online::Shared::Entities {
     class CarEntity final: public Framework::Networking::Replication::NetworkEntity {
         static uint8_t Unit(float value) {
             return static_cast<uint8_t>(std::lround(std::clamp(std::isfinite(value) ? value : 0.0f, 0.0f, 1.0f) * 255.0f));
+        }
+        static uint8_t Pedal(float value) {
+            return static_cast<uint8_t>(std::lround(std::clamp(std::isfinite(value) ? value : 0.0f, 0.0f, 1.0f) * 63.0f));
         }
 
       public:
@@ -154,10 +158,63 @@ namespace Mafia1Online::Shared::Entities {
         CrewState driverState = CrewState::None;
         CrewState passengerState = CrewState::None;
 
+        MafiaNet::PeerGuid GetTransformSource() const override {
+            return static_cast<MafiaNet::PeerGuid>(simulationControllerGuid);
+        }
+
+        // The controller's guid folded to the 16 bits the transform carries;
+        // receivers only compare it, to restart their clock mapping.
+        static uint16_t ClockSourceTag(uint64_t guid) {
+            if (guid == 0) {
+                return 0;
+            }
+            const auto folded = static_cast<uint16_t>(guid ^ (guid >> 16) ^ (guid >> 32) ^ (guid >> 48));
+            return folded != 0 ? folded : 1;
+        }
+
         // Values that change every tick while driving ride with the pose on
         // the unreliable transform channel, quantized; the reliable state
-        // channel would otherwise resend them on every serialize tick.
+        // channel would otherwise resend them on every serialize tick. About
+        // 40 bytes (75 as raw floats): position at 1/256 m, the rotation's
+        // smallest three at 12 bits (10 bits leave up to 0.14 degrees, 5 mm at
+        // a bumper, of noise per pose), velocity at 1/256 m/s, spin at 1/64
+        // rad/s, pedals in 6 bits.
         void SerializeTransform(Framework::Networking::Replication::FieldSerializer &fields) override {
+            if (auto *stream = fields.PlainStream()) {
+                const bool write = fields.Writing();
+                uint16_t source  = write ? ClockSourceTag(poseClockSource) : 0;
+                auto steering    = static_cast<int16_t>(std::lround(std::clamp(std::isfinite(steeringInput) ? steeringInput : 0.0f, -2.0f, 2.0f) * 16383.0f));
+                auto rpm         = static_cast<uint16_t>(std::lround(std::clamp(std::isfinite(engineRotations) ? engineRotations : 0.0f, 0.0f, 65535.0f)));
+                auto gearValue   = static_cast<int8_t>(std::clamp(gear, -1, 14));
+                uint8_t pedals[4] = {Pedal(powerInput), Pedal(brakeInput), Pedal(handbrakeInput), Pedal(clutchInput)};
+                bool good = Net::SerializeWorldPosition(stream, write, position, Net::kCarPlaneBits, Net::kCarHeightBits) &&
+                            Net::SerializeQuat(stream, write, rotation, 12) &&
+                            Net::SerializeFixed(stream, write, velocity.x, -128.0f, 128.0f, 16) && Net::SerializeFixed(stream, write, velocity.y, -128.0f, 128.0f, 16) &&
+                            Net::SerializeFixed(stream, write, velocity.z, -128.0f, 128.0f, 16) &&
+                            Net::SerializeFixed(stream, write, angularVelocity.x, -32.0f, 32.0f, 12) &&
+                            Net::SerializeFixed(stream, write, angularVelocity.y, -32.0f, 32.0f, 12) &&
+                            Net::SerializeFixed(stream, write, angularVelocity.z, -32.0f, 32.0f, 12) && stream->Serialize(write, poseClockMs) &&
+                            stream->Serialize(write, source) && stream->Serialize(write, steering) && stream->Serialize(write, rpm) &&
+                            stream->SerializeBitsFromIntegerRange(write, gearValue, int8_t {-1}, int8_t {14}) && stream->Serialize(write, skidMask);
+                for (uint8_t &pedal : pedals) {
+                    good = good && stream->SerializeBitsFromIntegerRange(write, pedal, uint8_t {0}, uint8_t {63});
+                }
+                if (!good) {
+                    fields.Fail();
+                    return;
+                }
+                if (!write) {
+                    poseClockSource = source;
+                    steeringInput   = steering / 16383.0f;
+                    engineRotations = rpm;
+                    gear            = gearValue;
+                    powerInput      = pedals[0] / 63.0f;
+                    brakeInput      = pedals[1] / 63.0f;
+                    handbrakeInput  = pedals[2] / 63.0f;
+                    clutchInput     = pedals[3] / 63.0f;
+                }
+                return;
+            }
             NetworkEntity::SerializeTransform(fields);
             fields.Field(poseClockMs);
             fields.Field(poseClockSource);

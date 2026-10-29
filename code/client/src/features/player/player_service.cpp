@@ -105,6 +105,7 @@ namespace Mafia1Online::Features::Player {
         ReplayClimbs(world);
         ReplaySeizures(world);
         ReleaseLocalSeized(world, false);
+        ReplayBumps(world);
 
         Shared::Entities::PlayerEntity *controlled = nullptr;
         const auto myGuid                          = static_cast<uint64_t>(replication->GetMyGUID());
@@ -140,19 +141,29 @@ namespace Mafia1Online::Features::Player {
             if (stream.creationFailed && _failedModels[id] != player->model) {
                 stream.creationFailed = false;
             }
-            const MafiaNet::Time packetTime = player->lastUpdateTime == 0 ? MafiaNet::GetTime() : player->lastUpdateTime;
-            if (stream.lastPacketTime != packetTime) {
+            // A new pose is one with a newer transform stamp (a state-only
+            // packet advances lastUpdateTime without one); it is dated by the
+            // controller's sample clock, not by the server pass that relayed it.
+            const MafiaNet::Time transformTime = player->GetLastTransformTime();
+            const double clockNow              = static_cast<double>(MafiaNet::GetTimeUS()) * 0.001;
+            if (stream.snapshots.Empty() || stream.lastPacketTime != transformTime) {
                 Framework::Utils::TransformSnapshot snapshot {player->position, player->velocity, player->rotation};
                 if (IsFinite(snapshot) && glm::length(snapshot.rotation) >= 0.0001f) {
-                    snapshot.rotation = glm::normalize(snapshot.rotation);
-                    stream.snapshots.Push(snapshot, packetTime);
+                    snapshot.rotation              = glm::normalize(snapshot.rotation);
+                    const MafiaNet::Time packetTime = static_cast<MafiaNet::Time>(std::max(1.0, std::round(stream.clock.Map(player->sampleClock, clockNow))));
+                    stream.snapshots.Push(snapshot, packetTime, clockNow);
                     stream.locomotion.emplace_back(packetTime, player->locomotion);
                     while (stream.locomotion.size() > 32) {
                         stream.locomotion.pop_front();
                     }
-                    stream.lastPacketTime = packetTime;
+                    stream.rides.emplace_back(packetTime, RemoteRide {player->railway, player->railwayPart, player->railwayLocal, player->railwayYaw});
+                    while (stream.rides.size() > 32) {
+                        stream.rides.pop_front();
+                    }
+                    stream.lastPacketTime = transformTime;
                 }
             }
+            stream.renderTime = stream.snapshots.RenderTimeMs(clockNow);
             if (!_currentById.contains(id) && !stream.creationFailed) {
                 Framework::Utils::TransformSnapshot pose {player->position, player->velocity, player->rotation};
                 if (IsFinite(pose) && glm::length(pose.rotation) >= 0.0001f) {
@@ -202,7 +213,9 @@ namespace Mafia1Online::Features::Player {
         if (changed) {
             ReleaseLocal(world);
             ResetLocal(world);
-            Framework::Utils::TransformSnapshot pose {controlled->position, controlled->velocity, controlled->rotation};
+            // The spawn pose rides the reliable fields with the generation:
+            // this client never gets its own transform back.
+            Framework::Utils::TransformSnapshot pose {controlled->spawnPosition, glm::vec3(0.0f), glm::angleAxis(controlled->spawnYaw, glm::vec3(0.0f, 1.0f, 0.0f))};
             if (!IsFinite(pose) || glm::length(pose.rotation) < 0.0001f) {
                 return;
             }
@@ -253,7 +266,7 @@ namespace Mafia1Online::Features::Player {
             static_cast<SDK::Player::NativeHuman *>(static_cast<void *>(actor))->SetHealth(controlled->health);
         }
         const auto now = std::chrono::steady_clock::now();
-        if (!controlled->alive || (_lastSent != std::chrono::steady_clock::time_point {} && now - _lastSent < kSendInterval)) {
+        if (!controlled->alive) {
             return;
         }
         const auto position  = SDK::Player::WorldPosition(actor);
@@ -262,18 +275,28 @@ namespace Mafia1Online::Features::Player {
         if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z) || !std::isfinite(yaw)) {
             return;
         }
+        // The server withholds this client's own pose (PlayerEntity::
+        // GetTransformSource), so the local replica follows the native body
+        // for everything here that reads it (steal reach, map blips).
+        controlled->position = {position.x, position.y, position.z};
+        controlled->rotation = glm::angleAxis(yaw, glm::vec3(0.0f, 1.0f, 0.0f));
+        if (_lastSent != std::chrono::steady_clock::time_point {} && now - _lastSent < kSendInterval) {
+            return;
+        }
         Shared::Player::Movement movement;
         movement.networkId         = id;
         movement.missionGeneration = _missionGeneration;
         movement.spawnGeneration   = _spawnGeneration;
         movement.sequence          = ++_sequence;
+        movement.clockMs           = Shared::Net::SampleClock(MafiaNet::GetTime());
         movement.x                 = position.x;
         movement.y                 = position.y;
         movement.z                 = position.z;
         movement.yaw               = yaw;
         movement.locomotion        = static_cast<int16_t>(static_cast<SDK::Player::NativeHuman *>(static_cast<void *>(actor))->AnimationState());
-        // Aboard a railway the position rides on the wagon: observers place
-        // it on their copy rather than trail it through the world.
+        // Aboard a railway the position rides on the wagon frame it is
+        // linked to: observers place it on their copy rather than trail it
+        // through the world.
         if (const auto ride = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->Railways().RideOf(actor)) {
             movement.railway     = ride->index;
             movement.railwayPart = ride->part;
@@ -434,26 +457,70 @@ namespace Mafia1Online::Features::Player {
             if (_seizures.size() >= 32) {
                 return;
             }
-            _seizures.push_back({seized.missionGeneration, seized.targetNetworkId, seized.targetSpawnGeneration, seized.outcome == Shared::Npc::Caught::Outcome::Fine,
-                                 std::chrono::steady_clock::now()});
+            _seizures.push_back({seized, std::chrono::steady_clock::now()});
+        });
+        Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Combat::VehicleBump>([this](const Shared::Combat::VehicleBump &bump, MafiaNet::Packet *) {
+            if (_bumps.size() >= 8) {
+                return;
+            }
+            _bumps.push_back({bump, std::chrono::steady_clock::now()});
         });
     }
 
     void PlayerService::HoldSeized(uint64_t networkId) {
         _seizedUntil[networkId] = std::chrono::steady_clock::now() + kSeizedLimit;
+        _alignedUntil.erase(networkId);
+    }
+
+    void PlayerService::HoldAligned(uint64_t networkId, std::chrono::milliseconds hold) {
+        _alignedUntil[networkId] = std::chrono::steady_clock::now() + hold;
+    }
+
+    void PlayerService::ReplayBumps(World::WorldService &world) {
+        const auto now = std::chrono::steady_clock::now();
+        auto *replication = Framework::CoreModules::GetReplication();
+        while (!_bumps.empty()) {
+            const auto bump = _bumps.front().bump;
+            const auto received = _bumps.front().received;
+            _bumps.pop_front();
+            const auto *player = _local.networkId && replication ? replication->GetEntity<Shared::Entities::PlayerEntity>(_local.networkId) : nullptr;
+            auto *actor = static_cast<SDK::Player::NativeActor *>(world.NativeObjects().Resolve(_local));
+            const SDK::Player::Vector3 contact {bump.contactX, bump.contactY, bump.contactZ};
+            const SDK::Player::Vector3 direction {bump.directionX, bump.directionY, bump.directionZ};
+            const float speed = std::sqrt(direction.x * direction.x + direction.y * direction.y + direction.z * direction.z);
+            if (now - received > std::chrono::seconds(1) || bump.missionGeneration != world.LoadedMissionGeneration() || !player || !player->alive ||
+                player->spawnGeneration != bump.targetSpawnGeneration || !actor || !actor->IsAlive() || !std::isfinite(speed) || speed < 0.0001f ||
+                speed >= Shared::Combat::kVehicleImpactMinSpeed || !std::isfinite(contact.x) || !std::isfinite(contact.y) || !std::isfinite(contact.z)) {
+                continue;
+            }
+            auto *human = static_cast<SDK::Player::NativeHuman *>(static_cast<void *>(actor));
+            auto *car = static_cast<SDK::Player::NativeActor *>(world.NativeObjects().Resolve(world.NativeObjects().FindByNetwork(bump.carId)));
+            if (car && car->GetType() == SDK::Player::NativeActor::Type::Car) {
+                // C_player::Collision: the police collision lock may refuse
+                // it; a seated player returns at once.
+                human->CarCollision(car, contact, direction);
+            }
+            else if (!static_cast<const SDK::Seat::NativeHuman *>(static_cast<const void *>(actor))->usedActorEnter) {
+                human->SideJump(contact, direction);
+            }
+        }
     }
 
     void PlayerService::ReplaySeizures(World::WorldService &world) {
         const auto now = std::chrono::steady_clock::now();
         while (!_seizures.empty()) {
-            const auto seized = _seizures.front();
+            const auto seized = _seizures.front().seized;
+            const auto received = _seizures.front().received;
             _seizures.pop_front();
-            if (now - seized.received > std::chrono::seconds(2) || seized.missionGeneration != world.LoadedMissionGeneration()) {
+            if (now - received > std::chrono::seconds(2) || seized.missionGeneration != world.LoadedMissionGeneration()) {
                 continue;
             }
-            const auto current = _currentById.find(seized.networkId);
+            const auto outcome = seized.outcome == Shared::Npc::Caught::Outcome::Fine ? Shared::Npc::Caught::Outcome::Fine : Shared::Npc::Caught::Outcome::Arrest;
+            // The officer's half on its replica, where the host's stands.
+            static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->NpcReplicas().PlaySeizing(world, seized.officerNetworkId, seized.officer, outcome);
+            const auto current = _currentById.find(seized.targetNetworkId);
             const auto owned = current == _currentById.end() ? _ownedByNative.end() : _ownedByNative.find(current->second);
-            if (owned == _ownedByNative.end() || owned->second.spawnGeneration != seized.spawnGeneration) {
+            if (owned == _ownedByNative.end() || owned->second.spawnGeneration != seized.targetSpawnGeneration) {
                 continue;
             }
             auto *actor = static_cast<SDK::Player::NativeActor *>(world.NativeObjects().Resolve(owned->second.handle));
@@ -461,17 +528,35 @@ namespace Mafia1Online::Features::Player {
                 continue;
             }
             auto *human = static_cast<SDK::Player::NativeHuman *>(static_cast<void *>(actor));
-            if (!human->PlayAnimationOnce(Shared::Npc::SeizedAnimation(seized.fine ? Shared::Npc::Caught::Outcome::Fine : Shared::Npc::Caught::Outcome::Arrest))) {
-                continue;
+            // State 10 stood the target in front of the officer (SetPos,
+            // SetDir); its half lines up with the officer's only there. A
+            // seated player, or one already farther away, plays in place.
+            const auto position = SDK::Player::WorldPosition(actor);
+            const bool seated = static_cast<const SDK::Seat::NativeHuman *>(static_cast<const void *>(actor))->usedActorEnter != nullptr;
+            if (!seated && Shared::Npc::SeizedAlignable({position.x, position.y, position.z}, seized.target)) {
+                const auto place = seized.target.Position();
+                const auto facing = seized.target.Direction();
+                owned->second.frame->SetWorldPosition({place.x, place.y, place.z});
+                owned->second.frame->SetDirection({facing.x, facing.y, facing.z});
+                owned->second.frame->Update();
+                actor->SetStoredTransform({place.x, place.y, place.z}, {facing.x, facing.y, facing.z});
             }
             if (owned->second.local) {
                 // Retail locks its player at the grab (0x515d1f) and unlocks
-                // it when the fine ends (0x5172a8).
+                // it when the fine ends (0x5172a8); the weapon goes away
+                // before the cuffs (Do_Holster, 0x5171d4).
                 SDK::Police::LockPlayerControls(actor, true);
                 _localSeizedUntil = now + kSeizedLimit;
+                human->Holster();
             }
-            else {
-                HoldSeized(seized.networkId);
+            if (!human->PlayAnimationOnce(Shared::Npc::SeizedAnimation(outcome))) {
+                if (owned->second.local) {
+                    ReleaseLocalSeized(world, true);
+                }
+                continue;
+            }
+            if (!owned->second.local) {
+                HoldSeized(seized.targetNetworkId);
             }
         }
     }
@@ -547,12 +632,10 @@ namespace Mafia1Online::Features::Player {
     std::optional<PlayerService::RemoteAnimation> PlayerService::RemoteLocomotion(const RemoteStream &stream) const {
         // The state at the same render time as the interpolated pose, so a
         // stop, turn or jump plays where the body actually does it.
-        const MafiaNet::Time now   = MafiaNet::GetTime();
-        const auto delay           = static_cast<MafiaNet::Time>(stream.snapshots.EffectiveDelayMs());
-        const MafiaNet::Time time  = now > delay ? now - delay : 0;
+        const double time = stream.renderTime;
         std::optional<int16_t> state;
         for (const auto &[at, value] : stream.locomotion) {
-            if (at > time && state) {
+            if (static_cast<double>(at) > time && state) {
                 break;
             }
             state = value;
@@ -591,7 +674,17 @@ namespace Mafia1Online::Features::Player {
         case 99:
         case 100:
         case 101:
-        case 103: return RemoteAnimation {base, true};
+        case 103:
+        // A car's side jump (C_human::Do_SideJump 0x587040, GAME_ANIM_DODGE_*
+        // 322-329): once, as the owner's C_human::Update ends it on idle.
+        case 322:
+        case 323:
+        case 324:
+        case 325:
+        case 326:
+        case 327:
+        case 328:
+        case 329: return RemoteAnimation {base, true};
         default: break;
         }
         return RemoteAnimation {static_cast<int16_t>(Animation::Idle), false};
@@ -618,6 +711,12 @@ namespace Mafia1Online::Features::Player {
                 return;
             }
             _seizedUntil.erase(seized);
+        }
+        if (const auto aligned = _alignedUntil.find(networkId); aligned != _alignedUntil.end()) {
+            if (std::chrono::steady_clock::now() < aligned->second) {
+                return;
+            }
+            _alignedUntil.erase(aligned);
         }
         const auto owned = _ownedByNative.find(current->second);
         if (owned == _ownedByNative.end()) {
@@ -663,15 +762,18 @@ namespace Mafia1Online::Features::Player {
         glm::vec3 position  = pose.position;
         glm::vec3 direction = glm::mat3_cast(pose.rotation) * glm::vec3(0.0f, 0.0f, 1.0f);
         // Aboard a railway: on this client's copy of it, which runs a render
-        // delay of its own; the streamed world position would trail it.
-        if (const auto *entity = Framework::CoreModules::GetReplication()->GetEntity<Shared::Entities::PlayerEntity>(networkId);
-            entity && entity->railway != Shared::Railway::kNoRailway) {
-            const Railway::RailwayService::Ride ride {entity->railway, entity->railwayPart, entity->railwayLocal, entity->railwayYaw};
+        // delay of its own; the streamed world position would trail it. The
+        // offset is the one at this pose's render time, eased in and out of
+        // the world track while the body boards or steps off.
+        RemoteRide remoteRide;
+        float aboard = 0.0f;
+        if (const auto stream = _remote.find(networkId); stream != _remote.end() && RideAt(stream->second.rides, stream->second.renderTime, remoteRide, aboard)) {
+            const Railway::RailwayService::Ride ride {remoteRide.railway, remoteRide.part, remoteRide.local, remoteRide.yaw};
             glm::vec3 ridePosition;
             glm::vec3 rideDirection;
-            if (static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->Railways().PlaceRide(ride, ridePosition, rideDirection)) {
-                position  = ridePosition;
-                direction = rideDirection;
+            if (static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->Railways().PlaceRider(ride, ridePosition, rideDirection)) {
+                position  = glm::mix(position, ridePosition, aboard);
+                direction = glm::normalize(glm::mix(direction, rideDirection, aboard));
             }
         }
         owned->second.frame->SetWorldPosition({position.x, position.y, position.z});
@@ -753,10 +855,8 @@ namespace Mafia1Online::Features::Player {
         if (it == _remote.end()) {
             return false;
         }
-        const MafiaNet::Time now = MafiaNet::GetTime();
-        const auto delay         = static_cast<MafiaNet::Time>(it->second.snapshots.EffectiveDelayMs());
-        bool held                = false;
-        const bool sampled       = it->second.snapshots.Sample(now > delay ? now - delay : 0, out, &held);
+        bool held          = false;
+        const bool sampled = it->second.snapshots.Sample(it->second.renderTime, out, &held);
         if (sampled && held) {
             out.velocity = glm::vec3(0.0f);
         }
@@ -803,6 +903,8 @@ namespace Mafia1Online::Features::Player {
         _climbingUntil.clear();
         _seizures.clear();
         _seizedUntil.clear();
+        _alignedUntil.clear();
+        _bumps.clear();
         std::vector<uint64_t> current;
         current.reserve(_currentById.size());
         for (const auto &[id, native] : _currentById) {

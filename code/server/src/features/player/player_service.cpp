@@ -9,6 +9,7 @@
 #include "shared/features/player/player_movement.h"
 #include "shared/features/player/player_native_pose.h"
 #include "shared/features/railway/railway_report.h"
+#include "shared/net/sample_clock.h"
 
 #include <core_modules.h>
 #include <logging/logger.h>
@@ -195,6 +196,8 @@ namespace Mafia1Online::Features::Player {
         }
         ++player->spawnGeneration;
         player->missionGeneration = missionGeneration;
+        player->spawnPosition     = position;
+        player->spawnYaw          = yaw;
         player->position          = position;
         player->velocity          = glm::vec3(0.0f);
         player->rotation          = glm::angleAxis(yaw, glm::vec3(0.0f, 1.0f, 0.0f));
@@ -375,6 +378,10 @@ namespace Mafia1Online::Features::Player {
             return;
         }
         const auto now = std::chrono::steady_clock::now();
+        // What observers hold now: an unchanged pose keeps its sample clock,
+        // so a player standing still is not sent again every report.
+        MafiaNet::BitStream before;
+        Shared::Net::WriteTransform(*player, before);
         // Aboard a railway: a wagon is about 15 units long; a seat never
         // holds both a car and a railway, and the railway the host reported
         // must be at the player.
@@ -420,6 +427,7 @@ namespace Mafia1Online::Features::Player {
         player->railwayPart  = riding ? movement.railwayPart : 0;
         player->railwayLocal = riding ? railwayLocal : glm::vec3(0.0f);
         player->railwayYaw   = riding ? movement.railwayYaw : 0.0f;
+        Shared::Net::AdvanceSampleClock(*player, before, movement.clockMs);
         session.lastSequence = movement.sequence;
         session.hasSequence  = true;
         session.lastMovement = now;

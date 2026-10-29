@@ -42,3 +42,19 @@ target_link_libraries(Mafia1OnlinePumperReportTests PRIVATE Framework::Framework
 add_executable(Mafia1OnlineTaxiProtocolTests taxi_protocol_tests.cpp)
 target_include_directories(Mafia1OnlineTaxiProtocolTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(Mafia1OnlineTaxiProtocolTests PRIVATE Framework::Framework)
+
+add_executable(Mafia1OnlineNetworkWireTests network_wire_tests.cpp)
+target_include_directories(Mafia1OnlineNetworkWireTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+target_link_libraries(Mafia1OnlineNetworkWireTests PRIVATE Framework::Framework)
+
+# The Framework's own snapshot buffer module, when the Framework is built from
+# a checkout alongside: its interpolation is what every replica here runs on.
+if(FW_SOURCE_DIR)
+    add_executable(Mafia1OnlineSnapshotBufferTests snapshot_buffer_tests.cpp)
+    target_include_directories(Mafia1OnlineSnapshotBufferTests PRIVATE "${FW_SOURCE_DIR}/code/tests")
+    target_link_libraries(Mafia1OnlineSnapshotBufferTests PRIVATE Framework::Framework)
+endif()
+
+add_executable(Mafia1OnlineContactSyncTests contact_sync_tests.cpp)
+target_include_directories(Mafia1OnlineContactSyncTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+target_link_libraries(Mafia1OnlineContactSyncTests PRIVATE Framework::Framework)

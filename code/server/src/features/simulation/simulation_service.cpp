@@ -63,6 +63,9 @@ namespace Mafia1Online::Features::Simulation {
         // The host drives traffic near every player, so it must receive the
         // range-streamed cars it controls wherever they are on the map.
         _viewer->streaming.range = kViewerRange;
+        // It simulates for every player, so it needs the whole set at full
+        // rate: no budget cuts and no distance bands from its far origin.
+        _viewer->streaming.unthrottled = true;
         _viewer->SetVirtualWorld(MafiaNet::VIRTUAL_WORLD_GLOBAL);
         replication->SetViewer(guid, _viewer);
         _host = guid;

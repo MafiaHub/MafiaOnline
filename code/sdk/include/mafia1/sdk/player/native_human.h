@@ -3,6 +3,7 @@
 #include <mafia1/sdk/core/mission.h>
 #include <mafia1/sdk/player/native_actor.h>
 #include <mafia1/sdk/player/native_inventory.h>
+#include <mafia1/sdk/sound/native_sound.h>
 
 #include <cstdint>
 
@@ -62,6 +63,18 @@ namespace Mafia1Online::SDK::Player {
     // bool __thiscall(C_human*), plain ret: probes the wall and ledge ahead of
     // m_vPosition/m_vDirection and starts climb animation 104 or 105.
     inline constexpr uintptr_t kHumanDoClimb        = 0x586400;
+    // void __thiscall C_human::NewScream(unsigned screamId), retn 4 (reM
+    // C_human.cpp:11991): plays voices.def group screamId - 2 in m_uVoice
+    // (+0x680) as "%08lu.wav" on the human's own sound frame (+0x6cc). It
+    // returns quietly when screams are disabled (+0x684), the sound frame is
+    // missing, (C_game +0x3628 & m_uScreamMask +0x9a0) is 0, the group is
+    // out of range or has no sound for this voice, or a line of equal or
+    // higher priority (+0x6d0) is playing (an unsigned compare). Nothing
+    // resets that priority when a line ends, so a group above 500 silences
+    // the human until something lowers it (NativeHuman::Say does).
+    inline constexpr uintptr_t kHumanNewScream = 0x58b470;
+    // voices.def holds S_voice_definition {uint priority; uint sounds[40]}.
+    inline constexpr uint32_t kHumanVoiceCount = 40;
     inline constexpr int32_t kClimbLowAnimation     = 104;
     inline constexpr int32_t kClimbHighAnimation    = 105;
     // C_human::Can_SpecialStroke: C_human* __fastcall(C_human*, bool), plain
@@ -69,6 +82,31 @@ namespace Mafia1Online::SDK::Player {
     // health directly and bypass C_human::Hit.
     inline constexpr uintptr_t kHumanCanSpecialStroke = 0x584010;
     inline constexpr uintptr_t kDefaultAnimEvents   = 0x6368D0;
+    // C_human::Collision: bool __thiscall(C_human*, C_actor*, const S_vector&
+    // position, const S_vector& direction, const S_vector& normal, float,
+    // I3D_frame*), retn 18h (IDA 0x5784a0; C_player::Collision 0x5941c0
+    // forwards its six arguments and returns with retn 18h). For a car
+    // (actor type 4) it returns at once for a human in a car (+0x98); below
+    // |direction| 3 it pushes the human out of the car's frame (only while
+    // no hit track plays) and calls Do_SideJump(position, direction); from 3
+    // it calls Hit(HIT_TYPE_SNIPER, (|v| - 2.5) * 4.2). Either way sound 184
+    // at 5 and, for a dead human with the police active,
+    // C_shvestky::NextNaSrackySoudruh(the car's driver).
+    inline constexpr uintptr_t kHumanCollision = 0x5784A0;
+    // C_player::Collision: the same, unless the police collision lock
+    // (+0xada) is set and ai_police_nastenka::SemTrefenaLocklaKurva refuses.
+    inline constexpr uintptr_t kPlayerCollision = 0x5941C0;
+    // C_human::Do_SideJump(const S_vector& position, const S_vector&
+    // direction), __thiscall, retn 8: unless boxed, carrying a body or
+    // already dodging (animation id 322-329), sets the animation state (+0x74)
+    // to the dodge away from the direction (GAME_ANIM_DODGE_* 322-329).
+    inline constexpr uintptr_t kHumanDoSideJump = 0x587040;
+    inline constexpr int32_t kHumanSideJumpFirstAnimation = 322;
+    inline constexpr int32_t kHumanSideJumpLastAnimation  = 329;
+    // C_human::Do_Holster, __thiscall, plain ret: puts the selected weapon
+    // away (G_Inventory::Holster); what does not fit drops (DropOutItems,
+    // which PickupService routes to the server).
+    inline constexpr uintptr_t kHumanDoHolster = 0x585C60;
 
     struct NativeItemProperty {
         int32_t type;
@@ -159,6 +197,38 @@ namespace Mafia1Online::SDK::Player {
         }
         void SetHealth(float health) {
             _health = health;
+        }
+        // m_iRailwayFrameIndex: the railway frame a rider is linked to, 0
+        // the body and n wagon n - 1 (NativeRailway::Vagon).
+        [[nodiscard]] uint32_t RailwayFrameIndex() const {
+            return _railwayFrameIndex;
+        }
+        // m_uVoice indexes each voices.def group's 40 sounds; NewScream does
+        // not range-check it. C_human::SetVoice is an inline plain store.
+        [[nodiscard]] uint32_t Voice() const {
+            return _voice;
+        }
+        void SetVoice(uint32_t voice) {
+            _voice = voice < kHumanVoiceCount ? voice : _voice;
+        }
+        // Says voices.def line `screamId` (the id NewScream takes, group + 2)
+        // now, cutting off whatever line it was saying. True when the line
+        // started: false when the human cannot speak (screams disabled, no
+        // sound frame, scream mask off) or its voice has no sound for it.
+        bool Say(uint32_t screamId) {
+            if (_screamDisabled || _screamSound == nullptr) {
+                return false;
+            }
+            // NewScream refuses any line while one of equal or higher
+            // priority plays (an unsigned compare) and every line once the
+            // priority is above 500. Stopping the playing line (SetOn(false,
+            // true) sets I3D_sound's state to stopped, so IsPlaying(false)
+            // reads false) and dropping the priority to 0 lets this one in.
+            _screamSound->Stop();
+            _screamPriority = 0;
+            reinterpret_cast<void(__thiscall *)(NativeHuman *, uint32_t)>(kHumanNewScream)(this, screamId);
+            // NewScream ends with SetOn(true, true) only when the wave opened.
+            return _screamSound->IsPlaying();
         }
         [[nodiscard]] float ShotCount() const {
             return _shotCount;
@@ -322,6 +392,23 @@ namespace Mafia1Online::SDK::Player {
         void Breathe() {
             reinterpret_cast<void(__thiscall *)(NativeHuman *)>(kHumanDoBreath)(this);
         }
+        // Retail's car contact on this human (kHumanCollision): the car's
+        // velocity as the direction; null frame as C_Vehicle passes it for a
+        // body contact. A player goes through C_player::Collision.
+        bool CarCollision(NativeActor *car, const Vector3 &contact, const Vector3 &velocity) {
+            using Call = bool(__thiscall *)(NativeHuman *, NativeActor *, const Vector3 &, const Vector3 &, const Vector3 &, float, void *);
+            const Vector3 normal {-velocity.x, -velocity.y, -velocity.z};
+            return reinterpret_cast<Call>(_actor.IsPlayer() ? kPlayerCollision : kHumanCollision)(this, car, contact, velocity, normal, 0.0f, nullptr);
+        }
+        void SideJump(const Vector3 &contact, const Vector3 &direction) {
+            reinterpret_cast<void(__thiscall *)(NativeHuman *, const Vector3 &, const Vector3 &)>(kHumanDoSideJump)(this, contact, direction);
+        }
+        [[nodiscard]] bool IsSideJumping() const {
+            return _animationState >= kHumanSideJumpFirstAnimation && _animationState <= kHumanSideJumpLastAnimation;
+        }
+        void Holster() {
+            reinterpret_cast<void(__thiscall *)(NativeHuman *)>(kHumanDoHolster)(this);
+        }
         // PERSON_STOPANIM.
         void StopAnimation() {
             reinterpret_cast<bool(__thiscall *)(NativeHuman *)>(kHumanDoStopAnimation)(this);
@@ -378,10 +465,20 @@ namespace Mafia1Online::SDK::Player {
         int32_t _actionTimeRemaining;
         std::byte _unused450[0x480 - 0x450];
         NativeInventory _inventory;
-        std::byte _unused564[0xdc];
+        std::byte _unused564[0x584 - 0x564];
+        uint32_t _railwayFrameIndex;
+        std::byte _unused588[0x640 - 0x588];
         float _strength;
         float _health;
-        std::byte _unused648[0x364];
+        std::byte _unused648[0x680 - 0x648];
+        uint32_t _voice;
+        bool _screamDisabled;
+        std::byte _unused685[0x6cc - 0x685];
+        Sound::NativeSound *_screamSound;
+        int32_t _screamPriority;
+        std::byte _unused6d4[0x9a0 - 0x6d4];
+        uint16_t _screamMask;
+        std::byte _unused9a2[0x9ac - 0x9a2];
         float _shotCount;
     };
     static_assert(offsetof(NativeHuman, _animationId) == 0x70);
@@ -405,6 +502,12 @@ namespace Mafia1Online::SDK::Player {
     static_assert(offsetof(NativeHuman, _fallSpeed) == 0x418);
     static_assert(offsetof(NativeHuman, _inventory) == 0x480);
     static_assert(offsetof(NativeHuman, _health) == 0x644);
+    static_assert(offsetof(NativeHuman, _railwayFrameIndex) == 0x584);
+    static_assert(offsetof(NativeHuman, _voice) == 0x680);
+    static_assert(offsetof(NativeHuman, _screamDisabled) == 0x684);
+    static_assert(offsetof(NativeHuman, _screamSound) == 0x6cc);
+    static_assert(offsetof(NativeHuman, _screamPriority) == 0x6d0);
+    static_assert(offsetof(NativeHuman, _screamMask) == 0x9a0);
     static_assert(offsetof(NativeHuman, _shotCount) == 0x9ac);
 
     inline NativeActor *CurrentPlayer() {

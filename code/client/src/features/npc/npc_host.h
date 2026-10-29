@@ -44,6 +44,9 @@ namespace Mafia1Online::Features::Npc {
     class NpcHost final {
       public:
         static constexpr std::chrono::milliseconds kSnapshotInterval {100};
+        // A grabbed player's replica keeps the place state 10 gave it this
+        // long, or until the animations start (OnSeized holds it on).
+        static constexpr std::chrono::seconds kArrestAlignHold {4};
         // An officer keeps a new target at least this long before another
         // attacker can take it over.
         static constexpr std::chrono::seconds kRedirectHold {5};
@@ -124,6 +127,12 @@ namespace Mafia1Online::Features::Npc {
         // After a native Hit on one of them.
         void OnHit(World::WorldService &world, SDK::Player::NativeHuman &npc, SDK::Player::NativeHitType type, const SDK::Player::Vector3 &direction, float damage,
                    SDK::Player::NativeActor *attacker, uint32_t bodyPart, float healthBefore);
+        // A player's car the server checked ran into a human this host
+        // runs (one of its NPCs, or a player's replica) at `speed`: what the
+        // driven car's own collision would have told the police here
+        // (C_shvestky::CarCollision's human crash, and a run-over counted on
+        // a kill), as the host's copy of the car runs no physics.
+        void ReportCarContact(SDK::Player::NativeActor *car, SDK::Player::NativeActor *victim, float speed, bool killed);
         // Retail threw a player's replica out of its network car seat.
         void OnKick(SDK::Player::NativeActor *thrower, uint64_t carId, uint8_t seat, uint64_t victimId, uint64_t victimSpawnGeneration);
         // A police officer grabbed a player's replica for an arrest or a fine

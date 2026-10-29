@@ -4,6 +4,7 @@
 #include "shared/features/car/car_hit_report.h"
 #include "shared/features/car/car_mesh_checkpoint.h"
 #include "shared/features/car/seat_action.h"
+#include "shared/features/combat/vehicle_impact.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -42,10 +43,12 @@ namespace Mafia1Online::Features::Car {
         bool ValidateHitGeometry(const Shared::Car::HitReport &report,
                                  std::chrono::steady_clock::time_point acceptedAt) const;
         // Match an impact against a recent accepted car pose and its native
-        // body bounds. The returned speed belongs to that matching pose.
+        // body bounds, moving at minSpeed or faster (a bump takes a slower
+        // pose than an impact). The returned speed belongs to that pose.
         std::optional<float> ValidateVehicleImpactGeometry(uint64_t carId, uint64_t missionGeneration,
                                                             const glm::vec3 &contact, const glm::vec3 &targetPosition,
-                                                            std::chrono::steady_clock::time_point receivedAt) const;
+                                                            std::chrono::steady_clock::time_point receivedAt,
+                                                            float minSpeed = Shared::Combat::kVehicleImpactMinSpeed) const;
         void SendMeshCheckpoint(uint64_t networkId, uint64_t recipientGuid) const;
         void TransferController(uint64_t formerGuid, uint64_t replacementGuid);
         void AssignUncontrolled(uint64_t controllerGuid);

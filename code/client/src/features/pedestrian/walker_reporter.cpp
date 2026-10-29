@@ -4,6 +4,7 @@
 
 #include "shared/features/pedestrian/pedestrian_entity.h"
 #include "shared/features/pedestrian/pedestrian_report.h"
+#include "shared/net/sample_clock.h"
 
 #include <core_modules.h>
 #include <logging/logger.h>
@@ -131,6 +132,7 @@ namespace Mafia1Online::Features::Pedestrian {
         auto *network = Framework::CoreModules::GetNetworkPeer();
         Shared::Pedestrian::Snapshot snapshot;
         snapshot.missionGeneration = missionGeneration;
+        snapshot.hostClockMs = Shared::Net::SampleClock(MafiaNet::GetTime());
         const auto flush = [&] {
             if (snapshot.count) {
                 network->BroadcastRPC(snapshot, MafiaNet::Priority::High, MafiaNet::Reliability::Unreliable);

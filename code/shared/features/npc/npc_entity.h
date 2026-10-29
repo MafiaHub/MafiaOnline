@@ -1,5 +1,7 @@
 #pragma once
 
+#include "shared/net/quantize.h"
+
 #include <networking/replication/network_entity.h>
 
 #include <algorithm>
@@ -74,10 +76,43 @@ namespace Mafia1Online::Shared::Entities {
         std::string animation;
         bool animationLoop = false;
         uint16_t animationRevision = 0;
+        // Retail's voice for it (C_human m_uVoice, +0x680): which of the 40
+        // sounds of each voices.def line it says. Chosen once at spawn, so
+        // one NPC always speaks with the same voice.
+        static constexpr uint8_t kVoiceCount   = 40;
+        static constexpr uint8_t kDefaultVoice = 12;
+        uint8_t voice = kDefaultVoice;
+        // npc.say: the line (a C_human::NewScream id, voices.def group + 2)
+        // and a count each say bumps; every copy that streams the NPC says
+        // it on a new count, and a copy constructed later does not.
+        static constexpr uint16_t kMinSpeechLine = 2;
+        static constexpr uint16_t kMaxSpeechLine = 1023;
+        uint16_t speechLine = 0;
+        uint16_t speechRevision = 0;
 
+        // The host's sample clock for this pose (Shared::Net).
+        uint16_t sampleClock = 0;
+        // Server only: the simulation host whose snapshots move it.
+        MafiaNet::PeerGuid poseSource = MafiaNet::UNASSIGNED_PEER_GUID;
+
+        MafiaNet::PeerGuid GetTransformSource() const override {
+            return poseSource;
+        }
+
+        // 14 bytes (43 as raw floats): a walker's pose plus the locomotion.
         void SerializeTransform(Framework::Networking::Replication::FieldSerializer &fields) override {
-            NetworkEntity::SerializeTransform(fields);
-            fields.Field(locomotion);
+            auto *stream = fields.PlainStream();
+            if (!stream) {
+                NetworkEntity::SerializeTransform(fields);
+                fields.Field(sampleClock);
+                fields.Field(locomotion);
+                return;
+            }
+            const bool write = fields.Writing();
+            if (!Net::SerializeWorldPosition(stream, write, position) || !Net::SerializeHeading(stream, write, rotation, 10) ||
+                !Net::SerializeGroundSpeed(stream, write, rotation, velocity) || !stream->Serialize(write, sampleClock) || !stream->Serialize(write, locomotion)) {
+                fields.Fail();
+            }
         }
 
         void OnSerializeConstruction(Framework::Networking::Replication::FieldSerializer &fields) override {
@@ -94,8 +129,14 @@ namespace Mafia1Online::Shared::Entities {
             fields.Field(throwAgeMs);
             fields.Field(alive);
             SerializeAnimation(fields);
+            fields.Field(voice);
+            fields.Field(speechLine);
+            fields.Field(speechRevision);
             if (!fields.Writing()) {
                 kind = static_cast<NpcKind>(kindValue);
+                if (voice >= kVoiceCount) {
+                    voice = kDefaultVoice;
+                }
                 if (model.size() > kMaxModelLength) {
                     model.clear();
                 }
@@ -105,6 +146,8 @@ namespace Mafia1Online::Shared::Entities {
         void SerializeFields(Framework::Networking::Replication::FieldSerializer &fields) override {
             fields.Field(alive);
             SerializeAnimation(fields);
+            fields.Field(speechLine);
+            fields.Field(speechRevision);
         }
 
       private:

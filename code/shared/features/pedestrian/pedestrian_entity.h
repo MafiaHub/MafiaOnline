@@ -1,5 +1,7 @@
 #pragma once
 
+#include "shared/net/quantize.h"
+
 #include <networking/replication/network_entity.h>
 
 #include <cstdint>
@@ -27,6 +29,31 @@ namespace Mafia1Online::Shared::Entities {
         // Waving for a taxi (Shared::Taxi::kWave*): the retail "MavaniNN
         // HPT.i3d" extended animation, 0 for none.
         uint8_t taxiWave = 0;
+        // The host's sample clock for this pose (Shared::Net).
+        uint16_t sampleClock = 0;
+        // Server only: the simulation host whose snapshots move it.
+        MafiaNet::PeerGuid poseSource = MafiaNet::UNASSIGNED_PEER_GUID;
+
+        MafiaNet::PeerGuid GetTransformSource() const override {
+            return poseSource;
+        }
+
+        // 12 bytes (41 as raw floats): position at 1/64 m, yaw in 10 bits and
+        // the ground speed along it, which is all the server builds the
+        // velocity from.
+        void SerializeTransform(Framework::Networking::Replication::FieldSerializer &fields) override {
+            auto *stream = fields.PlainStream();
+            if (!stream) {
+                NetworkEntity::SerializeTransform(fields);
+                fields.Field(sampleClock);
+                return;
+            }
+            const bool write = fields.Writing();
+            if (!Net::SerializeWorldPosition(stream, write, position) || !Net::SerializeHeading(stream, write, rotation, 10) ||
+                !Net::SerializeGroundSpeed(stream, write, rotation, velocity) || !stream->Serialize(write, sampleClock)) {
+                fields.Fail();
+            }
+        }
 
         void OnSerializeConstruction(Framework::Networking::Replication::FieldSerializer &fields) override {
             fields.Field(model);

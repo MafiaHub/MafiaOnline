@@ -8,6 +8,7 @@
 
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <unordered_map>
@@ -50,9 +51,12 @@ namespace Mafia1Online::Features::Railway {
             }
         }
         // A position within kBoardReach of the body or a wagon of a railway
-        // the host reported.
+        // the host reported, widened by how far the railway runs in a second:
+        // the host's report and the rider's are each up to a ping old, and a
+        // metro at speed would otherwise drop a rider's ride.
         [[nodiscard]] bool IsNear(uint8_t index, const glm::vec3 &position) const {
-            return index < Shared::Railway::kMaxRailways && _known[index] && DistanceTo(index, position) <= Shared::Railway::kBoardReach;
+            return index < Shared::Railway::kMaxRailways && _known[index] &&
+                   DistanceTo(index, position) <= Shared::Railway::kBoardReach + std::abs(_latest[index].speed) * kRiderLagSeconds;
         }
         // An applied hit of a railway on a player: playerId, index, damage.
         void SetHitCallback(std::function<void(uint64_t, uint8_t, float)> callback) {
@@ -60,11 +64,15 @@ namespace Mafia1Online::Features::Railway {
         }
 
       private:
+        static constexpr float kRiderLagSeconds = 1.0f;
+
         bool FromHost(MafiaNet::PeerGuid sender, uint64_t missionGeneration) const;
         // Player <-> host: stepping aboard locks the host's railway.
         void RegisterBoarding();
         // Host -> players near: each railway's passengers.
         void RegisterPassengers();
+        // A player's ShotHit names a reported railway's part and lies on it.
+        [[nodiscard]] bool ShotHitPlausible(const Shared::Railway::ShotHit &shot) const;
         // From the body or the nearest wagon of a reported railway.
         [[nodiscard]] float DistanceTo(uint8_t index, const glm::vec3 &position) const;
         void Forward(const Shared::Railway::Snapshot &snapshot);

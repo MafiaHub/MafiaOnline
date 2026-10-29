@@ -6,10 +6,12 @@
 #include "police_host.h"
 
 #include "features/combat/combat_hooks.h"
+#include "shared/net/sample_clock.h"
 #include "features/death/death_service.h"
 #include "core/application.h"
 #include "features/world/world_service.h"
 #include "shared/features/car/car_entity.h"
+#include "shared/features/combat/vehicle_impact.h"
 #include "shared/features/npc/npc_melee.h"
 #include "shared/features/npc/npc_seized.h"
 #include "shared/features/player/player_entity.h"
@@ -171,11 +173,44 @@ namespace Mafia1Online::Features::Npc {
                     continue;
                 }
                 auto *attacker = static_cast<NativeActor *>(_world->NativeObjects().Resolve(_world->NativeObjects().FindByNetwork(hit.attackerId)));
+                const Vector3 direction {hit.directionX, hit.directionY, hit.directionZ};
+                const Vector3 contact {hit.x, hit.y, hit.z};
+                const float speed = std::sqrt(direction.x * direction.x + direction.y * direction.y + direction.z * direction.z);
+                auto *car = attacker && attacker->GetType() == NativeActor::Type::Car ? attacker : nullptr;
+                // The server's alive flag trails the host's: an NPC already
+                // dead here is a corpse, which the police do not count again.
+                const bool aliveBefore = !static_cast<NativeActor *>(native)->IsDead() && AsHuman(native).Health() > 0.0f;
+                if (hit.hitType == Shared::Npc::Hit::kCarBump) {
+                    // C_human::Collision's slow branch, as the player's car
+                    // would have run it here: out of the car's frame and a
+                    // side jump; a seated NPC returns at once. Without this
+                    // host's copy of the car only the side jump plays. Not on
+                    // a corpse: Collision counts a dead human as run over
+                    // again (NextNaSrackySoudruh, 0x578a3b).
+                    if (!aliveBefore || !std::isfinite(speed) || speed >= Shared::Combat::kVehicleImpactMinSpeed || !std::isfinite(contact.x) ||
+                        !std::isfinite(contact.y) || !std::isfinite(contact.z)) {
+                        return;
+                    }
+                    if (car) {
+                        AsHuman(native).CarCollision(car, contact, direction);
+                    }
+                    else if (!static_cast<const SDK::Seat::NativeHuman *>(native)->usedActorEnter) {
+                        AsHuman(native).SideJump(contact, direction);
+                    }
+                    ReportCarContact(car, static_cast<NativeActor *>(native), speed, false);
+                    Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->debug("NPC {} bumped by car {} at {:.1f} m/s: animation {}", tracked.key, hit.attackerId, speed,
+                                                                               AsHuman(native).AnimationState());
+                    return;
+                }
                 // Retail C_human::Collision enters a car impact as HIT_TYPE_SNIPER.
-                const auto type = hit.hitType == 1 ? SDK::Player::NativeHitType::HardKnockdown :
-                                  hit.hitType == 4 ? SDK::Player::NativeHitType::Sniper : SDK::Player::NativeHitType::Generic;
+                const auto type = hit.hitType == Shared::Npc::Hit::kMeleeKnockdown ? SDK::Player::NativeHitType::HardKnockdown :
+                                  hit.hitType == Shared::Npc::Hit::kCarImpact ? SDK::Player::NativeHitType::Sniper : SDK::Player::NativeHitType::Generic;
                 const float before = AsHuman(native).Health();
-                Death::ApplyAuthoritativeHit(AsHuman(native), type, {hit.directionX, hit.directionY, hit.directionZ}, {hit.x, hit.y, hit.z}, hit.damage, attacker, hit.bodyPart);
+                Death::ApplyAuthoritativeHit(AsHuman(native), type, direction, contact, hit.damage, attacker, hit.bodyPart);
+                if (hit.hitType == Shared::Npc::Hit::kCarImpact && aliveBefore) {
+                    const bool killed = static_cast<NativeActor *>(native)->IsDead() || AsHuman(native).Health() <= 0.0f;
+                    ReportCarContact(car, static_cast<NativeActor *>(native), speed, killed);
+                }
                 Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->debug("NPC {} hit by {} (type {}, part {}, damage {:.1f}): health {:.1f} -> {:.1f}", tracked.key, hit.attackerId,
                                                                            hit.hitType, hit.bodyPart, hit.damage, before, AsHuman(native).Health());
                 return;
@@ -274,6 +309,7 @@ namespace Mafia1Online::Features::Npc {
         spawned.inventory = tracked.inventory;
         spawned.walkerKey = walkerKey;
         spawned.carId = carId;
+        spawned.hostClockMs = Shared::Net::SampleClock(MafiaNet::GetTime());
         // Ahead of the walker's Retired, which the reporter sends on its next
         // pass, so the server links the two before the walker goes.
         Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(spawned);
@@ -960,6 +996,26 @@ namespace Mafia1Online::Features::Npc {
         }
     }
 
+    void NpcHost::ReportCarContact(NativeActor *car, NativeActor *victim, float speed, bool killed) {
+        auto *game = SDK::Core::Mission::Get()->Game();
+        auto *police = game ? SDK::Police::PoliceManager(game) : nullptr;
+        if (!police || !police->IsActive() || !car || car->GetType() != NativeActor::Type::Car || !victim || !std::isfinite(speed)) {
+            return;
+        }
+        // Only a player's replica at the wheel has a record here.
+        auto *driver = static_cast<SDK::Seat::NativeCar *>(static_cast<void *>(car))->GetOwner(0);
+        if (!driver || !_policePersons.contains(driver)) {
+            return;
+        }
+        police->ReportCarCollision(driver, car, victim, speed);
+        // C_human::Collision 0x5784a0 counts the run-over once the human is
+        // dead (C_shvestky::NextNaSrackySoudruh); here once, for the contact
+        // that killed it.
+        if (killed) {
+            police->CountRunOver(driver);
+        }
+    }
+
     void NpcHost::OnGrab(NativeActor *officer, NativeActor *target) {
         const auto found = _npcs.find(officer);
         if (found == _npcs.end() || !_policePersons.contains(target)) {
@@ -970,6 +1026,14 @@ namespace Mafia1Online::Features::Npc {
         found->second.policeTickAt = std::chrono::steady_clock::now();
         // Unpunished, as OnCaught explains.
         SDK::Police::PoliceManager(SDK::Core::Mission::Get()->Game())->SettleRecord(target, false);
+        // State 10 places the replica in front of the officer (SetPos and
+        // SetDir on both) and state 11 starts both halves from there; the
+        // player's pose stream would pull it back in between.
+        if (_world) {
+            if (const auto victim = _world->NativeObjects().FindByNative(target); victim.networkId) {
+                static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->Players().HoldAligned(victim.networkId, kArrestAlignHold);
+            }
+        }
     }
 
     void NpcHost::ClearPlayerCrimes(SDK::Police::NativePoliceManager &police) {
@@ -1105,6 +1169,15 @@ namespace Mafia1Online::Features::Npc {
         seized.targetNetworkId = victim.networkId;
         seized.targetSpawnGeneration = player->spawnGeneration;
         seized.outcome = outcome;
+        // Both stand where state 10 put them (C_entity::actionTick's
+        // AI_POLICE_ARREST_WALK); players start both halves from there.
+        const auto pose = [](NativeActor *actor) {
+            const auto position = SDK::Player::WorldPosition(actor);
+            const auto direction = SDK::Player::WorldDirection(actor);
+            return Shared::Npc::Seized::Pose {position.x, position.y, position.z, std::atan2(direction.x, direction.z)};
+        };
+        seized.officer = pose(officer);
+        seized.target = pose(target);
         Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(seized, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
     }
 
@@ -1163,6 +1236,7 @@ namespace Mafia1Online::Features::Npc {
         auto *network = Framework::CoreModules::GetNetworkPeer();
         Shared::Npc::Snapshot snapshot;
         snapshot.missionGeneration = _missionGeneration;
+        snapshot.hostClockMs = Shared::Net::SampleClock(MafiaNet::GetTime());
         for (auto &[native, tracked] : _npcs) {
             auto *actor = static_cast<NativeActor *>(native);
             auto &human = AsHuman(native);

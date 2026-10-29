@@ -15,6 +15,7 @@
 #include <logging/logger.h>
 #include <mafia1/sdk/core/game.h>
 #include <mafia1/sdk/core/mission.h>
+#include <mafia1/sdk/police/native_police_manager.h>
 #include <mafia1/sdk/seat/native_seat.h>
 #include <mafia1/sdk/traffic/native_traffic.h>
 #include <networking/network_peer.h>
@@ -318,9 +319,22 @@ namespace Mafia1Online::Features::Pedestrian {
             // C_game's player (0x45891e-0x458948): here, that driver's replica.
             auto *game = SDK::Core::Mission::Get()->Game();
             auto *driver = static_cast<SDK::Seat::NativeCar *>(static_cast<void *>(car))->GetOwner(0);
+            auto *police = SDK::Police::PoliceManager(game);
+            // C_don_ocas::Collision 0x44ca50 runs before the Hit: a beat cop
+            // (pedestrian type 1 or 3) run into is a hit patrolman for the
+            // driver (DalJsemPochuzkariDoDrzky).
+            const uint8_t type = element->PedestrianType();
+            if (driver && (type == SDK::Traffic::kPolicePedestrian || type == SDK::Traffic::kPoliceSecondaryPedestrian)) {
+                police->ReportPatrolmanHit(driver);
+            }
             auto *previous = game->ExchangePlayer(driver);
             reinterpret_cast<ElementHit>(SDK::Traffic::kElementHit)(element, kCarImpactHit, &direction, kTorso, car, speed * kCarImpactDamageScale);
             game->ExchangePlayer(previous);
+            // ...and after it, a walker it killed counts as a run-over
+            // (NextNaSrackySoudruh) while the police are active.
+            if (driver && element->Health() <= 0.0f && police->IsActive()) {
+                police->CountRunOver(driver);
+            }
         });
         network->RegisterRPC<Shared::Pedestrian::Remove>([this](const Shared::Pedestrian::Remove &remove, MafiaNet::Packet *) {
             if (Simulation::IsHost() && _world && remove.missionGeneration == _world->LoadedMissionGeneration()) {

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "shared/net/quantize.h"
+
 #include <networking/rpc/rpc.h>
 
 #include <array>
@@ -50,42 +52,59 @@ namespace Mafia1Online::Shared::Car {
         // Door target per seat, 0 closed to 255 fully open; 0 without a door.
         std::array<uint8_t, 8> doorTargets {};
 
+        // Fuel, tank, gearbox, limiter and doors change seldom: they ride
+        // only when one changed or a second has passed (and always until the
+        // server has the car's dynamics), and the server keeps its own copy
+        // otherwise.
+        bool slowFields = true;
+
+        // About 50 bytes (147 before), 70 with the slow fields: ids
+        // compressed, the pose quantized as CarEntity's transform.
         void Serialize(MafiaNet::BitStream *stream, bool write) {
-            stream->Serialize(write, networkId);
-            stream->Serialize(write, missionGeneration);
-            stream->Serialize(write, transformRevision);
-            stream->Serialize(write, dynamicsCommandRevision);
+            stream->SerializeCompressed(write, networkId);
+            stream->SerializeCompressed(write, missionGeneration);
+            stream->SerializeCompressed(write, transformRevision);
+            stream->SerializeCompressed(write, dynamicsCommandRevision);
             stream->Serialize(write, sequence);
             stream->Serialize(write, clockMs);
-            stream->Serialize(write, x);
-            stream->Serialize(write, y);
-            stream->Serialize(write, z);
-            stream->Serialize(write, qw);
-            stream->Serialize(write, qx);
-            stream->Serialize(write, qy);
-            stream->Serialize(write, qz);
-            stream->Serialize(write, velocityX);
-            stream->Serialize(write, velocityY);
-            stream->Serialize(write, velocityZ);
-            stream->Serialize(write, angularVelocityX);
-            stream->Serialize(write, angularVelocityY);
-            stream->Serialize(write, angularVelocityZ);
-            stream->Serialize(write, steeringInput);
-            stream->Serialize(write, fuel);
-            stream->Serialize(write, fuelTankCapacity);
-            stream->Serialize(write, engineRotations);
+            glm::vec3 position {x, y, z};
+            glm::quat rotation {qw, qx, qy, qz};
+            Net::SerializeWorldPosition(stream, write, position);
+            Net::SerializeQuat(stream, write, rotation, 10);
+            Net::SerializeFixed(stream, write, velocityX, -128.0f, 128.0f, 16);
+            Net::SerializeFixed(stream, write, velocityY, -128.0f, 128.0f, 16);
+            Net::SerializeFixed(stream, write, velocityZ, -128.0f, 128.0f, 16);
+            Net::SerializeFixed(stream, write, angularVelocityX, -32.0f, 32.0f, 12);
+            Net::SerializeFixed(stream, write, angularVelocityY, -32.0f, 32.0f, 12);
+            Net::SerializeFixed(stream, write, angularVelocityZ, -32.0f, 32.0f, 12);
+            if (!write) {
+                x  = position.x;
+                y  = position.y;
+                z  = position.z;
+                qw = rotation.w;
+                qx = rotation.x;
+                qy = rotation.y;
+                qz = rotation.z;
+            }
+            Net::SerializeFixed(stream, write, steeringInput, -2.0f, 2.0f, 15);
+            Net::SerializeFixed(stream, write, engineRotations, 0.0f, 20000.0f, 15);
             stream->Serialize(write, gear);
-            stream->Serialize(write, maximumGear);
             stream->Serialize(write, lightState);
             stream->Serialize(write, hornOn);
-            stream->Serialize(write, powerInput);
-            stream->Serialize(write, brakeInput);
-            stream->Serialize(write, handbrakeInput);
-            stream->Serialize(write, clutchInput);
-            stream->Serialize(write, speedLimited);
+            Net::SerializeFixed(stream, write, powerInput, 0.0f, 1.0f, 8);
+            Net::SerializeFixed(stream, write, brakeInput, 0.0f, 1.0f, 8);
+            Net::SerializeFixed(stream, write, handbrakeInput, 0.0f, 1.0f, 8);
+            Net::SerializeFixed(stream, write, clutchInput, 0.0f, 1.0f, 8);
             stream->Serialize(write, skidMask);
-            for (auto &door : doorTargets) {
-                stream->Serialize(write, door);
+            stream->Serialize(write, slowFields);
+            if (slowFields) {
+                stream->Serialize(write, fuel);
+                stream->Serialize(write, fuelTankCapacity);
+                stream->Serialize(write, maximumGear);
+                stream->Serialize(write, speedLimited);
+                for (auto &door : doorTargets) {
+                    stream->Serialize(write, door);
+                }
             }
         }
     };

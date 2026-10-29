@@ -80,6 +80,39 @@ namespace Mafia1Online::Features::Railway {
                 _hit(hit.targetNetworkId, hit.index, hit.damage);
             }
         });
+        // A player's bullet on a railway part, as its screen drew it: to the
+        // host, which applies it to its passengers at the same place.
+        network->RegisterRPC<Shared::Railway::ShotHit>([this](const Shared::Railway::ShotHit &received, MafiaNet::Packet *packet) {
+            const auto sender = MafiaNet::ToPeerGuid(packet->guid);
+            const auto host = _simulation->Host();
+            if (!host || *host == sender || !ShotHitPlausible(received)) {
+                return;
+            }
+            const Combat::CombatService::ShotClaim claim {received.shooterId, received.missionGeneration, received.shooterSpawnGeneration, received.shotSequence,
+                                                         received.pelletIndex, Vec(received.direction), Vec(received.hit)};
+            const auto evidence = _combat->InspectShot(claim, sender);
+            if (!evidence || !_combat->ConsumeShot(claim, sender)) {
+                return;
+            }
+            auto forwarded = received;
+            forwarded.damage = evidence->damage;
+            Framework::CoreModules::GetNetworkPeer()->SendRPC(forwarded, MafiaNet::ToGuid(*host), MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
+        });
+    }
+
+    bool RailwayService::ShotHitPlausible(const Shared::Railway::ShotHit &shot) const {
+        if (shot.missionGeneration != _missionGeneration || shot.index >= Shared::Railway::kMaxRailways || !_known[shot.index] ||
+            shot.part > _latest[shot.index].wagonCount || !Finite(shot.direction) || !Finite(shot.hit) || !Finite(shot.localDirection) || !Finite(shot.localHit)) {
+            return false;
+        }
+        // The local spot must be where the validated world hit is on the
+        // part as the host last reported it, give or take how far it ran in
+        // the shooter's render delay and trip (the second a rider's ride
+        // allows): a real shot at the hull cannot be moved onto a rider.
+        const auto &railway = _latest[shot.index];
+        const auto &origin = shot.part == 0 ? railway.position : railway.wagonPositions[shot.part - 1];
+        const auto &direction = shot.part == 0 ? railway.direction : railway.wagonDirections[shot.part - 1];
+        return Shared::Railway::ShotHitMatchesPart(Shared::Railway::YawFrame(origin, direction), shot, railway.speed, kRiderLagSeconds);
     }
 
     float RailwayService::DistanceTo(uint8_t index, const glm::vec3 &position) const {
@@ -202,7 +235,9 @@ namespace Mafia1Online::Features::Railway {
         nearby.missionGeneration = snapshot.missionGeneration;
         nearby.hostSession = snapshot.hostSession;
         nearby.hostTimeMs = snapshot.hostTimeMs;
-        const bool everyRailway = _forwarded++ % Shared::Railway::kFarSnapshotDivider == 0;
+        // Far railways go a slice at a time, each in one snapshot of
+        // kFarSnapshotDivider as before, so no snapshot carries them all.
+        const uint32_t farSlice = _forwarded++ % Shared::Railway::kFarSnapshotDivider;
         _players->ForEach([&](Shared::Entities::PlayerEntity *player) {
             if (!player->spawned || player->missionGeneration != _missionGeneration) {
                 return;
@@ -211,7 +246,8 @@ namespace Mafia1Online::Features::Railway {
             for (uint8_t i = 0; i < snapshot.count; ++i) {
                 const auto &state = snapshot.railways[i];
                 const glm::vec3 offset = Vec(state.position) - player->position;
-                if (everyRailway || offset.x * offset.x + offset.z * offset.z <= Shared::Railway::kStreamRange * Shared::Railway::kStreamRange) {
+                if (state.index % Shared::Railway::kFarSnapshotDivider == farSlice ||
+                    offset.x * offset.x + offset.z * offset.z <= Shared::Railway::kStreamRange * Shared::Railway::kStreamRange) {
                     nearby.railways[nearby.count++] = state;
                 }
             }

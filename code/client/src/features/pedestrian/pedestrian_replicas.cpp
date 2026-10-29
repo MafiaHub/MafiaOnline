@@ -97,9 +97,12 @@ namespace Mafia1Online::Features::Pedestrian {
                 return;
             }
             snapshot.rotation = glm::normalize(snapshot.rotation);
-            const MafiaNet::Time transformTime = walker->GetLastTransformTime() ? walker->GetLastTransformTime() : networkNow;
-            if (replica.lastTransformTime != transformTime) {
-                replica.snapshots.Push(snapshot, transformTime);
+            // Dated by when the host sampled the pose, not the server pass
+            // that relayed it.
+            const MafiaNet::Time transformTime = walker->GetLastTransformTime();
+            if (replica.snapshots.Empty() || replica.lastTransformTime != transformTime) {
+                const double clockNow = static_cast<double>(MafiaNet::GetTimeUS()) * 0.001;
+                replica.snapshots.Push(snapshot, static_cast<MafiaNet::Time>(std::max(1.0, std::round(replica.clock.Map(walker->sampleClock, clockNow)))), clockNow);
                 replica.lastTransformTime = transformTime;
             }
             if (!replica.element && !replica.failed) {
@@ -141,7 +144,7 @@ namespace Mafia1Online::Features::Pedestrian {
             // The buffer's presentation clock slews as the adaptive delay
             // moves with each packet's jitter; subtracting that delay here
             // instead stepped the walker on every late or early packet.
-            const bool sampled = replica.snapshots.Sample(replica.snapshots.RenderTime(networkNow), pose);
+            const bool sampled = replica.snapshots.Sample(replica.snapshots.RenderTimeMs(static_cast<double>(MafiaNet::GetTimeUS()) * 0.001), pose);
             if (sampled && !replica.holding) {
                 // Root motion moves the element; the host's pose, which
                 // already carries the host's root motion, replaces it.

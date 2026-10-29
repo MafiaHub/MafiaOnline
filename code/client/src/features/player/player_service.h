@@ -1,6 +1,10 @@
 #pragma once
 
 #include "game/entities/native_object_registry.h"
+#include "ride_blend.h"
+#include "shared/features/combat/vehicle_impact.h"
+#include "shared/features/npc/npc_seized.h"
+#include "shared/net/sample_clock.h"
 
 #include <utils/snapshot_buffer.h>
 
@@ -48,15 +52,18 @@ namespace Mafia1Online::Features::Player {
         // simulation host natively, elsewhere from Npc::Seized): the pose
         // stream stays off it until the track ends.
         void HoldSeized(uint64_t networkId);
+        // Simulation host: the police arrest walk placed this replica in
+        // front of its officer; the pose stream stays off it for `hold`.
+        void HoldAligned(uint64_t networkId, std::chrono::milliseconds hold);
         bool SampleRemote(uint64_t networkId, Framework::Utils::TransformSnapshot &out) const;
         void Reset(World::WorldService &world);
         SDK::Scene::NativeFrame *OnNativeDestroyed(World::WorldService &world, void *actor);
 
       private:
-        // The owner reports movement every 50 ms. One extra half-sample of
-        // render delay gives remote turns steadier brackets without making
-        // steering feel late.
-        inline static const Framework::Utils::SnapshotBufferConfig kRemoteSnapshotConfig {75.0f, 150.0f, 4.0f, 4.0f, true, 75.0f, 200.0f};
+        // The owner reports movement every 50 ms, and the server's farther
+        // bands every 100 or 200 ms. Two intervals of render delay, plus how
+        // late packets come, keep a bracket through one lost packet.
+        inline static const Framework::Utils::SnapshotBufferConfig kRemoteSnapshotConfig {75.0f, 150.0f, 4.0f, 4.0f, true, 75.0f, 500.0f, 2.0f, 0.1f};
         struct RemoteStream {
             RemoteStream(): snapshots(&kRemoteSnapshotConfig) {}
             Framework::Utils::TransformSnapshotBuffer snapshots;
@@ -65,6 +72,13 @@ namespace Mafia1Online::Features::Player {
             uint64_t spawnGeneration      = 0;
             bool creationFailed           = false;
             std::deque<std::pair<MafiaNet::Time, int16_t>> locomotion;
+            // The ride each pose came with, so the offset on the wagon is
+            // read at the same render time as the pose and locomotion.
+            std::deque<std::pair<MafiaNet::Time, RemoteRide>> rides;
+            // This frame's presentation time (the buffer's slewed clock).
+            double renderTime = 0.0;
+            // Dates each pose by when the controller sampled it.
+            Shared::Net::SampleClockMapper clock;
         };
 
         struct NativeHuman {
@@ -115,17 +129,23 @@ namespace Mafia1Online::Features::Player {
         std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> _climbingUntil;
         bool _replayingClimb = false;
         void ReplayClimbs(World::WorldService &world);
-        // Npc::Seized: the target's half of a police arrest or fine.
+        // Npc::Seized: both halves of a police arrest or fine.
         struct PendingSeized {
-            uint64_t missionGeneration;
-            uint64_t networkId;
-            uint64_t spawnGeneration;
-            bool fine;
+            Shared::Npc::Seized seized;
             std::chrono::steady_clock::time_point received;
         };
         std::deque<PendingSeized> _seizures;
         // Replicas held off the pose stream while the animation plays.
         std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> _seizedUntil;
+        // Simulation host: replicas kept where the arrest walk placed them.
+        std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> _alignedUntil;
+        // Combat::VehicleBump on the local player, applied on the game thread.
+        struct PendingBump {
+            Shared::Combat::VehicleBump bump;
+            std::chrono::steady_clock::time_point received;
+        };
+        std::deque<PendingBump> _bumps;
+        void ReplayBumps(World::WorldService &world);
         // The local player's controls stay locked until its animation ends.
         std::chrono::steady_clock::time_point _localSeizedUntil {};
         void ReplaySeizures(World::WorldService &world);

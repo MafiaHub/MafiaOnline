@@ -34,6 +34,9 @@ namespace Mafia1Online::Features::Npc {
         }
         // Holds the pose stream off a pull-out whose track never ends.
         constexpr auto kPullLimit = std::chrono::seconds(5);
+        // As PlayerService's kSeizedLimit: the longest an arrest half holds
+        // the pose stream off.
+        constexpr std::chrono::milliseconds kSeizingLimit {15000};
 
         // A driver constructed here later than this into its throw-out stands
         // where the host's is: replaying the throw would pull it back to the
@@ -64,6 +67,7 @@ namespace Mafia1Online::Features::Npc {
         }
         std::unordered_set<uint64_t> seen;
         const MafiaNet::Time networkNow = MafiaNet::GetTime();
+        const double clockNow           = static_cast<double>(MafiaNet::GetTimeUS()) * 0.001;
         replication->ForEach<Shared::Entities::NpcEntity>([&](Shared::Entities::NpcEntity *npc) {
             if (npc->missionGeneration != world.LoadedMissionGeneration() || npc->model.empty()) {
                 return;
@@ -76,22 +80,24 @@ namespace Mafia1Online::Features::Npc {
             seen.insert(id);
             snapshot.rotation = glm::normalize(snapshot.rotation);
             auto &replica = _replicas[id];
-            const MafiaNet::Time transformTime = npc->GetLastTransformTime() ? npc->GetLastTransformTime() : networkNow;
+            const MafiaNet::Time transformTime = npc->GetLastTransformTime();
+            const bool newPose                 = replica.snapshots.Empty() || replica.lastTransformTime != transformTime;
+            const MafiaNet::Time sampleTime    = newPose ? static_cast<MafiaNet::Time>(std::max(2.0, std::round(replica.clock.Map(npc->sampleClock, clockNow)))) : 0;
             std::optional<Framework::Utils::TransformSnapshot> handedOff;
             if (!replica.frame && !replica.failed && replica.lastTransformTime == 0 && npc->sourcePedestrianId) {
                 // The walker this NPC was: start where it stands on this
                 // screen, a render delay behind, and ease into the host's
                 // stream instead of jumping to its newer pose.
                 handedOff = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->PedestrianReplicas().HandOff(world, npc->sourcePedestrianId);
-                if (handedOff) {
+                if (handedOff && newPose) {
                     const auto delay = static_cast<MafiaNet::Time>(replica.snapshots.EffectiveDelayMs());
                     const MafiaNet::Time renderTime = networkNow > delay ? networkNow - delay : 1;
-                    replica.snapshots.Push(*handedOff, std::min(renderTime, transformTime > 1 ? transformTime - 1 : 1));
+                    replica.snapshots.Push(*handedOff, std::min(renderTime, sampleTime - 1));
                 }
             }
-            if (replica.lastTransformTime != transformTime) {
-                replica.snapshots.Push(snapshot, transformTime);
-                replica.locomotion.emplace_back(transformTime, npc->locomotion);
+            if (newPose) {
+                replica.snapshots.Push(snapshot, sampleTime, clockNow);
+                replica.locomotion.emplace_back(sampleTime, npc->locomotion);
                 while (replica.locomotion.size() > 32) {
                     replica.locomotion.pop_front();
                 }
@@ -113,12 +119,24 @@ namespace Mafia1Online::Features::Npc {
                 replica.handle = world.NativeObjects().Bind(actor, id);
                 replica.frame = actor->Frame();
                 _frames[actor] = replica.frame;
+                // Lines said before this copy existed are not replayed.
+                static_cast<SDK::Player::NativeHuman *>(static_cast<void *>(actor))->SetVoice(npc->voice);
+                replica.speechRevision = npc->speechRevision;
                 if (npc->kind == Shared::Entities::NpcKind::Driver && npc->thrownFromCarId && npc->alive && npc->throwAgeMs < kThrowReplayAgeMs) {
                     ReplayThrowOut(world, actor, npc->thrownFromCarId);
                 }
             }
+            replica.renderTime = replica.snapshots.RenderTimeMs(clockNow);
             auto *actor = world.NativeObjects().Resolve(replica.handle);
             if (actor) {
+                if (replica.speechRevision != npc->speechRevision) {
+                    replica.speechRevision = npc->speechRevision;
+                    if (npc->alive) {
+                        auto *human = static_cast<SDK::Player::NativeHuman *>(actor);
+                        human->SetVoice(npc->voice);
+                        human->Say(npc->speechLine);
+                    }
+                }
                 ApplyAnimation(replica, actor, *npc);
                 ApplyPose(replica, actor, npc->alive);
             }
@@ -137,9 +155,9 @@ namespace Mafia1Online::Features::Npc {
     }
 
     void NpcReplicaService::ApplyPose(Replica &replica, void *native, bool alive) {
-        const MafiaNet::Time now = MafiaNet::GetTime();
-        const auto delay = static_cast<MafiaNet::Time>(replica.snapshots.EffectiveDelayMs());
-        const MafiaNet::Time time = now > delay ? now - delay : 0;
+        // The slewed presentation clock: subtracting the adaptive delay
+        // directly stepped the body on every late or early packet.
+        const double time = replica.renderTime;
         Framework::Utils::TransformSnapshot pose;
         bool held = false;
         if (!replica.snapshots.Sample(time, pose, &held)) {
@@ -156,6 +174,13 @@ namespace Mafia1Online::Features::Npc {
             return;
         }
         auto *human = static_cast<SDK::Player::NativeHuman *>(native);
+        // The officer's arrest half plays from the aligned place.
+        if (replica.seizingUntil != std::chrono::steady_clock::time_point {}) {
+            if (human->IsPlayingAnimation() && std::chrono::steady_clock::now() < replica.seizingUntil) {
+                return;
+            }
+            replica.seizingUntil = {};
+        }
         // A replayed throw placed the NPC at the door and plays its pull-out;
         // the stream would stand it idle there before the player is out.
         if (human->IsPullingFromCar()) {
@@ -194,7 +219,7 @@ namespace Mafia1Online::Features::Npc {
         // The state at the same render time as the pose.
         std::optional<int16_t> state;
         for (const auto &[at, value] : replica.locomotion) {
-            if (at > time && state) {
+            if (static_cast<double>(at) > time && state) {
                 break;
             }
             state = value;
@@ -234,6 +259,35 @@ namespace Mafia1Online::Features::Npc {
         const uint32_t duration = human->PlayScriptAnimation(npc.animation.c_str(), npc.animationLoop);
         replica.animatingUntil = npc.animationLoop ? std::chrono::steady_clock::time_point::max()
                                                    : std::chrono::steady_clock::now() + std::chrono::milliseconds(duration);
+    }
+
+    void NpcReplicaService::PlaySeizing(World::WorldService &world, uint64_t officerId, const Shared::Npc::Seized::Pose &pose, Shared::Npc::Caught::Outcome outcome) {
+        const auto found = officerId ? _replicas.find(officerId) : _replicas.end();
+        if (found == _replicas.end() || !found->second.frame) {
+            return;
+        }
+        auto &replica = found->second;
+        auto *actor = static_cast<SDK::Player::NativeActor *>(world.NativeObjects().Resolve(replica.handle));
+        if (!actor || !actor->IsAlive() || actor->IsDead()) {
+            return;
+        }
+        // Where state 10 stood the host's officer, facing its target; a
+        // replica far from it (stale pose) plays where it is.
+        const auto current = SDK::Player::WorldPosition(actor);
+        if (Shared::Npc::SeizedAlignable({current.x, current.y, current.z}, pose)) {
+            const auto place = pose.Position();
+            const auto facing = pose.Direction();
+            replica.frame->SetWorldPosition({place.x, place.y, place.z});
+            replica.frame->SetDirection({facing.x, facing.y, facing.z});
+            replica.frame->Update();
+            actor->SetStoredTransform({place.x, place.y, place.z}, {facing.x, facing.y, facing.z});
+        }
+        auto *human = static_cast<SDK::Player::NativeHuman *>(static_cast<void *>(actor));
+        const uint32_t duration = human->PlayAnimationOnce(Shared::Npc::SeizingAnimation(outcome));
+        if (duration == 0) {
+            return;
+        }
+        replica.seizingUntil = std::chrono::steady_clock::now() + std::min(std::chrono::milliseconds(duration), kSeizingLimit);
     }
 
     void NpcReplicaService::Remove(World::WorldService &world, uint64_t networkId, const Replica &replica) {

@@ -10,6 +10,7 @@
 #include "shared/features/npc/npc_report.h"
 #include "shared/features/npc/npc_seized.h"
 #include "shared/features/player/player_entity.h"
+#include "shared/net/sample_clock.h"
 
 #include <core_modules.h>
 #include <logging/logger.h>
@@ -30,6 +31,19 @@ namespace Mafia1Online::Features::Npc {
 
         bool Finite(float x, float y, float z) {
             return std::isfinite(x) && std::isfinite(y) && std::isfinite(z);
+        }
+
+        // Retail's voice ranges for these humans: police 10-11 (C_traffic_
+        // generator.cpp:94-95), mafianos 12-16 (C_traffic_element.cpp:93-94),
+        // a thrown-out male driver 26-28 (C_human.cpp:993-995), and C_human's
+        // default 12 (C_human.cpp:830) for the rest.
+        uint8_t VoiceFor(Shared::Entities::NpcKind kind, uint64_t networkId) {
+            switch (kind) {
+            case Shared::Entities::NpcKind::Police: return static_cast<uint8_t>(10 + networkId % 2);
+            case Shared::Entities::NpcKind::Gangster: return static_cast<uint8_t>(12 + networkId % 5);
+            case Shared::Entities::NpcKind::Driver: return static_cast<uint8_t>(26 + networkId % 3);
+            default: return NpcEntity::kDefaultVoice;
+            }
         }
 
         void SetPose(NpcEntity &entity, float x, float y, float z, float yaw, float speed) {
@@ -131,6 +145,10 @@ namespace Mafia1Online::Features::Npc {
                 npc.confirmed = true;
                 npc.lastSeen = std::chrono::steady_clock::now();
                 SetPose(*npc.entity, spawned.x, spawned.y, spawned.z, spawned.yaw, 0.0f);
+                // The pose Spawn gave it carried clock 0; the host's own
+                // reaches observers as a new sample, not a repeat.
+                npc.entity->sampleClock = spawned.hostClockMs;
+                npc.entity->poseSource = MafiaNet::ToPeerGuid(packet->guid);
                 npc.entity->alive = spawned.health > 0.0f;
                 npc.state.alive = npc.entity->alive;
                 npc.state.health = std::max(spawned.health, 0.0f);
@@ -169,9 +187,12 @@ namespace Mafia1Online::Features::Npc {
                 entity->thrownAt = std::chrono::steady_clock::now();
             }
             entity->alive = spawned.health > 0.0f;
+            entity->voice = VoiceFor(spawned.kind, entity->GetNetworkID());
             entity->streaming.range = kStreamRange;
             entity->SetVirtualWorld(MafiaNet::VIRTUAL_WORLD_GLOBAL);
             SetPose(*entity, spawned.x, spawned.y, spawned.z, spawned.yaw, 0.0f);
+            entity->sampleClock = spawned.hostClockMs;
+            entity->poseSource = MafiaNet::ToPeerGuid(packet->guid);
             auto &npc = _npcs[spawned.key];
             npc.entity = entity;
             npc.lastSeen = std::chrono::steady_clock::now();
@@ -205,15 +226,21 @@ namespace Mafia1Online::Features::Npc {
                 auto &entity = *npc->entity;
                 auto &state = npc->state;
                 npc->lastSeen = now;
-                SetPose(entity, pose.x, pose.y, pose.z, pose.yaw, state.alive && !pose.dead ? pose.speed : 0.0f);
-                entity.locomotion = pose.locomotion;
+                // An unchanged pose keeps its clock, so a standing NPC or a
+                // corpse is not sent again every snapshot.
+                Shared::Net::RelayPose(entity, snapshot.hostClockMs, [&] {
+                    SetPose(entity, pose.x, pose.y, pose.z, pose.yaw, state.alive && !pose.dead ? pose.speed : 0.0f);
+                    entity.locomotion = pose.locomotion;
+                });
+                entity.poseSource = MafiaNet::ToPeerGuid(packet->guid);
                 if (!state.alive) {
                     continue;
                 }
                 const bool died = pose.dead || pose.health <= 0.0f;
                 const glm::vec3 target(pose.poseTargetX, pose.poseTargetY, pose.poseTargetZ);
                 const glm::vec3 previous(state.poseTargetOffsetX, state.poseTargetOffsetY, state.poseTargetOffsetZ);
-                if (!died && pose.aiming == state.aiming && pose.crouching == state.crouching && pose.health == state.health && glm::distance(target, previous) <= 0.05f) {
+                const bool aimOnly = !died && pose.aiming == state.aiming && pose.crouching == state.crouching && pose.health == state.health;
+                if (aimOnly && glm::distance(target, previous) <= 0.05f) {
                     continue;
                 }
                 state.aiming = pose.aiming;
@@ -233,6 +260,12 @@ namespace Mafia1Online::Features::Npc {
                     state.aiming = false;
                     entity.alive = false;
                     npc->diedAt = now;
+                }
+                if (aimOnly) {
+                    // Only the aim target moved: unreliable, to the players
+                    // that stream this NPC, instead of a whole State to all.
+                    Combat::CombatService::RelayAim(entity, state, *_simulation->Host(), npc->aimRelay);
+                    continue;
                 }
                 Publish(*npc);
                 if (died && _events.death) {
@@ -436,8 +469,10 @@ namespace Mafia1Online::Features::Npc {
                 player->missionGeneration != _missionGeneration || player->spawnGeneration != seized.targetSpawnGeneration) {
                 return;
             }
-            // The host plays the animation natively; everyone else replays it.
+            // The host plays the animation natively; everyone else replays it,
+            // the officer's half on its replica too.
             auto relay = seized;
+            relay.officerNetworkId = npc->state.networkId;
             Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(relay, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered, MafiaNet::ToGuid(sender));
         });
         network->RegisterRPC<Shared::Npc::Damaged>([this](const Shared::Npc::Damaged &damaged, MafiaNet::Packet *packet) {
@@ -565,6 +600,9 @@ namespace Mafia1Online::Features::Npc {
             if (npc.scripted && !npc.state.alive && !npc.removeSent && now - npc.diedAt > kCorpseLifetime) {
                 npc.removeSent = Remove(npc.state.networkId);
             }
+            if (npc.state.alive) {
+                Combat::CombatService::SettleAim(*npc.entity, npc.state, npc.aimRelay, now);
+            }
         }
     }
 
@@ -686,6 +724,7 @@ namespace Mafia1Online::Features::Npc {
         entity->kind = Shared::Entities::NpcKind::Scripted;
         entity->sourcePedestrianId = request.walkerId;
         entity->alive = true;
+        entity->voice = request.voice && *request.voice < NpcEntity::kVoiceCount ? *request.voice : VoiceFor(entity->kind, entity->GetNetworkID());
         entity->streaming.range = kStreamRange;
         entity->SetVirtualWorld(request.virtualWorld);
         SetPose(*entity, request.position.x, request.position.y, request.position.z, request.heading, 0.0f);
@@ -799,6 +838,16 @@ namespace Mafia1Online::Features::Npc {
         order.missionGeneration = _missionGeneration;
         order.key = _keyByNetworkId.at(networkId);
         Framework::CoreModules::GetNetworkPeer()->SendRPC(order, MafiaNet::ToGuid(*host), MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
+        return true;
+    }
+
+    bool NpcService::Say(uint64_t networkId, uint16_t line) {
+        auto *npc = FindNetwork(networkId);
+        if (!npc || !npc->state.alive || line < NpcEntity::kMinSpeechLine || line > NpcEntity::kMaxSpeechLine) {
+            return false;
+        }
+        npc->entity->speechLine = line;
+        ++npc->entity->speechRevision;
         return true;
     }
 

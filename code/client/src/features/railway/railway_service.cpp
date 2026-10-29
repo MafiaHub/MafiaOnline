@@ -2,6 +2,9 @@
 
 #include "railway_service.h"
 
+#include "core/application.h"
+#include "features/combat/combat_service.h"
+
 #include "features/seat/seat_hooks.h"
 #include "features/simulation/simulation_config.h"
 #include "features/world/world_service.h"
@@ -32,10 +35,36 @@ namespace Mafia1Online::Features::Railway {
 
         using Lifecycle = void(__thiscall *)(NativeRailway *);
         using Tick = void(__thiscall *)(NativeRailway *, unsigned int);
+        using RailwayHit = bool(__thiscall *)(NativeRailway *, uint32_t, const Vector3 *, const Vector3 *, const Vector3 *, float, SDK::Player::NativeActor *, uint32_t,
+                                              SDK::Scene::NativeFrame *);
         Lifecycle gGameInitOriginal = nullptr;
         Lifecycle gGameDoneOriginal = nullptr;
         Tick gUpdateOriginal = nullptr;
+        RailwayHit gHitOriginal = nullptr;
         RailwayService *gService = nullptr;
+
+        // C_railway::Hit (NativeRailway::kHit). A bullet's arguments are its
+        // unit direction and the hit point on the struck part (TickShoot).
+        bool __fastcall HitHook(NativeRailway *railway, void *, uint32_t type, const Vector3 *direction, const Vector3 *point, const Vector3 *normal, float damage,
+                                SDK::Player::NativeActor *attacker, uint32_t flags, SDK::Scene::NativeFrame *frame) {
+            const bool bullet = gService && type == NativeRailway::kGenericHit && direction && point;
+            const bool local = bullet && attacker && attacker == SDK::Player::CurrentPlayer();
+            // A player's bullet replayed on the host flies at this railway as
+            // it is now, not as the shooter saw it: the shooter's own report
+            // of the hit (ShotHit) applies it instead, and the bullet still
+            // stops at the hull. A player of the host's own fires natively.
+            if (bullet && !local && Simulation::IsHost() && gService->IsPlayerShot(attacker)) {
+                return true;
+            }
+            const bool result = gHitOriginal(railway, type, direction, point, normal, damage, attacker, flags, frame);
+            // Reported after the native trace: a rider's replica it reached
+            // inside the wagon took the pellet first (DeathService's
+            // HitReport), and a pellet goes to one target only.
+            if (local && !Simulation::IsHost()) {
+                gService->OnLocalShotHit(railway, *direction, *point, frame);
+            }
+            return result;
+        }
 
         // Two host reports behind: one lost packet still leaves a bracket.
         constexpr double kRenderDelayMs = 200.0;
@@ -139,6 +168,17 @@ namespace Mafia1Online::Features::Railway {
             return true;
         }
 
+        // Shared::Railway::YawFrame of a part as this copy places it.
+        bool PartFrame(NativeRailway &railway, uint8_t part, Shared::Railway::FrameMatrix &frame) {
+            glm::vec3 origin;
+            glm::vec3 direction;
+            if (part > Shared::Railway::kMaxWagons || !PartPose(railway, part, origin, direction)) {
+                return false;
+            }
+            frame = Shared::Railway::YawFrame({origin.x, origin.y, origin.z}, {direction.x, direction.y, direction.z});
+            return true;
+        }
+
         // A world pose in the basis of the railway part nearest to it.
         void LocalPose(NativeRailway &railway, const glm::vec3 &position, const glm::vec3 &facing, uint8_t &part, glm::vec3 &local, float &yaw) {
             float nearest = std::numeric_limits<float>::max();
@@ -200,8 +240,9 @@ namespace Mafia1Online::Features::Railway {
         if (MH_CreateHook(reinterpret_cast<void *>(NativeRailway::kGameInit), reinterpret_cast<void *>(&GameInitHook), reinterpret_cast<void **>(&gGameInitOriginal)) != MH_OK ||
             MH_CreateHook(reinterpret_cast<void *>(NativeRailway::kGameDone), reinterpret_cast<void *>(&GameDoneHook), reinterpret_cast<void **>(&gGameDoneOriginal)) != MH_OK ||
             MH_CreateHook(reinterpret_cast<void *>(NativeRailway::kUpdate), reinterpret_cast<void *>(&UpdateHook), reinterpret_cast<void **>(&gUpdateOriginal)) != MH_OK ||
+            MH_CreateHook(reinterpret_cast<void *>(NativeRailway::kHit), reinterpret_cast<void *>(&HitHook), reinterpret_cast<void **>(&gHitOriginal)) != MH_OK ||
             MH_EnableHook(reinterpret_cast<void *>(NativeRailway::kGameInit)) != MH_OK || MH_EnableHook(reinterpret_cast<void *>(NativeRailway::kGameDone)) != MH_OK ||
-            MH_EnableHook(reinterpret_cast<void *>(NativeRailway::kUpdate)) != MH_OK) {
+            MH_EnableHook(reinterpret_cast<void *>(NativeRailway::kUpdate)) != MH_OK || MH_EnableHook(reinterpret_cast<void *>(NativeRailway::kHit)) != MH_OK) {
             Uninstall();
             return false;
         }
@@ -220,7 +261,7 @@ namespace Mafia1Online::Features::Railway {
 
     void RailwayService::Uninstall() {
         Seat::SetRailwayUseHandler(nullptr);
-        for (uintptr_t address : {NativeRailway::kGameInit, NativeRailway::kGameDone, NativeRailway::kUpdate}) {
+        for (uintptr_t address : {NativeRailway::kGameInit, NativeRailway::kGameDone, NativeRailway::kUpdate, NativeRailway::kHit}) {
             MH_DisableHook(reinterpret_cast<void *>(address));
             MH_RemoveHook(reinterpret_cast<void *>(address));
         }
@@ -231,6 +272,7 @@ namespace Mafia1Online::Features::Railway {
         gGameInitOriginal = nullptr;
         gGameDoneOriginal = nullptr;
         gUpdateOriginal = nullptr;
+        gHitOriginal = nullptr;
         gService = nullptr;
         Reset();
     }
@@ -265,6 +307,9 @@ namespace Mafia1Online::Features::Railway {
                 if (done.missionGeneration == _missionGeneration) {
                     ReleaseLocks(done.playerId);
                 }
+            });
+            network->RegisterRPC<Shared::Railway::ShotHit>([this](const Shared::Railway::ShotHit &shot, MafiaNet::Packet *) {
+                ApplyShotHit(shot);
             });
             return;
         }
@@ -937,22 +982,63 @@ namespace Mafia1Online::Features::Railway {
         if (index < 0) {
             return std::nullopt;
         }
+        auto &railway       = *_railways[index].railway;
+        const uint32_t part = static_cast<const SDK::Player::NativeHuman *>(human)->RailwayFrameIndex();
+        auto *frame         = part <= static_cast<uint32_t>(std::min<int32_t>(railway.WagonCount(), Shared::Railway::kMaxWagons)) ? railway.Vagon(part) : nullptr;
+        if (!frame) {
+            return std::nullopt;
+        }
+        // Where Intern_UseRailway put it: the inverse of the frame's world
+        // matrix (rows right, up, forward, origin) applied to the world pose.
+        const float *matrix     = frame->UpdatedWorldMatrix();
+        const glm::vec3 right   = {matrix[0], matrix[1], matrix[2]};
+        const glm::vec3 up      = {matrix[4], matrix[5], matrix[6]};
+        const glm::vec3 forward = {matrix[8], matrix[9], matrix[10]};
+        const glm::vec3 offset  = Vec(SDK::Player::WorldPosition(human)) - glm::vec3(matrix[12], matrix[13], matrix[14]);
+        const glm::vec3 facing  = Vec(SDK::Player::WorldDirection(human));
+        if (glm::dot(right, right) < 1e-6f || glm::dot(up, up) < 1e-6f || glm::dot(forward, forward) < 1e-6f) {
+            return std::nullopt;
+        }
         Ride ride;
         ride.index = static_cast<uint8_t>(index);
-        LocalPose(*_railways[index].railway, Vec(SDK::Player::WorldPosition(human)), Vec(SDK::Player::WorldDirection(human)), ride.part, ride.local, ride.yaw);
+        ride.part  = static_cast<uint8_t>(part);
+        ride.local = {glm::dot(offset, right) / glm::dot(right, right), glm::dot(offset, up) / glm::dot(up, up), glm::dot(offset, forward) / glm::dot(forward, forward)};
+        ride.yaw   = std::atan2(glm::dot(facing, glm::normalize(right)), glm::dot(facing, glm::normalize(forward)));
         return ride;
     }
 
+    bool RailwayService::PlaceRider(const Ride &ride, glm::vec3 &position, glm::vec3 &direction) const {
+        if (!Placed(ride.index)) {
+            return false;
+        }
+        auto *frame = _railways[ride.index].railway->Vagon(ride.part);
+        if (!frame) {
+            return false;
+        }
+        const float *matrix     = frame->UpdatedWorldMatrix();
+        const glm::vec3 right   = {matrix[0], matrix[1], matrix[2]};
+        const glm::vec3 up      = {matrix[4], matrix[5], matrix[6]};
+        const glm::vec3 forward = {matrix[8], matrix[9], matrix[10]};
+        position                = glm::vec3(matrix[12], matrix[13], matrix[14]) + right * ride.local.x + up * ride.local.y + forward * ride.local.z;
+        direction               = glm::normalize(right) * std::sin(ride.yaw) + glm::normalize(forward) * std::cos(ride.yaw);
+        return std::isfinite(position.x) && std::isfinite(position.y) && std::isfinite(position.z) && std::isfinite(direction.x);
+    }
+
+    bool RailwayService::Placed(uint8_t index) const {
+        if (index >= _railways.size() || !_railways[index].railway) {
+            return false;
+        }
+        const auto &entry = _railways[index];
+        // A player only gets the railways near it; one it has not placed
+        // lately stands somewhere else.
+        return Simulation::IsHost() || (!entry.samples.empty() && std::chrono::steady_clock::now() - entry.lastReport <= std::chrono::seconds(1));
+    }
+
     bool RailwayService::PlaceRide(const Ride &ride, glm::vec3 &position, glm::vec3 &direction) const {
-        if (ride.index >= _railways.size() || !_railways[ride.index].railway) {
+        if (!Placed(ride.index)) {
             return false;
         }
         const auto &entry = _railways[ride.index];
-        // A player only gets the railways near it; one it has not placed
-        // lately stands somewhere else.
-        if (!Simulation::IsHost() && (entry.samples.empty() || std::chrono::steady_clock::now() - entry.lastReport > std::chrono::seconds(1))) {
-            return false;
-        }
         glm::vec3 origin;
         glm::vec3 partDirection;
         if (!PartPose(*entry.railway, ride.part, origin, partDirection)) {
@@ -1102,6 +1188,93 @@ namespace Mafia1Online::Features::Railway {
             railway->WagonPositions()[i] = ToNative(wagonPositions[i]);
             railway->WagonDirections()[i] = ToNative(wagonDirections[i]);
         }
+    }
+
+    bool RailwayService::IsPlayerShot(SDK::Player::NativeActor *attacker) const {
+        if (!attacker || !_world) {
+            return false;
+        }
+        const auto handle = _world->NativeObjects().FindByNative(attacker);
+        auto *replication = Framework::CoreModules::GetReplication();
+        return handle.networkId && replication && replication->GetEntity<Shared::Entities::PlayerEntity>(handle.networkId);
+    }
+
+    void RailwayService::OnLocalShotHit(NativeRailway *railway, const Vector3 &direction, const Vector3 &point, SDK::Scene::NativeFrame *frame) {
+        auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
+        if (!_world || !_world->IsReady()) {
+            return;
+        }
+        const int index = IndexOf(railway);
+        const int32_t part = railway->PartOfCollisionFrame(frame);
+        // A boarding passenger's own collision is the host's alone; this
+        // client's railways carry none.
+        if (index < 0 || !Placed(static_cast<uint8_t>(index)) || part < 0 || part > Shared::Railway::kMaxWagons) {
+            return;
+        }
+        const auto *state = application->Combat().GetLocalState(*_world);
+        const auto shooter = _world->NativeObjects().FindByNative(SDK::Player::CurrentPlayer());
+        if (!state || !shooter.networkId || shooter.networkId != state->networkId || !state->spawned || !state->alive) {
+            return;
+        }
+        // In the part's yaw frame from this copy's placement of it, which the
+        // host and the server rebuild from their own (PartFrame).
+        Shared::Railway::FrameMatrix matrix;
+        if (!PartFrame(*railway, static_cast<uint8_t>(part), matrix)) {
+            return;
+        }
+        Shared::Railway::ShotHit shot;
+        if (!Shared::Railway::FrameLocal(matrix, {point.x, point.y, point.z}, true, shot.localHit) ||
+            !Shared::Railway::FrameLocal(matrix, {direction.x, direction.y, direction.z}, false, shot.localDirection)) {
+            return;
+        }
+        const auto pellet = application->Combat().MatchLocalPellet(direction.x, direction.y, direction.z, point.x, point.y, point.z);
+        if (!pellet) {
+            return;
+        }
+        shot.missionGeneration = _world->LoadedMissionGeneration();
+        shot.shooterId = shooter.networkId;
+        shot.shooterSpawnGeneration = state->spawnGeneration;
+        shot.shotSequence = pellet->shotSequence;
+        shot.pelletIndex = pellet->pelletIndex;
+        shot.index = static_cast<uint8_t>(index);
+        shot.part = static_cast<uint8_t>(part);
+        shot.direction = ToWire(direction);
+        shot.hit = ToWire(point);
+        Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(shot, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
+    }
+
+    void RailwayService::ApplyShotHit(const Shared::Railway::ShotHit &shot) {
+        if (!_world || !_world->IsReady() || shot.missionGeneration != _missionGeneration || shot.index >= _railways.size() || !std::isfinite(shot.damage) ||
+            shot.damage < 0.0f) {
+            return;
+        }
+        auto *railway = _railways[shot.index].railway;
+        auto *frame = railway ? railway->PartCollisionFrame(shot.part) : nullptr;
+        if (!frame) {
+            return;
+        }
+        // The shooter's hit at the same place in this copy of the part.
+        Shared::Railway::FrameMatrix matrix;
+        if (!PartFrame(*railway, shot.part, matrix)) {
+            return;
+        }
+        const auto point = Shared::Railway::FrameWorld(matrix, shot.localHit, true);
+        auto direction = Vec(Shared::Railway::FrameWorld(matrix, shot.localDirection, false));
+        const float length = glm::length(direction);
+        if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z) || !std::isfinite(length) || length < 0.0001f) {
+            return;
+        }
+        direction /= length;
+        const Vector3 nativeDirection = ToNative(direction);
+        const Vector3 nativePoint {point.x, point.y, point.z};
+        const Vector3 normal {-direction.x, -direction.y, -direction.z};
+        // The shooter's replica as the attacker, as its replayed bullet
+        // would have been: the riders it hits through the hierarchy (a
+        // player's replica) keep their own server-checked damage.
+        auto *attacker = static_cast<SDK::Player::NativeActor *>(_world->NativeObjects().Resolve(_world->NativeObjects().FindByNetwork(shot.shooterId)));
+        const bool result = gHitOriginal(railway, NativeRailway::kGenericHit, &nativeDirection, &nativePoint, &normal, shot.damage, attacker, 0, frame);
+        Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->debug("Railway {} part {} shot by {} (damage {:.1f}): {}", shot.index, shot.part, shot.shooterId, shot.damage,
+                                                                     result ? "hit" : "missed");
     }
 
     void RailwayService::OnHitPlayer(World::WorldService &world, SDK::Player::NativeHuman &target, SDK::Player::NativeActor *railway, const Vector3 &direction, float damage) {
