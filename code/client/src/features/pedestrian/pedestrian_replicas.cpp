@@ -96,6 +96,7 @@ namespace Mafia1Online::Features::Pedestrian {
         const auto elapsed = _lastUpdate == std::chrono::steady_clock::time_point {} ? 0 : std::chrono::duration_cast<std::chrono::milliseconds>(now - _lastUpdate).count();
         _lastUpdate = now;
         const auto frameMs = static_cast<uint32_t>(std::clamp<int64_t>(elapsed, 1, kMaximumFrameMs));
+        AdvanceFades(frameMs);
 
         SDK::Traffic::CountDownScreamCooldown(frameMs);
         const auto generators = MissionGenerators();
@@ -229,12 +230,25 @@ namespace Mafia1Online::Features::Pedestrian {
                 ++it;
                 continue;
             }
-            Release(world, it->second);
+            Retire(world, it->first, it->second);
             it = _replicas.erase(it);
         }
     }
 
     std::optional<Framework::Utils::TransformSnapshot> PedestrianReplicaService::HandOff(World::WorldService &world, uint64_t walkerId) {
+        // Gone from the stream a moment before its NPC came: the NPC takes
+        // its place instead of fading beside it.
+        if (const auto fading = std::find_if(_fading.begin(), _fading.end(), [walkerId](const Fading &copy) { return copy.walkerId == walkerId; }); fading != _fading.end()) {
+            Framework::Utils::TransformSnapshot pose {};
+            pose.position = {fading->position.x, fading->position.y, fading->position.z};
+            pose.rotation = glm::angleAxis(std::atan2(fading->direction.x, fading->direction.z), glm::vec3(0.0f, 1.0f, 0.0f));
+            if (world.IsReady() && fading->element->IsActive()) {
+                fading->element->Deactivate();
+            }
+            _fading.erase(fading);
+            _handedOff.insert(walkerId);
+            return pose;
+        }
         const auto found = _replicas.find(walkerId);
         if (found == _replicas.end() || !found->second.element || !found->second.element->IsActive() || !found->second.element->Model()) {
             return std::nullopt;
@@ -302,11 +316,71 @@ namespace Mafia1Online::Features::Pedestrian {
         replica.element = nullptr;
     }
 
+    void PedestrianReplicaService::Retire(World::WorldService &world, uint64_t walkerId, Replica &replica) {
+        auto *element = replica.element;
+        // Retail Tick fades a walker leaving its despawn radius only while
+        // it is drawn this pass (the model's render stamp is the mission's,
+        // 0x45345f), over a second, and deactivates one out of view at once;
+        // 359bef9 fades NPC replicas the same way.
+        if (!element || !world.IsReady() || !element->IsActive() || !element->Model() ||
+            element->Model()->RenderStamp() != SDK::Core::Mission::Get()->RenderStamp()) {
+            Release(world, replica);
+            return;
+        }
+        if (replica.appliedWave) {
+            element->EndTaxiWave();
+        }
+        // Nothing moves it any more: a living walker stands rather than
+        // walks on the spot (SetAnim blends to the breath).
+        const bool living = !replica.dead && !replica.settled;
+        if (living && Player::MovingGait(element->CurrentAnimation())) {
+            element->PlayAnimation(Player::kStopState, false);
+            replica.holding = false;
+        }
+        const auto position = element->Model()->WorldPosition();
+        const auto direction = element->Model()->WorldDirection();
+        _fading.push_back({walkerId, element, std::clamp(element->Alpha(), 0.0f, 1.0f), {position.x, position.y, position.z}, {direction.x, 0.0f, direction.z},
+                           !replica.settled && !replica.holding});
+        replica.element = nullptr;
+    }
+
+    void PedestrianReplicaService::AdvanceFades(uint32_t frameMs) {
+        // Retail's rate: the whole opacity in a second (frameTime * 0.001).
+        for (auto it = _fading.begin(); it != _fading.end();) {
+            auto *element = it->element;
+            it->alpha -= static_cast<float>(frameMs) * 0.001f;
+            if (!element->IsActive()) {
+                it = _fading.erase(it);
+                continue;
+            }
+            if (it->alpha <= 0.0f) {
+                element->Deactivate();
+                it = _fading.erase(it);
+                continue;
+            }
+            element->SetAlpha(it->alpha);
+            // Its breath goes on where it stood, as Update ticks a replica.
+            if (it->animating && !element->TickAnimation(frameMs)) {
+                element->SetPose({it->position.x, it->position.y, it->position.z}, {it->direction.x, it->direction.y, it->direction.z});
+                element->Model()->Tick(static_cast<int>(frameMs));
+            }
+            ++it;
+        }
+    }
+
     void PedestrianReplicaService::Reset(World::WorldService &world) {
         for (auto &[id, replica] : _replicas) {
             Release(world, replica);
         }
         _replicas.clear();
+        if (world.IsReady()) {
+            for (const auto &copy : _fading) {
+                if (copy.element->IsActive()) {
+                    copy.element->Deactivate();
+                }
+            }
+        }
+        _fading.clear();
         _handedOff.clear();
         _lastUpdate = {};
     }
