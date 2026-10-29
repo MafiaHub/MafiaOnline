@@ -35,6 +35,8 @@ namespace Mafia1Online::Features::Car {
     //    past a pose that braked, say) does not move it there at once: the
     //    jump becomes a correction that decays over ~200 ms, in position and
     //    rotation. One beyond kSnapDistance or kSnapCos is applied at once.
+    //  - The render time can run a lead ahead of now - delay, which eases
+    //    toward its target rather than stepping (AdvanceLead).
     //  - Motion is native physics': the body turns about its mass centre
     //    (reM C_Vehicle_kernel.cpp:2677-2709), so the frame origin moves at
     //    the mass centre's velocity plus the turn, and past the newest pose
@@ -79,6 +81,10 @@ namespace Mafia1Online::Features::Car {
 
         float IntervalMs() const {
             return _intervalMs;
+        }
+
+        float LeadMs() const {
+            return _leadMs;
         }
 
         // The native car's mass centre in its frame (C_Vehicle 0x3f8).
@@ -257,6 +263,21 @@ namespace Mafia1Online::Features::Car {
             return renderTime;
         }
 
+        // How far past now - delay the car is shown, eased toward `targetMs`
+        // critically damped over about `smoothSeconds`: a change of render
+        // clock is one of the car's speed on screen, so it must neither step
+        // nor overshoot.
+        float AdvanceLead(float targetMs, float dtSeconds, float smoothSeconds) {
+            const float omega  = 2.0f / smoothSeconds;
+            const float x      = omega * std::max(dtSeconds, 0.0f);
+            const float decay  = 1.0f / (1.0f + x + 0.48f * x * x + 0.235f * x * x * x);
+            const float change = _leadMs - targetMs;
+            const float pull   = (_leadRate + omega * change) * std::max(dtSeconds, 0.0f);
+            _leadRate          = (_leadRate - omega * pull) * decay;
+            _leadMs            = targetMs + (change + pull) * decay;
+            return _leadMs;
+        }
+
         // The pose to show at `renderTime`: Sample plus what is left of the
         // correction, which decays by `dtSeconds`.
         bool Present(double renderTime, float dtSeconds, CarPoseSample &out) {
@@ -273,8 +294,28 @@ namespace Mafia1Online::Features::Car {
             return true;
         }
 
-        // The car is shown some other way this frame (corrected native
-        // physics, a snap): no correction carries over.
+        // The car was shown at `position` and `rotation` some other way
+        // (native physics) at local clock `time`: the difference from the
+        // replicated path becomes the correction, so Present carries on from
+        // there. Beyond a snap the car starts on the path.
+        void Rebase(const glm::vec3 &position, const glm::quat &rotation, double time) {
+            ClearCorrection();
+            CarPoseSample path;
+            if (!Sample(time, path)) {
+                return;
+            }
+            _offset = position - path.position;
+            // Shown: _turn * sampled.
+            _turn = glm::normalize(rotation * glm::inverse(path.rotation));
+            if (glm::length(_offset) > kSnapDistance || std::abs(_turn.w) < kSnapCos) {
+                ClearCorrection();
+                return;
+            }
+            _lastRender = time;
+            _presented  = true;
+        }
+
+        // A snap: no correction carries over.
         void ClearCorrection() {
             _offset    = glm::vec3(0.0f);
             _turn      = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
@@ -303,6 +344,8 @@ namespace Mafia1Online::Features::Car {
         glm::vec3 _massCenter {0.0f};
         glm::vec3 _offset {0.0f};
         glm::quat _turn {1.0f, 0.0f, 0.0f, 0.0f};
+        float _leadMs      = 0.0f;
+        float _leadRate    = 0.0f;
         double _lastRender = 0.0;
         bool _presented    = false;
     };

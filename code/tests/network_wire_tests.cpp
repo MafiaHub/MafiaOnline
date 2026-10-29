@@ -483,6 +483,55 @@ namespace {
         CHECK(last <= 3.0f && last > 2.99f && lastSpeed < 0.01f);
     }
 
+    // A car at 15 m/s, rendered every 16 ms, that comes near a car this
+    // client simulates from 1 s to 2.5 s: its render clock eases to the
+    // present and back, so it never lurches ahead (stepping the clock moved
+    // it 1.5 m in a frame) nor snaps back, and never steps backward.
+    void CarContactClock() {
+        Features::Car::CarPoseBuffer buffer;
+        float lastX   = 0.0f;
+        float minStep = 1.0f;
+        float maxStep = 0.0f;
+        bool shown    = false;
+        bool native   = false;
+        for (double now = 0.0; now < 6000.0; now += 16.0) {
+            for (double sent = std::floor(now / 33.0) * 33.0; sent > now - 16.0; sent -= 33.0) {
+                buffer.Push(CarAt(sent, static_cast<float>(sent) * 0.015f, 15.0f), sent + 10.0, false);
+            }
+            const bool contact      = now >= 1000.0 && now < 2500.0;
+            const double renderTime = buffer.AdvanceDelay(now, 16.0f) + buffer.AdvanceLead(contact ? buffer.DelayMs() : 0.0f, 0.016f, contact ? 0.3f : 1.0f);
+            if (!contact && native) {
+                // Native physics ran it a little off the path meanwhile.
+                buffer.Rebase(glm::vec3(lastX, 0.0f, 0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f), renderTime - 16.0);
+            }
+            native = contact;
+            Features::Car::CarPoseSample pose;
+            CHECK(buffer.Present(renderTime, 0.016f, pose));
+            if (contact) {
+                pose.position.x += 0.05f;
+            }
+            if (shown && now > 500.0) {
+                minStep = std::min(minStep, pose.position.x - lastX);
+                maxStep = std::max(maxStep, pose.position.x - lastX);
+            }
+            shown = true;
+            lastX = pose.position.x;
+            if (now > 2400.0 && now < 2500.0) {
+                // At the present by the end of the contact, but for the few
+                // ms the lead trails the delay as that settles.
+                CHECK(Near(pose.position.x, static_cast<float>(now) * 0.015f + 0.05f, 0.06f));
+            }
+        }
+        // 0.24 m a frame at speed, a quarter more or 10% less at most.
+        CHECK(maxStep < 0.24f * 1.25f + 0.05f + 0.01f);
+        CHECK(minStep > 0.24f * 0.9f - 0.05f);
+        CHECK(Near(buffer.LeadMs(), 0.0f, 1.0f));
+        // A rebase beyond a snap starts on the path.
+        buffer.Rebase(glm::vec3(lastX + 6.0f, 0.0f, 0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f), 5900.0);
+        Features::Car::CarPoseSample pose;
+        CHECK(buffer.Present(5900.0, 0.016f, pose) && Near(pose.position.x, 5900.0f * 0.015f, 0.01f));
+    }
+
     void RideBlend() {
         using Features::Player::RemoteRide;
         std::deque<std::pair<MafiaNet::Time, RemoteRide>> rides;
@@ -525,6 +574,7 @@ int main() {
     CarLateCorrection();
     CarArcMotion();
     CarExtrapolationEase();
+    CarContactClock();
     RideBlend();
     if (failures == 0) {
         std::printf("network wire tests passed\n");

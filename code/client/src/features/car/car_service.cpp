@@ -85,6 +85,12 @@ namespace Mafia1Online::Features::Car {
         // Impacts closer together than this belong to one contact.
         constexpr double kImpactEpisodeGapMs = 500.0;
         constexpr float kYieldCorrectionSeconds = 1.0f;
+        // How fast an observed car's render clock reaches the present near a
+        // car this client simulates, and drops back behind it after: at the
+        // usual 100 ms delay the car runs at most a quarter faster, or 7%
+        // slower, meanwhile.
+        constexpr float kLeadEntrySeconds = 0.3f;
+        constexpr float kLeadExitSeconds  = 1.0f;
         // How far a controlled car's physics clock may fall behind the local
         // clock before it rejoins it: more than a frame's read jitter.
         constexpr int32_t kSimClockSlackMs = 40;
@@ -1624,7 +1630,7 @@ namespace Mafia1Online::Features::Car {
     bool CarService::Sample(uint64_t networkId, Framework::Utils::TransformSnapshot &out) const {
         const auto it = _streams.find(networkId);
         Stream::PoseSample pose;
-        if (it == _streams.end() || !it->second.poses.Sample(LocalClockMs() - it->second.poses.DelayMs(), pose)) {
+        if (it == _streams.end() || !it->second.poses.Sample(LocalClockMs() - it->second.poses.DelayMs() + it->second.poses.LeadMs(), pose)) {
             return false;
         }
         out = {pose.position, pose.velocity, pose.rotation};
@@ -1745,9 +1751,16 @@ namespace Mafia1Online::Features::Car {
                 }
             }
         }
-        if (_predictedSync || stream.contactUntil > _frameClock) {
+        // Watched, the car is shown a delay behind; near a car this client
+        // simulates, at the present, where the two meet. The render clock
+        // eases between them: stepping it moved the car by its speed times
+        // the delay at once, a lurch on entry and a snap back on exit.
+        const bool contact = _predictedSync || stream.contactUntil > _frameClock;
+        const double renderTime = stream.poses.AdvanceDelay(_frameClock, static_cast<float>(frameMs)) +
+                                  stream.poses.AdvanceLead(contact ? stream.poses.DelayMs() : 0.0f, dt, contact ? kLeadEntrySeconds : kLeadExitSeconds);
+        if (contact) {
             // Native physics runs on the replicated pedals and steering, then
-            // is pulled toward the pose predicted to the present, still
+            // is pulled toward the replicated pose at the render time, still
             // before C_car::Update and the camera read it.
             const auto before = vehicle.LinearVelocity();
             native(car, frameMs);
@@ -1764,9 +1777,10 @@ namespace Mafia1Online::Features::Car {
                 }
                 stream.lastImpactAt = _frameClock;
             }
-            // Shown through corrected native physics, not Present.
-            stream.poses.ClearCorrection();
-            if (!stream.poses.Sample(_frameClock, pose)) {
+            // The target keeps Present's correction, so it carries on from
+            // where the car was shown; the frame is native physics'.
+            stream.nativeShown = true;
+            if (!stream.poses.Present(renderTime, dt, pose)) {
                 return true;
             }
             // Until the controller's poses carry its own answer to the
@@ -1798,8 +1812,13 @@ namespace Mafia1Online::Features::Car {
             return true;
         }
         // A late pose that lands behind where the car was shown is closed
-        // over ~200 ms (CarPoseBuffer::Present), not jumped to.
-        const double renderTime = stream.poses.AdvanceDelay(_frameClock, static_cast<float>(frameMs));
+        // over ~200 ms (CarPoseBuffer::Present), not jumped to; so is where
+        // native physics left it.
+        if (stream.nativeShown) {
+            stream.nativeShown = false;
+            const auto current = frame->WorldPosition();
+            stream.poses.Rebase({current.x, current.y, current.z}, FrameRotation(*frame), renderTime - static_cast<double>(frameMs));
+        }
         if (!stream.poses.Present(renderTime, dt, pose)) {
             return false;
         }

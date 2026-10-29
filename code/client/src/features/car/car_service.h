@@ -98,6 +98,9 @@ namespace Mafia1Online::Features::Car {
             // Until this local clock time the car runs on corrected native
             // physics because a locally simulated car is close.
             double contactUntil = 0.0;
+            // The frame is where native physics put it: interpolation next
+            // starts from there (CarPoseBuffer::Rebase).
+            bool nativeShown = false;
             // Local clock times of the first and the latest impact of the
             // current contact a locally simulated car gave it here.
             double impactAt = 0.0;
