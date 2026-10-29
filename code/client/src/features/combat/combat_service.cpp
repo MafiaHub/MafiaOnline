@@ -129,7 +129,7 @@ namespace Mafia1Online::Features::Combat {
             auto *human = static_cast<SDK::Player::NativeHuman *>(static_cast<void *>(actor));
             // DeathService applies a retail Hit after the server's death state
             // arrives. Keep the native human alive until that replay occurs.
-            if (state.alive) {
+            if (state.alive && !life->killed) {
                 human->SetHealth(state.health);
             }
             auto &applied        = _applied[networkId];
@@ -189,7 +189,7 @@ namespace Mafia1Online::Features::Combat {
             }
             const auto *seat      = static_cast<SDK::Seat::NativeHuman *>(static_cast<void *>(actor));
             const bool inCar      = seat->usedActorEnter != nullptr;
-            if (!state.alive) {
+            if (!state.alive || life->killed) {
                 continue;
             }
             const bool crouchChanged = human->IsCrouching() != state.crouching;

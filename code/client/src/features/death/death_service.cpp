@@ -3,6 +3,7 @@
 #include "core/application.h"
 #include "features/simulation/simulation_config.h"
 
+#include "features/combat/combat_life.h"
 #include "features/combat/combat_service.h"
 #include "features/world/world_service.h"
 #include "shared/features/combat/fatal_fall_report.h"
@@ -160,8 +161,9 @@ namespace Mafia1Online::Features::Death {
                 ++it;
             }
         }
-        // Players and simulation host NPCs die the same way.
-        const auto applyDeath = [&](uint64_t networkId, uint64_t spawnGeneration) {
+        // Players and simulation host NPCs die the same way; an NPC as soon as
+        // either its entity or its Combat::State says so.
+        const auto applyDeath = [&](uint64_t networkId, uint64_t spawnGeneration, bool killed) {
             const auto *state        = combat.GetState(networkId);
             if (!state || !state->spawned || state->missionGeneration != world.LoadedMissionGeneration() || state->spawnGeneration != spawnGeneration) {
                 _applied.erase(networkId);
@@ -172,7 +174,7 @@ namespace Mafia1Online::Features::Death {
             if (!actor || (actor->GetType() != NativeActor::Type::Player && actor->GetType() != NativeActor::Type::Entity)) {
                 return;
             }
-            if (state->alive) {
+            if (state->alive && !killed) {
                 _applied.erase(networkId);
                 if (!actor->IsAlive() || actor->IsDead()) {
                     RestoreLiving(*actor);
@@ -196,9 +198,9 @@ namespace Mafia1Online::Features::Death {
                 _applied[networkId] = applied;
             }
         };
-        replication->ForEach<Shared::Entities::PlayerEntity>([&](Shared::Entities::PlayerEntity *player) { applyDeath(player->GetNetworkID(), player->spawnGeneration); });
+        replication->ForEach<Shared::Entities::PlayerEntity>([&](Shared::Entities::PlayerEntity *player) { applyDeath(player->GetNetworkID(), player->spawnGeneration, false); });
         replication->ForEach<Shared::Entities::NpcEntity>([&](Shared::Entities::NpcEntity *npc) {
-            applyDeath(npc->GetNetworkID(), Shared::Entities::NpcEntity::kSpawnGeneration);
+            applyDeath(npc->GetNetworkID(), Shared::Entities::NpcEntity::kSpawnGeneration, !npc->alive);
         });
     }
 
@@ -225,6 +227,11 @@ namespace Mafia1Online::Features::Death {
         // animation ends in SetActState(2). Respawn creates a new actor.
         if (const auto *state = handle.networkId && _combat ? _combat->GetState(handle.networkId) : nullptr; state && state->spawned && !state->alive) {
             return false;
+        }
+        if (auto *replication = handle.networkId ? Framework::CoreModules::GetReplication() : nullptr) {
+            if (const auto life = Combat::FindCombatLife(*replication, handle.networkId); life && life->killed) {
+                return false;
+            }
         }
         return handle.networkId != 0 || SDK::Player::CurrentPlayer() == &actor;
     }

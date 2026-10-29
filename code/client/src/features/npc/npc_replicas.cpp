@@ -74,6 +74,7 @@ namespace Mafia1Online::Features::Npc {
             Reset(world);
             return;
         }
+        auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
         std::unordered_set<uint64_t> seen;
         const MafiaNet::Time networkNow = MafiaNet::GetTime();
         const double clockNow           = static_cast<double>(MafiaNet::GetTimeUS()) * 0.001;
@@ -138,16 +139,21 @@ namespace Mafia1Online::Features::Npc {
             replica.renderTime = replica.snapshots.RenderTimeMs(clockNow);
             auto *actor = world.NativeObjects().Resolve(replica.handle);
             if (actor) {
+                // The death reaches the entity and the Combat::State on separate
+                // channels; DeathService replays it on the first, and the pose
+                // stream stops with it.
+                const auto *state = application->Combat().GetState(id);
+                const bool alive = npc->alive && (!state || state->alive);
                 if (replica.speechRevision != npc->speechRevision) {
                     replica.speechRevision = npc->speechRevision;
-                    if (npc->alive) {
+                    if (alive) {
                         auto *human = static_cast<SDK::Player::NativeHuman *>(actor);
                         human->SetVoice(npc->voice);
                         human->Say(npc->speechLine);
                     }
                 }
                 ApplyAnimation(replica, actor, *npc);
-                ApplyPose(replica, actor, npc->alive);
+                ApplyPose(replica, actor, alive);
             }
         });
         std::vector<uint64_t> gone;
