@@ -24,6 +24,9 @@ namespace Mafia1Online::SDK::Player {
 namespace Mafia1Online::SDK::Police {
     struct NativePoliceManager;
 }
+namespace Mafia1Online::SDK::Seat {
+    struct NativeCar;
+}
 namespace Mafia1Online::SDK::World {
     struct NativeItemVector;
 }
@@ -101,6 +104,13 @@ namespace Mafia1Online::Features::Npc {
         // Reports one of them's seat again on the next update, whatever was
         // reported last (a throw the server took but the native refused).
         void ResendSeat(const void *actor);
+        // C_human::Use_Actor on one of them finished (seat_hooks.cpp); seat
+        // is the one it held before the call.
+        void OnUseCar(SDK::Player::NativeActor *actor, SDK::Seat::NativeCar *car, int action, int seat);
+        // A crew retail seated itself (Krles: Intern_UseCar) and that was
+        // tracked just now: its seat goes to the server at once, and its
+        // exit too if the AI already sent it out.
+        void ReportCrewSeat(SDK::Player::NativeActor *actor, SDK::Seat::NativeCar *car);
         // ai_logs::GetMaxAngryCharacter on one of them: the angriest log entry
         // retail picked, replaced by the player that hurt this NPC most
         // lately, else the nearest player it is at odds with.
@@ -203,6 +213,8 @@ namespace Mafia1Online::Features::Npc {
         void ScanTemporaryActors(World::WorldService &world);
         // Seat changes in the cars the host drives.
         void SendSeats(World::WorldService &world);
+        // from: the seat it left, for the server to play the exit from.
+        void ReportSeat(Tracked &tracked, uint64_t carId, uint8_t seat, bool animated, uint64_t fromCarId, uint8_t fromSeat);
         void Retire(void *actor);
         // The player (network id) that should be this officer's offender.
         uint64_t TopGrudge(Tracked &tracked) const;

@@ -207,6 +207,14 @@ namespace Mafia1Online::Features::Seat {
     }
 
     void SeatService::OnNativeUse(NativeHuman *human, NativeCar *car, int action, int seat) {
+        // Simulation host: its NPCs report their own seat changes.
+        if (Simulation::IsHost() && human && car) {
+            auto &npcs = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->Npcs();
+            if (npcs.Owns(&human->actor)) {
+                npcs.OnUseCar(&human->actor, car, action, seat);
+                return;
+            }
+        }
         if (!_world || !_world->IsReady() || !human || !car || &human->actor != SDK::Player::CurrentPlayer() ||
             (action != static_cast<int>(SDK::Seat::UseAction::Enter) && action != static_cast<int>(SDK::Seat::UseAction::Exit))) {
             return;

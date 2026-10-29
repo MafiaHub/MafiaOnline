@@ -456,18 +456,68 @@ namespace Mafia1Online::Features::Npc {
                 continue;
             }
             tracked.forceSeatReport = false;
-            Shared::Npc::Seat report;
-            report.missionGeneration = _missionGeneration;
-            report.key = tracked.key;
-            report.carId = carId;
-            report.seat = seat;
             // Intern_UseCar / Intern_FromCar are instant; Use_Actor animates.
-            report.animated = carId ? !seated : door != nullptr;
-            tracked.seatCarId = carId;
-            tracked.seat = seat;
-            Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(report, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
-            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->debug("NPC {} seat: car {} seat {} ({})", tracked.key, carId, seat,
-                                                                        report.animated ? "animated" : "instant");
+            ReportSeat(tracked, carId, seat, carId ? !seated : door != nullptr, tracked.seatCarId, tracked.seat);
+        }
+    }
+
+    void NpcHost::ReportSeat(Tracked &tracked, uint64_t carId, uint8_t seat, bool animated, uint64_t fromCarId, uint8_t fromSeat) {
+        Shared::Npc::Seat report;
+        report.missionGeneration = _missionGeneration;
+        report.key = tracked.key;
+        report.carId = carId;
+        report.seat = seat;
+        report.animated = animated;
+        report.fromCarId = fromCarId;
+        report.fromSeat = fromCarId ? fromSeat : Shared::Npc::Seat::kNoSeat;
+        tracked.seatCarId = carId;
+        tracked.seat = seat;
+        Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(report, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
+        Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->debug("NPC {} seat: car {} seat {} ({})", tracked.key, carId, seat, animated ? "animated" : "instant");
+    }
+
+    void NpcHost::OnUseCar(NativeActor *actor, SDK::Seat::NativeCar *car, int action, int seat) {
+        const auto found = _npcs.find(actor);
+        if (found == _npcs.end() || !_world || action != static_cast<int>(SDK::Seat::UseAction::Exit) || seat < 0 ||
+            seat >= static_cast<int>(Shared::Entities::CarEntity::kMaxSeats)) {
+            return;
+        }
+        // Use_Actor's exit (0x582180) frees the seat and plays the door
+        // animation with the car in +0x9c. A refused door climbs across
+        // (Do_ClimbInCarLR) or pops it out (ForceExitCar): SendSeats reports
+        // those.
+        auto *human = static_cast<SDK::Seat::NativeHuman *>(static_cast<void *>(actor));
+        if (human->usedActorEnter || human->usedActorLeave != static_cast<NativeActor *>(car) || human->HasPendingEntry(car)) {
+            return;
+        }
+        const uint64_t carId = _world->NativeObjects().FindByNative(car).networkId;
+        if (carId == 0) {
+            return;
+        }
+        // Now, not on the next SendSeats: an NPC tracked as it left (a
+        // mafia crew right after Krles) never shows that pass a seat.
+        ReportSeat(found->second, 0, Shared::Npc::Seat::kNoSeat, true, carId, static_cast<uint8_t>(seat));
+    }
+
+    void NpcHost::ReportCrewSeat(NativeActor *actor, SDK::Seat::NativeCar *car) {
+        const auto found = _npcs.find(actor);
+        if (found == _npcs.end() || !_world || !car) {
+            return;
+        }
+        auto *human = static_cast<SDK::Seat::NativeHuman *>(static_cast<void *>(actor));
+        const uint64_t carId = _world->NativeObjects().FindByNative(car).networkId;
+        if (carId == 0 || human->seatId < 0 || human->seatId >= static_cast<int>(Shared::Entities::CarEntity::kMaxSeats)) {
+            return;
+        }
+        const auto seat = static_cast<uint8_t>(human->seatId);
+        // Use_Actor's exit keeps +0xac and leaves the car in +0x9c.
+        const bool leaving = !human->usedActorEnter && human->usedActorLeave == static_cast<NativeActor *>(car) && !human->HasPendingEntry(car);
+        if (!human->IsSeatedIn(car, seat) && !leaving) {
+            return;
+        }
+        ReportSeat(found->second, carId, seat, false, 0, Shared::Npc::Seat::kNoSeat);
+        if (leaving) {
+            ReportSeat(found->second, 0, Shared::Npc::Seat::kNoSeat, true, carId, seat);
         }
     }
 

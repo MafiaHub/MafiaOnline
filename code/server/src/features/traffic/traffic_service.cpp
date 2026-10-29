@@ -346,17 +346,27 @@ namespace Mafia1Online::Features::Traffic {
         const auto previous = _npcSeats.find(npcId);
         if (seat.seat == Shared::Npc::Seat::kNoSeat) {
             if (previous == _npcSeats.end()) {
-                Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->debug("NPC {} left a seat the server never gave it", npcId);
-                return false;
+                // The host tracked it as it left (a mafia crew Krles seated):
+                // players replay the exit from the seat it names, and the
+                // occupant list, which never held it, stays as it is.
+                const auto *car = seat.fromSeat != Shared::Npc::Seat::kNoSeat ? _cars->Find(seat.fromCarId) : nullptr;
+                if (!seat.animated || !car || !car->hostDriven || car->missionGeneration != _missionGeneration || seat.fromSeat >= car->seatCount) {
+                    Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->debug("NPC {} left a seat the server never gave it", npcId);
+                    return false;
+                }
+                event.carId = seat.fromCarId;
+                event.seat = seat.fromSeat;
             }
-            const auto where = previous->second;
-            _npcSeats.erase(previous);
-            auto *car = _cars->Find(where.carId);
-            if (!car || !_cars->RecordSeatOutcome(where.carId, where.seat, npcId, Shared::Entities::NpcEntity::kSpawnGeneration, Result::Exited)) {
-                return false;
+            else {
+                const auto where = previous->second;
+                _npcSeats.erase(previous);
+                auto *car = _cars->Find(where.carId);
+                if (!car || !_cars->RecordSeatOutcome(where.carId, where.seat, npcId, Shared::Entities::NpcEntity::kSpawnGeneration, Result::Exited)) {
+                    return false;
+                }
+                event.carId = where.carId;
+                event.seat = where.seat;
             }
-            event.carId = where.carId;
-            event.seat = where.seat;
             event.action = Shared::Car::SeatAction::Exit;
         }
         else {

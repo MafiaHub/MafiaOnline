@@ -673,6 +673,10 @@ namespace Mafia1Online::Shared::Npc {
         uint64_t carId = 0;
         uint8_t seat = kNoSeat;
         bool animated = false;
+        // The seat it left (kNoSeat for none). An exit from a seat the
+        // server never recorded still plays on players from there.
+        uint64_t fromCarId = 0;
+        uint8_t fromSeat = kNoSeat;
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {
             stream->Serialize(write, missionGeneration);
@@ -680,6 +684,8 @@ namespace Mafia1Online::Shared::Npc {
             stream->Serialize(write, carId);
             stream->Serialize(write, seat);
             stream->Serialize(write, animated);
+            stream->Serialize(write, fromCarId);
+            stream->Serialize(write, fromSeat);
         }
     };
 

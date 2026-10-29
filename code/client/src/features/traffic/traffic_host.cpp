@@ -26,6 +26,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <initializer_list>
 #include <limits>
 #include <unordered_set>
 
@@ -874,11 +875,13 @@ namespace Mafia1Online::Features::Traffic {
         }
         const auto &pursuit = begin[after - 1];
         Transfer(car, pursuit.car);
-        if (pursuit.driver) {
-            _npcs->TrackIfNew(pursuit.driver, Shared::Entities::NpcKind::Gangster);
-        }
-        if (pursuit.passenger) {
-            _npcs->TrackIfNew(pursuit.passenger, Shared::Entities::NpcKind::Gangster);
+        // Krles seated the crew (Intern_UseCar); the AI may send it out
+        // before the next seat pass, which would then see it on foot.
+        for (NativeActor *member : {pursuit.driver, pursuit.passenger}) {
+            if (member) {
+                _npcs->TrackIfNew(member, Shared::Entities::NpcKind::Gangster);
+                _npcs->ReportCrewSeat(member, static_cast<SDK::Seat::NativeCar *>(pursuit.car));
+            }
         }
         Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Mafia car crew turned on player {}", _world->NativeObjects().FindByNative(actor).networkId);
     }
