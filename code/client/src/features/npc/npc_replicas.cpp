@@ -15,6 +15,7 @@
 
 #include <core_modules.h>
 #include <logging/logger.h>
+#include <mafia1/sdk/collision/native_collision.h>
 #include <mafia1/sdk/core/mission.h>
 #include <mafia1/sdk/player/native_death.h>
 #include <mafia1/sdk/player/native_human.h>
@@ -73,7 +74,9 @@ namespace Mafia1Online::Features::Npc {
         constexpr float kContactDistance = 1.1f;
         constexpr float kContactLagLimit = 1.5f;
         constexpr float kContactEaseInSeconds = 0.2f;
-        constexpr float kContactEaseOutSeconds = 0.3f;
+        constexpr float kContactProbeHeight = 0.405f;
+        constexpr float kContactBodyRadius = 0.4f;
+        constexpr float kContactSettledDistance = 0.02f;
         // Once its own animation releases the body (a hit reaction, a timed
         // action, a door), it returns to the stream over this time; one
         // further off than this (a teleport) is placed at once.
@@ -303,7 +306,7 @@ namespace Mafia1Online::Features::Npc {
         }
         auto position = pose.position;
         auto direction = glm::mat3_cast(pose.rotation) * glm::vec3(0.0f, 0.0f, 1.0f);
-        ApplyContact(replica, pose, position, direction);
+        const auto step = ApplyContact(replica, pose, position, direction);
         BlendFromHold(replica, actor, position, direction, now);
         replica.frame->SetWorldPosition({position.x, position.y, position.z});
         replica.frame->SetDirection({direction.x, direction.y, direction.z});
@@ -335,6 +338,10 @@ namespace Mafia1Online::Features::Npc {
         if (Player::MovingGait(*state) &&
             Player::Stalled(time, static_cast<double>(replica.locomotion.back().at), kSnapshotConfig.maxExtrapolationMs, replica.newestVelocity)) {
             state = Player::kStopState;
+        }
+        // Stepping back from a melee contact while the host's body stands.
+        if (step && (*state & 0x1ff) == Player::kStopState) {
+            state = *step;
         }
         const auto animation = Player::ClassifyHumanState(*state);
         // Cover goes through the host's own call, which also starts the
@@ -428,14 +435,15 @@ namespace Mafia1Online::Features::Npc {
         SDK::Player::ShiftBody(*static_cast<SDK::Player::NativeHuman *>(native), {step.x, step.y, step.z});
     }
 
-    void NpcReplicaService::ApplyContact(Replica &replica, const Framework::Utils::TransformSnapshot &pose, glm::vec3 &position, glm::vec3 &direction) {
+    std::optional<int16_t> NpcReplicaService::ApplyContact(Replica &replica, const Framework::Utils::TransformSnapshot &pose, glm::vec3 &position, glm::vec3 &direction) {
         const auto now = std::chrono::steady_clock::now();
         const float seconds = replica.contactAt == std::chrono::steady_clock::time_point {} ? 0.0f : std::min(std::chrono::duration<float>(now - replica.contactAt).count(), 0.1f);
         replica.contactAt = now;
         auto *player = SDK::Player::CurrentPlayer();
         if (!player || (now >= replica.engagedUntil && replica.contact <= 0.0f)) {
             replica.contact = 0.0f;
-            return;
+            replica.contactOffset = glm::vec3(0.0f);
+            return std::nullopt;
         }
         const auto at = SDK::Player::WorldPosition(player);
         const glm::vec3 target(at.x, at.y, at.z);
@@ -443,16 +451,57 @@ namespace Mafia1Online::Features::Npc {
         const float distance = glm::length(flat);
         const float speed = glm::length(glm::vec3(pose.velocity.x, 0.0f, pose.velocity.z));
         const float lag = std::isfinite(speed) ? std::min(speed * replica.snapshots.EffectiveDelayMs() * 0.001f, kContactLagLimit) : 0.0f;
-        const bool closing = now < replica.engagedUntil && distance > kContactDistance && distance <= Shared::Combat::kMeleeReach + lag &&
-                             std::abs(position.y - target.y) <= Shared::Combat::kMeleeHeightDifference;
+        bool closing = now < replica.engagedUntil && distance > kContactDistance && distance <= Shared::Combat::kMeleeReach + lag &&
+                       std::abs(position.y - target.y) <= Shared::Combat::kMeleeHeightDifference;
         if (closing) {
             replica.contactSpot = {target.x + flat.x / distance * kContactDistance, position.y, target.z + flat.z / distance * kContactDistance};
+            // Never into a wall or a static prop: retail's movement collision
+            // (C_human::MovementIntern's sweep) would have stopped the host's
+            // body short of one. Tested at the body's base sphere, out to its
+            // radius beyond the spot (HUMAN_MOVEMENT_COLLISION_BASE_HEIGHT and
+            // _BASE_RADIUS, 0.405 and 0.4 m).
+            const glm::vec3 path = replica.contactSpot - position;
+            const float length = glm::length(path);
+            if (length > 0.001f) {
+                const glm::vec3 reach = path * ((length + kContactBodyRadius) / length);
+                closing = !SDK::Collision::StaticLineBlocked({position.x, position.y + kContactProbeHeight, position.z}, {reach.x, reach.y, reach.z});
+            }
         }
-        replica.contact = std::clamp(replica.contact + (closing ? seconds / kContactEaseInSeconds : -seconds / kContactEaseOutSeconds), 0.0f, 1.0f);
+        std::optional<int16_t> step;
+        if (closing) {
+            replica.contact = std::min(replica.contact + seconds / kContactEaseInSeconds, 1.0f);
+            replica.contactOffset = (replica.contactSpot - position) * replica.contact;
+            replica.contactReleaseLength = 0.0f;
+        }
+        else {
+            // Released: the body walks back onto its pose at retail's walk
+            // speeds, in the walk for its way relative to its facing, rather
+            // than gliding back in the stream's stance.
+            const float length = glm::length(replica.contactOffset);
+            if (!std::isfinite(length) || length <= kContactSettledDistance) {
+                replica.contact = 0.0f;
+                replica.contactOffset = glm::vec3(0.0f);
+                return std::nullopt;
+            }
+            if (replica.contactReleaseLength <= 0.0f) {
+                replica.contactReleaseLength = length;
+                replica.contactReleaseWeight = replica.contact;
+            }
+            // The way it faces as shown this frame, turned to the player.
+            glm::vec3 shown = direction;
+            if (const glm::vec3 toward(target.x - position.x - replica.contactOffset.x, 0.0f, target.z - position.z - replica.contactOffset.z); glm::length(toward) > 0.01f) {
+                shown = glm::mix(direction, glm::normalize(toward), replica.contact);
+            }
+            const auto walk = StepFor(-replica.contactOffset, shown);
+            const float left = std::max(length - walk.speed * seconds, 0.0f);
+            replica.contactOffset *= left / length;
+            replica.contact = replica.contactReleaseWeight * left / replica.contactReleaseLength;
+            step = walk.state;
+        }
         if (replica.contact <= 0.0f) {
-            return;
+            return std::nullopt;
         }
-        position = glm::mix(position, replica.contactSpot, replica.contact);
+        position += replica.contactOffset;
         // Facing the player, as the host's fighter turned to strike.
         const glm::vec3 facing(target.x - position.x, 0.0f, target.z - position.z);
         if (glm::length(facing) > 0.01f) {
@@ -461,6 +510,7 @@ namespace Mafia1Online::Features::Npc {
                 direction = glm::normalize(turned);
             }
         }
+        return step;
     }
 
     void NpcReplicaService::Engage(uint64_t networkId, std::chrono::steady_clock::time_point until) {

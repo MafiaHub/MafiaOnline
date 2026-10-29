@@ -817,6 +817,22 @@ namespace {
         CHECK(ReleaseWeight(0.1f, 0.0f) == 0.0f && ReleaseWeight(std::numeric_limits<float>::quiet_NaN(), 0.3f) == 0.0f);
     }
 
+    void ContactStep() {
+        using namespace Features::Npc;
+        const glm::vec3 north {0.0f, 0.0f, 1.0f};
+        // Facing +z: ahead is walk1, behind back1, +x strafR1 (Go_Right).
+        CHECK(StepFor({0.0f, 0.0f, 1.0f}, north).state == 6 && StepFor({0.0f, 0.0f, 1.0f}, north).speed == 1.7f);
+        CHECK(StepFor({0.0f, 0.0f, -1.0f}, north).state == 7 && StepFor({0.0f, 0.0f, -1.0f}, north).speed == 1.5f);
+        CHECK(StepFor({1.0f, 0.0f, 0.0f}, north).state == 12);
+        CHECK(StepFor({-1.0f, 0.0f, 0.0f}, north).state == 11);
+        // Facing +x, its right is -z; height does not count.
+        CHECK(StepFor({0.0f, 5.0f, -1.0f}, {1.0f, 0.0f, 0.0f}).state == 12);
+        // Mostly backwards with a little sideways is still back1.
+        CHECK(StepFor({0.3f, 0.0f, -1.0f}, north).state == 7);
+        // Nothing to go by: walk1.
+        CHECK(StepFor(glm::vec3(0.0f), north).state == 6 && StepFor(north, glm::vec3(0.0f)).state == 6);
+    }
+
     void HostView() {
         using namespace Features::Player;
         // Half of each round trip, kept within the buffer's bound one send
@@ -869,6 +885,7 @@ int main() {
     StalledGait();
     HumanStates();
     ReleaseBlend();
+    ContactStep();
     HostView();
     if (failures == 0) {
         std::printf("network wire tests passed\n");

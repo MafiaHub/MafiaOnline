@@ -118,11 +118,16 @@ namespace Mafia1Online::Features::Npc {
             // A police arrest half (PlaySeizing) holds the pose too: the
             // clip moves the body from the aligned place.
             std::chrono::steady_clock::time_point seizingUntil {};
-            // Engage: how far (0..1) the replica stands at `contactSpot`
-            // instead of its pose, and when that was last eased.
+            // Engage: how far (0..1) the replica turns to the player, how
+            // far it stands from its pose toward `contactSpot`, and when
+            // that was last eased. Released, it walks back from
+            // contactReleaseLength away, turning from contactReleaseWeight.
             std::chrono::steady_clock::time_point engagedUntil {};
             float contact = 0.0f;
             glm::vec3 contactSpot {0.0f};
+            glm::vec3 contactOffset {0.0f};
+            float contactReleaseLength = 0.0f;
+            float contactReleaseWeight = 0.0f;
             std::chrono::steady_clock::time_point contactAt {};
             // Its death: when a channel first said so, whether this copy
             // got to the host's moment of it (DeathShown), and whether it
@@ -163,8 +168,9 @@ namespace Mafia1Online::Features::Npc {
         // falls and where it rests.
         void SettleCorpse(Replica &replica, void *actor);
         // Eases the pose toward striking range of the local player while
-        // engaged, and back to the pose after.
-        void ApplyContact(Replica &replica, const Framework::Utils::TransformSnapshot &pose, glm::vec3 &position, glm::vec3 &direction);
+        // engaged and its way there is clear, and walks it back to the pose
+        // after: the walk to show meanwhile if the stream stands.
+        std::optional<int16_t> ApplyContact(Replica &replica, const Framework::Utils::TransformSnapshot &pose, glm::vec3 &position, glm::vec3 &direction);
         // Replays npc.playAnimation / stopAnimation as PERSON_PLAYANIM and
         // PERSON_STOPANIM do on the host.
         void ApplyAnimation(Replica &replica, void *actor, const Shared::Entities::NpcEntity &npc);
