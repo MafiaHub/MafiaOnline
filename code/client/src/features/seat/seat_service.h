@@ -47,6 +47,11 @@ namespace Mafia1Online::Features::Seat {
         void OnNativeUse(SDK::Seat::NativeHuman *human, SDK::Seat::NativeCar *car, int action, int seat);
         // victim: the seat's owner before the throw.
         void OnNativeSteal(SDK::Seat::NativeHuman *human, SDK::Seat::NativeCar *car, int seat, SDK::Player::NativeActor *victim);
+        // Players: a host NPC's door entry or exit its replica was not
+        // placed for (it streamed in during one, or was never seated here).
+        // An exit seats it first. Only into a free seat, and never during
+        // another door animation.
+        bool ReplayNpcDoor(World::WorldService &world, uint64_t npcId, uint64_t carId, uint8_t seat, Shared::Car::SeatAction action);
 
       private:
         struct PendingLocal {
@@ -73,6 +78,7 @@ namespace Mafia1Online::Features::Seat {
         };
 
         void Send(uint64_t carId, uint64_t playerId, uint8_t seat, Shared::Car::SeatAction action);
+        bool ReplayNpcDoor(SDK::Seat::NativeHuman *human, SDK::Seat::NativeCar *car, uint64_t npcId, uint64_t carId, uint8_t seat, Shared::Car::SeatAction action);
         // Simulation host: one of its NPCs threw a player's replica out.
         void OnNpcSteal(SDK::Seat::NativeHuman *human, SDK::Seat::NativeCar *car, int seat, SDK::Player::NativeActor *victim);
         void PollLocal(World::WorldService &world);

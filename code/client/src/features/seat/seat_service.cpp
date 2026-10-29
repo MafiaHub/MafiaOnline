@@ -563,7 +563,9 @@ namespace Mafia1Online::Features::Seat {
                                                                                    event.seat, human->IsSeatedIn(car, event.seat) ? "still seated" : "popped out");
                     }
                 }
-                else if (npc) {
+                // Never seated here (the server never had its seat, or the
+                // Exited outcome came first): seated now to leave as well.
+                else if (npc && (!npc->alive || !ReplayNpcDoor(human, car, event.playerId, event.carId, event.seat, Action::Exit))) {
                     Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->warn("NPC {} exit from car {} seat {} not replayed: its replica is not seated there", event.playerId,
                                                                                event.carId, event.seat);
                 }
@@ -577,6 +579,39 @@ namespace Mafia1Online::Features::Seat {
                 break;
             }
         }
+    }
+
+    bool SeatService::ReplayNpcDoor(World::WorldService &world, uint64_t npcId, uint64_t carId, uint8_t seat, Action action) {
+        auto *human = Human(world, npcId);
+        auto *car = Car(world, carId);
+        return human && car && ReplayNpcDoor(human, car, npcId, carId, seat, action);
+    }
+
+    bool SeatService::ReplayNpcDoor(NativeHuman *human, NativeCar *car, uint64_t npcId, uint64_t carId, uint8_t seat, Action action) {
+        if ((action != Action::Enter && action != Action::Exit) || seat >= Shared::Entities::CarEntity::kMaxSeats || !car->HasSeat(seat) || car->GetOwner(seat) ||
+            human->usedActorEnter || human->usedActorLeave || human->actor.IsDead()) {
+            return false;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (action == Action::Enter) {
+            human->UseCar(car, SDK::Seat::UseAction::Enter, seat);
+            // Use_Actor's entry reserves the seat with the car in +0x9c.
+            if (!human->HasPendingEntry(car)) {
+                return false;
+            }
+            _animations[npcId] = {now + std::chrono::seconds(5), carId, seat};
+            return true;
+        }
+        // Use_Actor's exit starts from the seat (+0x98, +0xac).
+        if (!human->PlaceInCar(car, seat)) {
+            return false;
+        }
+        {
+            const RemoteExitScope remote;
+            human->UseCar(car, SDK::Seat::UseAction::Exit, seat);
+        }
+        _animations[npcId] = {now + std::chrono::seconds(2), carId, seat};
+        return human->usedActorLeave == static_cast<NativeActor *>(car);
     }
 
     void SeatService::Reconcile(World::WorldService &world) {
