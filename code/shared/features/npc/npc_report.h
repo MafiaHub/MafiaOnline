@@ -312,6 +312,8 @@ namespace Mafia1Online::Shared::Npc {
         float directionX = 0.0f;
         float directionY = 0.0f;
         float directionZ = 0.0f;
+        // When it landed, on the host's sample clock (Npc::Melee::hostClockMs).
+        uint16_t hostClockMs = 0;
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {
             stream->Serialize(write, missionGeneration);
@@ -324,6 +326,7 @@ namespace Mafia1Online::Shared::Npc {
             stream->Serialize(write, directionX);
             stream->Serialize(write, directionY);
             stream->Serialize(write, directionZ);
+            stream->Serialize(write, hostClockMs);
         }
     };
 

@@ -23,6 +23,10 @@ namespace Mafia1Online::Shared::Combat {
         float directionZ               = 0.0f;
         // The car of a car impact (hit type 4), else 0.
         uint64_t sourceCarId           = 0;
+        // An NPC's hit: the NPC and its host's sample clock when it landed
+        // (Npc::PlayerHit::hostClockMs), else 0.
+        uint64_t sourceNpcId           = 0;
+        uint16_t sourceClock           = 0;
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {
             stream->Serialize(write, targetNetworkId);
@@ -36,6 +40,10 @@ namespace Mafia1Online::Shared::Combat {
             stream->Serialize(write, directionY);
             stream->Serialize(write, directionZ);
             stream->Serialize(write, sourceCarId);
+            stream->Serialize(write, sourceNpcId);
+            if (sourceNpcId != 0) {
+                stream->Serialize(write, sourceClock);
+            }
         }
     };
 } // namespace Mafia1Online::Shared::Combat

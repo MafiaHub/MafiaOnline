@@ -89,6 +89,7 @@ namespace Mafia1Online::Features::Combat {
         _states.clear();
         _aimSequences.clear();
         _applied.clear();
+        _heldDamage.clear();
         _events.clear();
         _seenEvents.clear();
         _seenOrder.clear();
@@ -131,7 +132,7 @@ namespace Mafia1Online::Features::Combat {
             // DeathService applies a retail Hit after the server's death state
             // arrives. Keep the native human alive until that replay occurs.
             if (state.alive && !life->killed) {
-                human->SetHealth(state.health);
+                human->SetHealth(state.health + HeldDamage(networkId));
             }
             auto &applied        = _applied[networkId];
             const bool newNative = applied.nativeGeneration != handle.generation || applied.missionGeneration != state.missionGeneration || applied.spawnGeneration != state.spawnGeneration;

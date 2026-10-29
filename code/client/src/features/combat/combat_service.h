@@ -70,6 +70,15 @@ namespace Mafia1Online::Features::Combat {
         bool Submit(uint64_t networkId, Shared::Combat::Action action, uint8_t weaponId, uint64_t targetNetworkId, uint64_t targetSpawnGeneration, float directionX, float directionY, float directionZ, bool aiming = false,
                     bool crouching = false, float poseTargetOffsetX = 0.0f, float poseTargetOffsetY = 0.0f, float poseTargetOffsetZ = 0.0f, const NativeShotData *shot = nullptr);
         bool PopEvent(Shared::Combat::Event &event);
+        // NPC blows DeathService holds until they land, per target: its
+        // health shows that much more until then.
+        void HoldDamage(std::unordered_map<uint64_t, float> held) {
+            _heldDamage = std::move(held);
+        }
+        [[nodiscard]] float HeldDamage(uint64_t networkId) const {
+            const auto found = _heldDamage.find(networkId);
+            return found == _heldDamage.end() ? 0.0f : found->second;
+        }
 
       private:
         void OnState(const Shared::Combat::State &state);
@@ -124,6 +133,7 @@ namespace Mafia1Online::Features::Combat {
         // The local controller's own count for AimUpdate.
         uint16_t _aimUpdateSequence = 0;
         std::unordered_map<uint64_t, AppliedNative> _applied;
+        std::unordered_map<uint64_t, float> _heldDamage;
         std::deque<PendingEvent> _events;
         std::unordered_set<EventKey, EventKeyHash> _seenEvents;
         std::deque<EventKey> _seenOrder;

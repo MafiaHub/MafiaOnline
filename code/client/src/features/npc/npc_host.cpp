@@ -1450,6 +1450,7 @@ namespace Mafia1Online::Features::Npc {
         hit.directionX = unit.x;
         hit.directionY = unit.y;
         hit.directionZ = unit.z;
+        hit.hostClockMs = Shared::Net::SampleClock(MafiaNet::GetTime());
         Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(hit, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
         Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->debug("NPC {} hit player {} (type {}, part {}, damage {:.1f})", hit.key, hit.targetNetworkId, hit.hitType, hit.bodyPart,
                                                                     damage);

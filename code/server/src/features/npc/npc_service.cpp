@@ -424,7 +424,7 @@ namespace Mafia1Online::Features::Npc {
                 return;
             }
             _combat->ApplyNpcHit(npc->state.networkId, hit.targetNetworkId, hit.missionGeneration, hit.targetSpawnGeneration, hit.hitType, hit.bodyPart, hit.damage,
-                                 glm::vec3(hit.directionX, hit.directionY, hit.directionZ), npc->state.selectedWeapon);
+                                 glm::vec3(hit.directionX, hit.directionY, hit.directionZ), npc->state.selectedWeapon, hit.hostClockMs);
         });
         network->RegisterRPC<Shared::Npc::CarHit>([this](const Shared::Npc::CarHit &hit, MafiaNet::Packet *packet) {
             if (!FromHost(MafiaNet::ToPeerGuid(packet->guid), hit.missionGeneration) || !_carHit || !std::isfinite(hit.damage) || hit.damage <= 0.0f ||

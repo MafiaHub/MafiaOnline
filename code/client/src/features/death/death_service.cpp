@@ -19,6 +19,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <unordered_map>
+#include <utility>
 
 namespace Mafia1Online::Features::Death {
     namespace {
@@ -50,6 +52,7 @@ namespace Mafia1Online::Features::Death {
         _world  = &world;
         _combat = &combat;
         if (!world.IsReady()) {
+            combat.HoldDamage({});
             _applied.clear();
             _seenAlive.clear();
             _pendingDamage.clear();
@@ -104,10 +107,21 @@ namespace Mafia1Online::Features::Death {
             const float speed = std::sqrt(event.directionX * event.directionX + event.directionY * event.directionY + event.directionZ * event.directionZ);
             static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->Npcs().ReportCarContact(car, victim, speed, killed);
         };
+        // An NPC's blow lands when its replica swings it (the attack waits
+        // for the replica in CombatService::ReplayEvents), and its damage
+        // shows, or kills, only then: until that moment each target keeps
+        // the health it had.
+        const auto &npcReplicas = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->NpcReplicas();
+        std::unordered_map<uint64_t, float> heldDamage;
         for (auto it = _pendingDamage.begin(); it != _pendingDamage.end();) {
             const auto &event = it->event;
             if (event.missionGeneration < world.LoadedMissionGeneration() || now - it->received > std::chrono::seconds(2)) {
                 it = _pendingDamage.erase(it);
+                continue;
+            }
+            if (event.hitType == 1 && event.sourceNpcId != 0 && (heldDamage.contains(event.targetNetworkId) || !npcReplicas.Reached(event.sourceNpcId, event.sourceClock, it->received))) {
+                heldDamage[event.targetNetworkId] += std::isfinite(event.damage) ? std::max(event.damage, 0.0f) : 0.0f;
+                ++it;
                 continue;
             }
             const auto *state = combat.GetState(event.targetNetworkId);
@@ -162,6 +176,7 @@ namespace Mafia1Online::Features::Death {
                 ++it;
             }
         }
+        combat.HoldDamage(std::move(heldDamage));
         // Players and simulation host NPCs die the same way; an NPC as soon as
         // either its entity or its Combat::State says so.
         const auto applyDeath = [&](uint64_t networkId, uint64_t spawnGeneration, bool killed) {
@@ -181,6 +196,10 @@ namespace Mafia1Online::Features::Death {
                 if (!actor->IsAlive() || actor->IsDead()) {
                     RestoreLiving(*actor);
                 }
+                return;
+            }
+            // A lethal NPC blow kills when it lands.
+            if (combat.HeldDamage(networkId) > 0.0f) {
                 return;
             }
             const AppliedDeath applied {state->missionGeneration, state->spawnGeneration, handle.generation};

@@ -177,8 +177,10 @@ namespace Mafia1Online::Features::Combat {
         // the native Hit damage before the body part scale. A bullet (hit
         // type 0) is scaled like a player's shot; bodyPart 0 means through
         // the car the target sits in. A melee knockdown (1) applies as given.
+        // hostClock: when it landed, on the host's sample clock, which
+        // players play the hit by (DamageEvent::sourceClock).
         void ApplyNpcHit(uint64_t sourceId, uint64_t targetId, uint64_t missionGeneration, uint64_t targetSpawnGeneration, uint8_t hitType, uint8_t bodyPart, float damage,
-                         const glm::vec3 &direction, uint8_t weaponId);
+                         const glm::vec3 &direction, uint8_t weaponId, uint16_t hostClock);
         // A tram or metro train of the simulation host ran into a player on
         // foot there; damage is C_human::Collision's (|v| - 2.5) * 4.2.
         // Returns whether the hit was applied.
@@ -270,7 +272,9 @@ namespace Mafia1Online::Features::Combat {
         // every physics step while the bodies touch); an impact may follow a
         // bump at once (VehicleContactDue).
         bool AdmitVehicleContact(uint64_t carId, uint64_t targetId, Shared::Combat::VehicleContact kind);
-        void PublishDamage(const Shared::Combat::HitReport &report, float damage, uint8_t hitType, std::optional<uint8_t> weaponId);
+        // npcClock: an NPC's hit's host sample clock (ApplyNpcHit).
+        void PublishDamage(const Shared::Combat::HitReport &report, float damage, uint8_t hitType, std::optional<uint8_t> weaponId,
+                           std::optional<uint16_t> npcClock = std::nullopt);
         void OnFatalFallReport(const Shared::Combat::FatalFallReport &report, MafiaNet::PeerGuid sender);
         void OnDetonationReport(const Shared::Combat::DetonationReport &report, MafiaNet::PeerGuid sender);
         void OnVehicleImpact(const Shared::Combat::VehicleImpact &report, MafiaNet::PeerGuid sender);

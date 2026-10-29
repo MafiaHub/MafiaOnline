@@ -281,7 +281,7 @@ namespace Mafia1Online::Core {
         _chat.SetOpenKeys(_settings.ModKeyDik(ModKey::Chat), _settings.ModKeyDik(ModKey::Command));
         _nametags.SetVisible(_settings.Hud().nametags, _settings.Hud().nametagHealth);
         const auto *localState = _combat.GetLocalState(_world);
-        _chat.Update(_world.IsReady(), localState && localState->spawned ? std::optional<float>(localState->health) : std::nullopt);
+        _chat.Update(_world.IsReady(), localState && localState->spawned ? std::optional<float>(localState->health + _combat.HeldDamage(localState->networkId)) : std::nullopt);
         while (auto line = _chat.TakeOutgoing()) {
             SubmitChatLine(*line);
         }

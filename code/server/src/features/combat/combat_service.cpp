@@ -1304,7 +1304,7 @@ namespace Mafia1Online::Features::Combat {
         return true;
     }
 
-    void CombatService::PublishDamage(const Shared::Combat::HitReport &report, float damage, uint8_t hitType, std::optional<uint8_t> weaponId) {
+    void CombatService::PublishDamage(const Shared::Combat::HitReport &report, float damage, uint8_t hitType, std::optional<uint8_t> weaponId, std::optional<uint16_t> npcClock) {
         auto *target = _players->FindByNetworkId(report.targetNetworkId);
         const auto cause = hitType == 0 ? DamageCause::Firearm : hitType == 1 ? DamageCause::Melee : hitType == 2 ? DamageCause::Explosion : DamageCause::Fire;
         if (!target || !SetHealth(target->GetNetworkID(), target->health - damage, report.shooterNetworkId, weaponId, cause)) {
@@ -1325,11 +1325,15 @@ namespace Mafia1Online::Features::Combat {
         event.directionX            = report.directionX;
         event.directionY            = report.directionY;
         event.directionZ            = report.directionZ;
+        if (npcClock) {
+            event.sourceNpcId = report.shooterNetworkId;
+            event.sourceClock = *npcClock;
+        }
         Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(event);
     }
 
     void CombatService::ApplyNpcHit(uint64_t sourceId, uint64_t targetId, uint64_t missionGeneration, uint64_t targetSpawnGeneration, uint8_t hitType, uint8_t bodyPart, float damage,
-                                    const glm::vec3 &direction, uint8_t weaponId) {
+                                    const glm::vec3 &direction, uint8_t weaponId, uint16_t hostClock) {
         auto *target = _players->FindByNetworkId(targetId);
         if (!target || !target->spawned || !target->alive || target->missionGeneration != missionGeneration || target->spawnGeneration != targetSpawnGeneration ||
             !std::isfinite(damage) || damage <= 0.0f || !std::isfinite(direction.x) || !std::isfinite(direction.y) || !std::isfinite(direction.z)) {
@@ -1366,7 +1370,7 @@ namespace Mafia1Online::Features::Combat {
                 victim->state.deathAnimation = 131 + static_cast<uint16_t>((sourceId + report.bodyPart + targetId) % 6);
             }
         }
-        PublishDamage(report, damage, hitType, weaponId);
+        PublishDamage(report, damage, hitType, weaponId, hostClock);
     }
 
     std::optional<CombatService::ValidatedHit> CombatService::ValidateMelee(const Shared::Combat::HitReport &report, const Shared::Entities::PlayerEntity &attacker, Session &session,
