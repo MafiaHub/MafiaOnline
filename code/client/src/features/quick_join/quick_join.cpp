@@ -24,10 +24,13 @@ namespace Mafia1Online::Features::QuickJoin {
         }
     } // namespace
 
-    void Initialize(const std::string &projectPath) {
+    std::filesystem::path ConfigPath(const std::string &projectPath) {
         const char *configOverride = std::getenv("MAFIA1ONLINE_CLIENT_CONFIG");
-        const auto path = configOverride && *configOverride ? std::filesystem::path(configOverride) : std::filesystem::path(projectPath) / "config" / "client.json";
-        std::ifstream input(path);
+        return configOverride && *configOverride ? std::filesystem::path(configOverride) : std::filesystem::path(projectPath) / "config" / "client.json";
+    }
+
+    void Initialize(const std::string &projectPath) {
+        std::ifstream input(ConfigPath(projectPath));
         if (!input) {
             return;
         }

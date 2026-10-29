@@ -9,7 +9,7 @@ namespace Mafia1Online::Shared::Door {
     // A local native use of a mission door. The server validates the player's
     // current life, generation, proximity and rate before accepting it.
     struct DoorIntent {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::DoorIntent");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::DoorIntent");
 
         uint64_t playerId = 0;
         uint64_t missionGeneration = 0;

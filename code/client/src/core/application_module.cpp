@@ -2,6 +2,8 @@
 
 #include "application_module.h"
 
+#include "features/simulation/simulation_config.h"
+
 #include "shared/version.h"
 
 #include <logging/logger.h>
@@ -19,10 +21,14 @@ namespace Mafia1Online::Core {
             opts.gameVersion    = "1.2";
             opts.modSlug        = "mafia1online";
             opts.modVersion     = Mafia1Online::Version::rel;
-            opts.assetCacheRoot = _projectPath + "\\cache";
+            opts.cacheRoot      = _projectPath + "\\cache";
+#ifdef MAFIA1ONLINE_RPC_IDENTIFIER_SALT
+            opts.rpcIdentifierSalt = MAFIA1ONLINE_RPC_IDENTIFIER_SALT;
+#endif
 
             // Borrow the engine's Direct3D 8 device for web views; ImGui has no D3D8 path.
-            opts.useRenderer                  = true;
+            // The simulation host shows no web views.
+            opts.useRenderer                  = !Features::Simulation::IsHost();
             opts.rendererOptions.backend      = Framework::Graphics::RendererBackend::BACKEND_D3D_8;
             opts.rendererOptions.platform     = Framework::Graphics::PlatformBackend::PLATFORM_WIN32;
             opts.rendererOptions.d3d8.device  = static_cast<Framework::Graphics::D3D8::Device *>(SDK::Graphics::GetD3DDevice());

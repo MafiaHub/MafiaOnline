@@ -1,5 +1,7 @@
 #pragma once
 
+#include "shared/features/npc/npc_task_done.h"
+
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -23,6 +25,8 @@ namespace Mafia1Online::Shared::Combat {
     struct Event;
 }
 namespace Mafia1Online::Shared::Entities {
+    class PedestrianEntity;
+    class NpcEntity;
     class CarEntity;
     class CarDebrisEntity;
     class PlayerEntity;
@@ -46,8 +50,24 @@ namespace Mafia1Online::Features::Script {
     // name(vehicle); vehicleDamage adds the native damage snapshot and
     // vehicleTerminal the terminal state.
     void EmitCarEvent(Core::Server &server, const char *name, Shared::Entities::CarEntity &car);
+    void EmitPedestrianEvent(Core::Server &server, const char *name, Shared::Entities::PedestrianEntity &walker);
+    void EmitPedestrianDamage(Core::Server &server, Shared::Entities::PedestrianEntity &walker, uint64_t attackerId, int32_t hitType, float damage, float healthBefore, float healthAfter);
+    void EmitPedestrianDeath(Core::Server &server, Shared::Entities::PedestrianEntity &walker, uint64_t killerId);
+    void EmitNpcEvent(Core::Server &server, const char *name, Shared::Entities::NpcEntity &npc);
+    void EmitNpcDamage(Core::Server &server, Shared::Entities::NpcEntity &npc, uint64_t attackerId, int32_t hitType, float damage, float healthBefore, float healthAfter);
+    void EmitNpcDeath(Core::Server &server, Shared::Entities::NpcEntity &npc, uint64_t killerId);
+    void EmitNpcTaskComplete(Core::Server &server, Shared::Entities::NpcEntity &npc, uint32_t taskId, Shared::Npc::TaskType type, Shared::Npc::TaskDone::Result result);
+    void EmitPlayerCrime(Core::Server &server, uint64_t playerId, uint16_t crime);
+    void EmitPlayerWanted(Core::Server &server, uint64_t playerId, uint8_t level, uint8_t previous);
+    void EmitPoliceBackup(Core::Server &server, uint32_t requestId, uint64_t playerId, bool sent);
+    void EmitPlayerArrest(Core::Server &server, uint64_t playerId, Shared::Entities::NpcEntity &officer, bool fine);
+    void EmitTrafficTaken(Core::Server &server, uint64_t carId, uint64_t playerId, bool stolen);
+    void EmitTrafficStealRefused(Core::Server &server, uint64_t carId, uint64_t playerId);
+    void EmitPlayerThrownOut(Core::Server &server, uint64_t playerId, uint64_t carId, uint8_t seat, uint64_t npcId);
+    void EmitRailwayHit(Core::Server &server, uint64_t playerId, uint8_t index, float damage);
     void EmitCarHitEvent(Core::Server &server, const Shared::Car::HitReport &hit, float damage);
     void EmitPickupEvent(Core::Server &server, const char *name, uint64_t pickupId, uint64_t playerId);
+    void EmitMapObjectEvent(Core::Server &server, const char *name, uint64_t objectId);
     void EmitCarDebrisEvent(Core::Server &server, const char *name, Shared::Entities::CarDebrisEntity &debris);
     void EmitPlayerStateEvent(Core::Server &server, const char *name, Shared::Entities::PlayerEntity &player);
     void EmitPlayerHealthEvent(Core::Server &server, uint64_t playerId, uint64_t sourceId, std::optional<uint8_t> weaponId,

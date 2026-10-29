@@ -29,6 +29,18 @@ namespace Mafia1Online::Features::Combat {
         bool captured = false;
     };
 
+    // Host: a player's melee hit the server validated is applied inside
+    // one of these. Outside it, retail HumanBoxing for a player's replica
+    // (its replayed swing) books nothing.
+    class ValidatedMeleeScope final {
+      public:
+        ValidatedMeleeScope();
+        ~ValidatedMeleeScope();
+        ValidatedMeleeScope(const ValidatedMeleeScope &)            = delete;
+        ValidatedMeleeScope &operator=(const ValidatedMeleeScope &) = delete;
+        static bool Active();
+    };
+
     bool InstallCombatHooks(CombatService &service);
     void UninstallCombatHooks();
     enum class NativeShotReplayResult { Deferred, Played, Rejected };

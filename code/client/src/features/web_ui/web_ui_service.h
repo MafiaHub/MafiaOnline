@@ -22,6 +22,10 @@ namespace Mafia1Online::Features::World {
     class WorldService;
 } // namespace Mafia1Online::Features::World
 
+namespace Mafia1Online::Features::Settings {
+    class SettingsService;
+} // namespace Mafia1Online::Features::Settings
+
 namespace Mafia1Online::Features::WebUi {
     // The Chromium (CEF) front end: one full-screen off-screen view drawn into
     // the game's Direct3D 8 frame. It replaces the main menu and the chat once
@@ -36,7 +40,7 @@ namespace Mafia1Online::Features::WebUi {
         };
 
         // False leaves the native UI in charge; not an error for the caller.
-        bool Install(Framework::Integrations::Client::Instance &instance, Chat::ChatService &chat, const std::string &projectPath);
+        bool Install(Framework::Integrations::Client::Instance &instance, Chat::ChatService &chat, Settings::SettingsService &settings, const std::string &projectPath);
         void Shutdown();
         void Reset();
         void Update(World::WorldService &world);
@@ -103,12 +107,17 @@ namespace Mafia1Online::Features::WebUi {
         bool OnKeyMessage(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
         bool ToggleInGame(uint32_t key);
         void OpenChat(const std::string &prefill);
-        void OpenPause();
+        void OpenPause(bool settings = false);
+        // The pause screen opened on its settings page, for Settings.open().
+        void OpenSettings();
+        void PushSettings(bool force);
+        void PushVoiceLevel();
         void CloseInGameScreens();
         Screen LiveScreen() const;
 
         Framework::Integrations::Client::Instance *_instance = nullptr;
         Chat::ChatService *_chat                             = nullptr;
+        Settings::SettingsService *_gameSettings             = nullptr;
         Framework::GUI::View *_view                          = nullptr;
         int _viewId                                          = -1;
         Framework::GUI::View *_cursorView                    = nullptr;
@@ -122,6 +131,13 @@ namespace Mafia1Online::Features::WebUi {
         bool _captured        = false;
         bool _chatOpen        = false;
         bool _pauseOpen       = false;
+        // The page's settings screen is up: Escape belongs to it (it backs
+        // out of a key capture or the screen) rather than closing the pause.
+        bool _settingsOpen    = false;
+        bool _voiceMeter      = false;
+        uint64_t _settingsRevision = 0;
+        std::string _lastVoiceLevel;
+        std::chrono::steady_clock::time_point _lastVoiceLevelPush;
         uint64_t _gameplayMenuId = 0;
         std::optional<GameplayMenuResponse> _gameplayMenuResponse;
         bool _scoreboardShown = false;

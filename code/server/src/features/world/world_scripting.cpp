@@ -255,6 +255,23 @@ namespace Mafia1Online::Scripting {
             info.GetReturnValue().Set(true);
         }
 
+        void JS_RepairProps(const v8::FunctionCallbackInfo<v8::Value> &info) {
+            if (info.Length() != 0) {
+                ScriptArgs::Throw(info.GetIsolate(), "World.repairProps() takes no arguments");
+                return;
+            }
+            info.GetReturnValue().Set(static_cast<double>(GetServer().Props().Repair()));
+        }
+
+        void JS_GetPropDamage(const v8::FunctionCallbackInfo<v8::Value> &info) {
+            auto *isolate = info.GetIsolate();
+            auto context  = isolate->GetCurrentContext();
+            auto damage   = v8::Object::New(isolate);
+            SetField(isolate, context, damage, "broken", v8::Number::New(isolate, static_cast<double>(GetServer().Props().BrokenCount())));
+            SetField(isolate, context, damage, "moved", v8::Number::New(isolate, static_cast<double>(GetServer().Props().MovedCount())));
+            info.GetReturnValue().Set(damage);
+        }
+
         void JS_ResetFrameOpacity(const v8::FunctionCallbackInfo<v8::Value> &info) {
             auto *isolate = info.GetIsolate();
             if (info.Length() > 1 || (info.Length() == 1 && !info[0]->IsString() && !info[0]->IsUndefined())) {
@@ -444,7 +461,7 @@ namespace Mafia1Online::Scripting {
         }
     } // namespace
 
-    std::unique_ptr<v8pp::class_<Sound>> Sound::_class;
+    std::unordered_map<v8::Isolate *, std::unique_ptr<v8pp::class_<Sound>>> Sound::_classes;
 
     SoundEntity *Sound::ResolveSound() const {
         return Service().FindSound(_id);
@@ -497,7 +514,12 @@ namespace Mafia1Online::Scripting {
         return sound ? "Sound(" + std::to_string(_id) + ", " + sound->wave + ")" : "Sound(" + std::to_string(_id) + ", destroyed)";
     }
 
+    void Sound::UnregisterIsolate(v8::Isolate *isolate) {
+        _classes.erase(isolate);
+    }
+
     v8pp::class_<Sound> &Sound::GetClass(v8::Isolate *isolate) {
+        auto &_class = _classes[isolate];
         if (_class) {
             return *_class;
         }
@@ -543,6 +565,10 @@ namespace Mafia1Online::Scripting {
         auto &weather = ServerCatalog().data_type("WeatherInfo", "The replicated weather.");
         weather.add_property("weather", "\"default\" | \"clear\" | \"rain\" | \"snow\"", "Weather preset; default keeps the mission's own weather.");
         weather.add_property("intensity", "number | null", "Rain or snow intensity from 0 to 100, or null for the preset's own.");
+        auto &propDamage = ServerCatalog().data_type("PropDamageInfo", "What happened to the mission's world props since it loaded or was last repaired.");
+        propDamage.add_property("broken", "number",
+            "Breakables knocked down: phone booths, hydrants, trash bins, barrels and the other crash-material scene models. Traffic signs from the city cache are not counted or synchronized.");
+        propDamage.add_property("moved", "number", "Physical props (boxes, railings, mail boxes, cans) resting away from where the mission placed them.");
 
         v8pp::module world(isolate, ServerCatalog(), "World", "The shared Mafia 1 world: mission, collections, weather, scene frames, city music and effects everyone sees.");
         world.function("getMission", &JS_GetMission, docs("string", {}, "Returns the current mission.", "Stock or detected mod mission directory name."));
@@ -575,6 +601,14 @@ namespace Mafia1Online::Scripting {
                 "Applies FRM_SETALPHA to a supported visual frame for everyone in this mission, including late joiners.", "False when 128 opacity overrides already exist."));
         world.function("resetFrameOpacity", &JS_ResetFrameOpacity,
             docs("void", {param("name", "string", true, "One frame to restore; omit to restore every overridden frame.")}, "Restores the scene's original opacity for one or all overridden frames."));
+        world.function("getPropDamage", &JS_GetPropDamage,
+            docs("PropDamageInfo", {}, "Counts the world props broken or moved in this mission, which every client and late joiner sees the same.", "The broken and moved counts."));
+        world.function("repairProps", &JS_RepairProps,
+            docs("number", {},
+                "Puts every broken booth, hydrant, bin and other breakable back up, with its collision, and every box or other physical prop back where the mission placed it, for every client. "
+                "The debris pieces and hydrant jets go. Traffic signs from the city cache (dopravni1B-8B), which a car or shot knocks down on that client only, stay down until the mission changes. "
+                "Mission changes start with every prop whole.",
+                "How many props were broken or moved."));
         world.function("createExplosion", &JS_CreateExplosion,
             docs("void", {param("position", "Vector3 | { x: number; y: number; z: number }", false, "Explosion centre."),
                              param("options", "{ radius?: number; damage?: number }", true, "Radius up to 30 (default 15) and damage up to 1000 (default 400). Damage 0 is a visual explosion.")},

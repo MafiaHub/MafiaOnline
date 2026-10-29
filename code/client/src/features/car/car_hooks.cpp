@@ -3,9 +3,12 @@
 #include "car_hooks.h"
 
 #include "core/application.h"
+#include "features/simulation/simulation_config.h"
 #include "shared/features/car/car_entity.h"
 #include "shared/features/car/car_hit_report.h"
+#include "shared/features/combat/melee_rules.h"
 #include "shared/features/combat/vehicle_impact.h"
+#include "shared/features/npc/npc_entity.h"
 #include "shared/features/player/player_entity.h"
 
 #include <MinHook.h>
@@ -20,6 +23,7 @@
 
 #include <cmath>
 #include <chrono>
+#include <optional>
 #include <unordered_map>
 
 namespace Mafia1Online::Features::Car {
@@ -48,7 +52,11 @@ namespace Mafia1Online::Features::Car {
                 return std::hash<uint64_t> {}(key.carId) ^ (std::hash<uint64_t> {}(key.targetId) << 1);
             }
         };
-        std::unordered_map<ImpactKey, std::chrono::steady_clock::time_point, ImpactKeyHash> gLastPedestrianImpact;
+        struct LastContact {
+            std::chrono::steady_clock::time_point at;
+            Shared::Combat::VehicleContact kind;
+        };
+        std::unordered_map<ImpactKey, LastContact, ImpactKeyHash> gLastPedestrianImpact;
         using CarAI = void(__thiscall *)(SDK::Car::NativeCar *, unsigned int);
         CarAI gCarAIOriginal = nullptr;
 
@@ -83,19 +91,20 @@ namespace Mafia1Online::Features::Car {
             return false;
         }
 
-        void ReportLocalCarHit(Core::Application &application, SDK::Car::NativeCar &car, uint64_t carId,
-                               const SDK::Player::Vector3 &direction, const SDK::Player::Vector3 &position,
-                               const SDK::Player::Vector3 &normal, SDK::Player::NativeActor *attacker) {
-            if (!application.World().IsReady() || attacker != SDK::Player::CurrentPlayer() || !car.Frame()) {
-                return;
-            }
-            const auto shooter = application.World().NativeObjects().FindByNative(attacker);
-            const auto *shooterState = application.Combat().GetLocalState(application.World());
-            if (!shooterState || shooter.networkId == 0 || shooter.networkId != shooterState->networkId ||
-                !shooterState->spawned || !shooterState->alive) {
-                return;
-            }
+        struct CarLocalHit {
+            glm::vec3 hit;
+            glm::vec3 direction;
+        };
+
+        // The impact in the car's own frame, which the controller replays on
+        // its copy; nothing for a broken basis or a shot that is not a unit
+        // vector near the car.
+        std::optional<CarLocalHit> LocalCarHit(SDK::Car::NativeCar &car, const SDK::Player::Vector3 &direction,
+                                               const SDK::Player::Vector3 &position) {
             auto *frame = car.Frame();
+            if (!frame) {
+                return std::nullopt;
+            }
             const auto center = frame->WorldPosition();
             const auto basis = frame->GetWorldBasis();
             const glm::vec3 right(basis.right.x, basis.right.y, basis.right.z);
@@ -110,11 +119,30 @@ namespace Mafia1Online::Features::Car {
                 !std::isfinite(up.x) || !std::isfinite(up.y) || !std::isfinite(up.z) ||
                 !std::isfinite(forward.x) || !std::isfinite(forward.y) || !std::isfinite(forward.z) ||
                 glm::length(right) < 0.8f || glm::length(up) < 0.8f || glm::length(forward) < 0.8f) {
-                return;
+                return std::nullopt;
             }
             const glm::vec3 localHit(glm::dot(hit, right), glm::dot(hit, up), glm::dot(hit, forward));
             const glm::vec3 localDirection(glm::dot(shot, right), glm::dot(shot, up), glm::dot(shot, forward));
             if (glm::length(localHit) > 15.0f || glm::length(localDirection) < 0.8f || glm::length(localDirection) > 1.2f) {
+                return std::nullopt;
+            }
+            return CarLocalHit {localHit, localDirection};
+        }
+
+        void ReportLocalCarHit(Core::Application &application, SDK::Car::NativeCar &car, uint64_t carId,
+                               const SDK::Player::Vector3 &direction, const SDK::Player::Vector3 &position,
+                               const SDK::Player::Vector3 &normal, SDK::Player::NativeActor *attacker) {
+            if (!application.World().IsReady() || attacker != SDK::Player::CurrentPlayer()) {
+                return;
+            }
+            const auto shooter = application.World().NativeObjects().FindByNative(attacker);
+            const auto *shooterState = application.Combat().GetLocalState(application.World());
+            if (!shooterState || shooter.networkId == 0 || shooter.networkId != shooterState->networkId ||
+                !shooterState->spawned || !shooterState->alive) {
+                return;
+            }
+            const auto local = LocalCarHit(car, direction, position);
+            if (!local) {
                 return;
             }
             const auto pellet = application.Combat().MatchLocalPellet(direction.x, direction.y, direction.z,
@@ -138,12 +166,65 @@ namespace Mafia1Online::Features::Car {
             report.normalX = normal.x;
             report.normalY = normal.y;
             report.normalZ = normal.z;
-            report.localHitX = localHit.x;
-            report.localHitY = localHit.y;
-            report.localHitZ = localHit.z;
-            report.localDirectionX = localDirection.x;
-            report.localDirectionY = localDirection.y;
-            report.localDirectionZ = localDirection.z;
+            report.localHitX = local->hit.x;
+            report.localHitY = local->hit.y;
+            report.localHitZ = local->hit.z;
+            report.localDirectionX = local->direction.x;
+            report.localDirectionY = local->direction.y;
+            report.localDirectionZ = local->direction.z;
+            Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(report);
+        }
+
+        // The local player's melee strike on a network car, against the
+        // swing the server accepted (one car report per swing).
+        void ReportLocalMeleeCarHit(Core::Application &application, SDK::Car::NativeCar &car, uint64_t carId,
+                                    const SDK::Player::Vector3 &direction, const SDK::Player::Vector3 &position,
+                                    const SDK::Player::Vector3 &normal, SDK::Player::NativeActor *attacker) {
+            static Shared::Combat::MeleeReportGate gate;
+            if (!application.World().IsReady()) {
+                return;
+            }
+            const auto attackerHandle = application.World().NativeObjects().FindByNative(attacker);
+            const auto *attackerState = application.Combat().GetLocalState(application.World());
+            const auto swing = application.Combat().OpenLocalMelee();
+            if (!attackerState || attackerHandle.networkId == 0 || attackerHandle.networkId != attackerState->networkId || !attackerState->spawned ||
+                !attackerState->alive || !swing) {
+                return;
+            }
+            // Retail's swing direction is not a unit vector; the server checks
+            // the hit point, so a unit one does.
+            const glm::vec3 swingDirection(direction.x, direction.y, direction.z);
+            const float length = glm::length(swingDirection);
+            if (!(length > 0.0001f)) {
+                return;
+            }
+            const SDK::Player::Vector3 unit {swingDirection.x / length, swingDirection.y / length, swingDirection.z / length};
+            const auto local = LocalCarHit(car, unit, position);
+            if (!local || !gate.Admit(*swing)) {
+                return;
+            }
+            Shared::Car::HitReport report;
+            report.kind = Shared::Car::HitKind::Melee;
+            report.carId = carId;
+            report.missionGeneration = application.World().LoadedMissionGeneration();
+            report.shooterId = attackerHandle.networkId;
+            report.shooterSpawnGeneration = attackerState->spawnGeneration;
+            report.shotSequence = *swing;
+            report.directionX = unit.x;
+            report.directionY = unit.y;
+            report.directionZ = unit.z;
+            report.hitX = position.x;
+            report.hitY = position.y;
+            report.hitZ = position.z;
+            report.normalX = normal.x;
+            report.normalY = normal.y;
+            report.normalZ = normal.z;
+            report.localHitX = local->hit.x;
+            report.localHitY = local->hit.y;
+            report.localHitZ = local->hit.z;
+            report.localDirectionX = local->direction.x;
+            report.localDirectionY = local->direction.y;
+            report.localDirectionZ = local->direction.z;
             Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(report);
         }
 
@@ -164,6 +245,14 @@ namespace Mafia1Online::Features::Car {
 
         void __fastcall CarDestructorHook(void *car, void *) {
             auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
+            // A host traffic car's network car moves on or goes; a player's
+            // crew models leave before the frame they hang from.
+            if (Simulation::IsHost()) {
+                application->Traffic().OnNativeCarDestroyed(car);
+            }
+            else {
+                application->TrafficCrew().OnNativeCarDestroyed(car);
+            }
             auto *frame = application->Cars().OnNativeDestroyed(application->World(), car);
             auto *scene = frame ? SDK::Core::Mission::Get()->GetScene() : nullptr;
             application->World().NativeObjects().InvalidateNative(car);
@@ -175,6 +264,12 @@ namespace Mafia1Online::Features::Car {
 
         void __fastcall CarExplosionHook(SDK::Car::NativeCar *car, void *, unsigned int flags) {
             auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
+            // A host traffic car not yet a network car explodes once it is,
+            // through the server, so players see it: a burning car asks again
+            // each tick.
+            if (Simulation::IsHost() && application->Traffic().AwaitsBinding(car)) {
+                return;
+            }
             if (application->Cars().OnNativeExplosion(application->World(), car)) {
                 gCarExplosionOriginal(car, flags);
             }
@@ -213,9 +308,34 @@ namespace Mafia1Online::Features::Car {
             }
             const auto *state = Framework::CoreModules::GetReplication()->GetEntity<Shared::Entities::CarEntity>(handle.networkId);
             if (hitType != 0) {
-                if (state && state->missionGeneration == application->World().LoadedMissionGeneration() &&
-                    state->simulationControllerGuid == static_cast<uint64_t>(Framework::CoreModules::GetReplication()->GetMyGUID())) {
+                const bool current = state && state->missionGeneration == application->World().LoadedMissionGeneration();
+                const bool controller = current && state->simulationControllerGuid == static_cast<uint64_t>(Framework::CoreModules::GetReplication()->GetMyGUID());
+                if (hitType == Shared::Car::NativeHitType(Shared::Car::HitKind::Melee) && current) {
+                    if (attacker && attacker == SDK::Player::CurrentPlayer()) {
+                        // The server sends it on to the controller and has
+                        // everyone else hear it.
+                        if (direction && position && normal) {
+                            ReportLocalMeleeCarHit(*application, *car, handle.networkId, *direction, *position, *normal, attacker);
+                        }
+                    }
+                    else if (attacker && Framework::CoreModules::GetReplication()->GetEntity<Shared::Entities::PlayerEntity>(
+                                             application->World().NativeObjects().FindByNative(attacker).networkId)) {
+                        // A remote player's replayed swing: that player
+                        // reports its own strike.
+                        return true;
+                    }
+                }
+                if (controller) {
                     return gCarHitOriginal(car, hitType, direction, position, normal, damage, attacker, flags, frame);
+                }
+                return true;
+            }
+            if (frame && !Simulation::IsHost() && application->TrafficCrew().IsCrewFrame(car, frame)) {
+                // A traffic crew model is the host's to kill: its re-ray of
+                // the reported impact hits the host's own crew model, and
+                // retail's DostalJsemRanuKachlou does the rest.
+                if (state && state->missionGeneration == application->World().LoadedMissionGeneration() && direction && position && normal) {
+                    ReportLocalCarHit(*application, *car, handle.networkId, *direction, *position, *normal, attacker);
                 }
                 return true;
             }
@@ -226,7 +346,18 @@ namespace Mafia1Online::Features::Car {
             }
             if (state && state->missionGeneration == application->World().LoadedMissionGeneration() &&
                 direction && position && normal) {
-                ReportLocalCarHit(*application, *car, handle.networkId, *direction, *position, *normal, attacker);
+                if (!Simulation::IsHost()) {
+                    ReportLocalCarHit(*application, *car, handle.networkId, *direction, *position, *normal, attacker);
+                }
+                else if (attacker && application->Npcs().Owns(attacker)) {
+                    // The host has no player of its own; its NPCs' bullets
+                    // reach a player's car only through the server.
+                    if (const auto local = LocalCarHit(*car, *direction, *position)) {
+                        application->Npcs().OnHitCar(handle.networkId, *direction, *position, *normal, damage, attacker,
+                                                     {local->hit.x, local->hit.y, local->hit.z},
+                                                     {local->direction.x, local->direction.y, local->direction.z});
+                    }
+                }
             }
             return true;
         }
@@ -251,6 +382,18 @@ namespace Mafia1Online::Features::Car {
             // are ghosted: their replicated pose cannot yield to a car's
             // native impulse, so treating one as a rigid body stops the car.
             const auto *dynamic = static_cast<const SDK::Car::NativeDynamicCollision *>(collision);
+            if ((dynamic->packed & SDK::Car::NativeDynamicCollision::kDynamicTypeMask) != 0 && dynamic->ownerActor &&
+                dynamic->ownerActor->GetType() == SDK::Player::NativeActor::Type::Barrier) {
+                // A road block's spike strip: Collision_Filter_Body flattens a
+                // tyre it crosses (C_irenka::ZapichameSi, VEHICLE_WHEEL_SPARE).
+                // Only a car's simulation controller rolls over it; the flat
+                // reaches every other copy with the car's damage state.
+                auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
+                if (IsRemoteNetworkCar(*application, &car->Vehicle())) {
+                    return nullptr;
+                }
+                return gCollisionFilterBodyOriginal(car, collision, position, normal);
+            }
             if ((dynamic->packed & SDK::Car::NativeDynamicCollision::kDynamicTypeMask) == 0 || !dynamic->ownerActor ||
                 dynamic->ownerActor->GetType() != SDK::Player::NativeActor::Type::Entity) {
                 return gCollisionFilterBodyOriginal(car, collision, position, normal);
@@ -267,19 +410,25 @@ namespace Mafia1Online::Features::Car {
             }
             auto *replication = Framework::CoreModules::GetReplication();
             const auto *carState = replication->GetEntity<Shared::Entities::CarEntity>(carHandle.networkId);
-            const auto *targetState = replication->GetEntity<Shared::Entities::PlayerEntity>(targetHandle.networkId);
-            if (!carState || !targetState || carState->missionGeneration != world.LoadedMissionGeneration() ||
-                targetState->missionGeneration != world.LoadedMissionGeneration()) {
+            // A simulation host NPC is a network human too.
+            const auto *player = replication->GetEntity<Shared::Entities::PlayerEntity>(targetHandle.networkId);
+            const auto *npc = player ? nullptr : replication->GetEntity<Shared::Entities::NpcEntity>(targetHandle.networkId);
+            const uint64_t targetMission = player ? player->missionGeneration : npc ? npc->missionGeneration : 0;
+            const bool targetAlive = player ? player->alive : npc && npc->alive;
+            const uint64_t targetSpawn = player ? player->spawnGeneration : Shared::Entities::NpcEntity::kSpawnGeneration;
+            if (!carState || (!player && !npc) || carState->missionGeneration != world.LoadedMissionGeneration() ||
+                targetMission != world.LoadedMissionGeneration()) {
                 return gCollisionFilterBodyOriginal(car, collision, position, normal);
             }
-            if (carState->simulationControllerGuid == static_cast<uint64_t>(replication->GetMyGUID()) && targetState->alive) {
-                const auto velocity = car->Vehicle().LinearVelocity();
-                const float speed = std::hypot(velocity.x, velocity.y, velocity.z);
-                if (!std::isfinite(speed) || speed < 3.0f) {
-                    // Retail uses this contact for a low speed pedestrian
-                    // side jump. Keep the original filter in that case.
-                    return gCollisionFilterBodyOriginal(car, collision, position, normal);
-                }
+            const bool controlled = carState->simulationControllerGuid == static_cast<uint64_t>(replication->GetMyGUID());
+            const auto velocity = car->Vehicle().LinearVelocity();
+            const float speed = std::hypot(velocity.x, velocity.y, velocity.z);
+            // C_human::Collision 0x5784a0 hits only from 3 m/s (damage
+            // (|v| - 2.5) * 4.2); slower it pushes the human out and starts
+            // a side jump. Below 3 the original filter keeps the body rigid,
+            // as before; the dodge itself is the target's owner's to play.
+            const bool slow = !std::isfinite(speed) || speed < Shared::Combat::kVehicleImpactMinSpeed;
+            if (controlled && targetAlive) {
                 const auto angular = car->Vehicle().AngularVelocity();
                 const auto center = car->Vehicle().WorldCenter();
                 const glm::vec3 offset(position.x - center.x, position.y - center.y, position.z - center.z);
@@ -287,29 +436,40 @@ namespace Mafia1Online::Features::Car {
                 const glm::vec3 linear(velocity.x, velocity.y, velocity.z);
                 const glm::vec3 relative = linear - glm::cross(spin, offset);
                 const glm::vec3 contactNormal(normal.x, normal.y, normal.z);
-                const float approach = glm::dot(relative, contactNormal);
                 // C_Vehicle::BodyCollision only handles an approaching
                 // contact after its callback filter has returned.
-                if (!std::isfinite(approach) || approach >= 0.0f) {
-                    return nullptr;
-                }
-                const ImpactKey key {carHandle.networkId, targetHandle.networkId};
-                const auto now = std::chrono::steady_clock::now();
-                auto previous = gLastPedestrianImpact.find(key);
-                if (previous == gLastPedestrianImpact.end() || now - previous->second >= std::chrono::milliseconds(500)) {
-                    if (gLastPedestrianImpact.size() > 1024) {
-                        gLastPedestrianImpact.clear();
+                const float approach = glm::dot(relative, contactNormal);
+                Shared::Combat::VehicleContact kind;
+                if (Shared::Combat::ClassifyVehicleContact(speed, approach, kind)) {
+                    const ImpactKey key {carHandle.networkId, targetHandle.networkId};
+                    const auto now = std::chrono::steady_clock::now();
+                    const auto previous = gLastPedestrianImpact.find(key);
+                    if (previous == gLastPedestrianImpact.end() ||
+                        Shared::Combat::VehicleContactDue(now - previous->second.at, previous->second.kind, kind)) {
+                        if (gLastPedestrianImpact.size() > 1024) {
+                            gLastPedestrianImpact.clear();
+                        }
+                        gLastPedestrianImpact[key] = {now, kind};
+                        Shared::Combat::VehicleImpact report;
+                        report.carId = carHandle.networkId;
+                        report.targetId = targetHandle.networkId;
+                        report.missionGeneration = world.LoadedMissionGeneration();
+                        report.targetSpawnGeneration = targetSpawn;
+                        report.contactX = position.x;
+                        report.contactY = position.y;
+                        report.contactZ = position.z;
+                        report.kind = kind;
+                        Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(report);
+                        if (kind == Shared::Combat::VehicleContact::Impact) {
+                            // Retail C_human::Collision hits the human in this
+                            // same contact; the server's answer is a round
+                            // trip away.
+                            application->Death().PredictVehicleImpact(carHandle.networkId, targetHandle.networkId, velocity);
+                        }
                     }
-                    gLastPedestrianImpact[key] = now;
-                    Shared::Combat::VehicleImpact report;
-                    report.carId = carHandle.networkId;
-                    report.targetId = targetHandle.networkId;
-                    report.missionGeneration = world.LoadedMissionGeneration();
-                    report.targetSpawnGeneration = targetState->spawnGeneration;
-                    report.contactX = position.x;
-                    report.contactY = position.y;
-                    report.contactZ = position.z;
-                    Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(report);
+                }
+                if (slow) {
+                    return gCollisionFilterBodyOriginal(car, collision, position, normal);
                 }
             }
             return nullptr;
@@ -403,7 +563,7 @@ namespace Mafia1Online::Features::Car {
 
     bool ApplyAuthoritativeCarHit(SDK::Car::NativeCar *car, const SDK::Player::Vector3 &direction,
                                   const SDK::Player::Vector3 &position, const SDK::Player::Vector3 &normal, float damage,
-                                  SDK::Scene::NativeFrame *frame) {
-        return gCarHitOriginal(car, 0, &direction, &position, &normal, damage, nullptr, 0, frame);
+                                  SDK::Scene::NativeFrame *frame, SDK::Player::NativeActor *attacker, int hitType) {
+        return gCarHitOriginal(car, hitType, &direction, &position, &normal, damage, attacker, 0, frame);
     }
 } // namespace Mafia1Online::Features::Car

@@ -14,6 +14,14 @@ namespace Mafia1Online::SDK::Seat {
     inline constexpr uintptr_t kHumanForceExitCar = 0x581220;
     inline constexpr uintptr_t kHumanClimbInCar = 0x581eb0;
     inline constexpr uintptr_t kHumanThrowFromCar = 0x587d70;
+    // C_human::intern_ThrowMeFromCar, void __thiscall(C_human*): frees the
+    // seated human's seat (+0x98, +0xac) and plays its throw-out (308-315).
+    inline constexpr uintptr_t kHumanThrowMeFromCar = 0x588b40;
+    // C_human::Intern_UseRailway, void __thiscall(C_human*, bool enter),
+    // ret 4: the end of a railway step. false takes the human back to world
+    // space and the primary sector, out of the wagon's collision list
+    // (DynGetOut), unlinks the camera of the local player and Unlocks.
+    inline constexpr uintptr_t kHumanInternUseRailway = 0x571b90;
     inline constexpr uintptr_t kCarGetOwner = 0x41dec0;
     inline constexpr uintptr_t kCarGetSeatProperty = 0x41dc30;
 
@@ -102,6 +110,17 @@ namespace Mafia1Online::SDK::Seat {
         [[nodiscard]] bool TrySteal(NativeCar *car, int seat) {
             using Call = bool(__thiscall *)(NativeHuman *, NativeCar *, int);
             return reinterpret_cast<Call>(kHumanThrowFromCar)(this, car, seat);
+        }
+
+        // Retail's Corovacka branch of Do_ThrowCocotFromCar seats the new
+        // driver (Intern_UseCar) and calls this on it.
+        void ThrowOutOfSeat() {
+            reinterpret_cast<void(__thiscall *)(NativeHuman *)>(kHumanThrowMeFromCar)(this);
+        }
+
+        // Aboard a railway, +0x98 holds it as for a car.
+        void LeaveRailwayNow() {
+            reinterpret_cast<void(__thiscall *)(NativeHuman *, bool)>(kHumanInternUseRailway)(this, false);
         }
     };
     static_assert(offsetof(NativeHuman, usedActorEnter) == 0x98);

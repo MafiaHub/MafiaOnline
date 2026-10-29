@@ -9,7 +9,7 @@ namespace Mafia1Online::Shared::Player {
     // it started from. The server relays it so observers replay the same
     // climb; the animation's root motion, not the pose stream, lifts the body.
     struct Climb {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::PlayerClimb");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::PlayerClimb");
 
         uint64_t networkId         = 0;
         uint64_t missionGeneration = 0;

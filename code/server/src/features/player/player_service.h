@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <unordered_map>
 #include <utility>
 
@@ -22,6 +23,7 @@ namespace Mafia1Online::Shared::Player {
     struct NativePose;
     struct Climb;
     struct CameraView;
+    struct Whistle;
 } // namespace Mafia1Online::Shared::Player
 
 namespace Mafia1Online::Features::Player {
@@ -48,6 +50,11 @@ namespace Mafia1Online::Features::Player {
         MafiaNet::PeerGuid GuidForNetworkId(uint64_t networkId) const;
         bool SuggestedSpawnPosition(uint64_t networkId, glm::vec3 &position) const;
         bool HasRecentFatalFall(uint64_t networkId) const;
+        // Whether a position is aboard-close to a railway the host reported
+        // (RailwayService::IsNear): a rider's claim is taken only then.
+        void SetRailwayCheck(std::function<bool(uint8_t, const glm::vec3 &)> check) {
+            _railwayNear = std::move(check);
+        }
         template <typename Callback>
         void ForEach(Callback &&callback) const {
             for (const auto &[guid, session] : _sessions) {
@@ -60,11 +67,13 @@ namespace Mafia1Online::Features::Player {
         void OnNativePose(const Shared::Player::NativePose &pose, MafiaNet::PeerGuid sender);
         void OnClimb(const Shared::Player::Climb &climb, MafiaNet::PeerGuid sender);
         void OnCameraView(const Shared::Player::CameraView &view, MafiaNet::PeerGuid sender);
+        void OnWhistle(const Shared::Player::Whistle &whistle, MafiaNet::PeerGuid sender);
         void Update();
         void Reset();
 
       private:
         std::string UniqueNickname(std::string_view requested, uint64_t networkId) const;
+        std::function<bool(uint8_t, const glm::vec3 &)> _railwayNear;
         struct Session {
             uint64_t networkId    = 0;
             uint32_t lastSequence = 0;
@@ -72,11 +81,15 @@ namespace Mafia1Online::Features::Player {
             std::chrono::steady_clock::time_point lastMovement;
             std::chrono::steady_clock::time_point lastCameraView;
             uint32_t lastCameraViewSequence = 0;
+            std::chrono::steady_clock::time_point lastWhistle;
             glm::vec3 suggestedPosition  = glm::vec3(0.0f);
             uint64_t suggestedGeneration = 0;
             std::deque<std::pair<std::chrono::steady_clock::time_point, float>> recentHeights;
         };
         std::unordered_map<MafiaNet::PeerGuid, Session> _sessions;
+        static constexpr auto kPingRefresh = std::chrono::seconds(2);
+        static constexpr int kPingChange   = 5;
+        std::chrono::steady_clock::time_point _lastPingRefresh;
         uint64_t _currentMissionGeneration = 1;
     };
 } // namespace Mafia1Online::Features::Player

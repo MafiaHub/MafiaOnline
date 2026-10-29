@@ -106,6 +106,16 @@ declare global {
     doorInteractionChange: [door: Door, player: null];
 
     /**
+     * Dispatched after a MapObject.moveTo reached its target. A teleport, stop or new move does not dispatch it for the move it replaced.
+     */
+    mapObjectMoved: [object: MapObject];
+
+    /**
+     * Dispatched once a fire's intensity reaches 0. The fire stays, smoking, until destroyed.
+     */
+    fireExtinguished: [fire: Fire, info: FireExtinguishedInfo];
+
+    /**
      * Dispatched after Player.spawn started a new life.
      */
     playerSpawn: [player: Player];
@@ -128,7 +138,7 @@ declare global {
     /**
      * Dispatched after a fatal health decrease, following playerDamage. The killer is null when no connected attacker owns the damage; info.weaponId identifies the validated weapon when known. Death never respawns a player by itself; call Player.respawn.
      */
-    playerDeath: [victim: Player, killer: Player | null, info: PlayerHealthInfo];
+    playerDeath: [victim: Player, killer: Player | Npc | null, info: PlayerHealthInfo];
 
     /**
      * Dispatched after an accepted health increase.
@@ -196,14 +206,139 @@ declare global {
     playerWeaponDrop: [player: Player, info: WeaponActionInfo];
 
     /**
-     * Dispatched when a drop or a death leaves a weapon pickup in the world.
+     * Dispatched when a drop or a death leaves a weapon pickup in the world; a dead npc's weapon names the npc.
      */
-    weaponDropped: [pickup: Pickup | null, player: Player | null, info: PickupEventInfo];
+    weaponDropped: [pickup: Pickup | null, player: Player | Npc | null, info: PickupEventInfo];
 
     /**
      * Dispatched after the server moved a pickup into a player's inventory. The pickup handle is null when nothing is left on the ground.
      */
     pickupTaken: [pickup: Pickup | null, player: Player | null, info: PickupEventInfo];
+
+    /**
+     * Dispatched when the simulation host starts a pedestrian near a player.
+     */
+    pedestrianSpawn: [pedestrian: Pedestrian];
+
+    /**
+     * Dispatched just before a pedestrian leaves the world: far from every player, a corpse past its lifetime, Pedestrian.remove or setEnabled(false). A mission change removes every pedestrian without this event.
+     */
+    pedestrianRetire: [pedestrian: Pedestrian];
+
+    /**
+     * Dispatched after the simulation host applied a hit.
+     */
+    pedestrianDamage: [pedestrian: Pedestrian, info: PedestrianDamageInfo];
+
+    /**
+     * Dispatched once when a pedestrian dies; killer is the last attacker.
+     */
+    pedestrianDeath: [pedestrian: Pedestrian, killer: Player | Vehicle | null];
+
+    /**
+     * Dispatched when the simulation host starts running an armed human, such as a gangster pedestrian someone hit that draws its weapon or a police walker the police manager sends after a player.
+     */
+    npcSpawn: [npc: Npc];
+
+    /**
+     * Dispatched just before an NPC leaves the world: no player within 150 units, Npc.remove or the host leaving. A mission change removes every NPC without this event.
+     */
+    npcRetire: [npc: Npc];
+
+    /**
+     * Dispatched after the simulation host applied a hit.
+     */
+    npcDamage: [npc: Npc, info: NpcDamageInfo];
+
+    /**
+     * Dispatched once when an NPC dies; killer is the last attacker. The weapon in its hand drops as a pickup, as retail Do_WeaponDrop does (weaponDropped).
+     */
+    npcDeath: [npc: Npc, killer: Player | Npc | Vehicle | null];
+
+    /**
+     * Dispatched when a task of an NPC spawned with Npc.spawn ends on the simulation host. A follow or attack task runs until it is replaced, its target is gone or (attack) dead.
+     */
+    npcTaskComplete: [npc: Npc, info: NpcTaskInfo];
+
+    /**
+     * Dispatched when the simulation host's police manager records a new crime of a player. The player's wanted level may rise with it (playerWantedChange).
+     */
+    playerCrime: [player: Player, info: PlayerCrimeInfo];
+
+    /**
+     * Dispatched when a player's wanted level changes: the police raise it for a crime, a script sets it, an arrest or Police.clear settles it, the officers lose the player, or a new simulation host takes over (every record starts again at 0).
+     */
+    playerWantedChange: [player: Player, info: PlayerWantedInfo];
+
+    /**
+     * Dispatched once for each Police.sendBackup request when the simulation host answers it. The player is the one the police car hunts; its officers join the NPCs (npcSpawn, kind police).
+     */
+    policeBackup: [player: Player, info: PoliceBackupInfo];
+
+    /**
+     * Dispatched when a simulation host walker starts waving at the taxi of a player Taxi.setHailable allows, as retail's walkers hail single player's taxi. Every player sees the wave.
+     */
+    taxiHail: [player: Player, pedestrian: Pedestrian, vehicle: Vehicle];
+
+    /**
+     * Dispatched when that walker stops waving.
+     */
+    taxiHailEnd: [player: Player, pedestrian: Pedestrian, info: TaxiHailEndInfo];
+
+    /**
+     * Dispatched once when the taxi stops within 10 m of the waving walker (retail's boarding moment). The walker keeps waving for 15 seconds; Taxi.board makes it the passenger.
+     */
+    taxiPickup: [player: Player, pedestrian: Pedestrian, vehicle: Vehicle];
+
+    /**
+     * Dispatched when a Taxi.board passenger sat down in the player's car.
+     */
+    taxiPassengerEnter: [player: Player, passenger: Npc, vehicle: Vehicle];
+
+    /**
+     * Dispatched once when the taxi stands still (0.5 m/s or less) within the radius of Taxi.setDestination's point with the passenger aboard.
+     */
+    taxiArrive: [player: Player, passenger: Npc, vehicle: Vehicle];
+
+    /**
+     * Dispatched when a Taxi.board passenger's ride ends: it got out (it then walks off and is removed out of sight), never got in, died or is gone.
+     */
+    taxiPassengerExit: [player: Player | null, passenger: Npc | null, vehicle: Vehicle | null, info: TaxiPassengerExitInfo];
+
+    /**
+     * Dispatched when a simulation host police officer finished arresting or fining a player. Nothing else happens to the player: the game goes on and the script decides the outcome. The player's crime record is cleared.
+     */
+    playerArrest: [player: Player, officer: Npc, info: PlayerArrestInfo];
+
+    /**
+     * Dispatched when a car the simulation host drove becomes the player's: the host stops driving it and the player's client simulates it. After a steal the player gets in with the next use, as in retail.
+     */
+    vehicleTrafficTaken: [vehicle: Vehicle, player: Player, info: VehicleTrafficTakenInfo];
+
+    /**
+     * Dispatched when the server refused a player's steal of a traffic car: the car moved out of reach or was not standing still, another player took it first or its driver had left. A player's repeated try within 500 ms is refused without this event. The player's client already played the pull-out; the driver stays in the car.
+     */
+    vehicleStealRefused: [vehicle: Vehicle, player: Player];
+
+    /**
+     * Dispatched after vehiclePlayerExited when a simulation host NPC pulled the player out of the seat (retail Do_ThrowCocotFromCar).
+     */
+    playerThrownOut: [player: Player, vehicle: Vehicle, info: PlayerThrownOutInfo];
+
+    /**
+     * Dispatched when the attendant's fuel animation ends its pumping (retail EndPumpFuel), after the server has set the car's fuel (vehicleFuelChange) and taken the money (playerMoneyChange). The car stays locked until he is back at his post.
+     */
+    vehicleRefuel: [vehicle: Vehicle, player: Player | null, info: VehicleRefuelInfo];
+
+    /**
+     * Dispatched when the server refuses the retail "use the pump" choice of a driver stopped at a pump. The attendant stays where he is and the car is not locked.
+     */
+    pumperRefused: [player: Player, vehicle: Vehicle, info: PumperRefusedInfo];
+
+    /**
+     * Dispatched after a tram or metro train knocked a player on foot down, following playerDamage (cause railway).
+     */
+    railwayHitPlayer: [player: Player, info: RailwayHitInfo];
 
     /**
      * Dispatched after Vehicle.spawn created a vehicle.
@@ -309,6 +444,11 @@ declare global {
      * Dispatched when one key of an entity's state changes: on the server when a script writes it, on a client when the write arrives. `value` is undefined when the key was removed and `previous` is undefined when it held nothing before, so a stored null stays distinguishable from an absent key. The entity is whatever the game's WrapScriptEntity answers, and the base Entity handle by default.
      */
     entityStateChange: [entity: Entity, key: string, value: any, previous: any];
+
+    /**
+     * Dispatched when a player asks to join, before the connection exists: they hold no player slot, are not counted as online, and are sent nothing -- no resource list, no download, no body. The request waits until every handler has returned and every Promise a handler returned has settled, then it is let in if a player slot is free (otherwise it is refused as full). `connection.reject()` turns it away instead, and so does a handler that throws or rejects, or handlers that have not settled within the server's admission timeout (30 seconds by default, restarted by every `connection.update()`). With no handler at all, every request is let in at once.
+     */
+    playerConnecting: [connection: PendingConnection];
   }
 
   /** Names of native events available in this scripting environment. */
@@ -345,13 +485,28 @@ declare global {
   }
 
   /**
+   * How a fire went out.
+   */
+  interface FireExtinguishedInfo {
+    /**
+     * Water or Fire.douse put it out, a script set it out, or its lifetime ran out.
+     */
+    reason: "doused" | "script" | "burnedOut";
+
+    /**
+     * Who put out how much of it, most first; share sums to 1.
+     */
+    contributors: { player: Player | null; amount: number; share: number }[];
+  }
+
+  /**
    * An accepted change of a player's server health.
    */
   interface PlayerHealthInfo {
     /**
-     * Player the damage is attributed to, or null when the source is absent or has disconnected.
+     * Player or simulation host NPC the damage is attributed to, or null when the source is absent or has disconnected.
      */
-    attacker: Player | null;
+    attacker: Player | Npc | null;
 
     /**
      * Validated weapon used for this damage: 0 is fists, 5 is a Molotov, 15 is a grenade; null for script, fall, vehicle or unknown damage. Remains known if the attacker disconnects after throwing.
@@ -359,9 +514,9 @@ declare global {
     weaponId: number | null;
 
     /**
-     * Server damage path that changed health. Explosions and fires can have a weaponId when they came from a thrown weapon.
+     * Server damage path that changed health; railway is a tram or metro train running into the player on foot. Explosions and fires can have a weaponId when they came from a thrown weapon.
      */
-    cause: "script" | "firearm" | "melee" | "explosion" | "fire" | "fall" | "drowning" | "vehicle";
+    cause: "script" | "firearm" | "melee" | "explosion" | "fire" | "fall" | "drowning" | "vehicle" | "railway";
 
     /**
      * Health before the change.
@@ -480,13 +635,383 @@ declare global {
   }
 
   /**
+   * A hit the simulation host applied to a pedestrian.
+   */
+  interface PedestrianDamageInfo {
+    /**
+     * The player or car that hit it, when there was one.
+     */
+    attacker: Player | Vehicle | null;
+
+    /**
+     * Retail hit type: 0 bullet, 1 hard knockdown, 2 melee, 3 explosion, 5 car impact.
+     */
+    hitType: number;
+
+    /**
+     * Damage of the hit.
+     */
+    damage: number;
+
+    /**
+     * Health before the hit.
+     */
+    healthBefore: number;
+
+    /**
+     * Health after the hit; 0 or less means it died.
+     */
+    healthAfter: number;
+  }
+
+  /**
+   * A hit the simulation host applied to an NPC.
+   */
+  interface NpcDamageInfo {
+    /**
+     * Who hit it, when known.
+     */
+    attacker: Player | Npc | Vehicle | null;
+
+    /**
+     * Retail C_human hit type: 0 bullet, 1 hard knockdown, 2 melee, 3 explosion, 8 car impact.
+     */
+    hitType: number;
+
+    /**
+     * Damage of the hit before the body part scale.
+     */
+    damage: number;
+
+    /**
+     * Health before the hit.
+     */
+    healthBefore: number;
+
+    /**
+     * Health after the hit; 0 or less means it died.
+     */
+    healthAfter: number;
+  }
+
+  /**
+   * How a scripted NPC's task ended.
+   */
+  interface NpcTaskInfo {
+    /**
+     * The id the task method returned.
+     */
+    id: number;
+
+    /**
+     * The task.
+     */
+    task: "stop" | "follow" | "walkTo" | "enterVehicle" | "exitVehicle" | "driveTo" | "attack";
+
+    /**
+     * completed: arrived, seated, out of the car or the target is dead; failed: the retail AI gave up, the target or car is gone or the NPC died; cancelled: another task replaced it.
+     */
+    result: "completed" | "failed" | "cancelled";
+
+    /**
+     * True when result is completed.
+     */
+    success: boolean;
+  }
+
+  /**
+   * A player's retail police crime record on the simulation host.
+   */
+  interface PoliceRecord {
+    /**
+     * Wanted level: 0 none, 1 minor (pursuit), 2 arrest, 3 lethal.
+     */
+    level: number;
+
+    /**
+     * Crimes since the record was last settled.
+     */
+    crimes: ("weaponSeen" | "firing" | "speeding" | "crashObject" | "crashCar" | "crashPedestrian" | "sidewalk" | "violence" | "redLight" | "carTheft" | "signDamage" | "assaultOnPolice" | "forcedArrest" | "policeCarRammed")[];
+
+    /**
+     * Officers assigned to the player.
+     */
+    officers: number;
+  }
+
+  /**
+   * A crime the police noticed.
+   */
+  interface PlayerCrimeInfo {
+    /**
+     * What the player did: a weapon in hand, shots, speeding, a crash, driving on the sidewalk, fist fights, a red light, car theft, a damaged sign, assault on police, a scripted arrest or ramming a police car.
+     */
+    crime: "weaponSeen" | "firing" | "speeding" | "crashObject" | "crashCar" | "crashPedestrian" | "sidewalk" | "violence" | "redLight" | "carTheft" | "signDamage" | "assaultOnPolice" | "forcedArrest" | "policeCarRammed";
+  }
+
+  /**
+   * A wanted level change.
+   */
+  interface PlayerWantedInfo {
+    /**
+     * New level: 0 none, 1 minor, 2 arrest, 3 lethal.
+     */
+    level: number;
+
+    /**
+     * Level before the change.
+     */
+    previous: number;
+  }
+
+  /**
+   * The simulation host's answer to Police.sendBackup.
+   */
+  interface PoliceBackupInfo {
+    /**
+     * The request id Police.sendBackup returned.
+     */
+    id: number;
+
+    /**
+     * True when the police car and its two officers set out; false when the pool had too few free officers, no road was far enough away, the player was no longer wanted, or the host or mission changed.
+     */
+    sent: boolean;
+  }
+
+  /**
+   * Why a walker stopped waving at a taxi.
+   */
+  interface TaxiHailEndInfo {
+    /**
+     * boarded: Taxi.board made it the passenger; ended: the wave ended on the host (Taxi.decline, a panic or hit, the taxi drove off or its driver is wanted, the walker walked out of range); gone: the walker or the driver is gone.
+     */
+    reason: "boarded" | "ended" | "gone";
+  }
+
+  /**
+   * How a taxi ride ended.
+   */
+  interface TaxiPassengerExitInfo {
+    /**
+     * dropOff: Taxi.dropOff; driverLeft: the player left the driver's seat; failed: it never got in; died; gone: removed, or the host or mission went.
+     */
+    reason: "dropOff" | "driverLeft" | "failed" | "died" | "gone";
+
+    /**
+     * Whether it had sat down in the car.
+     */
+    boarded: boolean;
+  }
+
+  /**
+   * How a police officer caught a player.
+   */
+  interface PlayerArrestInfo {
+    /**
+     * arrest: the retail arrest, which ends a single-player game; fine: the on-the-spot fine.
+     */
+    kind: "arrest" | "fine";
+  }
+
+  /**
+   * How a player took a car of the city's traffic.
+   */
+  interface VehicleTrafficTakenInfo {
+    /**
+     * True when the player pulled its driver out, who stays as a driver NPC; false for a seat nobody held.
+     */
+    stolen: boolean;
+  }
+
+  /**
+   * How an NPC threw a player out of a car.
+   */
+  interface PlayerThrownOutInfo {
+    /**
+     * Seat the player was thrown out of; 0 is the driver.
+     */
+    seat: number;
+
+    /**
+     * The NPC that did it: a traffic driver taking its car back, a policeman before an arrest or a gangster.
+     */
+    by: Npc;
+  }
+
+  /**
+   * One wagon behind a railway's body.
+   */
+  interface RailwayWagonInfo {
+    /**
+     * Wagon position.
+     */
+    position: { x: number; y: number; z: number };
+
+    /**
+     * Unit direction of the wagon.
+     */
+    direction: { x: number; y: number; z: number };
+  }
+
+  /**
+   * A tram or metro train as the simulation host last reported it.
+   */
+  interface RailwayInfo {
+    /**
+     * Load index within the mission, from 0; stable for the mission generation.
+     */
+    index: number;
+
+    /**
+     * Position of the body.
+     */
+    position: { x: number; y: number; z: number };
+
+    /**
+     * Unit direction of the body.
+     */
+    direction: { x: number; y: number; z: number };
+
+    /**
+     * Speed in units per second.
+     */
+    speed: number;
+
+    /**
+     * Retail railway state. driverHit stops it after a bullet hit its driver; the host lets it go on after 30 seconds.
+     */
+    state: "moving" | "stationArrival" | "passengersLeaving" | "passengersEntering" | "stationWait" | "scheduleWait" | "departing" | "collisionBraking" | "stopPointBraking" | "semaphoreBraking" | "driverHit" | "followingRailway" | "unknown";
+
+    /**
+     * Wagons behind the body; empty for a tram, one for a freeride metro train.
+     */
+    wagons: RailwayWagonInfo[];
+  }
+
+  /**
+   * A drawbridge as the simulation host last reported it.
+   */
+  interface BridgeInfo {
+    /**
+     * Load index within the mission, from 0; stable for the mission generation.
+     */
+    index: number;
+
+    /**
+     * Position of the bridge frame, one of its two leaves.
+     */
+    position: { x: number; y: number; z: number };
+
+    /**
+     * Retail bridge phase. A steamer in its request zone moves a closed bridge to signaling (red road lights); it opens once no traffic car is on it.
+     */
+    phase: "closed" | "signaling" | "preparing" | "opening" | "open" | "closing" | "unknown";
+
+    /**
+     * Leaf angle in radians, 0 closed; the retail bridges open to 50 degrees.
+     */
+    angle: number;
+
+    /**
+     * True while opening, open or closing: the leaves are up, and a player on foot who walks into the raised bridge dies, as in retail.
+     */
+    raised: boolean;
+  }
+
+  /**
+   * A gas station attendant as the simulation host last reported him.
+   */
+  interface PumperInfo {
+    /**
+     * Load index within the mission, from 0; stable for the mission generation.
+     */
+    index: number;
+
+    /**
+     * Position of the attendant.
+     */
+    position: { x: number; y: number; z: number };
+
+    /**
+     * What the retail attendant is doing: idle and smoking between cars; greeting, walking, fueling, turning and done (his last line) while he serves one.
+     */
+    state: "idle" | "smoking" | "greeting" | "walking" | "fueling" | "turning" | "done" | "unknown";
+
+    /**
+     * True while he serves a car or walks back from one; a request is then refused (reason busy).
+     */
+    busy: boolean;
+
+    /**
+     * The car the server has him serve, or null.
+     */
+    vehicle: Vehicle | null;
+  }
+
+  /**
+   * A tank an attendant filled.
+   */
+  interface VehicleRefuelInfo {
+    /**
+     * The attendant's load index.
+     */
+    pumper: number;
+
+    /**
+     * Litres put in: what the tank lacked, or what the player's money bought.
+     */
+    litres: number;
+
+    /**
+     * Money taken from the player at Pumper.setPrice; 0 when free.
+     */
+    cost: number;
+  }
+
+  /**
+   * Why the server turned down a player's "use the pump".
+   */
+  interface PumperRefusedInfo {
+    /**
+     * The attendant's load index.
+     */
+    pumper: number;
+
+    /**
+     * disabled after Pumper.setEnabled(false); unavailable without a simulation host; busy while he serves another car; full when the tank lacks less than half a litre; money when the player cannot pay for one litre.
+     */
+    reason: "disabled" | "unavailable" | "busy" | "full" | "money";
+
+    /**
+     * For money, what the full tank would cost; otherwise 0.
+     */
+    cost: number;
+  }
+
+  /**
+   * A railway running into a player.
+   */
+  interface RailwayHitInfo {
+    /**
+     * The railway, as last reported.
+     */
+    railway: RailwayInfo | null;
+
+    /**
+     * Damage applied: retail (|speed| - 2.5) * 4.2.
+     */
+    damage: number;
+  }
+
+  /**
    * An accepted firearm pellet against a vehicle.
    */
   interface VehicleHitInfo {
     /**
-     * Player who fired, or null when they have left.
+     * Player or simulation host NPC who fired, or null when they are gone.
      */
-    shooter: Player | null;
+    shooter: Player | Npc | null;
 
     /**
      * Damage derived from the accepted shot.
@@ -499,12 +1024,12 @@ declare global {
     position: { x: number; y: number; z: number };
 
     /**
-     * Shooter's fire sequence.
+     * Shooter's fire sequence; 0 for an NPC.
      */
     shotSequence: number;
 
     /**
-     * Pellet of that shot.
+     * Pellet of that shot; 0 for an NPC.
      */
     pelletIndex: number;
   }
@@ -1281,6 +1806,21 @@ declare global {
     readonly seatCount: number;
 
     /**
+     * True for a car of the city's traffic the simulation host spawned, also after a player took it (vehicleTrafficTaken).
+     */
+    readonly traffic: boolean;
+
+    /**
+     * What kind of traffic car it is; none for a script car.
+     */
+    readonly trafficKind: "none" | "civil" | "police" | "mafia";
+
+    /**
+     * True while the simulation host drives it: its traffic driver or an NPC crew sits in it. Players only steal it or take a seat nobody holds.
+     */
+    readonly hostDriven: boolean;
+
+    /**
      * 0 active, 1 exploded, 2 native water contact, 3 fall volume or native invalid fall.
      */
     readonly terminalState: number;
@@ -1496,6 +2036,640 @@ declare global {
   interface Vehicle extends Entity {}
 
   /**
+   * A walker of the city's pedestrian traffic. The simulation host runs it with the retail AI around every player; it is a new pedestrian each time it walks again.
+   */
+  class Pedestrian {
+    /**
+     * Creates a handle for an existing pedestrian.
+     * @param id Network entity identifier.
+     */
+    constructor(id: number);
+
+    /**
+     * Retail .i3d model filename.
+     */
+    readonly model: string;
+
+    /**
+     * Position the simulation host last reported.
+     */
+    readonly position: Vector3;
+
+    /**
+     * Facing in radians.
+     */
+    readonly heading: number;
+
+    /**
+     * False once it died; the corpse stays until it retires.
+     */
+    readonly alive: boolean;
+
+    /**
+     * Whether it holds a rain umbrella; a hit drops it.
+     */
+    readonly umbrella: boolean;
+
+    /**
+     * Retail traffic animation id; 6 is its walk.
+     */
+    readonly animation: number;
+
+    /**
+     * Retail walk style, 0 to 4.
+     */
+    readonly walkStyle: number;
+
+    /**
+     * Formats this pedestrian for logging.
+     * @returns The pedestrian ID and model.
+     */
+    toString(): string;
+
+    /**
+     * Asks the simulation host to retire it now; pedestrianRetire follows.
+     * @returns False when it no longer exists or no host is attached.
+     */
+    remove(): boolean;
+
+    /**
+     * Lists every pedestrian.
+     * @returns The current pedestrians.
+     */
+    static getAll(): Pedestrian[];
+
+    /**
+     * Lists the pedestrians within radius of position.
+     * @param position Center; three numbers are accepted too.
+     * @param radius Distance in units.
+     * @returns The pedestrians in range.
+     */
+    static getInRange(position: Vector3 | { x: number; y: number; z: number }, radius: number): Pedestrian[];
+
+    /**
+     * Counts the pedestrians.
+     * @returns The number of pedestrians.
+     */
+    static getCount(): number;
+
+    /**
+     * Turns pedestrian traffic on or off; off retires every pedestrian at once.
+     * @returns False when the value was rejected.
+     */
+    static setEnabled(enabled: boolean): boolean;
+
+    /**
+     * Whether pedestrian traffic runs.
+     * @returns The current setting.
+     */
+    static isEnabled(): boolean;
+
+    /**
+     * Scales how many pedestrians walk around players; existing ones retire naturally.
+     * @param density 0 to 1 of the retail count around each group of players.
+     * @returns False when the value was rejected.
+     */
+    static setDensity(density: number): boolean;
+
+    /**
+     * The pedestrian density.
+     * @returns 0 to 1.
+     */
+    static getDensity(): number;
+
+    /**
+     * Sets how long a dead pedestrian stays. Defaults to 30000.
+     * @param milliseconds 0 to 3600000; 0 keeps a corpse until every player is far from it, as in single player.
+     * @returns False when the value was rejected.
+     */
+    static setCorpseLifetime(milliseconds: number): boolean;
+
+    /**
+     * How long a dead pedestrian stays, in milliseconds.
+     * @returns The current setting.
+     */
+    static getCorpseLifetime(): number;
+  }
+
+  interface Pedestrian extends Entity {}
+
+  /**
+   * A human the simulation host runs with the retail AI: a gangster pedestrian someone hit that draws a Thompson and fights back, a policeman, a thrown-out driver, or one a script spawned and gives tasks.
+   */
+  class Npc {
+    /**
+     * Creates a handle for an existing NPC.
+     * @param id Network entity identifier.
+     */
+    constructor(id: number);
+
+    /**
+     * What it is: "gangster", "police", "driver" (a traffic driver thrown out of its car) or "scripted" (Npc.spawn).
+     */
+    readonly kind: string;
+
+    /**
+     * Retail .i3d model filename.
+     */
+    readonly model: string;
+
+    /**
+     * Position the simulation host last reported.
+     */
+    readonly position: Vector3;
+
+    /**
+     * Facing in radians.
+     */
+    readonly heading: number;
+
+    /**
+     * False once it died; the corpse stays until it retires.
+     */
+    readonly alive: boolean;
+
+    /**
+     * Health the simulation host last reported; a gangster starts at 200.
+     */
+    readonly health: number;
+
+    /**
+     * Retail item id of the weapon in hand, 0 for none; 10 is the Thompson.
+     */
+    readonly weapon: number;
+
+    /**
+     * The clip a script plays on it (playAnimation); an empty string for none. A one-shot clip keeps its name until another clip, stopAnimation or a task.
+     */
+    readonly animation: string;
+
+    /**
+     * A scripted NPC's spawn behaviour, "neutral", "friendly" or "hostile"; an empty string for another kind.
+     */
+    readonly behaviour: string;
+
+    /**
+     * Retail voice (C_human m_uVoice), 0 to 39, fixed at spawn: police 10-11, gangsters 12-16, thrown-out drivers 26-28, 12 otherwise unless the spawn option chose one.
+     */
+    readonly voice: number;
+
+    /**
+     * Formats this NPC for logging.
+     * @returns The NPC ID, kind and model.
+     */
+    toString(): string;
+
+    /**
+     * Returns the selected weapon and the held weapons the server records for it.
+     * @returns The inventory, or null when it no longer exists.
+     */
+    getInventory(): Inventory | null;
+
+    /**
+     * Returns the car a driver NPC was thrown out of when a player stole it.
+     * @returns The vehicle, or null for another kind of NPC or once that car is gone.
+     */
+    getThrownFromVehicle(): Vehicle | null;
+
+    /**
+     * Asks the simulation host to retire it now; npcRetire follows.
+     * @returns False when it no longer exists or no host is attached.
+     */
+    remove(): boolean;
+
+    /**
+     * Follows the target the way retail companions follow Tommy (Entity_ActionFollow), until another task or the target is gone. It runs to catch up and resumes after a fight. The task replaces the current one; npcTaskComplete reports how it ends. Scripted NPCs only.
+     * @param target Who to follow.
+     * @param distance How close it keeps, 0.5 to 50; defaults to 2.
+     * @returns The task id, or 0 when refused (not a living scripted NPC, no host, a target that is gone).
+     */
+    follow(target: Player | Npc, distance?: number): number;
+
+    /**
+     * Walks over the mission's pedestrian paths to the point (EntityMoveToFrame). With direct it walks straight there instead, the way retail steps a human along its script path (AI_human_goto_target), for rooms the paths do not reach; it fails when something blocks it for 3 seconds. The task replaces the current one; npcTaskComplete reports how it ends. Scripted NPCs only.
+     * @param position Where to go; three numbers are accepted too.
+     * @param options run: run instead of walking; radius: how close it must come, 0.3 to 20 (default 0.5); direct: walk in a straight line without the pedestrian paths.
+     * @returns The task id, or 0 when refused (not a living scripted NPC, no host, a target that is gone).
+     */
+    walkTo(position: Vector3 | { x: number; y: number; z: number }, options?: { run?: boolean; radius?: number; direct?: boolean }): number;
+
+    /**
+     * Walks to the car's door and gets in (Entity_MoveToCar, Enemy_UseCar). The simulation host drives the car while a scripted NPC boards or sits in it, and players cannot get in meanwhile; in a passenger seat of a car a player drives, the player keeps driving and the NPC rides along on every client. The task replaces the current one; npcTaskComplete reports how it ends. Scripted NPCs only.
+     * @param vehicle A script's vehicle with no player in it, not a traffic car; or any car a player drives, for a passenger seat.
+     * @param seat Seat index; 0, the driver's, by default.
+     * @param options run: run to the car.
+     * @returns The task id, or 0 when refused (not a living scripted NPC, no host, a target that is gone).
+     */
+    enterVehicle(vehicle: Vehicle, seat?: number, options?: { run?: boolean }): number;
+
+    /**
+     * Gets out of its car once the car is nearly still (Enemy_UseCar). The task replaces the current one; npcTaskComplete reports how it ends. Scripted NPCs only.
+     * @returns The task id, or 0 when refused (not a living scripted NPC, no host, a target that is gone).
+     */
+    exitVehicle(): number;
+
+    /**
+     * Drives the car it sits in as driver over the road network to the point and stops there (Entity_CarMoveTo). The task replaces the current one; npcTaskComplete reports how it ends. Scripted NPCs only.
+     * @param position Destination; three numbers are accepted too.
+     * @returns The task id, or 0 when refused (not a living scripted NPC, no host, a target that is gone).
+     */
+    driveTo(position: Vector3 | { x: number; y: number; z: number }): number;
+
+    /**
+     * Chases and shoots the target with its best weapon (Entity_ActionFire) until the target is dead (completed) or gone. The task replaces the current one; npcTaskComplete reports how it ends. Scripted NPCs only.
+     * @param target Who to fight.
+     * @returns The task id, or 0 when refused (not a living scripted NPC, no host, a target that is gone).
+     */
+    attack(target: Player | Npc): number;
+
+    /**
+     * Drops every action and stands (Entity_ActionsClear). The task replaces the current one; npcTaskComplete reports how it ends. Scripted NPCs only.
+     * @returns The task id, or 0 when refused (not a living scripted NPC, no host, a target that is gone).
+     */
+    stop(): number;
+
+    /**
+     * Turns it on the spot (ACTOR_SETDIR). Scripted NPCs only; a task that moves it turns it again.
+     * @param target A heading in radians, or a position to turn towards.
+     * @returns False when it is not a living scripted NPC or no host is attached.
+     */
+    face(target: number | Vector3 | { x: number; y: number; z: number }): boolean;
+
+    /**
+     * Adds a weapon to a scripted NPC's native inventory (HUMAN_ADDWEAPON); the retail AI picks what it holds. getInventory shows it once the host reports it.
+     * @param weaponId Supported stock weapon, 2 through 15.
+     * @param ammo Loaded rounds; defaults to a full magazine for a firearm and 1 otherwise.
+     * @param reserve Reserve rounds; defaults to 0.
+     * @returns False when it is not a living scripted NPC or no host is attached.
+     */
+    giveWeapon(weaponId: number, ammo?: number, reserve?: number): boolean;
+
+    /**
+     * Sets a living scripted NPC's health.
+     * @param health Above 0, up to 100000.
+     * @returns False when it is not a living scripted NPC or no host is attached.
+     */
+    setHealth(health: number): boolean;
+
+    /**
+     * Plays a clip on a scripted NPC the way retail mission scripts do (PERSON_PLAYANIM, C_human::Do_PlayAnim), on the simulation host and on every player's copy, including players who see it later. It ends the running task (cancelled); any task stops the clip. A clip the game does not have shows nothing.
+     * @param name A stock human animation, a bare .i3d filename such as "x barman stativ.i3d".
+     * @param options loop: repeat the clip until stopped (default true); false plays it once and it returns to standing.
+     * @returns False when it is not a living scripted NPC, it sits in a car or no host is attached.
+     */
+    playAnimation(name: string, options?: { loop?: boolean }): boolean;
+
+    /**
+     * Stops a script clip and returns it to standing (PERSON_STOPANIM).
+     * @returns False when it is not a living scripted NPC or no host is attached.
+     */
+    stopAnimation(): boolean;
+
+    /**
+     * Says a line in this NPC's voice (the voice spawn option) on every player that streams it, positioned on its head, cutting off the line it was saying. A line with no sound for that voice says nothing.
+     * @param line A retail voice line: the id C_human::NewScream takes, a tables/voices.def group plus 2. Ones the game itself uses: 6-8 a group event, 15-16 seeing a body, 21-23 finding someone, 33-36 ready to fight, 45-50 a fight spotted, 61-65 freezing, 66-69 panic, 70-74 searching, 75-78 giving up, 79-83 hit, 84 a strong leg hit, 85-91 pain, 92-93 hit while dying, 132-134 a car steal refused, 137-138 out of fuel, 139-144 police halt, 145-146 police grab, 147-149 police grab of an armed man, 150-151 a police car warning, 152-157 police notifying a crime, 161-167 thrown out of a car.
+     * @returns False when it is not a living NPC or the line is out of range.
+     */
+    say(line: number): boolean;
+
+    /**
+     * Returns the scripted NPC's running task.
+     * @returns The task, or null when it runs none.
+     */
+    getTask(): { id: number; task: string } | null;
+
+    /**
+     * Returns the car it sits in.
+     * @returns The vehicle, or null on foot.
+     */
+    getVehicle(): Vehicle | null;
+
+    /**
+     * Lists every NPC.
+     * @returns The current NPCs.
+     */
+    static getAll(): Npc[];
+
+    /**
+     * Lists the NPCs within radius of position.
+     * @param position Center; three numbers are accepted too.
+     * @param radius Distance in units.
+     * @returns The NPCs in range.
+     */
+    static getInRange(position: Vector3 | { x: number; y: number; z: number }, radius: number): Npc[];
+
+    /**
+     * Counts the NPCs.
+     * @returns The number of NPCs.
+     */
+    static getCount(): number;
+
+    /**
+     * Spawns a human the simulation host runs with the retail AI and that scripts give tasks. The handle is usable at once; npcSpawn follows once the host created it, npcRetire if it could not.
+     * @param model Stock human .i3d filename, such as "pol01.i3d" for a policeman.
+     * @param position Where it stands; three numbers are accepted too.
+     * @param heading Facing in radians; defaults to 0.
+     * @param options health: defaults to 100; behaviour: how the retail AI rates players (default neutral); weapon, ammo, reserve: a weapon to hold; virtualWorld: the only world whose players see it (default every world); voice: the retail voice 0 to 39 its say() lines use (default 12; retail police use 10-11, gangsters 12-16, men 26-28, women 29-31).
+     * @returns The NPC, or null when no simulation host is attached, no mission is loaded, 64 scripted NPCs exist or an argument is unusable.
+     */
+    static spawn(model: string, position: Vector3 | { x: number; y: number; z: number }, heading?: number, options?: { health?: number; behaviour?: "neutral" | "friendly" | "hostile"; weapon?: number; ammo?: number; reserve?: number; virtualWorld?: number; voice?: number }): Npc | null;
+  }
+
+  interface Npc extends Entity {}
+
+  /**
+   * The retail police, which the simulation host runs for every player: each player's crime record, the wanted level it reaches and the officers it sends. Officers come from police walkers and from the traffic's police cars, which also chase players and set up roadblocks.
+   */
+  const Police: {
+    /**
+     * Returns the player's crime record as the host last reported it.
+     * @param player A spawned player.
+     * @returns The record, or null when the player is not spawned.
+     */
+    getRecord(player: Player): PoliceRecord | null;
+
+    /**
+     * Raises the record to this level, which sends the police the retail way, or lowers it (calling off the officers first). playerWantedChange follows.
+     * @param player A spawned player.
+     * @param level 0 none, 1 minor, 2 arrest, 3 lethal.
+     * @returns False when the player is not spawned, no simulation host is attached, or the police are off and the level would rise.
+     */
+    setWanted(player: Player, level: number): boolean;
+
+    /**
+     * Settles the player's record and calls off every officer after them.
+     * @param player A spawned player.
+     * @returns False when the player is not spawned or no simulation host is attached.
+     */
+    clear(player: Player): boolean;
+
+    /**
+     * Turns the police reaction to crimes on or off for everyone. While off, crimes raise nothing, Police.setWanted cannot raise a level and a hit officer opens no new case. Officers already on a case keep it; Police.clear calls them off.
+     * @param enabled Whether crimes raise wanted levels.
+     */
+    setEnabled(enabled: boolean): void;
+
+    /**
+     * Whether crimes raise wanted levels.
+     * @returns True unless Police.setEnabled(false).
+     */
+    isEnabled(): boolean;
+
+    /**
+     * Makes the player a police officer for the retail police, as retail treats its own officers: no crime record (no crime, wanted level, case, arrest or car hunt for them), and NPCs rate them as a policeman. The record is settled at once (playerWantedChange if they were wanted); Police.setWanted cannot raise it. False turns them back into a citizen with a clean record. The setting lasts until changed or the player leaves.
+     * @param player A connected player.
+     * @param officer True on police duty, false back to a citizen.
+     * @returns False when the player is unknown.
+     */
+    setOfficer(player: Player, officer: boolean): boolean;
+
+    /**
+     * Whether Police.setOfficer made the player a police officer.
+     * @param player A player.
+     * @returns True on police duty.
+     */
+    isOfficer(player: Player): boolean;
+
+    /**
+     * Sends a police car with two officers after the player the retail way (the reinforcements a rising wanted level brings): it sets out from a road about 140 m away and hunts them as their wanted level says (kill, arrest or pursue). policeBackup answers whether it set out; the police pool must have two free officers.
+     * @param player A wanted player.
+     * @returns The request id policeBackup carries, or 0 when the player is not wanted, is an officer, the police are off or no simulation host is attached.
+     */
+    sendBackup(player: Player): number;
+  };
+
+  /**
+   * A walker waving at a player's taxi.
+   */
+  interface TaxiHail {
+    /**
+     * The driver it waves at.
+     */
+    player: Player | null;
+
+    /**
+     * Their taxi.
+     */
+    vehicle: Vehicle | null;
+
+    /**
+     * The taxi stopped by it (taxiPickup).
+     */
+    pickedUp: boolean;
+  }
+
+  /**
+   * A taxi passenger's ride.
+   */
+  interface TaxiRide {
+    /**
+     * The driver.
+     */
+    player: Player | null;
+
+    /**
+     * The taxi.
+     */
+    vehicle: Vehicle | null;
+
+    /**
+     * The passenger's seat.
+     */
+    seat: number;
+
+    /**
+     * Walking to the door, seated, getting out, or out and walking off.
+     */
+    phase: "boarding" | "riding" | "leaving" | "released";
+
+    /**
+     * Taxi.setDestination's point.
+     */
+    destination: { x: number; y: number; z: number } | null;
+
+    /**
+     * How close the taxi must stop.
+     */
+    radius: number;
+
+    /**
+     * The taxi stopped there (taxiArrive).
+     */
+    arrived: boolean;
+  }
+
+  /**
+   * Retail taxi passengers. The simulation host runs single player's hailing for every player Taxi.setHailable allows: in a taxi model (taxi, fordapicktaxi, phantomtaxi and retail's hot rods) at 20 m/s or less with no passenger, a walker 20 to 90 m ahead waves (taxiHail), turns to the cab and keeps waving; when the taxi stops within 10 m (taxiPickup) a script boards it (Taxi.board). It becomes an NPC passenger that gets into the back, rides on every client, and gets out when Taxi.dropOff says so or the driver leaves the driver's seat.
+   */
+  const Taxi: {
+    /**
+     * Lets walkers hail the player's taxi, as the retail mission script's taxidriver_enable does for single player's player. Off ends their waves. It lasts until changed or the player leaves.
+     * @param player A connected player.
+     * @param hailable Whether walkers may hail their taxi.
+     * @returns False when the player is unknown.
+     */
+    setHailable(player: Player, hailable: boolean): boolean;
+
+    /**
+     * Whether walkers may hail the player's taxi.
+     * @param player A player.
+     * @returns The setting.
+     */
+    isHailable(player: Player): boolean;
+
+    /**
+     * Whether a simulation host runs the walkers, so hails can come at all.
+     * @returns False without a simulation host or a loaded mission.
+     */
+    isAvailable(): boolean;
+
+    /**
+     * Returns whom the walker waves at.
+     * @param pedestrian A walker.
+     * @returns The hail, or null when it does not wave.
+     */
+    getHail(pedestrian: Pedestrian): TaxiHail | null;
+
+    /**
+     * Ends the walker's wave; it walks on. taxiHailEnd follows.
+     * @param pedestrian A waving walker.
+     * @returns False when it does not wave, already boards or no host is attached.
+     */
+    decline(pedestrian: Pedestrian): boolean;
+
+    /**
+     * Makes the walker the player's passenger: a scripted NPC takes its place where it stands (players swap the walker for it) and gets into the player's car, which the player keeps driving. taxiPassengerEnter follows once seated; taxiPassengerExit if it never sits down.
+     * @param player The driver the walker hails.
+     * @param pedestrian The waving walker.
+     * @param seat A free passenger seat; by default retail's: seat 3 of a car with more than three seats, else seat 1, else the first free one.
+     * @returns The passenger NPC, or null when the walker does not hail this player, the player does not drive a car with a free passenger seat, already has a passenger, or no NPC can be made.
+     */
+    board(player: Player, pedestrian: Pedestrian, seat?: number): Npc | null;
+
+    /**
+     * Sets where the ride goes: taxiArrive follows once the taxi stands still (0.5 m/s or less) within the radius.
+     * @param passenger A passenger from Taxi.board.
+     * @param position Where the ride goes, or null for nowhere.
+     * @param radius How close the taxi must stop; 15 by default, as taxi_pas.dat.
+     * @returns False when it is not a passenger still aboard.
+     */
+    setDestination(passenger: Npc, position: Vector3 | { x: number; y: number; z: number } | null, radius?: number): boolean;
+
+    /**
+     * Ends the ride: the passenger gets out once the car is nearly still and walks off, and is removed once out of sight. taxiPassengerExit follows.
+     * @param passenger A passenger from Taxi.board.
+     * @returns False when it is not a passenger or already leaves.
+     */
+    dropOff(passenger: Npc): boolean;
+
+    /**
+     * Returns the player's passenger, boarding or seated.
+     * @param player A player.
+     * @returns The passenger, or null.
+     */
+    getPassenger(player: Player): Npc | null;
+
+    /**
+     * Returns a passenger's ride.
+     * @param passenger An NPC.
+     * @returns The ride, or null when it is no taxi passenger.
+     */
+    getRide(passenger: Npc): TaxiRide | null;
+  };
+
+  /**
+   * The mission's trams and metro trains. The simulation host runs them with the retail AI everywhere on the map and reports them ten times a second; every player sees them, with the host's passengers, where the host has them. Players ride them through the doors at stations.
+   */
+  const Railway: {
+    /**
+     * Lists every railway the simulation host has reported this mission.
+     * @returns The railways, by load index.
+     */
+    getAll(): RailwayInfo[];
+
+    /**
+     * Returns one railway as the host last reported it.
+     * @param index Load index from 0.
+     * @returns The railway, or null before the host reported it.
+     */
+    get(index: number): RailwayInfo | null;
+
+    /**
+     * Lists the railways whose body is within radius of position.
+     * @param position Center; three numbers are accepted too.
+     * @param radius Distance in units.
+     * @returns The railways in range.
+     */
+    getInRange(position: Vector3 | { x: number; y: number; z: number }, radius: number): RailwayInfo[];
+
+    /**
+     * Counts the reported railways.
+     * @returns The number of railways; freeride has 38.
+     */
+    getCount(): number;
+  };
+
+  /**
+   * The mission's drawbridges. The simulation host runs them with the retail AI, which raises one when a steamer comes; every player sees them, their steamers and their collision where the host has them, a few hundred milliseconds later. Read only.
+   */
+  const Bridge: {
+    /**
+     * Lists every bridge the simulation host has reported this mission.
+     * @returns The bridges, by load index.
+     */
+    getAll(): BridgeInfo[];
+
+    /**
+     * Returns one bridge as the host last reported it.
+     * @param index Load index from 0.
+     * @returns The bridge, or null before the host reported it.
+     */
+    get(index: number): BridgeInfo | null;
+  };
+
+  /**
+   * The mission's gas station attendants (the Free Ride scenes have three, one per pump). The simulation host runs them with the retail AI and every player sees them the same: idling, smoking, and serving a car. A driver who stops at a pump with the engine off and takes the retail "use the pump" choice gets the retail service: the attendant greets, walks to the car, fuels it with its sound, says he is done and walks back, while the car stands locked. The server fills the tank, charges the price and dispatches vehicleRefuel.
+   */
+  const Pumper: {
+    /**
+     * Lists every attendant the simulation host has reported this mission.
+     * @returns The attendants, by load index.
+     */
+    getAll(): PumperInfo[];
+
+    /**
+     * Returns one attendant as the host last reported it.
+     * @param index Load index from 0.
+     * @returns The attendant, or null before the host reported it.
+     */
+    get(index: number): PumperInfo | null;
+
+    /**
+     * Turns the service on or off for everyone. While off, a request is refused (pumperRefused, reason disabled); a service under way finishes.
+     * @param enabled Whether attendants take new cars.
+     */
+    setEnabled(enabled: boolean): void;
+
+    /**
+     * Whether attendants take new cars.
+     * @returns True unless Pumper.setEnabled(false).
+     */
+    isEnabled(): boolean;
+
+    /**
+     * Sets what a service costs. The fill takes every litre the tank lacks, or as many as the player's money buys; a player who cannot pay for one litre is refused (reason money).
+     * @param pricePerLitre Money per litre, 0 to 10000; 0 (the default) is free.
+     */
+    setPrice(pricePerLitre: number): void;
+
+    /**
+     * Money per litre.
+     * @returns The price Pumper.setPrice set, 0 by default.
+     */
+    getPrice(): number;
+  };
+
+  /**
    * A server-owned weapon in the world: a script pickup, a dropped weapon or a dead player's weapon. The use key asks the server, which checks reach, life and inventory.
    */
   class Pickup {
@@ -1650,6 +2824,289 @@ declare global {
   interface Door extends Entity {}
 
   /**
+   * A script-placed world object built from a stock model, like SA-MP's CreateObject. Every client in its virtual world sees it and collides with it on foot, in cars and with bullets. It lasts until destroyed, until the mission changes or until the resource that created it stops.
+   */
+  class MapObject {
+    /**
+     * Creates a handle for an existing map object; use MapObject.create to place one.
+     * @param id Network entity identifier.
+     */
+    constructor(id: number);
+
+    /**
+     * Model file the object was created from.
+     */
+    readonly model: string;
+
+    /**
+     * Whether players, cars and bullets collide with the object.
+     */
+    readonly collision: boolean;
+
+    /**
+     * Whether a moveTo is running.
+     */
+    readonly moving: boolean;
+
+    /**
+     * Mission generation the object belongs to.
+     */
+    readonly missionGeneration: number;
+
+    /**
+     * Current position, also while moving. Assigning teleports the object and stops a running move without mapObjectMoved.
+     */
+    position: Vector3;
+
+    /**
+     * Current rotation. Assigning a quaternion or Euler radians { x, y, z } turns the object at once and stops a running move.
+     */
+    rotation: Quaternion;
+
+    /**
+     * Virtual world; only players in it see and collide with the object. 4294967295 (assign -1 for it) is every world, the default.
+     */
+    virtualWorld: number;
+
+    /**
+     * Formats this object for logging.
+     * @returns The object ID and model.
+     */
+    toString(): string;
+
+    /**
+     * Moves the object smoothly from where it is. Fires mapObjectMoved on arrival. Replaces a running move.
+     * @param position Where to go; three numbers are accepted too.
+     * @param speed Meters per second, up to 1000. A move that only turns uses radians per second.
+     * @param rotation Rotation to reach on arrival, turned evenly on the way; keeps the current one when omitted.
+     * @returns False for an invalid speed or a destroyed object.
+     */
+    moveTo(position: Vector3 | { x: number; y: number; z: number }, speed: number, rotation?: Quaternion | { x: number; y: number; z: number }): boolean;
+
+    /**
+     * Stops a running move where the object is now. Does not fire mapObjectMoved.
+     * @returns False when the object no longer exists.
+     */
+    stop(): boolean;
+
+    /**
+     * Removes the object and its collision from every client.
+     * @returns False when it no longer exists.
+     */
+    destroy(): boolean;
+
+    /**
+     * Places an object in the current mission for every client, including late joiners.
+     * @param model Stock model file under models\, such as "bar_fence.4ds"; .i3d is accepted too.
+     * @param position World position; three numbers are accepted too.
+     * @param rotation A quaternion, or Euler angles in radians about x, y (up) and z. Defaults to none.
+     * @param options virtualWorld defaults to every world (-1). collision defaults to true. scale is 0.01 to 100 per axis. material is a tables\materials.def id (0 to 46 except glass 24 and crash frames 41) for collision built from the model's mesh; by default the mission's own collision for the model is used where it has some, and concrete (4) otherwise.
+     * @returns The object, or null at the limit of 4096 objects.
+     */
+    static create(model: string, position: Vector3 | { x: number; y: number; z: number }, rotation?: Quaternion | { x: number; y: number; z: number }, options?: { virtualWorld?: number; collision?: boolean; scale?: number | Vector3 | { x: number; y: number; z: number }; material?: number }): MapObject | null;
+
+    /**
+     * Lists every map object.
+     * @returns The current map objects.
+     */
+    static getAll(): MapObject[];
+  }
+
+  interface MapObject extends Entity {}
+
+  /**
+   * A fire that burns until water or a script puts it out. Every client draws it from the retail fire effects, light and sound; the fewer flames burn the lower its intensity. Water jets aimed into its area lower the intensity, and players standing in it burn. It lasts until destroyed, the mission changes or the resource that created it stops.
+   */
+  class Fire {
+    /**
+     * Creates a handle for an existing fire; use Fire.create to start one.
+     * @param id Network entity identifier.
+     */
+    constructor(id: number);
+
+    /**
+     * How far above its position the flames reach, 0 to 12.
+     */
+    readonly height: number;
+
+    /**
+     * Whether its intensity is above 0.
+     */
+    readonly burning: boolean;
+
+    /**
+     * Whether a water jet hit it in the last 1.5 seconds.
+     */
+    readonly dousing: boolean;
+
+    /**
+     * Mission generation the fire belongs to.
+     */
+    readonly missionGeneration: number;
+
+    /**
+     * Where it burns. Assigning moves it and detaches it from a vehicle.
+     */
+    position: Vector3;
+
+    /**
+     * 0 (out, smoke only) to 1 (fully ablaze). Assigning 0 fires fireExtinguished with reason "script"; above 0 sets it alight again.
+     */
+    intensity: number;
+
+    /**
+     * Radius of its area in units, 0.5 to 15.
+     */
+    radius: number;
+
+    /**
+     * The vehicle it burns on, or null.
+     */
+    readonly vehicle: Vehicle | null;
+
+    /**
+     * Formats this fire for logging.
+     * @returns The fire ID and intensity.
+     */
+    toString(): string;
+
+    /**
+     * Lowers the intensity, as an extinguisher or a bucket would. Fires fireExtinguished with reason "doused" when it reaches 0.
+     * @param amount Intensity to take off, 0 or more.
+     * @param player Who gets the credit in getContributors and fireExtinguished.
+     * @returns The remaining intensity, or -1 when the fire no longer exists.
+     */
+    douse(amount: number, player?: Player): number;
+
+    /**
+     * Makes the fire follow a vehicle.
+     * @param vehicle A vehicle to burn on, or null to stay where it is.
+     * @returns False when the fire or vehicle no longer exists.
+     */
+    attachTo(vehicle: Vehicle | null): boolean;
+
+    /**
+     * Lists who put out how much of this fire, most first. share sums to 1.
+     * @returns The contributions.
+     */
+    getContributors(): { player: Player | null; amount: number; share: number }[];
+
+    /**
+     * Puts the fire out at once. Fires fireExtinguished with reason "script" unless it was out.
+     * @returns False when it no longer exists.
+     */
+    extinguish(): boolean;
+
+    /**
+     * Removes the fire, smoke and all, from every client without an event.
+     * @returns False when it no longer exists.
+     */
+    destroy(): boolean;
+
+    /**
+     * Starts a fire every client sees, including late joiners.
+     * @param position Where it burns (its base); three numbers are accepted too.
+     * @param options radius 0.5-15 (default 3); height 0-12, how far up a facade the flames climb (default 0); intensity 0-1 (default 1); damage per second to a player in it at full intensity, 0-200 (default 20); lifetime in ms before it burns out by itself, 0 for never (default); growth, intensity regained per second three seconds after the last water (default 0); toughness, how much harder than a 3-unit fire it is to put out (default 1); attachTo, a vehicle it burns on; virtualWorld (default every world, -1).
+     * @returns The fire, or null at the limit of 64 fires.
+     */
+    static create(position: Vector3 | { x: number; y: number; z: number }, options?: { radius?: number; height?: number; intensity?: number; damage?: number; lifetime?: number; growth?: number; toughness?: number; attachTo?: Vehicle; virtualWorld?: number }): Fire | null;
+
+    /**
+     * Lists every fire, burning or out.
+     * @returns The current fires.
+     */
+    static getAll(): Fire[];
+
+    /**
+     * Lists the fires within radius of position.
+     * @param position Center.
+     * @param radius Distance in units.
+     * @returns The fires in range.
+     */
+    static getInRange(position: Vector3 | { x: number; y: number; z: number }, radius: number): Fire[];
+  }
+
+  interface Fire extends Entity {}
+
+  /**
+   * A fire hose held by a player or a water cannon on a vehicle. While aimed, every client draws the retail hose spray arcing from the nozzle to the target with the hydrant's water sound, and the server lowers the intensity of every fire whose area holds the target. It lasts until destroyed, the mission changes or the resource that created it stops.
+   */
+  class WaterJet {
+    /**
+     * Creates a handle for an existing water jet; use WaterJet.create.
+     * @param id Network entity identifier.
+     */
+    constructor(id: number);
+
+    /**
+     * Whether it sprays.
+     */
+    readonly active: boolean;
+
+    /**
+     * Where the water lands while it sprays, else null.
+     */
+    readonly target: Vector3 | null;
+
+    /**
+     * Who holds the nozzle.
+     */
+    readonly source: Player | Vehicle | null;
+
+    /**
+     * Muzzle speed in m/s, 8 to 30 (default 18). The arc reaches about pressure squared over 9.8, and water puts fires out faster at higher pressure.
+     */
+    pressure: number;
+
+    /**
+     * Formats this jet for logging.
+     * @returns The jet ID and whether it sprays.
+     */
+    toString(): string;
+
+    /**
+     * Opens the nozzle towards the target, or turns it. Fires within 45 units of the nozzle whose area holds the target are doused.
+     * @param position Where the water should land; three numbers are accepted too.
+     * @returns False when the jet no longer exists.
+     */
+    aimAt(position: Vector3 | { x: number; y: number; z: number }): boolean;
+
+    /**
+     * Where the water leaves: a player's hands or a vehicle's roof.
+     * @returns The nozzle, or null while its holder is dead, unspawned or gone.
+     */
+    getNozzle(): Vector3 | null;
+
+    /**
+     * Closes the nozzle.
+     * @returns False when the jet no longer exists.
+     */
+    stop(): boolean;
+
+    /**
+     * Removes the jet from every client.
+     * @returns False when it no longer exists.
+     */
+    destroy(): boolean;
+
+    /**
+     * Creates a closed hose; aimAt opens it.
+     * @param source Who holds the nozzle: a player's hands, or the roof of a vehicle.
+     * @param options pressure 8-30 m/s (default 18); player, who gets the credit for a vehicle's jet; virtualWorld (default every world, -1).
+     * @returns The jet, or null at the limit of 32 jets.
+     */
+    static create(source: Player | Vehicle, options?: { pressure?: number; player?: Player; virtualWorld?: number }): WaterJet | null;
+
+    /**
+     * Lists every water jet.
+     * @returns The current jets.
+     */
+    static getAll(): WaterJet[];
+  }
+
+  interface WaterJet extends Entity {}
+
+  /**
    * A stock Mafia 1 weapon the server accepts.
    */
   interface WeaponInfo {
@@ -1783,6 +3240,21 @@ declare global {
   }
 
   /**
+   * What happened to the mission's world props since it loaded or was last repaired.
+   */
+  interface PropDamageInfo {
+    /**
+     * Breakables knocked down: phone booths, hydrants, trash bins, barrels and the other crash-material scene models. Traffic signs from the city cache are not counted or synchronized.
+     */
+    broken: number;
+
+    /**
+     * Physical props (boxes, railings, mail boxes, cans) resting away from where the mission placed them.
+     */
+    moved: number;
+  }
+
+  /**
    * The shared Mafia 1 world: mission, collections, weather, scene frames, city music and effects everyone sees.
    */
   const World: {
@@ -1900,6 +3372,18 @@ declare global {
     resetFrameOpacity(name?: string): void;
 
     /**
+     * Counts the world props broken or moved in this mission, which every client and late joiner sees the same.
+     * @returns The broken and moved counts.
+     */
+    getPropDamage(): PropDamageInfo;
+
+    /**
+     * Puts every broken booth, hydrant, bin and other breakable back up, with its collision, and every box or other physical prop back where the mission placed it, for every client. The debris pieces and hydrant jets go. Traffic signs from the city cache (dopravni1B-8B), which a car or shot knocks down on that client only, stay down until the mission changes. Mission changes start with every prop whole.
+     * @returns How many props were broken or moved.
+     */
+    repairProps(): number;
+
+    /**
      * Explodes for every client. The server applies player damage and fires playerDamage and playerDeath; clients damage cars and objects.
      * @param position Explosion centre.
      * @param options Radius up to 30 (default 15) and damage up to 1000 (default 400). Damage 0 is a visual explosion.
@@ -1913,6 +3397,34 @@ declare global {
      */
     createFire(position: Vector3 | { x: number; y: number; z: number }, options?: { duration?: number; radius?: number; damage?: number }): void;
   };
+
+  /**
+   * Node.js timer handle returned by setTimeout and setInterval.
+   */
+  interface Timeout {
+    /**
+     * Keeps the event loop alive while this timer is pending.
+     * @returns This timer.
+     */
+    ref(): Timeout;
+
+    /**
+     * Lets the event loop exit while this timer is still pending.
+     * @returns This timer.
+     */
+    unref(): Timeout;
+
+    /**
+     * Whether this timer keeps the event loop alive.
+     */
+    hasRef(): boolean;
+
+    /**
+     * Restarts this timer's countdown from now, with its original delay.
+     * @returns This timer.
+     */
+    refresh(): Timeout;
+  }
 
   /**
    * Mutable two-dimensional vector exposed as the global Vector2.
@@ -2666,7 +4178,7 @@ declare global {
      * @param args Arguments delivered to every matching handler.
      * @returns Promise rejected with an AggregateError when one or more handlers fail.
      */
-    emit(eventName: string, args?: unknown[]): Promise<void>;
+    emit(eventName: string, args: unknown[]): Promise<void>;
 
     /**
      * Invokes matching handlers belonging only to one resource.
@@ -2675,7 +4187,7 @@ declare global {
      * @param args Arguments delivered to matching handlers owned by the destination.
      * @returns Promise rejected when one or more destination handlers fail.
      */
-    emitTo(resourceName: string, eventName: string, args?: unknown[]): Promise<void>;
+    emitTo(resourceName: string, eventName: string, args: unknown[]): Promise<void>;
 
     /**
      * Registers a handler in the calling resource's private local-event namespace.
@@ -2690,7 +4202,7 @@ declare global {
      * @param args Arguments delivered only to handlers owned by the calling resource.
      * @returns Promise rejected when one or more local handlers fail.
      */
-    emitLocal(eventName: string, args?: unknown[]): Promise<void>;
+    emitLocal(eventName: string, args: unknown[]): Promise<void>;
 
     /**
      * Counts persistent and one-shot shared handlers across resources.
@@ -2698,6 +4210,13 @@ declare global {
      * @returns Number of matching handlers.
      */
     listenerCount(eventName: string): number;
+
+    /**
+     * Broadcasts a named event to every connected client's shared Events handlers.
+     * @param eventName Client shared-event name.
+     * @param payload Optional string payload sent verbatim; other values are JSON-serialized.
+     */
+    emitAllClients(eventName: string, payload?: unknown): void;
 
     /**
      * Registers a persistent server handler for events originating from clients; this namespace is isolated from native events.
@@ -2720,13 +4239,6 @@ declare global {
      * @param handler Resource-owned callback invoked with the emitted arguments.
      */
     offClient(eventName: string, handler: EventHandler): void;
-
-    /**
-     * Broadcasts a named event to every connected client's shared Events handlers.
-     * @param eventName Client shared-event name.
-     * @param payload Optional string payload sent verbatim; other values are JSON-serialized.
-     */
-    emitAllClients(eventName: string, payload?: unknown): void;
   };
 
   /**
@@ -2799,31 +4311,31 @@ declare global {
      * Writes an informational log entry prefixed with the current resource name.
      * @param values Values formatted and joined with spaces.
      */
-    log(values?: unknown[]): void;
+    log(values: unknown[]): void;
 
     /**
      * Alias of console.log for informational output.
      * @param values Values formatted and joined with spaces.
      */
-    info(values?: unknown[]): void;
+    info(values: unknown[]): void;
 
     /**
      * Writes a warning log entry prefixed with the current resource name.
      * @param values Values formatted and joined with spaces.
      */
-    warn(values?: unknown[]): void;
+    warn(values: unknown[]): void;
 
     /**
      * Writes an error log entry prefixed with the current resource name.
      * @param values Values formatted and joined with spaces.
      */
-    error(values?: unknown[]): void;
+    error(values: unknown[]): void;
 
     /**
      * Writes a debug log entry prefixed with the current resource name.
      * @param values Values formatted and joined with spaces.
      */
-    debug(values?: unknown[]): void;
+    debug(values: unknown[]): void;
   };
 
   /**
@@ -2839,6 +4351,16 @@ declare global {
      * True in the authoritative server scripting runtime.
      */
     readonly isServer: boolean;
+
+    /**
+     * Local Framework release version.
+     */
+    readonly frameworkVersion: string;
+
+    /**
+     * Local mod version from InstanceOptions.modVersion; empty when unset.
+     */
+    readonly modVersion: string;
   };
 
   /**
@@ -2878,9 +4400,9 @@ declare global {
     getRange(): number;
 
     /**
-     * Overrides how far one player's voice carries, for whisper and shout modes.
+     * Overrides how far one player's voice carries, whichever voice tier they chose.
      * @param player Player whose voice carries the given distance.
-     * @param range Audibility radius in world units; values <= 0 return them to the server-wide range.
+     * @param range Audibility radius in world units; values <= 0 return them to the radius of their voice tier.
      */
     setPlayerRange(player: Entity, range: number): void;
 
@@ -2890,6 +4412,34 @@ declare global {
      * @returns Radius in world units.
      */
     getPlayerRange(player: Entity): number;
+
+    /**
+     * Sets how far a voice tier carries. Players switch tier themselves; whisper starts at 3, shout at 25, and normal carries the server-wide range. Set a tier to 0 to make it carry the server-wide range, which takes it away. Connected clients are told.
+     * @param tier Voice tier: 0 whisper, 1 normal, 2 shout.
+     * @param range Audibility radius in world units; values <= 0 make the tier carry the server-wide range.
+     */
+    setTierRange(tier: number, range: number): void;
+
+    /**
+     * Reads how far a voice tier carries, with the server-wide range already resolved.
+     * @param tier Voice tier: 0 whisper, 1 normal, 2 shout.
+     * @returns Radius in world units.
+     */
+    getTierRange(tier: number): number;
+
+    /**
+     * Puts a player on a voice tier, as if they had switched to it. Their own indicator follows, and the playerVoiceTierChange event is not raised.
+     * @param player Player to move.
+     * @param tier Voice tier: 0 whisper, 1 normal, 2 shout.
+     */
+    setPlayerTier(player: Entity, tier: number): void;
+
+    /**
+     * Reads the voice tier a player is on. A player switching tier raises the playerVoiceTierChange event with the player and the new tier.
+     * @param player Player to query.
+     * @returns 0 whisper, 1 normal, 2 shout.
+     */
+    getPlayerTier(player: Entity): number;
 
     /**
      * Server-wide mute: a muted player's voice reaches nobody.
@@ -2949,6 +4499,69 @@ declare global {
      */
     isPlayerTalking(player: Entity): boolean;
   };
+
+  /**
+   * A player asking to join, handed to `playerConnecting`. Every identifier is reported by the player's own client and is not verified by the server.
+   */
+  interface PendingConnection {
+    /**
+     * The name the player asked to join under.
+     */
+    readonly nickname: string;
+
+    /**
+     * Steam identifier the client reported, or an empty string when it had none.
+     */
+    readonly steamId: string;
+
+    /**
+     * Epic Games account identifier the client reported, or an empty string when it had none.
+     */
+    readonly epicId: string;
+
+    /**
+     * Discord identifier the client reported, or an empty string when it had none.
+     */
+    readonly discordId: string;
+
+    /**
+     * Discord username the client reported, or an empty string when it had none.
+     */
+    readonly discordName: string;
+
+    /**
+     * Framework hardware identifier the client reported, or an empty string when it had none.
+     */
+    readonly hardwareId: string;
+
+    /**
+     * The string the client was launched with, as the `ticket` of its launch link, or an empty string. The framework passes it through untouched; checking it -- against a one-time join ticket your own launcher or website issued, typically -- is the script's job.
+     */
+    readonly ticket: string;
+
+    /**
+     * The remote address the connection comes from, without its port.
+     */
+    readonly ip: string;
+
+    /**
+     * Turns the player away before they receive anything. Takes effect on the next server tick, whatever other handlers are still doing. Does nothing once the connection is decided or the player has left.
+     * @param reason Shown to the player as written, up to 512 bytes. Omitted, they read that the server refused the connection.
+     */
+    reject(reason?: string): void;
+
+    /**
+     * Shows the waiting player a line of status and restarts the admission timeout, so a queue that keeps updating its players is never timed out. Does nothing once the connection is decided or the player has left.
+     * @param message One line for the player's connecting screen, up to 256 bytes: 'Checking the whitelist', 'You are 4th in the queue'.
+     */
+    update(message: string): void;
+
+    /**
+     * Checks whether this connection is still waiting on a decision.
+     * @returns False once it was let in or turned away, or the player gave up and left; a queue drops such entries.
+     */
+    isPending(): boolean;
+  }
 
   /**
    * Base handle for a live replicated network entity.
@@ -3075,9 +4688,19 @@ declare global {
     readonly steamId: string;
 
     /**
+     * Epic Games account identifier the client reported, not verified by the server, or an empty string when unavailable.
+     */
+    readonly epicId: string;
+
+    /**
      * Authenticated Discord identifier, or an empty string when unavailable.
      */
     readonly discordId: string;
+
+    /**
+     * Discord username the client reported, not verified by the server, or an empty string when unavailable.
+     */
+    readonly discordName: string;
 
     /**
      * Framework hardware identifier, or an empty string when unavailable.
@@ -3157,7 +4780,7 @@ declare global {
 
     /**
      * Overrides the text drawn on this player's nametag.
-     * @param text Text to show instead of the player's name; empty or omitted restores the name.
+     * @param text Text to show instead of the player's name, cut to 64 bytes; empty or omitted restores the name.
      */
     setNametagText(text?: string): void;
 

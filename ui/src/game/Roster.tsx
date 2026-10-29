@@ -49,6 +49,14 @@ const styles = stylex.create({
         height: '100%',
         backgroundImage: 'linear-gradient(90deg, #7a1515, #c23a2a)',
     },
+    ping: {
+        width: '3.5rem',
+        fontFamily: fonts.body,
+        fontSize: '0.78rem',
+        color: colors.muted,
+        textAlign: 'right',
+        fontVariantNumeric: 'tabular-nums',
+    },
     state: {
         width: '5rem',
         fontFamily: fonts.body,
@@ -79,6 +87,7 @@ export function Roster() {
                     <th {...stylex.props(styles.head)}>#</th>
                     <th {...stylex.props(styles.head)}>Name</th>
                     <th {...stylex.props(styles.head)}>Health</th>
+                    <th {...stylex.props(styles.head, styles.ping)}>Ping</th>
                     <th {...stylex.props(styles.head)} />
                 </tr>
             </thead>
@@ -92,6 +101,7 @@ export function Roster() {
                                 <div {...stylex.props(styles.fill)} style={{ width: `${Math.max(0, Math.min(100, player.health))}%` }} />
                             </div>
                         </td>
+                        <td {...stylex.props(styles.cell, styles.ping)}>{player.ping > 0 ? `${player.ping} ms` : ''}</td>
                         <td {...stylex.props(styles.cell, styles.state, !player.alive && player.spawned && styles.dead)}>{!player.spawned ? 'arriving' : player.alive ? '' : 'wasted'}</td>
                     </tr>
                 ))}

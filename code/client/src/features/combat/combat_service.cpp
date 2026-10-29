@@ -1,6 +1,9 @@
 #include "combat_service.h"
 
+#include "features/simulation/simulation_config.h"
+
 #include "combat_hooks.h"
+#include "combat_life.h"
 #include "shared/features/combat/detonation.h"
 #include "features/world/world_service.h"
 #include "shared/features/player/player_entity.h"
@@ -38,6 +41,9 @@ namespace Mafia1Online::Features::Combat {
         network->RegisterRPC<Shared::Combat::State>([this](const Shared::Combat::State &state, MafiaNet::Packet *) {
             OnState(state);
         });
+        network->RegisterRPC<Shared::Combat::AimUpdate>([this](const Shared::Combat::AimUpdate &update, MafiaNet::Packet *) {
+            OnAimUpdate(update);
+        });
         network->RegisterRPC<Shared::Combat::Event>([this](const Shared::Combat::Event &event, MafiaNet::Packet *) {
             OnEvent(event);
         });
@@ -54,6 +60,7 @@ namespace Mafia1Online::Features::Combat {
         for (auto it = _states.begin(); it != _states.end();) {
             if (it->second.missionGeneration != world.LoadedMissionGeneration()) {
                 _applied.erase(it->first);
+                _aimSequences.erase(it->first);
                 it = _states.erase(it);
             }
             else {
@@ -79,6 +86,7 @@ namespace Mafia1Online::Features::Combat {
 
     void CombatService::Reset() {
         _states.clear();
+        _aimSequences.clear();
         _applied.clear();
         _events.clear();
         _seenEvents.clear();
@@ -89,6 +97,8 @@ namespace Mafia1Online::Features::Combat {
         _world                 = nullptr;
         _sequence              = 0;
         _lastLocalFireSequence = 0;
+        _lastLocalMeleeSequence = 0;
+        _meleeReports.Reset();
         _localFires.clear();
         _localGrenades.clear();
         _remoteGrenades.clear();
@@ -107,8 +117,8 @@ namespace Mafia1Online::Features::Combat {
             return;
         }
         for (const auto &[networkId, state] : _states) {
-            auto *player = replication->GetEntity<Shared::Entities::PlayerEntity>(networkId);
-            if (!player || !player->spawned || !state.spawned || player->missionGeneration != state.missionGeneration || player->spawnGeneration != state.spawnGeneration) {
+            const auto life = FindCombatLife(*replication, networkId);
+            if (!life || !life->spawned || !state.spawned || life->missionGeneration != state.missionGeneration || life->spawnGeneration != state.spawnGeneration) {
                 continue;
             }
             const auto handle = world.NativeObjects().FindByNetwork(networkId);
@@ -294,10 +304,38 @@ namespace Mafia1Online::Features::Combat {
         const bool firstPose        = !_localAim.sent;
         const bool changedDirection = _localAim.sent && ((aiming && delta > 0.0001f) || poseDelta > (aiming ? 0.0025f : 0.01f))
             && now - _localAim.lastSent >= std::chrono::milliseconds(aiming ? 50 : 75);
-        if (!transition && !firstPose && !changedDirection) {
+        // The aim came to rest after unreliable updates: the one it rests on
+        // goes once more, reliably (unordered; the sequence drops it behind
+        // a newer one), so a lost last update cannot leave it stale.
+        constexpr auto kAimSettleAfter = std::chrono::milliseconds(150);
+        const bool settled             = !transition && !firstPose && !changedDirection && _localAim.settlePending && now - _localAim.lastSent >= kAimSettleAfter;
+        if (!transition && !firstPose && !changedDirection && !settled) {
+            return;
+        }
+        if (!transition && !firstPose) {
+            // The aim moving, not starting or ending: unreliable, and the
+            // server relays it only to the players that stream this body.
+            Shared::Combat::AimUpdate update;
+            update.networkId        = state->networkId;
+            update.spawnGeneration  = state->spawnGeneration;
+            update.sequence         = ++_aimUpdateSequence;
+            update.aiming           = aiming;
+            update.direction        = {dx, dy, dz};
+            update.poseTargetOffset = {poseX, poseY, poseZ};
+            Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(update, MafiaNet::Priority::High,
+                                                                   settled ? MafiaNet::Reliability::Reliable : MafiaNet::Reliability::Unreliable);
+            _localAim.settlePending     = !settled;
+            _localAim.directionX        = dx;
+            _localAim.directionY        = dy;
+            _localAim.directionZ        = dz;
+            _localAim.poseTargetOffsetX = poseX;
+            _localAim.poseTargetOffsetY = poseY;
+            _localAim.poseTargetOffsetZ = poseZ;
+            _localAim.lastSent          = now;
             return;
         }
         if (SubmitAim(state->networkId, state->selectedWeapon, aiming, dx, dy, dz, poseX, poseY, poseZ)) {
+            _localAim.settlePending = false;
             _localAim.sent       = true;
             _localAim.aiming     = aiming;
             _localAim.directionX = dx;
@@ -508,12 +546,12 @@ namespace Mafia1Online::Features::Combat {
                 it = _events.erase(it);
                 continue;
             }
-            auto *player = replication->GetEntity<Shared::Entities::PlayerEntity>(event.networkId);
-            if (!player || player->missionGeneration < event.missionGeneration || (player->missionGeneration == event.missionGeneration && player->spawnGeneration < event.spawnGeneration)) {
+            const auto life = FindCombatLife(*replication, event.networkId);
+            if (!life || life->missionGeneration < event.missionGeneration || (life->missionGeneration == event.missionGeneration && life->spawnGeneration < event.spawnGeneration)) {
                 ++it;
                 continue;
             }
-            if (player->missionGeneration != event.missionGeneration || player->spawnGeneration != event.spawnGeneration) {
+            if (life->missionGeneration != event.missionGeneration || life->spawnGeneration != event.spawnGeneration) {
                 it = _events.erase(it);
                 continue;
             }
@@ -633,6 +671,10 @@ namespace Mafia1Online::Features::Combat {
                 human->SetShootTarget({position.x + 100.0f * event.directionX, position.y + 100.0f * event.directionY, position.z + 100.0f * event.directionZ});
             }
             const auto shotResult = fire ? ReplayNativeShot(*human, event) : NativeShotReplayResult::Deferred;
+            if (fire && Simulation::IsHost()) {
+                Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->debug("Simulation host replayed shot of {}: {}", event.networkId,
+                    shotResult == NativeShotReplayResult::Played ? "played" : shotResult == NativeShotReplayResult::Rejected ? "rejected" : "deferred");
+            }
             const bool replayed = fire ? shotResult != NativeShotReplayResult::Deferred : human->ReplayReload();
             const auto &selectedAmmo = state->ammo[state->selectedWeapon];
             human->ApplySelectedWeapon(state->selectedWeapon, selectedAmmo.loaded, selectedAmmo.reserve);
@@ -1052,7 +1094,43 @@ namespace Mafia1Online::Features::Combat {
                 return;
             }
         }
-        _states[state.networkId] = state;
+        Shared::Combat::State next = state;
+        auto applied               = _aimSequences.find(state.networkId);
+        if (it != _states.end() && applied != _aimSequences.end() && it->second.spawnGeneration == state.spawnGeneration && it->second.aiming == state.aiming &&
+            Shared::Combat::NewerSequence(applied->second, state.aimSequence)) {
+            // An aim relay newer than this state already moved the aim.
+            next.aimDirectionX     = it->second.aimDirectionX;
+            next.aimDirectionY     = it->second.aimDirectionY;
+            next.aimDirectionZ     = it->second.aimDirectionZ;
+            next.poseTargetOffsetX = it->second.poseTargetOffsetX;
+            next.poseTargetOffsetY = it->second.poseTargetOffsetY;
+            next.poseTargetOffsetZ = it->second.poseTargetOffsetZ;
+        }
+        else {
+            _aimSequences[state.networkId] = state.aimSequence;
+        }
+        _states[state.networkId] = next;
+    }
+
+    void CombatService::OnAimUpdate(const Shared::Combat::AimUpdate &update) {
+        auto it = _states.find(update.networkId);
+        if (it == _states.end() || it->second.spawnGeneration != update.spawnGeneration || it->second.aiming != update.aiming) {
+            return;
+        }
+        auto &sequence = _aimSequences[update.networkId];
+        if (!Shared::Combat::NewerSequence(update.sequence, sequence)) {
+            return;
+        }
+        sequence                     = update.sequence;
+        auto &state                  = it->second;
+        state.poseTargetOffsetX      = update.poseTargetOffset.x;
+        state.poseTargetOffsetY      = update.poseTargetOffset.y;
+        state.poseTargetOffsetZ      = update.poseTargetOffset.z;
+        if (update.aiming) {
+            state.aimDirectionX = update.direction.x;
+            state.aimDirectionY = update.direction.y;
+            state.aimDirectionZ = update.direction.z;
+        }
     }
 
     void CombatService::OnEvent(const Shared::Combat::Event &event) {

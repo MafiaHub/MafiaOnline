@@ -13,7 +13,7 @@
 #include <cmath>
 
 namespace Mafia1Online::Scripting {
-    std::unique_ptr<v8pp::class_<Door>> Door::_class;
+    std::unordered_map<v8::Isolate *, std::unique_ptr<v8pp::class_<Door>>> Door::_classes;
 
     namespace {
         void JS_Create(const v8::FunctionCallbackInfo<v8::Value> &info) {
@@ -125,7 +125,12 @@ namespace Mafia1Online::Scripting {
     bool Door::Destroy() { return GetServer().WorldScript().RemoveDoor(_id); }
     std::string Door::ToString() const { return "Door(" + std::to_string(_id) + ", " + GetName() + ")"; }
 
+    void Door::UnregisterIsolate(v8::Isolate *isolate) {
+        _classes.erase(isolate);
+    }
+
     v8pp::class_<Door> &Door::GetClass(v8::Isolate *isolate) {
+        auto &_class = _classes[isolate];
         if (_class) { return *_class; }
         using v8pp::metadata::docs;
         using v8pp::metadata::param;

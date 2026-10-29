@@ -8,7 +8,7 @@ namespace Mafia1Online::Shared::Combat {
     // Server-accepted impact. The matching/recent State is the durable truth;
     // this event only drives a one-shot native reaction on live recipients.
     struct DamageEvent {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CombatDamageEvent");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CombatDamageEvent");
 
         uint64_t targetNetworkId       = 0;
         uint64_t missionGeneration     = 0;
@@ -21,6 +21,8 @@ namespace Mafia1Online::Shared::Combat {
         float directionX               = 0.0f;
         float directionY               = 0.0f;
         float directionZ               = 0.0f;
+        // The car of a car impact (hit type 4), else 0.
+        uint64_t sourceCarId           = 0;
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {
             stream->Serialize(write, targetNetworkId);
@@ -33,6 +35,7 @@ namespace Mafia1Online::Shared::Combat {
             stream->Serialize(write, directionX);
             stream->Serialize(write, directionY);
             stream->Serialize(write, directionZ);
+            stream->Serialize(write, sourceCarId);
         }
     };
 } // namespace Mafia1Online::Shared::Combat

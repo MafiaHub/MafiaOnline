@@ -3,6 +3,7 @@
 #include "player_scripting.h"
 #include "door_scripting.h"
 #include "script_runtime.h"
+#include "map_scripting.h"
 #include "visual_scripting.h"
 
 #include "features/world/world_service.h"
@@ -216,12 +217,14 @@ namespace Mafia1Online::Features::Script {
             EmitMission("missionUnload", _readyMission, _readyGeneration);
         }
         Scripting::ResetLocalVisuals();
+        Scripting::ClientCityMap::Reset();
         _readyGeneration = 0;
         _readyMission.clear();
     }
 
     void ScriptService::Reset() {
         Scripting::ResetLocalVisuals();
+        Scripting::ClientCityMap::Reset();
         _players.clear();
         _pickups.clear();
         _doors.clear();

@@ -1,7 +1,9 @@
 #pragma once
 
+#include "shared/features/combat/aim_update.h"
 #include "shared/features/combat/combat_protocol.h"
 #include "shared/features/combat/detonation.h"
+#include "shared/features/combat/melee_rules.h"
 
 #include <array>
 #include <chrono>
@@ -52,6 +54,11 @@ namespace Mafia1Online::Features::Combat {
         // The local melee attack a native swing hit belongs to, while it can
         // still land (the server accepts one hit within 1.8 s).
         [[nodiscard]] std::optional<uint32_t> OpenLocalMelee() const;
+        // One walker hit report per local swing; Reset restarts the swing
+        // sequence, and the gate with it.
+        bool ClaimLocalMeleeReport(uint32_t swingSequence) {
+            return _meleeReports.Admit(swingSequence);
+        }
         struct LocalPelletMatch { uint32_t shotSequence; uint8_t pelletIndex; };
         std::optional<LocalPelletMatch> MatchLocalPellet(float directionX, float directionY, float directionZ, float hitX, float hitY, float hitZ);
         [[nodiscard]] uint32_t LastLocalFireSequence() const {
@@ -66,6 +73,7 @@ namespace Mafia1Online::Features::Combat {
 
       private:
         void OnState(const Shared::Combat::State &state);
+        void OnAimUpdate(const Shared::Combat::AimUpdate &update);
         void OnEvent(const Shared::Combat::Event &event);
         void OnDetonation(const Shared::Combat::Detonation &detonation);
         void ApplyNativeStates(World::WorldService &world);
@@ -111,6 +119,10 @@ namespace Mafia1Online::Features::Combat {
         };
 
         std::unordered_map<uint64_t, Shared::Combat::State> _states;
+        // The newest server aim relay applied to each body (AimUpdate).
+        std::unordered_map<uint64_t, uint16_t> _aimSequences;
+        // The local controller's own count for AimUpdate.
+        uint16_t _aimUpdateSequence = 0;
         std::unordered_map<uint64_t, AppliedNative> _applied;
         std::deque<PendingEvent> _events;
         std::unordered_set<EventKey, EventKeyHash> _seenEvents;
@@ -129,6 +141,9 @@ namespace Mafia1Online::Features::Combat {
             float poseTargetOffsetY     = 0.0f;
             float poseTargetOffsetZ     = 0.0f;
             std::chrono::steady_clock::time_point lastSent {};
+            // An unreliable AimUpdate went out; once the aim rests for
+            // kAimSettleAfter, it goes once more, reliably.
+            bool settlePending = false;
         } _localAim;
         struct LocalCrouch {
             uint64_t networkId         = 0;
@@ -154,6 +169,7 @@ namespace Mafia1Online::Features::Combat {
         uint32_t _sequence              = 0;
         uint32_t _lastLocalFireSequence = 0;
         uint32_t _lastLocalMeleeSequence = 0;
+        Shared::Combat::MeleeReportGate _meleeReports;
         struct LocalThrow {
             uint64_t networkId = 0;
             uint64_t missionGeneration = 0;

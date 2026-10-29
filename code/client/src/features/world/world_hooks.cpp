@@ -4,6 +4,7 @@
 
 #include "core/application.h"
 #include "features/quick_join/quick_join.h"
+#include "features/simulation/simulation_config.h"
 #include "shared/features/world/mission_actors.h"
 
 #include <MinHook.h>
@@ -15,7 +16,6 @@
 #include <mafia1/sdk/script/native_program.h>
 #include <mafia1/sdk/rail/native_rail_generator.h>
 #include <mafia1/sdk/rail/native_railway.h>
-#include <mafia1/sdk/world/native_bridge.h>
 #include <logging/logger.h>
 
 #include <array>
@@ -30,6 +30,12 @@ namespace Mafia1Online::Features::World {
         bool gNativeMissionLoading                     = false;
         uint32_t gSuppressedActors                     = 0;
         uint32_t gLoadedDoors                          = 0;
+        uint32_t gLoadedGenerators                     = 0;
+        uint32_t gLoadedTraffic                        = 0;
+        uint32_t gLoadedRailways                       = 0;
+        uint32_t gLoadedBridges                        = 0;
+        uint32_t gLoadedPhysicalProps                  = 0;
+        uint32_t gLoadedPumpers                        = 0;
         using MenuExecute                              = uint32_t(__fastcall *)(void *, bool, bool);
         MenuExecute gMenuExecuteOriginal               = nullptr;
         using MissionProgram                           = void(__thiscall *)(void *);
@@ -38,7 +44,6 @@ namespace Mafia1Online::Features::World {
         using ProgramCallProcess                       = bool(__thiscall *)(SDK::Script::NativeProgram *, unsigned int);
         using RailGeneratorAI                          = void(__thiscall *)(SDK::Rail::NativeRailGenerator *, unsigned int);
         using RailwayAI                                = void(__thiscall *)(SDK::Rail::NativeRailway *, unsigned int);
-        using BridgeGameInit                           = void(__thiscall *)(SDK::World::NativeBridge *);
         MissionProgram gProgramInitOriginal            = nullptr;
         MissionProgram gProgramDoneOriginal            = nullptr;
         MissionProgramRun gProgramRunOriginal          = nullptr;
@@ -46,7 +51,6 @@ namespace Mafia1Online::Features::World {
         ProgramCallProcess gProgramCallProcessOriginal = nullptr;
         RailGeneratorAI gRailGeneratorAIOriginal       = nullptr;
         RailwayAI gRailwayAIOriginal                   = nullptr;
-        BridgeGameInit gBridgeGameInitOriginal         = nullptr;
         using WindowProcedure                          = LRESULT(__stdcall *)(HWND, UINT, WPARAM, LPARAM);
         WindowProcedure gWindowProcedureOriginal       = nullptr;
         bool gNativeMissionActive                      = false;
@@ -70,11 +74,11 @@ namespace Mafia1Online::Features::World {
             // original factory once scene loading has finished. Scene doors
             // keep native interaction and the existing door synchronization.
             if (gNativeMissionLoading) {
-                if (!Shared::World::LoadMissionActor(type)) {
+                if (!Shared::World::LoadMissionActor(type, Features::Simulation::IsHost())) {
                     ++gSuppressedActors;
                     return nullptr;
                 }
-                ++gLoadedDoors;
+                ++(type == 6 ? gLoadedDoors : type == 12 ? gLoadedTraffic : type == 8 ? gLoadedRailways : type == 20 ? gLoadedBridges : type == 25 ? gLoadedPumpers : type == 35 ? gLoadedPhysicalProps : gLoadedGenerators);
             }
             return gCreateActorOriginal(mission, type);
         }
@@ -166,13 +170,19 @@ namespace Mafia1Online::Features::World {
         void __fastcall RailwayAIHook(SDK::Rail::NativeRailway *railway, void *, unsigned int frameTimeMs) {
             if (!gNativeMissionActive) {
                 gRailwayAIOriginal(railway, frameTimeMs);
+                return;
             }
-        }
-
-        void __fastcall BridgeGameInitHook(SDK::World::NativeBridge *bridge, void *) {
-            gBridgeGameInitOriginal(bridge);
-            if (gNativeMissionActive) {
-                bridge->ShutDown(true);
+            // The simulation host runs the server mission's railways; players
+            // place theirs from its reports (RailwayService), as network
+            // controlled actors that never reach AI. The police freeze
+            // SetTrafficVisible(false) set for the host stops railway AI at
+            // its first instruction, so it is lifted for this call only.
+            if (Features::Simulation::IsHost()) {
+                auto &freeze = *reinterpret_cast<bool *>(SDK::Rail::NativeRailway::kPoliceFreezeFlag);
+                const bool frozen = freeze;
+                freeze = false;
+                gRailwayAIOriginal(railway, frameTimeMs);
+                freeze = frozen;
             }
         }
 
@@ -194,7 +204,7 @@ namespace Mafia1Online::Features::World {
             gGameTickOriginal(game, frameTimeMs);
         }
 
-        constexpr std::array<uintptr_t, 10> kHookAddresses {
+        constexpr std::array<uintptr_t, 9> kHookAddresses {
             SDK::Core::Mission::kClose,
             SDK::Core::Mission::kCreateActor,
             SDK::Core::Mission::kGlobalProgramGameInit,
@@ -204,7 +214,6 @@ namespace Mafia1Online::Features::World {
             SDK::Script::NativeProgram::kCallProcess,
             SDK::Rail::NativeRailGenerator::kAI,
             SDK::Rail::NativeRailway::kAI,
-            SDK::World::kBridgeGameInit,
         };
     } // namespace
 
@@ -230,8 +239,7 @@ namespace Mafia1Online::Features::World {
             || MH_CreateHook(reinterpret_cast<void *>(SDK::Core::Game::kTick), reinterpret_cast<void *>(&GameTickHook), reinterpret_cast<void **>(&gGameTickOriginal)) != MH_OK
             || MH_CreateHook(reinterpret_cast<void *>(SDK::Script::NativeProgram::kCallProcess), reinterpret_cast<void *>(&ProgramCallProcessHook), reinterpret_cast<void **>(&gProgramCallProcessOriginal)) != MH_OK
             || MH_CreateHook(reinterpret_cast<void *>(SDK::Rail::NativeRailGenerator::kAI), reinterpret_cast<void *>(&RailGeneratorAIHook), reinterpret_cast<void **>(&gRailGeneratorAIOriginal)) != MH_OK
-            || MH_CreateHook(reinterpret_cast<void *>(SDK::Rail::NativeRailway::kAI), reinterpret_cast<void *>(&RailwayAIHook), reinterpret_cast<void **>(&gRailwayAIOriginal)) != MH_OK
-            || MH_CreateHook(reinterpret_cast<void *>(SDK::World::kBridgeGameInit), reinterpret_cast<void *>(&BridgeGameInitHook), reinterpret_cast<void **>(&gBridgeGameInitOriginal)) != MH_OK) {
+            || MH_CreateHook(reinterpret_cast<void *>(SDK::Rail::NativeRailway::kAI), reinterpret_cast<void *>(&RailwayAIHook), reinterpret_cast<void **>(&gRailwayAIOriginal)) != MH_OK) {
             UninstallWorldHooks();
             return false;
         }
@@ -273,9 +281,16 @@ namespace Mafia1Online::Features::World {
         if (loading) {
             gSuppressedActors = 0;
             gLoadedDoors      = 0;
+            gLoadedGenerators = 0;
+            gLoadedTraffic    = 0;
+            gLoadedRailways   = 0;
+            gLoadedBridges    = 0;
+            gLoadedPhysicalProps = 0;
+            gLoadedPumpers    = 0;
         }
         else {
-            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Suppressed {} mission-file actor spawns; kept {} doors", gSuppressedActors, gLoadedDoors);
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Suppressed {} mission-file actor spawns; kept {} doors, {} pedestrian generators, {} car traffic, {} railways, {} bridges, {} gas station attendants and {} physical props",
+                                                                        gSuppressedActors, gLoadedDoors, gLoadedGenerators, gLoadedTraffic, gLoadedRailways, gLoadedBridges, gLoadedPumpers, gLoadedPhysicalProps);
         }
     }
 

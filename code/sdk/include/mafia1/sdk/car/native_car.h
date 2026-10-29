@@ -786,6 +786,14 @@ namespace Mafia1Online::SDK::Car {
             using Call = void(__thiscall *)(NativeCar *, float, bool);
             reinterpret_cast<Call>(kReset)(this, speed, full);
         }
+        // C_car::Update (0x4217b2-0x4217cb) sets an empty car INACTIVE and
+        // zeroes its speed on its first update, wherever it is: a car placed
+        // above the ground then hangs there until a hit wakes it. Clearing
+        // the flag lets it land; retail's own sleep (C_Vehicle::Tick, on the
+        // ground and still) parks it after.
+        void SkipFirstUpdateFreeze() {
+            _firstUpdate = false;
+        }
         bool DropOut(Scene::NativeFrame *source, void *parameters, NativeDropOutType type, int partIndex) {
             using Call = bool(__fastcall *)(NativeCar *, Scene::NativeFrame *, void *, int, int);
             return reinterpret_cast<Call>(kDropOut)(this, source, parameters, static_cast<int>(type), partIndex);
@@ -803,6 +811,10 @@ namespace Mafia1Online::SDK::Car {
         std::byte _unused20F1[0x2154 - 0x20f1];
         int32_t _fuelTankHealth;
         int32_t _fuelTankHealthMaximum;
+        std::byte _unused215C[0x2218 - 0x215c];
+        // m_bFirstUpdate: C_car::GameInit (C_car.cpp:1547) and Reset(0.0f)
+        // (0x422bf7) arm it.
+        bool _firstUpdate;
     };
     static_assert(offsetof(NativeCar, _vehicle) == 0x70);
     static_assert(offsetof(NativeCar, _vehicle._engineRunning) == 0x6A8);
@@ -813,4 +825,5 @@ namespace Mafia1Online::SDK::Car {
     static_assert(offsetof(NativeCar, _burning) == 0x20f0);
     static_assert(offsetof(NativeCar, _fuelTankHealth) == 0x2154);
     static_assert(offsetof(NativeCar, _fuelTankHealthMaximum) == 0x2158);
+    static_assert(offsetof(NativeCar, _firstUpdate) == 0x2218);
 } // namespace Mafia1Online::SDK::Car

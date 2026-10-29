@@ -1,0 +1,163 @@
+#pragma once
+
+#include "shared/net/quantize.h"
+
+#include <networking/replication/network_entity.h>
+
+#include <algorithm>
+#include <chrono>
+#include <cstdint>
+#include <string>
+
+namespace Mafia1Online::Shared::Entities {
+    // What made a simulation host NPC; every kind is a retail C_entity.
+    enum class NpcKind : uint8_t {
+        // A gangster pedestrian someone hit (CreateMafianos).
+        Gangster = 1,
+        // A police pedestrian the police manager recruited against a
+        // player's crime (FizlosNamakatDoAkce).
+        Police = 2,
+        // A traffic driver turned into a C_entity: thrown out of its car by a
+        // player (Do_ThrowCocotFromCar) or a mafia car's crew (Krles).
+        Driver = 3,
+        // A C_entity a server script spawned (Npc.spawn) and gives tasks.
+        Scripted = 4,
+    };
+
+    inline bool KnownNpcKind(NpcKind kind) {
+        return kind == NpcKind::Gangster || kind == NpcKind::Police || kind == NpcKind::Driver || kind == NpcKind::Scripted;
+    }
+
+    inline const char *NpcKindName(NpcKind kind) {
+        switch (kind) {
+        case NpcKind::Gangster: return "gangster";
+        case NpcKind::Police: return "police";
+        case NpcKind::Driver: return "driver";
+        case NpcKind::Scripted: return "scripted";
+        }
+        return "unknown";
+    }
+
+    // An armed human the simulation host runs with the retail AI. The server
+    // owns it and streams it to nearby players. Its inventory, aim, health
+    // and death travel as a Combat::State under this network id, and its
+    // shots and reloads as Combat::Events, the same as a player's.
+    class NpcEntity final: public Framework::Networking::Replication::NetworkEntity {
+      public:
+        static constexpr const char *kTypeName = "Mafia1Online::Npc";
+        static constexpr size_t kMaxModelLength = 63;
+        static constexpr size_t kMaxAnimationLength = 59;
+        // An NPC has one life; its combat records use this spawn generation.
+        static constexpr uint64_t kSpawnGeneration = 1;
+
+        std::string model;
+        uint64_t missionGeneration = 0;
+        NpcKind kind = NpcKind::Gangster;
+        // The walker this NPC replaced, or 0. A player who sees that walker
+        // swaps it for this NPC where it stands on that player's screen.
+        uint64_t sourcePedestrianId = 0;
+        // The car a stolen traffic car's driver was thrown out of, or 0.
+        uint64_t thrownFromCarId = 0;
+        // Server only: when that throw started on the host.
+        std::chrono::steady_clock::time_point thrownAt {};
+        // How long before this copy was constructed the throw started, in
+        // ms (construction is written per destination); kThrowAgeUnknown
+        // for none. A player constructing it during the throw replays it.
+        static constexpr uint16_t kThrowAgeUnknown = 0xffff;
+        uint16_t throwAgeMs = kThrowAgeUnknown;
+        // Death is final: the corpse stays until the host retires it.
+        bool alive = true;
+        // The host's native locomotion state (C_human m_iAnimState), which
+        // rides with the pose like a player's.
+        int16_t locomotion = 1;
+        // The clip a script plays on it (npc.playAnimation), empty for none.
+        // Each play or stop counts the revision up, so a replayed one-shot
+        // clip starts again on every player's copy.
+        std::string animation;
+        bool animationLoop = false;
+        uint16_t animationRevision = 0;
+        // Retail's voice for it (C_human m_uVoice, +0x680): which of the 40
+        // sounds of each voices.def line it says. Chosen once at spawn, so
+        // one NPC always speaks with the same voice.
+        static constexpr uint8_t kVoiceCount   = 40;
+        static constexpr uint8_t kDefaultVoice = 12;
+        uint8_t voice = kDefaultVoice;
+        // npc.say: the line (a C_human::NewScream id, voices.def group + 2)
+        // and a count each say bumps; every copy that streams the NPC says
+        // it on a new count, and a copy constructed later does not.
+        static constexpr uint16_t kMinSpeechLine = 2;
+        static constexpr uint16_t kMaxSpeechLine = 1023;
+        uint16_t speechLine = 0;
+        uint16_t speechRevision = 0;
+
+        // The host's sample clock for this pose (Shared::Net).
+        uint16_t sampleClock = 0;
+        // Server only: the simulation host whose snapshots move it.
+        MafiaNet::PeerGuid poseSource = MafiaNet::UNASSIGNED_PEER_GUID;
+
+        MafiaNet::PeerGuid GetTransformSource() const override {
+            return poseSource;
+        }
+
+        // 14 bytes (43 as raw floats): a walker's pose plus the locomotion.
+        void SerializeTransform(Framework::Networking::Replication::FieldSerializer &fields) override {
+            auto *stream = fields.PlainStream();
+            if (!stream) {
+                NetworkEntity::SerializeTransform(fields);
+                fields.Field(sampleClock);
+                fields.Field(locomotion);
+                return;
+            }
+            const bool write = fields.Writing();
+            if (!Net::SerializeWorldPosition(stream, write, position) || !Net::SerializeHeading(stream, write, rotation, 10) ||
+                !Net::SerializeGroundSpeed(stream, write, rotation, velocity) || !stream->Serialize(write, sampleClock) || !stream->Serialize(write, locomotion)) {
+                fields.Fail();
+            }
+        }
+
+        void OnSerializeConstruction(Framework::Networking::Replication::FieldSerializer &fields) override {
+            auto kindValue = static_cast<uint8_t>(kind);
+            fields.Field(model);
+            fields.Field(missionGeneration);
+            fields.Field(kindValue);
+            fields.Field(sourcePedestrianId);
+            if (fields.Writing()) {
+                const auto age = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - thrownAt).count();
+                throwAgeMs = thrownFromCarId ? static_cast<uint16_t>(std::clamp<long long>(age, 0, kThrowAgeUnknown)) : kThrowAgeUnknown;
+            }
+            fields.Field(thrownFromCarId);
+            fields.Field(throwAgeMs);
+            fields.Field(alive);
+            SerializeAnimation(fields);
+            fields.Field(voice);
+            fields.Field(speechLine);
+            fields.Field(speechRevision);
+            if (!fields.Writing()) {
+                kind = static_cast<NpcKind>(kindValue);
+                if (voice >= kVoiceCount) {
+                    voice = kDefaultVoice;
+                }
+                if (model.size() > kMaxModelLength) {
+                    model.clear();
+                }
+            }
+        }
+
+        void SerializeFields(Framework::Networking::Replication::FieldSerializer &fields) override {
+            fields.Field(alive);
+            SerializeAnimation(fields);
+            fields.Field(speechLine);
+            fields.Field(speechRevision);
+        }
+
+      private:
+        void SerializeAnimation(Framework::Networking::Replication::FieldSerializer &fields) {
+            fields.Field(animation);
+            fields.Field(animationLoop);
+            fields.Field(animationRevision);
+            if (!fields.Writing() && animation.size() > kMaxAnimationLength) {
+                animation.clear();
+            }
+        }
+    };
+} // namespace Mafia1Online::Shared::Entities

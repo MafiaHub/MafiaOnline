@@ -14,6 +14,9 @@ namespace Mafia1Online::SDK::Core::Game {
     inline constexpr uintptr_t kRemoveTemporaryActor = 0x5a79a0;
     inline constexpr uintptr_t kNewShoot             = 0x5a84a0;
     inline constexpr uintptr_t kRandomFloat          = 0x408470;
+    // bool __thiscall C_game::ProcessCheatCode(char), retn 4: the game loops
+    // feed it every typed key; false means no code is in progress.
+    inline constexpr uintptr_t kProcessCheatCode     = 0x5a8030;
     inline constexpr uint32_t kWideCityCacheFlag     = 0x200;
 
     struct NativeShootRecord {
@@ -87,6 +90,12 @@ namespace Mafia1Online::SDK::Core::Game {
         void RecomputeLightCache() {
             reinterpret_cast<void(__thiscall *)(NativeGame *)>(0x5b5d40)(this);
         }
+        // C_game::UpdatePlayerControls 0x5a7ff0: returns unless initialized,
+        // then hands each C_player's driven car the profile's steering
+        // linearity, as the retail options menu does on close.
+        void UpdatePlayerControls() {
+            reinterpret_cast<void(__thiscall *)(NativeGame *)>(0x5a7ff0)(this);
+        }
         [[nodiscard]] bool HasPlayerFocus(Player::NativeActor *actor) const {
             return _player == actor && _human == actor && _camera._player == actor;
         }
@@ -154,6 +163,13 @@ namespace Mafia1Online::SDK::Core::Game {
         void SetPlayerForInitialization(Player::NativeActor *actor) {
             _player = actor;
         }
+        // Only C_game::m_pPlayer, for a retail call that compares an actor
+        // with it; the camera and human pointers stay. Returns the previous.
+        Player::NativeActor *ExchangePlayer(Player::NativeActor *actor) {
+            auto *previous = _player;
+            _player = actor;
+            return previous;
+        }
         void FocusPlayer(Player::NativeActor *actor) {
             // C_game::SetHuman performs the retail human/camera handoff.
             using Call = void(__thiscall *)(NativeGame *, Player::NativeActor *);
@@ -186,7 +202,11 @@ namespace Mafia1Online::SDK::Core::Game {
         int32_t _semaphoreStateZ;
         std::byte _unused1a4[0x1d4 - 0x1a4];
         NativeShootQueue _shootRecords;
-        std::byte _unused1e4[0x28f4];
+        std::byte _unused1e4[0x2a0c - 0x1e4];
+        // C_game::m_fPlayerSpeed, the local player's speed in m/s. Traffic
+        // element Activate (0x457820) widens its spawn ring with it.
+        float _playerSpeed;
+        std::byte _unused2a10[0x2ad8 - 0x2a10];
         bool _playerDeathTriggered;
         std::byte _unused2ad9[0x2b0c - 0x2ad9];
         uint32_t _gameTime;
@@ -203,6 +223,7 @@ namespace Mafia1Online::SDK::Core::Game {
     static_assert(offsetof(NativeGame, _player) == 0xe4);
     static_assert(offsetof(NativeGame, _human) == 0xe8);
     static_assert(offsetof(NativeGame, _shootRecords) == 0x1d4);
+    static_assert(offsetof(NativeGame, _playerSpeed) == 0x2a0c);
     static_assert(offsetof(NativeGame, _playerDeathTriggered) == 0x2ad8);
     static_assert(offsetof(NativeGame, _semaphoreTime) == 0x194);
     static_assert(offsetof(NativeGame, _semaphorePeriod) == 0x198);

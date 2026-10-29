@@ -1,0 +1,60 @@
+// The job key of the fire brigade and the ambulance (server/lib/jobkey.js):
+// G signs on or off under a station's arrow, held it sprays the hose, leads a
+// trapped civilian out or treats a patient; a downed player presses it to
+// stop waiting for a medic. The server decides
+// what a press does and sends the prompt and the treatment progress.
+const JOB_KEY = "g";
+const PING_MS = 250;
+const PROMPT_COLOR = 0xffe7c47d;
+const PROMPT_FILL = 0xd0121519;
+const PROMPT_EDGE = 0x70e7c47d;
+const BAR_FILL = 0xff8fc27a;
+const BAR_TRACK = 0x80303a40;
+
+const view = {text: null, progress: null};
+let holding = false;
+let pingAt = 0;
+
+Settings.describeKey(JOB_KEY, "Job key: sign on, use, treat, plant, pick up");
+
+Key.bind(JOB_KEY, "both", (_key, state) => {
+    holding = state === "down";
+    pingAt = Date.now();
+    Events.emitServer("fr:rescue:use", {down: holding});
+});
+
+Events.on("fr:rescue", (data) => {
+    view.text = typeof data?.text === "string" ? data.text : null;
+    view.progress = typeof data?.progress === "number" ? Math.max(0, Math.min(1, data.progress)) : null;
+});
+
+Events.on("render", () => {
+    if (holding && Date.now() - pingAt >= PING_MS) {
+        pingAt = Date.now();
+        if (Key.isDown(JOB_KEY)) Events.emitServer("fr:rescue:use", {down: true});
+        else {
+            holding = false;
+            Events.emitServer("fr:rescue:use", {down: false});
+        }
+    }
+    if (!view.text) return;
+    const {width, height} = Web.getScreenSize();
+    const top = height - 140;
+    const plate = view.progress === null ? 36 : 50;
+    Draw.rect(width / 2 - 230, top, 460, plate, PROMPT_FILL);
+    Draw.rect(width / 2 - 230, top, 4, plate, PROMPT_COLOR);
+    Draw.rect(width / 2 - 226, top, 456, 1, PROMPT_EDGE);
+    // The server words its prompts for G; show the key the player moved it to.
+    const text = view.text.replace("[G]", `[${Settings.getKeyLabel(JOB_KEY).toUpperCase()}]`);
+    Draw.text(text, width / 2 + 2, top + 24, 15, PROMPT_COLOR, 3);
+    if (view.progress !== null) {
+        Draw.rect(width / 2 - 200, top + 36, 400, 6, BAR_TRACK);
+        Draw.rect(width / 2 - 200, top + 36, Math.round(400 * view.progress), 6, BAR_FILL);
+    }
+});
+
+Events.on("missionUnload", () => {
+    view.text = null;
+    view.progress = null;
+    holding = false;
+});

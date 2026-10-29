@@ -12,6 +12,17 @@ The x86 launcher is linked at `0x400000` with a `.fwgame` reservation larger
 than the retail image, so the Framework PE loader maps the game's absolute
 addresses at their original values.
 
+The launcher resolves the image's `kernel32!CreateMutexA` import to its own
+stub. `MafiaEntryPoint` pushes `"Mafia Launcher Super Mutex Shit"` at
+`0x5bebfb` (`68 48 7B 63 00`), calls `CreateMutexA` at `0x5bec16`
+(`FF 15 50 30 62 00`), discards the handle by calling `GetLastError` at
+`0x5bec1c`, and at `0x5bec22` (`3D B7 00 00 00 0F 84 85 08 00 00`) jumps to
+`0x5bf4b2` on `ERROR_ALREADY_EXISTS`, which unwinds and returns 0 without
+initializing anything. For that exact name the stub creates an unnamed mutex
+and clears the last error, so several local clients can run; every other
+name reaches `CreateMutexA` unchanged. Only the game image's imports pass
+through the resolver, and the mutex lives until process exit as in retail.
+
 ## In-process display setup
 
 The retail setup is a packed `S_game_setup` of size `0x3f` at `0x647ee4`.
@@ -80,7 +91,7 @@ hooks belong to their feature directories.
 | --- | --- | --- | --- | --- |
 | `C_mission::Tick` at `0x5407e0` | `53 55 56 8B F1 57 8A 46 7C 84 C0 74 20 83 7E 78 01 7D 1A` | `void __thiscall(C_mission*, unsigned int frameTimeMs)`; `this` in `ECX`, one 32 bit stack argument, `ret 4` at `0x540948`. `C_mission` survives mission close/open and is released during `CloseSystem`. | IDA xrefs `0x5495c6`, `0x5be8ea`, `0x5ebc1e`: menu and gameplay loops. It restores suspended audio, ticks time shifts, scene, driver, animated models, initialized `C_game`, and transparency records. The mod calls the original exactly once, then its own update. | The mod stops updating before `CloseSystem` tears down the mission. Both hooks are disabled at normal process shutdown. |
 | `C_mission::Close` at `0x5405e0` | `53 56 8B F1 33 DB 38 5E 0C 0F 84 EE 01 00 00 8B 4E 24 3B CB 74 0D E8 65` | `void __thiscall(C_mission*)`; `this` in `ECX`, no stack arguments. The mission object survives close/open cycles. | Called by `Open`, `UnInit`, menu/gameplay loops and load helpers. It runs `C_game::Done`/`DoneIntern`, deletes actors and programs, clears caches and roads, and closes the scene. The world feature invalidates native handles before calling the original. | The world hook is removed in `Application::PreShutdown`, before the shell calls native `CloseSystem`; no handle survives disconnect or mission close. |
-| `CloseSystem` at `0x5c0080` | `55 56 57 B9 28 46 6D 00 E8 A3 4F 04 00 E8 BE 86 E4 FF` | `void __cdecl()`; no arguments, one caller at `0x5bf4aa`. Runs once at normal process shutdown. | Tears down profile, animations, vehicle materials, consoles, then calls `C_mission::UnInit` and releases the graphics and sound drivers. The mod shuts down before calling the original. | This is the teardown path. No native game object is retained after it returns. |
+| `CloseSystem` at `0x5c0080` | `55 56 57 B9 28 46 6D 00 E8 A3 4F 04 00 E8 BE 86 E4 FF` | `void __cdecl()`; no arguments, one caller at `0x5bf4aa`. Runs once at normal process shutdown. | Tears down profile, animations, vehicle materials, consoles, then calls `C_mission::UnInit` and releases the graphics and sound drivers. The hook first hides the IGraph main window (`ShowWindow(SW_HIDE)`, skipped when no graph exists), so the CEF and native teardown that follows is not shown as a frozen window, then the mod shuts down before calling the original. | This is the teardown path. No native game object is retained after it returns. |
 
 `C_game::SetTrafficVisible` at `0x5a8470` starts with retail bytes
 `53 8A 5C 24 08 8A CB E8 E4 64 EA FF 84 DB 0F 94 C3 8A CB E8 78 25 F0 FF`.
@@ -110,7 +121,7 @@ The client also reads the selected mission's `scene2.bin` through the normal,
 mod-aware `rw_data` exports. A bounded chunk parser reads only actor records
 (root `0x4c53`, actors `0xae20`, actor `0xae21`, type `0xae22`, frame name
 `0xae23`). It hides authored actor models before collision/game initialization,
-so parked cars, humans, weapons, physical props, aircraft and rail models do
+so parked cars, humans, weapons, aircraft and rail models do
 not survive as visible, unregistered shells. Static geometry used by generic
 props, doors, villa objects, bridge decks, turnouts, pumps and clocks remains;
 only doors retain their mission actor behaviours. Malformed actor metadata
@@ -125,11 +136,66 @@ traffic-car and police generation. Rail-generator and railway AI hooks skip
 native AI in every server mission. Mission rail generators are never created;
 if a runtime actor creates a pool, normal GameInit/GameDone still own it.
 
+### World props
+
+Breakable scene models (phone booths `PHbox01`, the hydrant `dopravni9B`
+whose crash model has the `;X1H;` piece, bins `popel01`/`kos01`, barrels)
+have collision primitives of material 41. `SpawnCrashActorFromFrame`
+(`0x431710`, `__fastcall`, `ret 8`) turns the model off, flags its subtree's
+primitives `0x20`, appends it to `C_game::m_ObjectsToDeactivate` (`+0x10`) and
+builds its pieces through `CreateCrashActors` (`0x430c50`, `ret 0x20`).
+`PropsService` hooks both: it records the primitives a break switched off,
+reports scene models by frame name together with the struck frame's name and
+replays remote breaks on that frame, because `ParseCrashConfigFromFrameName`
+(`0x431a00`) reads the crash settings from the struck frame's properties
+(`+0xc`; a model's own from its last visual child); a late joiner's breaks
+skip `CreateCrashActors`. Replayed pieces lose `CRASH_FLAG_EXPLODE` (`0x20`)
+and `CRASH_FLAG_START_FIRE` (`0x8`, `m_uCrashFlags` `+0x38c`): `C_crash_obj::AI`
+(`0x431be0`) would call `NewExplosion`/`NewFire` with damage on every client.
+Of the stock crash models only `xpumpa 2_c1` (`;M1000N22X1EF;`, three fuel
+pumps in freeride) and `barel_exp_c1` carry them, and the pump piece goes off
+on its first tick (`CreateActor` `0x4311d0` takes 2 off its health 1); a replay
+shows that blast and fire without damage. A repair turns the breakables back
+on, clears those flags, drops the `C_crash_obj` pieces as their AI would, then
+calls `DelAllHydrants` (`0x5b9ef0`), `LoadTelephones` (`0x5b6e00`) and
+`LoadSemaphores` (`0x5add10`). `DelSemaphore` (`0x5b6d50`), which
+`SpawnCrashActorFromFrame` calls with the model, matches `S_semaphore`'s first
+field, which the loader callback (`0x5ad900`) never writes, so whether it
+drops a light is undefined; reloading makes the repair independent of that.
+The stock freeride `scene2.bin` places 1,044 crash-model breakables (369
+`popel01`, 242 `dopravni9B`, 156 `kos01`, 127 `PHbox01`, 143 barrels, three
+fuel pumps and four cans); its `cache.bin` places one `xbarel 1` and 154 traffic signs
+(`dopravni1B`-`8B`). City cache instances (`off<n>seg<n>`) are left to retail,
+and the signs never reach `SpawnCrashActorFromFrame`: a car
+(`Collision_Filter_Body` `0x426d7e`) or shot (`TickShoot` `0x5aa76e`) breaks
+one through `HandleSignalMarkCrash` (`0x5b7be0`), which calls
+`CreateCrashActors` itself, sets the primitive's `0x20` flag and closes the
+cache placement (`0x402cf0`). They stay down on that client alone until the
+mission changes.
+
+Every client loads the type 35 `C_box_new` props; `GameInit` (`0x567650`) and
+`GameDone` (`0x567720`) number them, and a pose is placed the way
+`C_PhThing::MoveCount` (`0x45ddb0`) and `Update` (`0x45a7a0`) place one, then
+left asleep the way `FindActors` (`0x45a560`) leaves a new piece: `INACTIVE`,
+or `ACTIVE` past both sleep limits while actors stand on it. A prop counts as
+at rest when `C_PhThing::AI` (`0x45a690`) would skip it (`m_fLowMotionTimeSeconds`
+`+0x32c` past `+0x330`, or `m_iStationaryTimeMs` `+0x9c` past 4000) or it is
+`INACTIVE`; `Update` puts one to sleep without zeroing its velocity.
+`C_box_new::Collision` (`0x567c80`) and `Hit` (`0x567ca0`), the vtable
+`0x6254f0` slots that wake a prop, are hooked to note who did it.
+
 ### Drawbridges and city traffic lights
 
-Mission-authored bridge actors are suppressed and the authored bridge geometry
-stays visible and stationary. The bridge GameInit hook remains for any runtime
-bridge: native initialization closes it, then `ShutDown(true)` prevents opening.
+Every client loads the mission's bridge actors (type 20). The simulation host
+runs them natively; players replay its phases, leaf angles and steamers
+(`BridgeService`, see the NPC multiplayer audit). Nothing shuts them down.
+
+Every client loads the gas station attendants (type 25, `C_pumper`) too. The
+host runs them and serves the cars the server hands it; players replay its
+state and animation through the native animation machine, and the customer's
+client runs the retail `Start` and release on its own car (`PumperService`,
+see the NPC multiplayer audit). Their `Collision`, `Hit` and `PumperPanic` are
+hooked off: the attendant never panics.
 
 reM `C_game::Tick` advances `m_uSemaphoreTime` through ten 3000 ms phases;
 `m_iSemaphoreStateZ` starts five phases after `m_iSemaphoreStateX`.
@@ -365,6 +431,36 @@ profile header or game installation. Profile and save-game writes are
 suppressed in every mod session, including native shutdown. An existing
 profile is required; with none present, a startup error is shown and the
 skipped picker returns Back without creating a file.
+
+## Player settings
+
+The settings screen (`Features::Settings`, `docs/ui.md`) applies retail
+controls the way the retail options menu does, but from the mod's own
+`config/settings.json`; the profile file is never written. The loaded
+profile's `G_LoadSaveClass` copy at `0x6d4628` (`g_pLoadSaveClass`) holds
+`m_Bindings[60]` at `+0x1f4` (reM `GameKey`, `0x0c` bytes each) and
+`m_ControlSettings` at `+0x4c4` (reM `G_ControlSettings`, `0x5c` bytes; IDA
+`G_IndicatorsClass::GameInit` reads `m_bUseMph` as `0x6d4b44`, which is
+`+0x4c4+0x58`). Until the player changes a binding, the mouse/HUD values or a
+game volume in the mod, those values stay the profile's. Mouse sensitivity,
+turning limit, invert Y, double-tap roll, crosshair (`m_uIndicatorMode`) and
+speech volume are read live by `C_player`, `G_Camera`, `C_human` and
+`G_IndicatorsClass::DrawAll`; the others need the calls below. Gamma is not
+offered: the mod runs windowed, where `SetGammaRamp` has no effect.
+
+| Retail item | Original bytes | Convention, callers and effects | Lifetime and unload |
+| --- | --- | --- | --- |
+| `G_LoadSaveClass::PushBindingsToInput` `0x607a60` | `56 57 8B F9 B9 30 7C 64 00 E8 82 86 EE FF 33 F6 81 C7 F4 01 00 00 56 57` | `void __thiscall(loadSave*)`. IDA callers: native Init `0x604f3a`/`0x604fe9`, ProfileChange `0x605118`, ProfileLoad `0x605973`, options controls `OnClick` `0x5e1714` and `OnDestroy` `0x5e1625`. `C_Input::Reset` on `g_sInput` `0x647c30`, `BindKey` for each of the 60 slots, then `SetSensitivity(400, 400, 400)`. | Called on the game thread from the client update, after the mod wrote changed slots, and only when a slot changed. `C_Input` reallocates its state vectors; the chat input hook reads them only inside its own `Update` call. |
+| `G_LoadSaveClass::Refresh` `0x60dfe0` | `81 EC 08 06 00 00 53 8A 9C 24 10 06 00 00 57 8B F9 F6 C3 01 74 16 A1 DC` | `void __thiscall(loadSave*, unsigned mask)`, `ret 4`. IDA callers: audio options `0x5e0d78`-`0x5e0f6f`, controls `0x5e163b`/`0x5e1720`/`0x5e18a3`/`0x5e18cc`, ProfileLoad `0x605995`. Bit 1 sets the ISND driver volume (`g_ISNDDriver` `0x647edc`, checked by retail), bit 2 sets every IShow record's music volume through `g_pMission->m_pGame` (`0x5b6600`), bits 1 or `0x20` set the vehicle sound gain. The mod passes 1 and `0x20`, plus 2 only while `g_pMission` has its game; never gamma (4) or force feedback. | No pointer kept. The mission's game owns the IShow records; an empty list is a no-op. |
+| `G_IndicatorsClass::GameInit` `0x5f73c0` | `A1 8C 78 63 00 56 8D B1 84 40 00 00 8B 50 24 8A 82 44 2D 00 00 84 C0 8B` | `void __thiscall(indicators*)` on `0x6bf980`. IDA callers: `C_game::Init` `0x5a0cb8` and controls `OnDestroy` `0x5e162f`. Releases and recreates the dashboard textures for mph/km/h and night mode; it reads `g_pMission->m_pGame`. | Called only when the speedometer unit changed while `C_game` is initialized; otherwise the next `C_game::Init` loads the right texture. The indicators own both textures. |
+| `C_game::UpdatePlayerControls` `0x5a7ff0` | `8A 41 40 56 84 C0 57 74 2F 8B 0D 8C 78 63 00 8B 41 38 8D 79 38 85 C0 74` | `void __thiscall(C_game*)`. IDA callers: `GameLoopSingle` `0x549793`, `GameLoopSingle1` `0x5be9a8` after the pause menu, options `0x5e0f87`/`0x5e172e`. Returns unless initialized (`+0x40`), then each `C_player` hands its driven car the steering linearity. | Called after a controls change while the mission's game is initialized. No actor pointer is kept. |
+
+Mod keys outside `C_Input` (chat, chat with `/`, held player list, siren, car
+sync mode) are compared as DirectInput scan codes from `ReadKey` and
+`IGraph::TestKey`, or as window-message scan codes in the web UI; push-to-talk
+is the Framework `VoiceClient` key polled through `GetAsyncKeyState` in the
+active layout. Script keys are remapped where `Key.bind` reads them, in the
+client's `GetBaseInput()`.
 
 ## Native chat and health display
 
@@ -716,7 +812,9 @@ requesting an explosion each tick after its burn timer until it becomes dead,
 so the per-car client stream deduplicates these requests. The server verifies
 mission generation, controller GUID and active terminal state, commits the
 `Exploded` state and lethal damage to recorded occupants, then clears seats.
-Clients call the original exactly once when they observe the new terminal
+It also deals the blast `CarExplosion` passes to `NewExplosion` (radius 10,
+damage 200, `0x421eed`/`0x421ef6`) to players on foot with the retail falloff,
+since every client suppresses native hits on players. Clients call the original exactly once when they observe the new terminal
 sequence. This includes the controller, so it does not receive two explosions.
 A late join creates its native car first and then applies the terminal state;
 native wreckage creation remains game-owned. Native explosion side effects
@@ -1614,6 +1712,43 @@ lifetime, radius and damage and `damageActors = damage > 0`; `C_fire::Tick`
 hits nothing without it. The source actor and parent frame are null, so the
 combat hooks do not report these as grenade detonations. A message for another
 mission generation is dropped.
+
+### Persistent fires and water jets
+
+`Fire` and `WaterJet` (replicated `FireEntity` / `WaterJetEntity`) do not go
+through `C_fire`: its damage scales with the remaining lifetime
+(`C_fire::Tick` `0x55da80`, damage x `m_iLifeRemaining`) and its particle is
+the self-decaying "fire_fading". `FireService` (client, `features/fire`) owns
+everything it creates and drops it in the mission-closing callback:
+
+- Flames: `C_ParticleManager::CreateParticle(int, const S_vector&, const
+  S_vector&, int, I3D_frame*)` `0x449690` on `C_mission +0x6c` (as
+  `C_game::AddHydrant` `0x5b9b90` calls it), effects "Fire" 6 and
+  "Fire_no_smoke" 57 of `tables\effects.tbl` (no emission decay), parented to
+  a dummy frame (`I3D_driver::CreateFrame(FRAME_DUMMY)`) we move for a fire on
+  a car; `DestroyParticle` `0x44a240` ends them. The table's order is
+  `EFFECTS.TXT`'s (`LoadData` `0x449380` appends in file order); C_fire's 21
+  and the hydrant's 87 match it.
+- Light: `C_game::SpawnFireFrameSlot(const S_vector&, float, int, short)`
+  `0x5b5b40` with `NewFire`'s size 10 and type 1, on the ten slots at
+  `C_game +0x2a48` (0xc each, time at +4). The slot's time is renewed while
+  the fire burns and cut to 500 ms when it goes out, so `C_game::Tick` fades
+  it as a retail fire's.
+- Sound: `C_sound_table::ConstructSound` `0x55f820` on `g_SoundManager`
+  `0x646f50` with C_fire's loop 20 (looped, as `C_fire::Init`) and
+  `NewFire`'s ignition 21, which `C_game::Play3DSound(I3D_sound*)` `0x5accb0`
+  owns and releases.
+- Water: effect "hadice" 89 (one type, flags 0x19: its velocity (5, 0, 0) and
+  spawn spread are turned by the parent frame's world matrix in
+  `C_Particle::Create`, scale included, since `S_vector::RotateByMatrix` is
+  the plain 3x3 product; phase gravity 9.8, 2 s life) on a dummy nozzle frame
+  whose x row is the launch direction and whose uniform scale is pressure / 5,
+  so the drops fly the lower ballistic arc onto the target. The hydrant loop
+  is sound table 327 (`AddHydrant` pushes `0x147`). The steam over a doused
+  fire is "smoke_parnik" 28; a put-out fire smokes with "slow_smoke" 55.
+
+The server decides intensity, dousing and damage (`CombatService::StartFire`
+every 500 ms with damage x intensity); clients only draw.
 
 ### HUD, fade and camera
 

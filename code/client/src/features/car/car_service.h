@@ -1,9 +1,11 @@
 #pragma once
 
+#include "car_pose_buffer.h"
 #include "game/entities/native_object_registry.h"
 #include "shared/features/car/car_damage_state.h"
 #include "shared/features/car/car_hit_report.h"
 #include "shared/features/car/car_mesh_checkpoint.h"
+#include "shared/features/car/car_movement.h"
 
 #include <utils/snapshot_buffer.h>
 
@@ -54,6 +56,21 @@ namespace Mafia1Online::Features::Car {
         // Switches observers between interpolation of the replicated path
         // and native physics corrected toward the pose predicted to now.
         bool ToggleSyncMode();
+
+        // Simulation host: a car the retail game owns (a traffic pool car, or
+        // a temporary car it created) is this network car's native car. The
+        // host never creates a car of its own for a car it drives, and never
+        // deletes a pool car; a temporary one goes with RemoveTemporaryActor
+        // when the network car does.
+        enum class Origin : uint8_t {
+            Created,
+            Pool,
+            Temporary,
+        };
+        bool Adopt(World::WorldService &world, uint64_t networkId, SDK::Car::NativeCar *car, Origin origin);
+        // Unbinds the adopted car, which stays in the retail world.
+        void ReleaseAdopted(World::WorldService &world, uint64_t networkId);
+        [[nodiscard]] bool IsAdopted(uint64_t networkId) const;
         void OnSimulated(SDK::Car::NativeCar *car, unsigned int frameMs);
 
       private:
@@ -62,32 +79,41 @@ namespace Mafia1Online::Features::Car {
                 Shared::Car::AuthoritativeHit hit;
                 std::chrono::steady_clock::time_point received;
             };
-            struct PoseSample {
-                double time = 0.0;
-                glm::vec3 position {0.0f};
-                glm::vec3 velocity {0.0f};
-                glm::quat rotation {1.0f, 0.0f, 0.0f, 0.0f};
-                glm::vec3 angularVelocity {0.0f};
-            };
+            using PoseSample = CarPoseSample;
             // Replicated poses dated on the local clock from the controller's
-            // physics clock, rendered delayMs behind by Hermite interpolation.
-            std::deque<PoseSample> poses;
-            float delayMs      = 100.0f;
-            float latenessPeak = 0.0f;
-            float intervalMs   = 33.0f;
+            // physics clock, rendered a delay behind (CarPoseBuffer).
+            CarPoseBuffer poses;
             double lastPoseTime = 0.0;
             std::deque<double> offsetWindow;
+            // Controller: the physics time of its car's pose, in ms. It
+            // advances by each physics step and is pulled up to the local
+            // clock whenever the car fell behind it (a step capped at 83 ms,
+            // or frames the retail game left the car inactive), so receivers'
+            // mapping onto their clock never sees it drift.
             uint32_t simClockMs = 0;
+            int32_t simClockLag = 0;
+            bool simClockStarted = false;
             // The update serial of the last actor tick DriveObserver placed.
             uint64_t drivenSerial = 0;
             // Until this local clock time the car runs on corrected native
             // physics because a locally simulated car is close.
             double contactUntil = 0.0;
+            // Local clock times of the first and the latest impact of the
+            // current contact a locally simulated car gave it here.
+            double impactAt = 0.0;
+            double lastImpactAt = 0.0;
             MafiaNet::Time lastPacketTime        = 0;
             uint64_t poseClockSource             = 0;
             uint32_t poseClockMs                 = 0;
             double poseClockOffset               = 0.0;
             std::chrono::steady_clock::time_point lastSent;
+            // When the next report is due (ReportMovement's 30 Hz schedule).
+            std::chrono::steady_clock::time_point nextSend;
+            // The last report sent, and the last one that carried the slow
+            // fields, for the idle and slow-field tests (ReportMovement).
+            std::optional<Shared::Car::Movement> lastMovement;
+            std::optional<Shared::Car::Movement> lastSlowMovement;
+            std::chrono::steady_clock::time_point lastSlowSent;
             uint32_t sequence              = 0;
             uint32_t engineReportSequence  = 0;
             uint64_t appliedEngineRevision = 0;
@@ -136,6 +162,7 @@ namespace Mafia1Online::Features::Car {
             SDK::Scene::NativeFrame *frame = nullptr;
             bool removalQueued             = false;
             uint32_t radarColor            = 0;
+            Origin origin                  = Origin::Created;
             float appliedOpacity           = 1.0f;
             uint64_t opacityDamageRevision = 0;
             bool hasAppliedOpacity         = false;
@@ -143,6 +170,8 @@ namespace Mafia1Online::Features::Car {
 
         void CreateNativeCar(World::WorldService &world, uint64_t networkId, const char *model, const Framework::Utils::TransformSnapshot &pose);
         void ReportLoadFailure(World::WorldService &world, uint64_t networkId);
+        // The damage, mesh and hit state a new native car has to rebuild.
+        static void ResetNativeState(Stream &stream);
         void ReportMovement(World::WorldService &world, uint64_t networkId, Stream &stream);
         void SyncDynamics(World::WorldService &world, uint64_t networkId, Stream &stream);
         void SyncEngine(World::WorldService &world, uint64_t networkId, Stream &stream);
@@ -161,8 +190,6 @@ namespace Mafia1Online::Features::Car {
         void ResetNativePhysics(SDK::Car::NativeCar &actor, uint64_t networkId);
         void DetectTerminal(World::WorldService &world, uint64_t networkId, Stream &stream);
         void CaptureWaterCamera(World::WorldService &world, uint64_t networkId, SDK::Car::NativeCar &car);
-        static bool SamplePose(const Stream &stream, double time, Stream::PoseSample &out);
-        static void PushPose(Stream &stream, const Stream::PoseSample &pose, double arrival, bool reset);
         static double LocalClockMs();
         void SyncRadar(World::WorldService &world, uint64_t networkId);
         void SyncDoors(SDK::Car::NativeCar &car, const Shared::Entities::CarEntity &state);

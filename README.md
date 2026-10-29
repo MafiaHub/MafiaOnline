@@ -1,9 +1,14 @@
 # Mafia1Online
 
-This repository is checked out inside the [MafiaHub Framework](https://github.com/MafiaHub/Framework)
-at `code/projects/mafia1online`. Use the Framework commit recorded in
-[`FRAMEWORK_PIN`](FRAMEWORK_PIN) to reproduce a build. The Framework CMake
-project discovers this folder automatically.
+Mafia1Online is a top-level CMake project that brings in the
+[MafiaHub Framework](https://github.com/MafiaHub/Framework) through
+[`cmake/FrameworkBootstrap.cmake`](cmake/FrameworkBootstrap.cmake). It needs
+the Framework's D3D8 renderer, launcher and asset streamer support, which is
+not in a Framework release yet, so it builds the Framework from source: the
+commit recorded in [`FRAMEWORK_PIN`](FRAMEWORK_PIN). Check this repository out
+at `code/projects/<name>` inside that Framework tree and `builds/build.bat`
+picks the enclosing checkout up. [`cmake/FrameworkPin.cmake`](cmake/FrameworkPin.cmake)
+names the SDK release to switch to once that support ships in one.
 
 This project targets the 32 bit Mafia `Game.exe` identified by SHA-256
 `303eb95ee2de3433511ce0cb518921dcb96b62b0f64ebfcc436723ff5083f298`.
@@ -41,24 +46,26 @@ call `World.getMission()`, `World.getMissionGeneration()` and `World.isReady()`.
 Connected players have server-owned replicas with nickname, health, life and
 mission generations, and timestamped transforms. The client currently binds
 the stock local player after the native mission loads and sends its pose to
-the server. A separate native pose report lets the sample resource choose a
+the server. A separate native pose report lets the gamemode choose a
 matching initial spawn. Server scripts control spawn, respawn, despawn and
-health through `Players`, and car replicas through `Cars`. A sample resource
-under `resources/sample-gamemode` spawns ready players. `/car` opens a catalog
-with native model previews and seats the player in the chosen car. `/car
-<stock-car.i3d>` can spawn a model directly, and `/model [stock-human.i3d]`
-changes the player model. In a loaded mission, press T to open the
+health through `Players`, and car replicas through `Cars`. The default
+gamemode, [Free Ride](docs/freeride.md) under `resources/freeride`, spawns
+ready players. `/dealer` at the car lot opens a catalog with native model
+previews and prices, and `/garage` brings an owned car round. In a loaded mission, press T to open the
 native chat input, Enter to send and Escape to cancel. Incoming chat uses the
 game's own HUD console; the stock lives display receives the local player's
 authoritative health. Run the server with this project directory as its
-working directory so it discovers that resource.
+working directory so it discovers that resource and keeps its player records
+under `data/freeride`.
 The server resource API, including vehicle seat, engine, damage, death and
 mission callbacks, is documented in
 [`docs/server_scripting_api.md`](docs/server_scripting_api.md).
 The [Mafia Online Docs](https://github.com/MafiaHub/MafiaOnlineDocs) repository
 builds the generated API reference alongside the authored guides.
-The [sample Free Ride guide](docs/sample_freeride.md) covers the day/night
-missions, character selector, shops, weather, car radio, and synchronized doors.
+The [Free Ride guide](docs/freeride.md) covers the multiplayer street races,
+bounties, private duels, crews and turf wars, the export, police, taxi and
+hold-up jobs, building entrances, city events, cash stashes, speed traps,
+shops, persistent careers, weather, the car radio and synchronized doors.
 
 [LHRP — Lost Heaven Roleplay](gamemodes/real-life/README.md) is a separate,
 minimal TypeScript gamemode with a cinematic city login, Preact/StyleX UI,
@@ -75,15 +82,22 @@ integration testing. Full weapon, damage, death, vehicle terminal behavior,
 bounded correction, a graphical fill health bar and multiplayer loss testing
 remain release gates.
 
-The main menu, chat, pause screen and player list are a CEF web UI
+The main menu, chat, pause screen, settings and player list are a CEF web UI
 (Preact + StyleX, `ui/`). It is composited into the game's Direct3D 8 frame
 through the Framework's D3D8 backend. Build it with `tools/build_ui.sh`; the
 client build runs that script and copies the result to `bin/ui`. When CEF or
 the page is unavailable, or with `MAFIA1ONLINE_NATIVE_UI=1`, the retail main
 menu keeps only Exit, quick join connects, and the native HUD chat is used. See
-[`docs/ui.md`](docs/ui.md).
-The launcher does not write `steam_appid.txt` or a persistent launcher config;
-the client places its asset cache next to the mod rather than in AppData.
+[`docs/ui.md`](docs/ui.md). Its Settings screen (main menu, or Esc in game)
+rebinds every retail control, the mod's keys and resources' keys, and sets
+the mouse, HUD, game and voice volumes, push-to-talk or voice activity and
+the microphone. It saves to `bin/config/settings.json` and applies in-process;
+the Mafia profile is never written.
+The launcher does not write `steam_appid.txt`. Without Steam, or without Mafia
+in its Steam library, it asks for `Game.exe` once and keeps that choice in
+`Mafia1Online_launcher.json` beside itself; it writes nothing when
+`MAFIA1ONLINE_GAME_ROOT` is set. The client places its asset cache next to
+the mod rather than in AppData.
 On an unhandled launcher or game exception, the launcher writes a `.dmp` file
 under its `logs` folder and records the path in `Mafia1Online.log`. Keep the
 matching `Mafia1OnlineLauncher.pdb` and `Mafia1OnlineClient.pdb` from the same
@@ -119,14 +133,17 @@ game before launching the mod. Omitting `client.json` or setting `enabled` to
 
 ## Build
 
-From the Framework root, use the canonical wrapper:
+From this project's root, use its build wrapper. Build trees go to
+`builds/build-32` and `builds/build-64`:
 
-```sh
-bash builds/build.bat Mafia1OnlineLauncher 32
-bash builds/build.bat Mafia1OnlineClient 32
-bash builds/build.bat Mafia1OnlineServer 64
-bash builds/build.bat Mafia1OnlineServer linux64
+```bat
+builds\build.bat Mafia1OnlineLauncher 32
+builds\build.bat Mafia1OnlineClient 32
+builds\build.bat Mafia1OnlineServer 64
 ```
+
+`FW_SOURCE_DIR=<Framework checkout>` or `FW_SDK_ROOT=<installed SDK>` in the
+environment overrides where the Framework comes from.
 
 The client and launcher build only for Windows x86; the server builds for
 Windows x64 or Linux x64. For server configuration, copy
@@ -150,8 +167,7 @@ detection and the prepared Freeride Extended example.
 ## Client ZIP
 
 After building the 32-bit launcher and client, run
-`python3 code/projects/mafia1online/tools/package_client.py` from the Framework
-root. It creates `builds/releases/Mafia1OnlineClient-<VERSION>-windows-x86.zip`.
+`python3 tools/package_client.py`. It creates `builds/releases/Mafia1OnlineClient-<VERSION>-windows-x86.zip`.
 The archive contains the launcher, client, runtime DLLs, CEF resources, UI,
 license notices and a sample configuration. It excludes logs, caches, tests,
 debug symbols, local settings and the original game. Extract it to a writable
@@ -160,7 +176,21 @@ folder even when a shortcut has a different working directory. A matching
 Mafia executable and an existing Mafia profile are required. The
 example `127.0.0.1` server address only reaches a server on the same machine.
 
+Releases are published with `tools/release.py`: the launcher of a release
+patches itself from MafiaHub Services (the Framework's build patcher, as in
+Kingdoms Connected) and each tag gets a GitHub release with the client and
+server ZIPs. See [releasing](docs/releasing.md).
+
 ## Two-client local test
+
+On Windows, `tools/run_two_clients.ahk` (AutoHotkey v2) starts the server
+unless one is already running, then two quick-join clients as `Player1` and
+`Player2` with their windows side by side. It writes its configs under
+`builds/runtime`, uses `server.json` from the project root when present and
+otherwise a copy of `config/server.example.json`, and finds the game through
+Steam or `MAFIA1ONLINE_GAME_ROOT`. Both clients use Mafia profile 0, so create
+one in the original game first. `--no-server` skips the server and `--close`
+closes every client and the server.
 
 On this Linux/Hyprland test machine, `tools/run_two_clients.sh` launches two
 isolated Wine clients and places their 1024 by 768 windows side by side on

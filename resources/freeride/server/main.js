@@ -1,0 +1,433 @@
+// Free Ride, the default Mafia1Online gamemode. This entry owns the player
+// lifecycle, personal cars and the menu plumbing; each activity lives in its
+// own module next to it. Shared rules are in lib/.
+const util = require("./lib/util.js");
+const commands = require("./lib/commands.js");
+const profiles = require("./lib/profiles.js");
+const life = require("./lib/life.js");
+const menu = require("./lib/menu.js");
+const maps = require("./lib/maps.js");
+const nametag = require("./lib/nametag.js");
+const devmode = require("./lib/devmode.js");
+const admin = require("./lib/admin.js");
+const cars = require("./lib/cars.js");
+const dealership = require("./dealership.js");
+const {toast, toastAll, feed, name, text, COLORS} = require("./lib/notify.js");
+
+const {RESOURCE, onClient, distance, playable, vehicleById, formatMoney, headingOf, speedOf} = util;
+const CAR_CHOICE_COOLDOWN_MS = 750;
+const REPAIR_COOLDOWN_MS = 45_000;
+// A mechanic comes out anywhere; the pump and the car lot charge less.
+const REPAIR_COST = 150;
+const REPAIR_COST_AT_GARAGE = 50;
+const GARAGE_REACH = 25;
+const FLIP_COOLDOWN_MS = 10_000;
+const CAR_REACH = 8;
+const TIP_EVERY_MS = 7 * 60_000;
+const MENU_COMMAND_INTERVAL_MS = 300;
+const MENU_REQUEST_INTERVAL_MS = 800;
+// Sorting every record ever saved: a minute old is fresh enough.
+const LEADERBOARD_CACHE_MS = 60_000;
+
+
+const spawnedInGeneration = new Map();
+const welcomed = new Set();
+const lastVehicles = new Map();
+const personalCars = new Map();
+const retiringVehicles = new Map();
+const cooldowns = new Map();
+let generation = 0;
+let spawnTimer = null;
+let tipTimer = null;
+let tipIndex = 0;
+let leaderboardCache = null;
+
+const TIPS = [
+    "F2 opens the city menu: jobs, races, crews, events and everyone in town.",
+    "Buy a car at the car lot with /dealer. /garage brings it to you, /park puts it away, /lock keeps it yours.",
+    "Gold arrows at front doors mark homes for sale: a room in a tenement for a few thousand, a flat, or a villa on the hills. Press G at the door. F2 → Homes.",
+    "Your home is yours to furnish (F2 → Homes), lock or share with your crew, and a flat or villa keeps a car at its kerb: drive onto the spot and press G.",
+    "Jobs pay: taxi fares, courier envelopes, Lucas's export list, police duty and bootleg runs.",
+    "Fancy a uniform? Sign on under the arrow at the fire station or the hospital (both on the city map), then take a truck or an ambulance.",
+    "Out in the countryside the tobacco farm takes on farmhands: plant, water, pick and cure the crop, then truck it to a buyer. F2 → Jobs.",
+    "Tobacco exported at the docks fetches far more than in the village, but the whole city sees the loaded farm truck coming, and anyone may take it.",
+    "Somebody cooks real Cuban rum out in the woods, and no map shows where. The sailor in Salieri's billiard room drinks enough of it to know.",
+    "A rum still's gauge climbs on its own: tap G to vent it and keep it in the green. Past the top, the still blows.",
+    "Hold TAB for the city map: job stations, your objectives and your crewmates are marked on it.",
+    "Lucas Bertone pays for particular traffic cars. /export shows his list.",
+    "Go on police duty with /duty and take down wanted players for pay.",
+    "Thirty cash stashes hide at the roadside. They show only up close.",
+    "Crews can take over street corners with turf wars. /turf shows who holds what.",
+    "Speed traps sit on the longest roads. /speedtraps shows the records.",
+    "Feeling lucky? /dice <player> <bet>. Feeling bold? /rob a shop counter with a gun drawn.",
+    "Open a street race with /race and race anyone who joins. Routes follow the real city roads.",
+    "Three kills in a row put a price on your head. Anyone who drops you collects it.",
+    "Challenge someone with /duel <name>. Duels run in a private copy of the city.",
+    "Start a crew with /crew create <TAG>. Crewmates share a colour and see each other on the city map (TAB).",
+    "Supply drops and hot cars appear around the city, marked on the city map (TAB). /event follows one.",
+    "Salieri's back window has courier work, Yellow Pete sells guns, the pump sells fuel.",
+    "Use /goto <name> to ask for a ride to a friend; they decide with /accept.",
+];
+
+function cooldown(player, key, ms) {
+    const id = `${player.id}:${key}`;
+    const wait = (cooldowns.get(id) ?? 0) + ms - Date.now();
+    if (wait > 0) return Math.ceil(wait / 1000);
+    cooldowns.set(id, Date.now());
+    return 0;
+}
+
+// Stock missions other than Free Ride have no selector; their native spawn
+// hint places everyone as soon as the whole server has loaded.
+function spawnReadyPlayers() {
+    const next = World.getMissionGeneration();
+    if (next !== generation) {
+        generation = next;
+        spawnedInGeneration.clear();
+    }
+    if (!World.isReady() || util.inFreeRide()) return;
+    for (const player of World.getPlayers()) {
+        if (player.spawned || spawnedInGeneration.get(player.id) === generation) continue;
+        const position = player.getSuggestedSpawn();
+        if (!position || !player.spawn(position)) continue;
+        spawnedInGeneration.set(player.id, generation);
+    }
+}
+
+function clearRetiring() {
+    for (const timer of retiringVehicles.values()) clearTimeout(timer);
+    retiringVehicles.clear();
+}
+
+function retireAfter(id, missionGeneration, delayMs = 4000) {
+    if (retiringVehicles.has(id)) return;
+    const check = () => {
+        retiringVehicles.delete(id);
+        if (World.getMissionGeneration() !== missionGeneration) return;
+        const vehicle = vehicleById(id);
+        if (!vehicle) return;
+        // A passenger can still be in the old car. Wait for the last occupant
+        // instead of deleting a live multiplayer vehicle under them.
+        if (vehicle.getOccupants().some((occupant) => occupant !== null)) {
+            retiringVehicles.set(id, setTimeout(check, 1000));
+            return;
+        }
+        vehicle.destroy();
+    };
+    retiringVehicles.set(id, setTimeout(check, delayMs));
+}
+
+function carColor(player) {
+    const crew = player.state.get("fr.crew");
+    return crew?.color ? parseInt(crew.color.slice(1), 16) : 0xe8c57d;
+}
+
+function spawnPersonalCar(player, model) {
+    if (!playable(player)) return {ok: false, message: "Enter the city before choosing a car."};
+    if (!cars.byModel(model)) return {ok: false, message: "That car model is unavailable."};
+    if (["race", "duel", "jail"].includes(life.activity(player)?.kind)) return {ok: false, message: life.busyMessage(player)};
+    const oldVehicle = player.getVehicle();
+    const {x, y, z} = oldVehicle?.position ?? player.position;
+    const heading = oldVehicle ? headingOf(oldVehicle.rotation) : headingOf(player.rotation);
+    const vehicle = Vehicle.spawn(model, {x: x + Math.cos(heading) * 3.5, y: y + 0.3, z: z - Math.sin(heading) * 3.5}, heading, player);
+    if (!vehicle) return {ok: false, message: "The motor pool is busy. Try again."};
+    if (!player.putInVehicle(vehicle, 0)) {
+        vehicle.destroy();
+        return {ok: false, message: "The new driver's seat is unavailable."};
+    }
+    vehicle.setRadarMarker(true, carColor(player));
+    vehicle.state.set("fr.owner", player.nickname);
+    for (const id of personalCars.get(player.id) ?? []) retireAfter(id, World.getMissionGeneration());
+    if (!personalCars.has(player.id)) personalCars.set(player.id, new Set());
+    personalCars.get(player.id).add(vehicle.id);
+    lastVehicles.set(player.id, vehicle.id);
+    return {ok: true, vehicleId: vehicle.id, message: "Your car is ready. Open a race with /race."};
+}
+
+function currentOrLastVehicle(player) {
+    return player.getVehicle() ?? vehicleById(lastVehicles.get(player.id));
+}
+
+function nearbyCar(player) {
+    const vehicle = currentOrLastVehicle(player);
+    if (!vehicle || !vehicle.model || vehicle.terminalState !== 0) {
+        toast(player, "Get in a car, or call one of yours with /garage.", {tone: "bad"});
+        return null;
+    }
+    if (!player.getVehicle() && distance(player.position, vehicle.position) > CAR_REACH) {
+        toast(player, "Walk up to your car first.", {tone: "bad"});
+        return null;
+    }
+    return vehicle;
+}
+
+function welcome(player) {
+    if (welcomed.has(player.id)) return;
+    welcomed.add(player.id);
+    const record = profiles.get(player);
+    const {level, rank} = profiles.progress(record);
+    const returning = record.playMs > 0 || record.xp > 0;
+    toast(player, returning
+        ? `Welcome back, ${player.nickname}. Level ${level} ${rank} · ${formatMoney(player.money)}.`
+        : `Welcome to Lost Heaven, ${player.nickname}. You start with ${formatMoney(player.money)}.`,
+    {title: "Free Ride", tone: "gold", seconds: 7});
+    setTimeout(() => {
+        if (player.spawned) toast(player, "F2 opens the city menu · F1 shows who is in town · /help lists commands.", {seconds: 8});
+    }, 2500);
+}
+
+function showTip() {
+    const players = World.getPlayers().filter((player) => player.spawned);
+    if (!players.length) return;
+    const tip = TIPS[tipIndex++ % TIPS.length];
+    for (const player of players) toast(player, tip, {title: "Tip", seconds: 7});
+}
+
+function statsLine(record) {
+    const {level, rank} = profiles.progress(record);
+    const ratio = record.deaths ? (record.kills / record.deaths).toFixed(2) : record.kills.toFixed(2);
+    return `${record.name}: level ${level} ${rank}, ${record.kills} kills / ${record.deaths} deaths (${ratio}), ` +
+        `${record.racesWon} race wins, ${record.deliveries} deliveries, ${Math.round(record.playMs / 3_600_000 * 10) / 10} h played`;
+}
+
+util.onStart(() => {
+    spawnTimer = setInterval(spawnReadyPlayers, 200);
+    tipTimer = setInterval(showTip, TIP_EVERY_MS);
+});
+
+util.onStop(() => {
+    clearInterval(spawnTimer);
+    clearInterval(tipTimer);
+    clearRetiring();
+    // A restart keeps the players connected; take off what this run put on them.
+    for (const player of World.getPlayers()) {
+        for (const key of ["fr.bounty", "fr.activity", "fr.crew"]) profiles.setPublic(player, key, null);
+        nametag.reset(player);
+    }
+    // Node keeps required modules cached; a restarted resource must load
+    // fresh copies of lib/ instead of the stopped ones.
+    for (const key of Object.keys(require.cache)) if (key.startsWith(__dirname)) delete require.cache[key];
+});
+
+// The record is attached once the player has logged in (selector.js).
+Events.on("playerConnect", (player) => console.log(`[${RESOURCE}] ${player.nickname} connected`));
+Events.onLocal("fr:login", (player, {returning, restored}) => {
+    if (!restored) feed("join", [name(player, COLORS.gold), text(returning ? " is back in town" : " arrived in Lost Heaven")]);
+});
+
+Events.on("playerDisconnect", (player) => {
+    if (profiles.get(player)) feed("leave", [name(player), text(" left the city")]);
+    // After every other module's disconnect handler, so they can still
+    // write to the player's record (a parked car's condition, for one).
+    setTimeout(() => profiles.detach(player), 0);
+    welcomed.delete(player.id);
+    spawnedInGeneration.delete(player.id);
+    lastVehicles.delete(player.id);
+    for (const key of [...cooldowns.keys()]) if (key.startsWith(`${player.id}:`)) cooldowns.delete(key);
+    for (const id of personalCars.get(player.id) ?? []) {
+        const vehicle = vehicleById(id);
+        if (vehicle && vehicle.getOccupants().every((occupant) => occupant === null)) vehicle.destroy();
+    }
+    personalCars.delete(player.id);
+});
+
+Events.on("missionChange", () => {
+    clearRetiring();
+    lastVehicles.clear();
+    personalCars.clear();
+});
+
+Events.on("vehicleDestroy", (vehicle) => {
+    clearTimeout(retiringVehicles.get(vehicle.id));
+    retiringVehicles.delete(vehicle.id);
+    for (const [playerId, id] of lastVehicles) if (id === vehicle.id) lastVehicles.delete(playerId);
+    for (const ids of personalCars.values()) ids.delete(vehicle.id);
+});
+
+Events.on("vehicleTerminal", (vehicle, state) => {
+    if (state !== 2 && state !== 3) return;
+    const id = vehicle.id;
+    const missionGeneration = World.getMissionGeneration();
+    // The engine supplies the splash and fall. The car goes after the death
+    // fade and the respawn have had time to run.
+    setTimeout(() => {
+        if (World.getMissionGeneration() !== missionGeneration) return;
+        const current = vehicleById(id);
+        if (current && current.terminalState === state) current.destroy();
+    }, 6000);
+});
+
+Events.on("missionReady", spawnReadyPlayers);
+Events.on("playerMissionReady", spawnReadyPlayers);
+Events.on("playerSpawn", (player) => { if (!life.isTransit(player)) welcome(player); });
+Events.on("vehiclePlayerEntered", (vehicle, player) => lastVehicles.set(player.id, vehicle.id));
+Events.on("vehiclePlayerExited", (vehicle, player) => lastVehicles.set(player.id, vehicle.id));
+
+// The one handler for the car picker: the admin motor pool here, the car lot
+// and the garage in dealership.js.
+onClient("fr:car:choose", (player, request) => {
+    if (!request || request.generation !== World.getMissionGeneration() || !Number.isInteger(request.id)) return;
+    if (request.mode === "dealer" || request.mode === "garage") {
+        dealership.choose(player, request);
+        return;
+    }
+    if (request.mode !== "admin" || !admin.isAdmin(player)) return;
+    const model = cars.byId(request.id)?.model;
+    if (!model || cooldown(player, "car", CAR_CHOICE_COOLDOWN_MS)) return;
+    const result = spawnPersonalCar(player, model);
+    util.emit(player, "fr:car:result", {id: request.id, ...result});
+    if (result.ok) toast(player, result.message, {tone: "good"});
+});
+
+onClient("fr:menu:request", (player, request) => {
+    if (cooldown(player, "menu", MENU_REQUEST_INTERVAL_MS)) return;
+    util.emit(player, "fr:menu:data", {
+        ...menu.collect(player, typeof request?.tab === "string" ? request.tab : null),
+        commands: commands.list(),
+        you: {name: player.nickname, money: player.money, ...profiles.progress(profiles.get(player) ?? {xp: 0})},
+    });
+});
+
+// Menu buttons skip the chat rate limit, so they get their own.
+onClient("fr:menu:command", (player, request) => {
+    if (!cooldown(player, "menuCommand", MENU_COMMAND_INTERVAL_MS)) commands.runText(player, request?.text);
+});
+
+menu.provide("leaderboard", () => {
+    if (!leaderboardCache || Date.now() - leaderboardCache.at > LEADERBOARD_CACHE_MS) {
+        leaderboardCache = {at: Date.now(), board: {
+            level: profiles.leaderboard("level"),
+            money: profiles.leaderboard("money"),
+            kills: profiles.leaderboard("kills"),
+            races: profiles.leaderboard("racesWon"),
+        }};
+    }
+    return leaderboardCache.board;
+}, ["leaders"]);
+
+commands.register({name: "help", aliases: ["commands"], usage: "/help", help: "List the commands in chat.", category: "City"}, (player) => {
+    const byCategory = new Map();
+    for (const entry of commands.list()) {
+        if (entry.category === "Dev") continue;
+        if (!byCategory.has(entry.category)) byCategory.set(entry.category, []);
+        byCategory.get(entry.category).push(`/${entry.name}`);
+    }
+    player.sendMessage("Free Ride · F2 city menu · F1 players · F9 radio", 0xe8c57d);
+    for (const [category, names] of byCategory) player.sendMessage(`${category}: ${names.join(" ")}`, 0xd9cdb4);
+});
+
+commands.register({name: "stats", usage: "/stats [player]", help: "Show a career record.", category: "City"}, (player, args) => {
+    const target = args.length ? util.findPlayer(args.join(" ")) : player;
+    const record = target && profiles.get(target);
+    if (!record) {
+        toast(player, "No such player in town.", {tone: "bad"});
+        return;
+    }
+    player.sendMessage(statsLine(record), 0xe8c57d);
+});
+
+commands.register({name: "car", aliases: ["v"], usage: "/car [model.i3d]", help: "Admins: spawn any stock car.", category: "Dev", hidden: true}, (player, args) => {
+    if (!admin.isAdmin(player)) {
+        toast(player, "Buy a car at the car lot (/dealer), call one of yours (/garage), or take one from the street.", {tone: "bad"});
+        return;
+    }
+    if (!playable(player)) return;
+    if (!args.length) {
+        util.emit(player, "fr:car:open", {generation: World.getMissionGeneration(), mode: "admin"});
+        return;
+    }
+    if (cooldown(player, "car", CAR_CHOICE_COOLDOWN_MS)) return;
+    const result = spawnPersonalCar(player, args[0]);
+    toast(player, result.message, {tone: result.ok ? "good" : "bad"});
+});
+
+commands.register({name: "repair", aliases: ["fix"], usage: "/repair", help: "Pay a mechanic to fix your car; cheaper at the pump or the car lot.", category: "Cars"}, (player) => {
+    if (!playable(player)) return;
+    const vehicle = nearbyCar(player);
+    if (!vehicle) return;
+    const garages = maps.places().filter((place) => ["pump", "bertone"].includes(place.key));
+    const cost = garages.some((place) => distance(vehicle.position, place.position) <= GARAGE_REACH) ? REPAIR_COST_AT_GARAGE : REPAIR_COST;
+    if (cooldown(player, "repair", REPAIR_COOLDOWN_MS)) {
+        toast(player, "The mechanic is still busy with the last job.", {tone: "bad"});
+        return;
+    }
+    if (!player.trySpendMoney(cost)) {
+        toast(player, `The mechanic wants ${formatMoney(cost)}.`, {tone: "bad"});
+        return;
+    }
+    if (vehicle.repair()) toast(player, `Good as new, for ${formatMoney(cost)}.`, {tone: "good"});
+    else {
+        player.giveMoney(cost);
+        toast(player, "This car cannot be repaired.", {tone: "bad"});
+    }
+});
+
+commands.register({name: "flip", usage: "/flip", help: "Put an overturned car back on its wheels.", category: "Cars"}, (player) => {
+    if (!playable(player)) return;
+    const vehicle = nearbyCar(player);
+    if (!vehicle) return;
+    if (speedOf(vehicle) > 2) {
+        toast(player, "Let the car come to a stop first.", {tone: "bad"});
+        return;
+    }
+    if (cooldown(player, "flip", FLIP_COOLDOWN_MS)) return;
+    const {x, y, z} = vehicle.position;
+    vehicle.setTransform({x, y: y + 1.2, z}, headingOf(vehicle.rotation), {x: 0, y: 0, z: 0});
+    toast(player, "Back on four wheels.", {tone: "good"});
+});
+
+commands.register({name: "engine", usage: "/engine", help: "Start or stop the engine from the driver's seat.", category: "Cars"}, (player) => {
+    const vehicle = player.getVehicle();
+    if (!vehicle || player.getSeat() !== 0) {
+        toast(player, "Sit in the driver's seat first.", {tone: "bad"});
+        return;
+    }
+    vehicle.setEngine(!vehicle.engineOn);
+});
+
+commands.register({name: "kill", aliases: ["suicide"], usage: "/kill", help: "End this life and respawn.", category: "City"}, (player) => {
+    if (!player.alive) return;
+    const busy = life.activity(player);
+    if (busy?.kind === "duel" || busy?.kind === "jail") {
+        toast(player, busy.kind === "jail" ? "Serve your time or pay /bail." : "Not in the middle of a duel.", {tone: "bad"});
+        return;
+    }
+    player.setHealth(0);
+});
+
+Events.on("consoleCommand", (command, args) => {
+    if (command !== "fr") return;
+    const [action, ...rest] = args;
+    if (action === "save") {
+        profiles.save();
+        console.log("[freeride] Player records saved");
+    } else if (action === "money" && rest.length >= 2) {
+        const target = util.findPlayer(rest[0]);
+        const amount = Number(rest[1]);
+        if (target && Number.isInteger(amount) && target.giveMoney(amount)) console.log(`[freeride] ${target.nickname} now has ${formatMoney(target.money)}`);
+        else console.log("[freeride] Usage: fr money <player> <whole dollars>");
+    } else if (action === "admin" && ["add", "remove"].includes(rest[0]) && rest[1]) {
+        // A connected player's own record, or every saved record by that name.
+        const query = rest.slice(1).join(" ");
+        const target = util.findPlayer(query);
+        const keys = target && profiles.keyOf(target) ? [profiles.keyOf(target)] : profiles.keysNamed(query);
+        if (!keys.length) {
+            console.log(`[freeride] No player record named "${query}"; connected: ${World.getPlayers().map((player) => player.nickname).join(", ") || "nobody"}`);
+        } else {
+            for (const key of keys) admin.set(key, rest[0] === "add");
+            console.log(`[freeride] ${keys.join(", ")} ${rest[0] === "add" ? "now admin" : "no longer admin"}`);
+        }
+    } else if (action === "as" && rest.length >= 2) {
+        const target = util.findPlayer(rest[0]);
+        console.log(`[freeride] ${target ? require("./dev.js").run(target, rest[1], rest.slice(2)) : `No connected player "${rest[0]}"`}`);
+    } else if (action === "admin") {
+        console.log(`[freeride] Admins: ${admin.list().join(", ") || "none"}`);
+    } else if (action === "dev" && ["on", "off"].includes(rest[0])) {
+        devmode.set(rest[0] === "on");
+        console.log(`[freeride] Development commands ${devmode.isOn() ? "on" : "off"}`);
+    } else if (action === "say" && rest.length) {
+        toastAll(rest.join(" "), {title: "City Hall", tone: "gold", seconds: 8});
+    } else if (action !== "event") {
+        console.log("[freeride] Console: fr save | fr money <player> <amount> | fr say <text> | fr admin add|remove <player> | fr admin list | fr as <player> <dev action> | fr dev on|off | fr event <supply|hotcar>");
+    }
+});

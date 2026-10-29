@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdint>
 #include <deque>
+#include <map>
 #include <unordered_map>
 
 namespace Mafia1Online::SDK::Player {
@@ -33,6 +34,10 @@ namespace Mafia1Online::Features::Death {
         void OnSuppressedHit(SDK::Player::NativeHuman &target, SDK::Player::NativeHitType type, const SDK::Player::Vector3 &direction, const SDK::Player::Vector3 &hitPosition, SDK::Player::NativeActor *attacker, uint32_t bodyPart);
         void OnSuppressedMelee(SDK::Player::NativeHuman &target, const SDK::Player::Vector3 &direction, const SDK::Player::Vector3 &hitPosition, SDK::Player::NativeActor *attacker, uint32_t bodyPart);
         void OnSuppressedFatalFall(SDK::Player::NativeHuman &human, Shared::Combat::FatalFallReport::Cause cause);
+        // The local car just reported running into this network human: play
+        // the impact reaction now (retail C_human::Collision hits at once);
+        // the server's damage for that car then only sets health.
+        void PredictVehicleImpact(uint64_t carId, uint64_t targetId, const SDK::Player::Vector3 &direction);
 
       private:
         struct AppliedDeath {
@@ -55,6 +60,18 @@ namespace Mafia1Online::Features::Death {
         std::unordered_map<uint64_t, AppliedDeath> _applied;
         std::deque<PendingDamage> _pendingDamage;
         std::unordered_map<uint64_t, AppliedDamage> _appliedDamage;
+        struct PredictedImpact {
+            uint64_t carId = 0;
+            uint64_t targetId = 0;
+            float directionX = 0.0f;
+            float directionY = 0.0f;
+            float directionZ = 0.0f;
+        };
+        // Reported this frame, played on the next Update outside physics.
+        std::deque<PredictedImpact> _impactsToPlay;
+        // When each (car, target) last played a predicted impact. A health
+        // change is never predicted; only the reaction plays early.
+        std::map<std::pair<uint64_t, uint64_t>, std::chrono::steady_clock::time_point> _predictedImpacts;
         uint64_t _reportedFallNetworkId  = 0;
         uint64_t _reportedFallGeneration = 0;
         std::chrono::steady_clock::time_point _reportedFallAt;
@@ -64,4 +81,8 @@ namespace Mafia1Online::Features::Death {
     void UninstallDeathHooks();
     bool ReplayAuthoritativeDeath(SDK::Player::NativeHuman &human, uint16_t animationId);
     bool ReplayAuthoritativeDamage(SDK::Player::NativeHuman &human, const Shared::Combat::DamageEvent &event);
+    // A server-validated hit applied through the retail C_human::Hit with its
+    // real damage and attacker; the Hit hook does not suppress it.
+    bool ApplyAuthoritativeHit(SDK::Player::NativeHuman &human, SDK::Player::NativeHitType type, const SDK::Player::Vector3 &direction, const SDK::Player::Vector3 &position, float damage,
+                               SDK::Player::NativeActor *attacker, uint32_t bodyPart);
 } // namespace Mafia1Online::Features::Death

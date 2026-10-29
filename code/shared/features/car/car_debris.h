@@ -18,7 +18,7 @@ namespace Mafia1Online::Shared::Car {
     };
 
     struct DebrisSpawnReport {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarDebrisSpawnReport");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarDebrisSpawnReport");
         uint64_t carId = 0;
         uint64_t missionGeneration = 0;
         uint32_t localSequence = 0;
@@ -42,7 +42,7 @@ namespace Mafia1Online::Shared::Car {
     };
 
     struct DebrisMovement {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarDebrisMovement");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarDebrisMovement");
         uint64_t debrisId = 0;
         uint64_t missionGeneration = 0;
         uint32_t sequence = 0;
@@ -60,7 +60,7 @@ namespace Mafia1Online::Shared::Car {
     };
 
     struct DebrisGone {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarDebrisGone");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarDebrisGone");
         uint64_t debrisId = 0;
         uint64_t missionGeneration = 0;
 

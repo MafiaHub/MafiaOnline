@@ -14,7 +14,7 @@ namespace Mafia1Online::Scripting {
     using v8pp::metadata::param;
     using v8pp::metadata::property_docs;
 
-    std::unique_ptr<v8pp::class_<Door>> Door::_class;
+    std::unordered_map<v8::Isolate *, std::unique_ptr<v8pp::class_<Door>>> Door::_classes;
 
     Door::Door(uint64_t id): Framework::Scripting::Builtins::Entity(id) {
         if (!ResolveDoor()) {
@@ -46,7 +46,12 @@ namespace Mafia1Online::Scripting {
     double Door::GetMissionGeneration() const { const auto *door = ResolveDoor(); return door ? static_cast<double>(door->missionGeneration) : 0.0; }
     std::string Door::ToString() const { return "Door(" + std::to_string(GetId()) + ", " + GetFrameName() + ")"; }
 
+    void Door::UnregisterIsolate(v8::Isolate *isolate) {
+        _classes.erase(isolate);
+    }
+
     v8pp::class_<Door> &Door::GetClass(v8::Isolate *isolate) {
+        auto &_class = _classes[isolate];
         if (_class) { return *_class; }
         Framework::Scripting::Builtins::Entity::GetClass(isolate);
         _class = std::make_unique<v8pp::class_<Door>>(isolate, ClientCatalog(), "Door",

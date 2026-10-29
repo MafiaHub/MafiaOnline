@@ -10,6 +10,28 @@
 #include <string_view>
 
 namespace Mafia1Online::Scripting {
+    v8::Local<v8::Array> Weapon::HeldList(v8::Isolate *isolate, v8::Local<v8::Context> context, const Shared::Combat::State &state) {
+        auto weapons   = v8::Array::New(isolate);
+        uint32_t index = 0;
+        for (uint32_t weaponId = 0; weaponId < Shared::Combat::kWeaponSlots; ++weaponId) {
+            if (!IsSupported(weaponId) || (state.inventoryMask & (1u << weaponId)) == 0) {
+                continue;
+            }
+            auto item = Describe(isolate, context, weaponId).As<v8::Object>();
+            SetField(isolate, context, item, "loaded", v8::Uint32::New(isolate, state.ammo[weaponId].loaded));
+            SetField(isolate, context, item, "reserve", v8::Uint32::New(isolate, state.ammo[weaponId].reserve));
+            weapons->Set(context, index++, item).Check();
+        }
+        return weapons;
+    }
+
+    v8::Local<v8::Object> Weapon::Inventory(v8::Isolate *isolate, v8::Local<v8::Context> context, const Shared::Combat::State &state) {
+        auto inventory = v8::Object::New(isolate);
+        SetField(isolate, context, inventory, "selected", v8::Uint32::New(isolate, state.selectedWeapon));
+        SetField(isolate, context, inventory, "weapons", HeldList(isolate, context, state));
+        return inventory;
+    }
+
     namespace {
         void JS_WeaponList(const v8::FunctionCallbackInfo<v8::Value> &info) {
             auto *isolate  = info.GetIsolate();

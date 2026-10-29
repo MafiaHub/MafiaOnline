@@ -166,9 +166,31 @@ namespace Mafia1Online::Features::Car {
         if (!actor || !actor->Frame() || !debris) {
             return;
         }
-        const glm::vec3 direction = glm::normalize(debris->rotation * glm::vec3(0.0f, 0.0f, 1.0f));
-        actor->Frame()->SetWorldPosition({debris->position.x, debris->position.y, debris->position.z});
-        actor->Frame()->SetDirection({direction.x, direction.y, direction.z}, RollForDirection(debris->rotation, direction));
+        // The controller simulates the part; native physics here would pull
+        // it along its own path between poses.
+        actor->SetNetworkControlled(true);
+        const double clockNow = static_cast<double>(MafiaNet::GetTimeUS()) * 0.001;
+        const MafiaNet::Time transformTime = debris->GetLastTransformTime();
+        if (live.snapshots.Empty() || transformTime != live.lastTransformTime) {
+            live.lastTransformTime = transformTime;
+            Framework::Utils::TransformSnapshot received {debris->position, glm::vec3(0.0f), glm::normalize(debris->rotation)};
+            // Extrapolation over a late packet needs a velocity the stream
+            // does not carry: the last two poses give it.
+            const double sinceNewest = live.snapshots.Empty() ? 0.0 : clockNow - live.newestAt;
+            if (sinceNewest > 1.0) {
+                received.velocity = (received.position - live.newestPosition) * static_cast<float>(1000.0 / sinceNewest);
+            }
+            live.snapshots.Push(received, static_cast<MafiaNet::Time>(clockNow), clockNow);
+            live.newestAt       = clockNow;
+            live.newestPosition = received.position;
+        }
+        Framework::Utils::TransformSnapshot pose;
+        if (!live.snapshots.Sample(live.snapshots.RenderTimeMs(clockNow), pose)) {
+            return;
+        }
+        const glm::vec3 direction = glm::normalize(pose.rotation * glm::vec3(0.0f, 0.0f, 1.0f));
+        actor->Frame()->SetWorldPosition({pose.position.x, pose.position.y, pose.position.z});
+        actor->Frame()->SetDirection({direction.x, direction.y, direction.z}, RollForDirection(pose.rotation, direction));
         actor->Frame()->Update();
     }
 
@@ -228,6 +250,13 @@ namespace Mafia1Online::Features::Car {
                 return;
             }
             if (debris->controllerGuid == myGuid) {
+                // Handed over to this client: its physics runs the part again.
+                if (!live->second.snapshots.Empty()) {
+                    live->second.snapshots.Clear();
+                    if (auto *actor = static_cast<SDK::Player::NativeActor *>(world.NativeObjects().Resolve(live->second.handle))) {
+                        actor->SetNetworkControlled(false);
+                    }
+                }
                 ReportMovement(world, id, live->second);
             }
             else {

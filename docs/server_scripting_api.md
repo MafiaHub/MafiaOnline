@@ -1,7 +1,7 @@
 # Server scripting API
 
 Server resources run in Node.js. Mafia1Online adds `Player`, `Vehicle`,
-`Pickup`, `Door`, `Sound`, `Weapon`, and `World` to the framework scripting globals.
+`Pickup`, `Door`, `MapObject`, `Sound`, `Weapon`, and `World` to the framework scripting globals.
 Use these bindings for authoritative game state. Client resources handle
 presentation such as HUD, fade, camera and local sounds; see the
 [client API](client_scripting_api.md).
@@ -30,7 +30,7 @@ Events.on("playerCommand", (player, command) => {
 });
 ```
 
-See [the sample gamemode](../resources/sample-gamemode/server/main.js) for
+See [the Free Ride gamemode](../resources/freeride/server/main.js) for
 mission loading, vehicle commands, respawning, and server to client events.
 
 ## API map
@@ -38,10 +38,19 @@ mission loading, vehicle commands, respawning, and server to client events.
 | Area | Entry points | Purpose |
 | --- | --- | --- |
 | Players | `World.getPlayers()`, `Player` | Lives, health, inventory, seats, chat, connection details. |
-| Vehicles | `Vehicle.spawn()`, `World.getVehicles()` | Cars, occupancy, native damage, engine and physics commands. |
+| Vehicles | `Vehicle.spawn()`, `World.getVehicles()` | Cars, occupancy, native damage, engine and physics commands; traffic cars the simulation host drives. |
+| Pedestrians | `Pedestrian.getAll()`, `Pedestrian.setDensity()` | The city's walkers the simulation host runs around every player. |
+| NPCs | `Npc.spawn()`, `Npc.getAll()`, `Npc.getInRange()` | Humans the host runs with the retail AI: gangsters, policemen, thrown-out traffic drivers, and scripted NPCs that follow, walk, drive and fight on command. |
+| Police | `Police.getRecord()`, `Police.setWanted()` | Each player's retail crime record, wanted level and the officers it sends. |
+| Taxi | `Taxi.setHailable()`, `Taxi.board()` | Walkers hailing players' cabs the retail way, and the NPC passengers they become. |
+| Railways | `Railway.getAll()`, `Railway.getInRange()` | The mission's trams and metro trains, which the host runs and every player sees. |
+| Bridges | `Bridge.getAll()`, `Bridge.get()` | The mission's drawbridges, which the host raises for its steamers and every player sees. |
+| Gas station attendants | `Pumper.getAll()`, `Pumper.setPrice()` | The retail attendants, who fuel players' cars at the pumps for the price the gamemode sets. |
 | Pickups and weapons | `Pickup.create()`, `Weapon` | World weapon items and the supported stock weapon catalog. |
 | Mission doors | `Door.create()`, `Door.getAll()` | Lock, use, swing and paired-leaf state shared across clients. |
-| World | `World` | Missions, weather, music, scene frames, fire, explosions. |
+| Map objects | `MapObject.create()`, `MapObject.getAll()` | Script-placed models with collision that can move, for custom maps. |
+| Fires and hoses | `Fire.create()`, `WaterJet.create()` | Fires that burn until water or a script puts them out, and the hoses and truck cannons that do it. |
+| World | `World` | Missions, weather, music, scene frames, fire, explosions, world prop repair. |
 | Positional audio | `Sound.create()`, `Sound.play()` | Persistent or one-shot world sounds. |
 | Events | `Events.on()`, `Events.onClient()` | Native transitions and client-originated messages. |
 
@@ -185,7 +194,7 @@ if (player.alive && player.trySpendMoney(price)) {
 }
 ```
 
-The game's native Free Ride score is one shared counter on each client, and retail scripts can change it locally (the stock pump subtracts 500 when fueling). `Player.money` is the authoritative per-player balance; mirror it to the native score HUD with client `Hud.setScore(LocalPlayer.money)`. For priced fuel, debit with `trySpendMoney` on the server and then call `Vehicle.setFuel` rather than treating the retail score deduction as a purchase.
+The game's native Free Ride score is one shared counter on each client, and retail scripts can change it locally (the stock pump subtracts 500 when fueling; the attendant here does not). `Player.money` is the authoritative per-player balance; mirror it to the native score HUD with client `Hud.setScore(LocalPlayer.money)`. For priced fuel at the stock pumps use `Pumper.setPrice`, which debits `Player.money`; elsewhere debit with `trySpendMoney` and then call `Vehicle.setFuel`.
 
 The camera target is a server-owned choice per observer. It remains selected
 across the observer's respawn and the target's despawn/respawn. While the
@@ -234,6 +243,9 @@ clients add it to the interpolated player position to pose the neck and back.
 - `nativeDamageRevision`: `number`. Revision of the native damage snapshot.
 - `meshRevision`: `number`. Revision of the accepted deformation checkpoint.
 - `seatCount`: `number`. Number of seats, 1 to 8.
+- `traffic`: `boolean`. True for a car of the city's traffic the simulation host spawned, also after a player took it (`vehicleTrafficTaken`).
+- `trafficKind`: `"none" | "civil" | "police" | "mafia"`. What kind of traffic car it is; none for a script car.
+- `hostDriven`: `boolean`. True while the simulation host drives it: its traffic driver or an NPC crew sits in it. Players only steal it or take a seat nobody holds.
 - `terminalState`: `number`. 0 active, 1 exploded, 2 native water contact, 3 fall volume or native invalid fall.
 - `missionGeneration`: `number`. Mission generation the vehicle belongs to.
 - `engineRevision`: `number`. Revision of the engine state.
@@ -270,6 +282,256 @@ paths, and the simulation controller then reports a fresh durable snapshot.
 `getDamageState()` may briefly return null while that report is pending.
 Repair does not move or upright a car; retail `CAR_REPAIR` does that and also
 resets seats and motion, so it is not used here.
+
+Traffic cars are ordinary `Vehicle` handles the server creates for the
+simulation host. While `hostDriven` is true their seats belong to the host's
+crew: a player either steals the driver's seat (the driver is thrown out and
+stays as a `driver` NPC) or takes a seat nobody holds, and the car becomes that
+player's (`vehicleTrafficTaken`). Police traffic cars stay closed to players.
+
+## Pedestrian
+
+The city's walkers. The simulation host runs them with the retail AI around
+every player; a walker that walks again after being retired is a new
+pedestrian.
+
+- `pedestrian.toString(): string` — Formats this pedestrian for logging. Returns: The pedestrian ID and model.
+- `model`: `string`. Retail .i3d model filename.
+- `position`: `Vector3`. Position the simulation host last reported.
+- `heading`: `number`. Facing in radians.
+- `alive`: `boolean`. False once it died; the corpse stays until it retires.
+- `umbrella`: `boolean`. Whether it holds a rain umbrella; a hit drops it.
+- `animation`: `number`. Retail traffic animation id; 6 is its walk.
+- `walkStyle`: `number`. Retail walk style, 0 to 4.
+- `pedestrian.remove(): boolean` — Asks the simulation host to retire it now; `pedestrianRetire` follows. Returns: False when it no longer exists or no host is attached.
+- `Pedestrian.getAll(): Pedestrian[]`, `Pedestrian.getInRange(position, radius): Pedestrian[]`, `Pedestrian.getCount(): number` — The current pedestrians.
+- `Pedestrian.setEnabled(enabled: boolean): boolean`, `Pedestrian.isEnabled(): boolean` — Turns pedestrian traffic on or off; off retires every pedestrian at once.
+- `Pedestrian.setDensity(density: number): boolean`, `Pedestrian.getDensity(): number` — 0 to 1 of the retail count around each group of players; existing ones retire naturally.
+- `Pedestrian.setCorpseLifetime(milliseconds: number): boolean`, `Pedestrian.getCorpseLifetime(): number` — How long a dead pedestrian stays, 0 to 3600000 (default 30000); 0 keeps it until every player is far away.
+
+## Npc
+
+An armed human the simulation host runs with the retail AI: a gangster
+pedestrian someone hit, a policeman the police sent, or a traffic driver a
+player threw out of its car. Every player sees it; its shots, hits and death
+are validated like a player's.
+
+- `npc.toString(): string` — Formats this NPC for logging. Returns: The NPC ID, kind and model.
+- `kind`: `string`. `"gangster"`, `"police"` or `"driver"`.
+- `model`: `string`. Retail .i3d model filename.
+- `position`: `Vector3`. Position the simulation host last reported.
+- `heading`: `number`. Facing in radians.
+- `alive`: `boolean`. False once it died; the corpse stays until it retires.
+- `health`: `number`. Health the simulation host last reported; a gangster starts at 200.
+- `weapon`: `number`. Retail item id of the weapon in hand, 0 for none; 10 is the Thompson.
+- `npc.getInventory(): Inventory | null` — The selected weapon and the held weapons the server records for it.
+- `npc.getThrownFromVehicle(): Vehicle | null` — The car a `driver` NPC was thrown out of when a player stole it; null for another kind or once that car is gone.
+- `npc.remove(): boolean` — Asks the simulation host to retire it now; `npcRetire` follows. This also removes a scripted NPC.
+- `Npc.getAll(): Npc[]`, `Npc.getInRange(position, radius): Npc[]`, `Npc.getCount(): number` — The current NPCs.
+
+### Scripted NPCs
+
+`Npc.spawn` creates a retail `C_entity` on the simulation host that the
+script gives tasks, the way a stock mission script drives its companions and
+enemies. Each task runs the calls the retail entity script command makes, so
+the retail AI does the walking, following, boarding, driving and fighting;
+every player sees it like any other NPC. Only kind `"scripted"` NPCs take
+tasks.
+
+- `Npc.spawn(model: string, position, heading?: number, options?): Npc | null` — Spawns it. `options`: `health` (default 100), `behaviour`, `weapon`, `ammo`, `reserve` (a weapon to hold from the start) and `virtualWorld` (only players in that world see it; default every world). The handle works at once; `npcSpawn` follows once the host created it, `npcRetire` if it could not (an unknown model). Null when no simulation host is attached, no mission is loaded, 64 scripted NPCs exist or an argument is unusable.
+- `behaviour`: `string`. How the retail AI rates others (`ai_logs::Event` by behaviour class; players count as guards, players on police duty (`Police.setOfficer`) as policemen):
+  - `"neutral"` (default, reacts on hit): ignores players until one aims at or shoots it.
+  - `"friendly"` (guard): every player and every friendly NPC is a friend; gangsters are enemies it fights on sight.
+  - `"hostile"` (moves away, like the gangsters a hit pedestrian becomes): every player and friendly NPC is an enemy.
+  - A player on police duty is a friend to `"neutral"` NPCs (which do not turn on a friend that hits them), unknown to `"friendly"` ones and neutral to `"hostile"` ones until one attacks the other.
+- Every task method returns a task id (0 when refused) and replaces the task before it, which ends as `"cancelled"`. `npcTaskComplete` reports how each ends.
+  - `npc.follow(target: Player | Npc, distance = 2): number` — `Entity_ActionFollow`: follows, runs to catch up and turns towards the target, until another task or the target dies or leaves. It resumes after a fight.
+  - `npc.walkTo(position, { run?, radius?, direct? }): number` — `EntityMoveToFrame`: walks (or runs) over the mission's pedestrian paths (`check.bin`) to within `radius` (default 0.5). Completed on arrival; failed when the path is not found three times. A room the paths do not reach (a map-object interior, the paths' nodes being out of sight) has no way there: with `direct: true` it walks in a straight line instead, the way a retail entity steps along its script path (`AI_human_goto_target` once a frame, as `C_entity::scriptTick` does, with the entity's AI asleep as the script's `set_state SLEEP` leaves it). Every player sees it walk with its walk or run animation; walls and other actors stop it, and a walk that gains less than 0.3 in 3 seconds fails. Give a route of several stops as several walks.
+  - `npc.enterVehicle(vehicle: Vehicle, seat = 0, { run? }): number` — `Entity_MoveToCar` to the door, then `Enemy_UseCar`'s `Use_Actor` within 3 of a nearly still car. The car must be a script's car with no player in it, not a traffic car: the simulation host drives it while a scripted NPC boards or sits in it, and players cannot get in meanwhile. Completed once seated. A passenger seat (1 and up) of any car a player drives works too: the player keeps driving it, the NPC walks to the door once the car stands nearly still and rides along, seated in that car on every client (`npc.exitVehicle()` gets it out the same way). The Taxi module boards its passengers so.
+  - `npc.exitVehicle(): number` — `Enemy_UseCar` leave once the car is nearly still. Completed once out.
+  - `npc.driveTo(position): number` — `Entity_CarMoveTo`: drives the car it sits in as driver over the road graph (`road.bin`) and stops there. Completed on arrival, failed when the retail driver gives up or is blocked.
+  - `npc.attack(target: Player | Npc): number` — `Entity_ActionFire`: picks its best weapon, chases to its range and shoots (from a car seat it shoots out of the window). Completed when the target is dead.
+  - `npc.stop(): number` — `Entity_ActionsClear`: drops every action. Completed at once.
+- `npc.face(target: number | position): boolean` — Turns it on the spot to a heading in radians or towards a point (`ACTOR_SETDIR`). A task that moves it turns it again.
+- `npc.giveWeapon(weaponId, ammo?, reserve?): boolean` — `HUMAN_ADDWEAPON` on its native inventory; the AI chooses what it holds. `getInventory()` shows it once the host reports it.
+- `npc.setHealth(health): boolean` — Sets its health (above 0).
+- `npc.playAnimation(name, { loop? }): boolean` — Plays a stock human clip, a bare `.i3d` name such as `"x barman stativ.i3d"`, the way a retail mission script's `PERSON_PLAYANIM` does (`C_human::Do_PlayAnim(name, simple, 1)`): looping by default, once with `loop: false`, after which it stands again. It plays on the simulation host and on every player's copy, also for players who see the NPC later (a one-shot clip only for those who saw it start). It ends the running task (`"cancelled"`), and any task stops the clip. A clip the game does not have shows nothing. `npc.stopAnimation()` stops it (`PERSON_STOPANIM`), and `npc.animation` reads the clip, an empty string for none.
+- `npc.say(line: number): boolean` — Says a retail voice line (`C_human::NewScream(line)`: `tables/voices.def` group `line - 2`) in the NPC's voice on every player that streams it, positioned on its head and cutting off the line it was saying; later viewers do not replay it. `npc.voice` (0 to 39, `C_human` `m_uVoice`) is fixed at spawn: the `voice` spawn option, else retail's ranges (police 10-11, gangsters 12-16, thrown-out drivers 26-28, otherwise 12; women in retail traffic use 29-31). Ids the game uses: 6-8 a group event, 15-16 seeing a body, 21-23 finding someone, 33-36 ready to fight, 45-50 a fight spotted, 61-65 freezing, 66-69 panic, 70-74 searching, 75-78 giving up, 79-83 hit, 84 a strong leg hit, 85-91 pain, 92-93 hit while dying, 132-134 a car steal refused, 137-138 out of fuel, 139-144 police halt, 145-146 police grab, 147-149 police grab of an armed man, 150-151 a police car warning, 152-157 police notifying a crime, 161-167 thrown out of a car (reM `C_human.cpp`, `C_player.cpp` and the `C_entity` talk table). Other ids play whatever line that group holds; a voice with no sound for it says nothing.
+- `npc.getTask(): { id, task } | null` — The task still running.
+- `npc.getVehicle(): Vehicle | null` — The car it sits in.
+
+A scripted NPC never retires by distance. A dead one stays for 60 seconds,
+then goes (`npcRetire`); `npc.remove()` removes it earlier. `npcDamage` and
+`npcDeath` fire for it like for any NPC. `npc.setVirtualWorld()` changes which
+players see it; the host runs it in its one retail world, so it still meets
+players of every world there.
+
+```js
+// A policeman walks to a cell door, turns to it and goes.
+const officer = Npc.spawn("pol01.i3d", { x: -1890.5, y: -5.2, z: 18.1 }, Math.PI, { behaviour: "neutral", virtualWorld: 7 });
+let walk = 0;
+Events.on("npcSpawn", (npc) => {
+    if (officer && npc.id === officer.id) walk = officer.walkTo({ x: -1884.0, y: -5.2, z: 24.6 });
+});
+Events.on("npcTaskComplete", (npc, info) => {
+    if (!officer || npc.id !== officer.id || info.id !== walk) return;
+    if (info.success) officer.face({ x: -1884.0, y: -5.2, z: 26.0 });
+    setTimeout(() => officer.remove(), 5000);
+});
+
+// A companion that follows a player and fights for them.
+const guard = Npc.spawn("frank.i3d", player.position, 0, { behaviour: "friendly", weapon: 10, reserve: 200 });
+guard?.follow(player, 2.5);
+```
+
+Not supported yet: a companion that boards its leader's car by itself (it
+walks to the car but does not board; `npc.enterVehicle(car, seat)` with a
+passenger seat does), and turning a running NPC friendly or hostile after it
+spawned.
+
+```js
+// A barman behind the counter, as the retail Morello's bar script has him:
+// standing, then wiping the counter.
+const barman = Npc.spawn("Luigi.i3d", { x: -1776.1, y: -5.44, z: 10.26 }, -3.07, { virtualWorld: 0 });
+Events.on("npcSpawn", (npc) => {
+    if (!barman || npc.id !== barman.id) return;
+    barman.playAnimation("x barman stativ.i3d");
+    setTimeout(() => barman.playAnimation("x barman stul.i3d", { loop: false }), 7000);
+});
+```
+
+## Police
+
+The retail police, which the simulation host runs for every player. Officers
+come from police walkers and from the traffic's police cars, which also chase
+players and set up roadblocks.
+
+- `Police.getRecord(player: Player): PoliceRecord | null` — The player's crime record as the host last reported it; null when the player is not spawned.
+- `Police.setWanted(player: Player, level: number): boolean` — Raises the record to 0 none, 1 minor, 2 arrest or 3 lethal, which sends the police the retail way, or lowers it (calling off the officers first). `playerWantedChange` follows. False when the player is not spawned, no simulation host is attached, or the police are off and the level would rise.
+- `Police.clear(player: Player): boolean` — Settles the record and calls off every officer after the player.
+- `Police.setEnabled(enabled: boolean): void`, `Police.isEnabled(): boolean` — Turns the police reaction to crimes on or off for everyone. While off, crimes raise nothing (no `playerCrime`), `Police.setWanted` cannot raise a level and a hit officer opens no new case; officers already on a case keep it until `Police.clear`.
+- `Police.setOfficer(player: Player, officer: boolean): boolean`, `Police.isOfficer(player: Player): boolean` — Puts a player on police duty for the retail police, the way retail treats its own officers: the host keeps no crime record for them (retail records only its player and the people a mission script adds, never an officer), so no crime, wanted level, case, arrest, fine or car hunt touches them, and NPCs rate them as a policeman (the behaviour class retail gives its police walkers). A record they had is settled at once (`playerWantedChange` to 0) and `Police.setWanted` cannot raise it. `false` makes them a citizen again with a clean record. It lasts until changed or the player leaves; false only for an unknown player.
+- `Police.sendBackup(player: Player): number` — Sends a police car with two officers after a wanted player, the retail reinforcements a rising wanted level brings (`C_shvestky::DalsiChalpiDoPartie`): it sets out from a road about 140 m away and hunts them as their level says (kill, arrest or pursue), and its officers join the NPCs as kind `police`. `policeBackup` answers whether it set out (the police pool needs two free officers). Returns the request id, or 0 when the player is not wanted, is an officer, the police are off or no simulation host is attached.
+
+## Taxi
+
+Retail taxi passengers. Single player lets the walkers hail the player's cab
+once the mission script enables it (`taxidriver_enable`): in a taxi model at
+20 m/s or less with no passenger aboard and nobody after them, a walker 20 to
+90 m ahead within 36 degrees of the cab's heading starts waving
+(`GeneratePassengerForTaxi`, 0x44f7d0, on a 0.5 to 2.1 s countdown), turns
+to the cab and keeps waving (`MavaNaTaxi`, 0x451ff0); once the cab stands
+still within 10 m it becomes a `system\taxi_pas.dat` passenger, boards the
+back seat, shows the destination and pays fare plus fare times the time left
+on arrival. The simulation host runs that hailing for every player a script
+allows, with each player's own countdown, police record and taxi; the waves
+show on every client. The script decides the rest.
+
+- `Taxi.setHailable(player: Player, hailable: boolean): boolean`, `Taxi.isHailable(player): boolean` — Whether walkers may hail the player's cab (retail `EnableTaxiDriver`, per player). Retail's other conditions still apply on the host: the driver's seat of a taxi model (`taxi`, `fordapicktaxi`, `phantomtaxi` and retail's hot rods `hotrodp2/4/5`, `tbirdold`, `fordhot`, `blackdragon`), no passenger aboard, no officer after the player, a mission with `taxi_point` frames (both city maps; not the countryside). Off ends their waves. False for an unknown player.
+- `Taxi.isAvailable(): boolean` — A simulation host runs the walkers, so hails can come at all.
+- `Taxi.getHail(pedestrian): { player, vehicle, pickedUp } | null` — Whom a walker waves at.
+- `Taxi.decline(pedestrian): boolean` — Ends the wave; the walker walks on.
+- `Taxi.board(player: Player, pedestrian: Pedestrian, seat?: number): Npc | null` — Makes the walker hailing the player their passenger: a scripted NPC (`Npc.spawn` of the walker's model) takes its place where it stands on the host, players swap the walker for it where they see it, and it gets into the player's car (`npc.enterVehicle`) on retail's seat (seat 3 of a car with more than three seats, else seat 1, else the first free one). The player keeps driving. Null when the walker does not hail this player, the player does not drive a car with a free passenger seat or already has a passenger, or no NPC can be made.
+- `Taxi.setDestination(passenger: Npc, position | null, radius = 15): boolean` — Where the ride goes. `taxiArrive` follows once the cab stands still (0.5 m/s or less) within the radius, as `taxi_pas.dat` waits for it.
+- `Taxi.dropOff(passenger: Npc): boolean` — Ends the ride: the passenger gets out once the cab is nearly still, walks a few metres away and is removed once no player is within 90 m (at most a minute later).
+- `Taxi.getPassenger(player): Npc | null`, `Taxi.getRide(passenger): TaxiRide | null` — The player's passenger (boarding or seated) and a ride's `player`, `vehicle`, `seat`, `phase` (`"boarding"`, `"riding"`, `"leaving"`, `"released"`), `destination`, `radius` and `arrived`.
+
+The passenger also gets out without being told when the driver leaves the
+driver's seat (`taxi_pas.dat`'s owner check; `taxiPassengerExit` reason
+`driverLeft`). The events are `taxiHail`, `taxiHailEnd`, `taxiPickup`,
+`taxiPassengerEnter`, `taxiArrive` and `taxiPassengerExit`.
+
+```js
+Events.on("taxiPickup", (player, pedestrian) => {
+    const passenger = Taxi.board(player, pedestrian);
+    if (passenger) Taxi.setDestination(passenger, { x: -189.3, y: 18.1, z: -690.5 });
+});
+Events.on("taxiArrive", (player, passenger) => {
+    player.giveMoney(60);
+    Taxi.dropOff(passenger);
+});
+```
+
+## Railway
+
+The mission's trams and metro trains (freeride has 38). The simulation host
+runs them with the retail AI everywhere on the map and reports them ten times
+a second (twice a second to players farther than 600 units); every player sees them where the host has them,
+with the host's passengers. Players board and leave through the doors while a
+railway stands at a station; everyone sees a rider aboard it. A railway is named by its load index, which stays the same for the mission
+generation. A tram or train that runs into a player on foot knocks them down
+(`playerDamage` with cause `railway`, then `railwayHitPlayer`).
+
+- `Railway.getAll(): RailwayInfo[]` — Every railway the host has reported this mission, by load index.
+- `Railway.get(index: number): RailwayInfo | null` — One railway; null before the host reported it.
+- `Railway.getInRange(position, radius): RailwayInfo[]` — The railways whose body is within radius of position.
+- `Railway.getCount(): number` — The number of reported railways.
+
+```js
+Events.on("railwayHitPlayer", (player, info) => {
+    if (info.railway) console.log(`${player.nickname} was hit by railway ${info.railway.index} at ${info.railway.speed.toFixed(1)} u/s`);
+});
+```
+
+## Bridge
+
+The mission's drawbridges and the two steamers they open for. The simulation
+host runs them with the retail AI: a steamer reaching a bridge turns its road
+lights red, the bridge opens once no traffic car is on it, stays open while the
+steamer passes and closes again. The host reports them five times a second and
+on every phase change; every player sees the leaves, their collision, lights,
+sounds and the steamers where the host has them, a few hundred milliseconds
+later. A bridge is named by its load index. Read only.
+
+- `Bridge.getAll(): BridgeInfo[]` — Every bridge the host has reported this mission, by load index.
+- `Bridge.get(index: number): BridgeInfo | null` — One bridge; null before the host reported it.
+
+```js
+const raised = Bridge.getAll().filter((bridge) => bridge.raised);
+if (raised.length) console.log(`Bridges ${raised.map((bridge) => bridge.index).join(", ")} are up`);
+```
+
+## Pumper
+
+The mission's gas station attendants (retail `C_pumper`; the Free Ride scenes
+have three, one per pump). The simulation host runs them with the retail AI
+and every player sees the same attendant idle, smoke a cigarette and serve a
+car, with his footsteps, the fuel loop, the cigarette props and his lines. A
+driver who stops at a pump the retail way (fuel cap at the pump, slow, facing
+the pump's direction) with the engine off and presses the exit key gets the
+retail "use the pump" choice. The server checks that the player drives that
+car, that the attendant is free, the policy and the price; then the
+attendant greets, the car is aligned to the pump and locked with the camera on
+him, he walks over, fuels, says he is done and walks back, and the car is
+released. The server fills the network car's tank when his fuel animation
+ends its pumping and takes the money then: every litre the tank lacks, or as
+many as the player's money buys.
+
+The attendant cannot be startled: cars and shots do not panic him, and a
+blown-up pump leaves him standing. A service ends early (the attendant walks
+back, the car is released) when the driver leaves the seat or dies, the car
+goes, the simulation host leaves or three minutes pass.
+
+- `Pumper.getAll(): PumperInfo[]` — Every attendant the host has reported this mission, by load index.
+- `Pumper.get(index: number): PumperInfo | null` — One attendant; null before the host reported him.
+- `Pumper.setEnabled(enabled: boolean): void` — While off, a request is refused (`pumperRefused`, reason `disabled`); a service under way finishes.
+- `Pumper.isEnabled(): boolean` — True unless switched off.
+- `Pumper.setPrice(pricePerLitre: number): void` — 0 (the default) to 10000. A player who cannot pay for one litre is refused (reason `money`).
+- `Pumper.getPrice(): number` — The price per litre.
+
+`PumperInfo` has `index`, `position`, `state` (`idle`, `smoking`, `greeting`,
+`walking`, `fueling`, `turning`, `done`), `busy` (serving or walking back) and
+`vehicle` (the car he serves, or null).
+
+```js
+Pumper.setPrice(3);
+Events.on("vehicleRefuel", (vehicle, player, info) => {
+    if (player) player.sendMessage(`The attendant put in ${info.litres.toFixed(1)} litres for $${info.cost}.`);
+});
+Events.on("pumperRefused", (player, vehicle, info) => {
+    if (info.reason === "money") player.sendMessage(`A full tank costs $${info.cost}.`);
+});
+```
 
 ## Pickup
 
@@ -344,6 +606,135 @@ Events.on("doorStateChange", (door, player) => {
 });
 ```
 
+## MapObject
+
+`MapObject` places a stock model in the current mission for every client,
+like SA-MP's `CreateObject` and `MoveObject`. Players collide with it on foot,
+in cars and with bullets, and so do the simulation host's NPCs and traffic.
+Late joiners receive every object with its current pose and a running move.
+An object lasts until `destroy()`, until the mission changes, or until the
+resource that created it stops, so a restarted resource builds its map anew.
+
+```js
+const gate = MapObject.create("bar_fence.4ds", { x: -1200, y: 2, z: 300 }, { x: 0, y: Math.PI / 2, z: 0 });
+gate.moveTo({ x: -1200, y: -1, z: 300 }, 1.5); // sink into the ground at 1.5 m/s
+Events.on("mapObjectMoved", (object) => {
+    if (object.id === gate.id) console.log("gate open");
+});
+```
+
+- `MapObject.create(model, position, rotation?, options?): MapObject | null`.
+  `model` is a file under `models\`, such as `"bar_fence.4ds"` (`.i3d` works
+  too). `rotation` is a `Quaternion` or Euler angles in radians `{ x, y, z }`
+  (y is up), applied as `glm::quat(euler)`. `options`:
+  - `virtualWorld` (default `-1`, every world): only players in that world see
+    and collide with it. Reads back as `4294967295` for every world.
+  - `collision` (default `true`).
+  - `scale`: a number or `{ x, y, z }`, 0.01 to 100 per axis.
+  - `material`: a `tables\materials.def` id for collision built from the
+    model's mesh (0 to 46, not glass 24 or crash frames 41); for example 4
+    concrete, 13 wood, 19 metal structures, 27 wire fence, 38 brick.
+  It returns null at the limit of 4096 objects. A model the client cannot load
+  is logged there and shows nothing.
+- `MapObject.getAll()` lists every object.
+- `object.position` and `object.rotation` read the current pose, also while
+  it moves. Assigning either teleports the object and stops a running move
+  without `mapObjectMoved`. `object.virtualWorld` can be assigned (`-1` is
+  every world).
+- `object.moveTo(position, speed, rotation?)` moves it in a straight line at
+  `speed` m/s (up to 1000), turning evenly to `rotation` on the way. A move
+  that only turns takes `speed` as radians per second. A new move or a
+  teleport replaces a running one. `mapObjectMoved(object)` fires on arrival.
+- `object.stop()` halts it where it is; `object.moving` tells whether it moves.
+- `object.model`, `object.collision` and `object.missionGeneration` are read
+  only. `object.destroy()` removes it and its collision everywhere.
+
+Collision comes from the game's own data where it can. When the loaded mission
+places the same model and its `tree.klz` gives that placement collision, the
+object takes those primitives (faces, boxes, plates, spheres, cylinders) with
+their materials, so a lamp post keeps its cylinder and a traffic sign its box.
+Otherwise every triangle of the model's mesh collides from both sides, in
+concrete or the given `material`. Passing `material` always selects the mesh.
+Collision follows a moving object, but a player standing on one is not carried
+along; prefer slow moves for lifts. Only objects inside the mission's
+collision grid (the freeride grid spans x -3797 to 2849 and z -2222 to 1600,
+at any height) collide; one outside it is still drawn. AI path finding does
+not know about map objects.
+
+## Fire
+
+`Fire` is a fire that burns until it is put out, unlike the one-shot
+`World.createFire`. Every client within 250 units draws it from the retail
+effects in `tables\effects.tbl`: a ring of flame emitters ("Fire" in the
+centre with its smoke column, "Fire_no_smoke" around it) that the seed lays
+out the same way everywhere within `radius` and up to `height` above the
+position, one of the ten pooled retail fire lights (`C_game`'s
+`SpawnFireFrameSlot`, kept lit while it burns and faded out as `C_game::Tick`
+fades a retail fire's), the retail ignition sound and the `C_fire` loop
+(sound table 21 and 20). The server owns its `intensity`: the lower it is,
+the fewer flames burn; at 0 only "slow_smoke" is left for 40 seconds. A
+water jet hitting it adds the retail steam ("smoke_parnik"). Players standing
+in a burning fire take `damage` per second times the intensity, through the
+same fire damage path as a Molotov. A fire lasts until destroyed, the mission
+changes or the resource that created it stops; going out does not remove it.
+
+```js
+const fire = Fire.create({ x: -1157, y: -5.9, z: 280 }, { radius: 4, height: 5, toughness: 3, growth: 0.01 });
+const hose = WaterJet.create(player);           // a hose in the player's hands
+hose.aimAt(fire.position);                       // the water arcs onto the fire
+Events.on("fireExtinguished", (out, info) => {
+    if (out.id !== fire.id) return;
+    for (const { player, share } of info.contributors) player?.giveMoney(Math.round(400 * share));
+    setTimeout(() => out.destroy(), 20000);      // let it smoke a while
+});
+```
+
+- `Fire.create(position, options?): Fire | null`. `options`: `radius` 0.5–15
+  (default 3), `height` 0–12 (default 0; flames climb a facade), `intensity`
+  0–1 (default 1), `damage` per second at full intensity 0–200 (default 20),
+  `lifetime` in ms before it burns out by itself (0, the default, never),
+  `growth` in intensity per second regained three seconds after the last
+  water (default 0), `toughness` 0.1–20, how much harder than a 3-unit fire it
+  is to put out (default 1), `attachTo`, a `Vehicle` it burns on and follows,
+  and `virtualWorld` (default every world, `-1`). Null at 64 fires.
+- `Fire.getAll()`, `Fire.getInRange(position, radius)` list fires, burning or out.
+- `fire.intensity` (0–1, assignable: 0 puts it out with reason `"script"`,
+  above 0 sets it alight again), `fire.radius` (assignable), `fire.position`
+  (assignable; detaches it), `fire.height`, `fire.burning`, `fire.dousing`
+  (water hit it in the last 1.5 s), `fire.vehicle`, `fire.missionGeneration`.
+- `fire.douse(amount, player?)` takes intensity off, as an extinguisher or
+  bucket would, credited to the player; returns what is left (-1 for a gone
+  fire). `fire.extinguish()` puts it out at once. `fire.attachTo(vehicle | null)`.
+- `fire.getContributors()` lists `{ player, amount, share }`, most first,
+  where `share` sums to 1.
+- `fire.destroy()` removes it, smoke and all, without an event.
+
+`fireExtinguished(fire, { reason, contributors })` fires once the intensity
+reaches 0: `reason` is `"doused"` (water or `douse`), `"script"` or
+`"burnedOut"` (its lifetime ran out).
+
+### WaterJet
+
+A fire hose in a player's hands or a water cannon on a vehicle's roof. While
+aimed, every client within 150 units draws the retail hose effect
+"hadice" (effect 89: a hundred drops a second leaving its parent frame's x
+axis at 5 m/s and falling with gravity) from a nozzle frame turned and scaled
+so the drops fly at the jet's `pressure` on the lower ballistic arc that lands
+on the target, with the retail hydrant's water loop (sound table 327). The
+server douses every burning fire whose area (radius plus 1.5) holds the
+target, within 45 units of the nozzle: 0.14 intensity a second at pressure
+18, divided by the fire's toughness and by its radius over 3, credited to the
+player holding the hose (or the vehicle jet's `player`).
+
+- `WaterJet.create(source: Player | Vehicle, options?): WaterJet | null`.
+  `options`: `pressure` 8–30 m/s (default 18; the arc reaches about
+  pressure² / 9.8), `player` credited for a vehicle's jet, `virtualWorld`.
+  It starts closed. Null at 32 jets.
+- `jet.aimAt(position)` opens or turns it; `jet.stop()` closes it.
+- `jet.active`, `jet.target` (null while closed), `jet.source`,
+  `jet.pressure` (assignable), `jet.getNozzle()` (null while its holder is
+  dead or gone), `jet.destroy()`. `WaterJet.getAll()` lists them.
+
 ## World
 
 - `World.getMission(): string` — Returns the current mission. Returns: Stock or detected mod mission directory name.
@@ -364,6 +755,8 @@ Events.on("doorStateChange", (door, player) => {
 - `World.resetFrames(): void` — Restores every overridden frame to the scene's own visibility.
 - `World.setFrameOpacity(name: string, opacity: number): boolean` — Applies `FRM_SETALPHA` to a named static visual frame for everyone in this mission, including late joiners. Opacity is 0–1; returns false at the 128-frame limit.
 - `World.resetFrameOpacity(name?: string): void` — Restores the original opacity for one overridden frame or all of them. Mission changes clear these overrides.
+- `World.getPropDamage(): PropDamageInfo` — Counts the world props broken (`broken`) or moved (`moved`) in this mission since it loaded or was last repaired. City cache traffic signs are not counted.
+- `World.repairProps(): number` — Puts every broken phone booth, hydrant, trash bin, barrel and other breakable back up, with its collision, and every box, railing, mail box or can back where the mission placed it, for every client. Debris pieces and hydrant jets go. City cache traffic signs (`dopravni1B`–`8B`) are not synchronized and stay down on the client that knocked them over until the mission changes. Returns: How many props were broken or moved.
 - `World.createExplosion(position: Vector3 | { x: number; y: number; z: number }, options?: { radius?: number; damage?: number }): void` — Explodes for every client. The server applies player damage and fires playerDamage and playerDeath; clients damage cars and objects.
 - `World.createFire(position: Vector3 | { x: number; y: number; z: number }, options?: { duration?: number; radius?: number; damage?: number }): void` — Starts a fire every client sees; the server burns players standing in it.
 
@@ -418,17 +811,16 @@ Events.emitServer("shop:buy", { itemId: 6 });
 Use `Events.emitAllClients("shop:stock", { itemId: 6, remaining: 3 })`
 when every client should receive an update. Client requests are untrusted;
 the server handler must validate the sender and payload before changing state.
-The sample gamemode demonstrates both directions in
-[`server/main.js`](../resources/sample-gamemode/server/main.js) and
-[`client/main.js`](../resources/sample-gamemode/client/main.js).
+The Free Ride gamemode demonstrates both directions throughout, for example
+in [`server/races.js`](../resources/freeride/server/races.js) and
+[`client/hud.js`](../resources/freeride/client/hud.js).
 
-The [visual pickup demo](../resources/sample-gamemode/server/visual_pickups.js)
-shows a server-owned collectible drawn entirely by
-[client script](../resources/sample-gamemode/client/visual_pickups.js): the
-server publishes its position and active state, and validates mission
-generation, life, and distance before awarding ammo. Client-local models and
-labels cannot grant a reward on their own. Use `Pickup.create` instead when
-the item should be a native weapon pickup with the game's use interaction.
+Its [world events](../resources/freeride/server/world_events.js) show a
+server-owned objective drawn entirely by
+[client script](../resources/freeride/client/markers.js): the server
+publishes the supply crate's position and checks each player's distance
+itself before it creates native `Pickup.create` weapons and pays the finder.
+Client-local models and labels cannot grant a reward on their own.
 
 The table lists native server event arguments. `Events.onClient` event names
 are defined by your resources.
@@ -459,8 +851,10 @@ are defined by your resources.
 | `playerHealthChange` | `[player: Player, info: PlayerHealthInfo]` | Dispatched after an accepted health increase. |
 | `playerVoiceStart` | `[player: Player]` | The player's voice relay started receiving speech. |
 | `playerVoiceStop` | `[player: Player]` | The player's voice relay stopped receiving speech. |
-| `weaponDropped` | `[pickup: Pickup | null, player: Player | null, info: PickupEventInfo]` | Dispatched when a drop or a death leaves a weapon pickup in the world. |
+| `weaponDropped` | `[pickup: Pickup | null, player: Player | Npc | null, info: PickupEventInfo]` | Dispatched when a drop or a death leaves a weapon pickup in the world; a dead NPC's weapon names the NPC. |
 | `pickupTaken` | `[pickup: Pickup | null, player: Player | null, info: PickupEventInfo]` | Dispatched after the server moved a pickup into a player's inventory. The pickup handle is null when nothing is left on the ground. |
+| `mapObjectMoved` | `[object: MapObject]` | Dispatched after a MapObject.moveTo reached its target. A teleport, stop or new move does not dispatch it for the move it replaced. |
+| `fireExtinguished` | `[fire: Fire, info: FireExtinguishedInfo]` | Dispatched once a fire's intensity reaches 0. The fire stays, smoking, until destroyed. |
 | `vehicleSpawn` | `[vehicle: Vehicle]` | Dispatched after Vehicle.spawn created a vehicle. |
 | `vehicleDestroy` | `[vehicle: Vehicle]` | Dispatched immediately before Vehicle.destroy removes the vehicle. A mission change removes every vehicle without this event. |
 | `vehicleDamage` | `[vehicle: Vehicle, damage: VehicleDamage | null]` | Dispatched when the native per-part damage snapshot changes. |
@@ -474,6 +868,31 @@ are defined by your resources.
 | `vehiclePlayerExited` | `[vehicle: Vehicle, player: Player, info: VehicleSeatInfo]` | Dispatched when a player leaves a seat, including by death, respawn or removeFromVehicle. |
 | `vehiclePlayerExitBlocked` | `[vehicle: Vehicle, player: Player, info: VehicleSeatInfo]` | Dispatched when a script records an administrative blocked exit; native blocked exits use seat transfer or the retail emergency exit. |
 | `vehiclePlayerSeatChanged` | `[vehicle: Vehicle, player: Player, info: VehicleSeatInfo]` | Dispatched after a blocked-side exit moves the player into the paired seat. `info.fromSeat` is the prior seat. |
+| `vehicleTrafficTaken` | `[vehicle: Vehicle, player: Player, info: VehicleTrafficTakenInfo]` | A car the simulation host drove became the player's: the host stops driving it and the player's client simulates it. After a steal the player gets in with the next use, as in retail. |
+| `vehicleStealRefused` | `[vehicle: Vehicle, player: Player]` | The server refused a player's steal of a traffic car (out of reach, not standing still, taken first, driver gone); a repeated try within 500 ms is refused without this event. The player's client already played the pull-out; the driver stays in the car. |
+| `playerThrownOut` | `[player: Player, vehicle: Vehicle, info: PlayerThrownOutInfo]` | After `vehiclePlayerExited`, when a simulation host NPC pulled the player out of the seat. |
+| `railwayHitPlayer` | `[player: Player, info: RailwayHitInfo]` | A tram or metro train knocked a player on foot down, after `playerDamage` (cause `railway`). |
+| `vehicleRefuel` | `[vehicle: Vehicle, player: Player \| null, info: VehicleRefuelInfo]` | A gas station attendant's fuel animation ended its pumping: the server has set the fuel (`vehicleFuelChange`) and taken the money (`playerMoneyChange`). `info` has `pumper`, `litres` and `cost`. The car stays locked until he is back at his post. |
+| `pumperRefused` | `[player: Player, vehicle: Vehicle, info: PumperRefusedInfo]` | The server refused a driver's "use the pump": `info.reason` is `disabled`, `unavailable` (no simulation host), `busy`, `full` (less than half a litre missing) or `money` (with `info.cost` for the full tank). Nothing is locked. |
+| `pedestrianSpawn` | `[pedestrian: Pedestrian]` | The simulation host started a pedestrian near a player. |
+| `pedestrianRetire` | `[pedestrian: Pedestrian]` | Just before a pedestrian leaves the world: far from every player, a corpse past its lifetime, `Pedestrian.remove` or `setEnabled(false)`. A mission change removes every pedestrian without this event. |
+| `pedestrianDamage` | `[pedestrian: Pedestrian, info: PedestrianDamageInfo]` | After the simulation host applied a hit. |
+| `pedestrianDeath` | `[pedestrian: Pedestrian, killer: Player \| Vehicle \| null]` | Once when a pedestrian dies; killer is the last attacker. |
+| `npcSpawn` | `[npc: Npc]` | The simulation host started running an armed human: a gangster drawing a weapon, a policeman sent after a player, or a thrown-out traffic driver. |
+| `npcRetire` | `[npc: Npc]` | Just before an NPC leaves the world: no player within 150 units, `Npc.remove` or the host leaving. A mission change removes every NPC without this event. |
+| `npcDamage` | `[npc: Npc, info: NpcDamageInfo]` | After the simulation host applied a hit. |
+| `npcDeath` | `[npc: Npc, killer: Player \| Npc \| Vehicle \| null]` | Once when an NPC dies; the weapon in its hand drops as a pickup (`weaponDropped`). |
+| `npcTaskComplete` | `[npc: Npc, info: NpcTaskInfo]` | A scripted NPC's task ended: `info.id` (the id the task method returned), `info.task` (`"stop"`, `"follow"`, `"walkTo"`, `"enterVehicle"`, `"exitVehicle"`, `"driveTo"` or `"attack"`), `info.result` (`"completed"`, `"failed"` or `"cancelled"`) and `info.success`. |
+| `playerCrime` | `[player: Player, info: PlayerCrimeInfo]` | The police manager recorded a new crime of a player; the wanted level may rise with it. |
+| `playerWantedChange` | `[player: Player, info: PlayerWantedInfo]` | A player's wanted level changed: a crime, a script, an arrest, `Police.clear`, the officers losing the player, or a new simulation host taking over (to 0). |
+| `policeBackup` | `[player: Player, info: { id: number, sent: boolean }]` | The simulation host answered a `Police.sendBackup` request for this player: `sent` is false when the pool had too few free officers, no road was far enough away, the player was no longer wanted, or the host or mission changed. |
+| `taxiHail` | `[player: Player, pedestrian: Pedestrian, vehicle: Vehicle]` | A walker started waving at the cab of a player `Taxi.setHailable` allows. Every player sees the wave. |
+| `taxiHailEnd` | `[player: Player, pedestrian: Pedestrian, info: { reason: string }]` | It stopped waving: `"boarded"` (`Taxi.board`), `"ended"` (`Taxi.decline`, a panic or hit, the cab drove off or its driver is wanted, the walker out of range, or 15 s after `taxiPickup` without a board) or `"gone"`. |
+| `taxiPickup` | `[player: Player, pedestrian: Pedestrian, vehicle: Vehicle]` | Once, when the cab stands still within 10 m of the waving walker: retail's boarding moment. |
+| `taxiPassengerEnter` | `[player: Player, passenger: Npc, vehicle: Vehicle]` | A `Taxi.board` passenger sat down in the player's car. |
+| `taxiArrive` | `[player: Player, passenger: Npc, vehicle: Vehicle]` | Once, when the cab stands still within the radius of `Taxi.setDestination`'s point with the passenger aboard. |
+| `taxiPassengerExit` | `[player: Player \| null, passenger: Npc \| null, vehicle: Vehicle \| null, info: { reason: string, boarded: boolean }]` | The ride ended: `reason` is `"dropOff"`, `"driverLeft"`, `"failed"` (never got in), `"died"` or `"gone"`; `boarded` whether it had sat down. |
+| `playerArrest` | `[player: Player, officer: Npc, info: PlayerArrestInfo]` | An officer finished arresting or fining a player: both animations played to the end (an officer killed or called off before then caught nobody). Nothing else happens to the player; the script decides the outcome. The crime record is cleared. |
 | `playerWeaponEquip` | `[player: Player, info: WeaponActionInfo]` | Dispatched after the server accepted this controller action. |
 | `playerAimChange` | `[player: Player, info: WeaponActionInfo]` | Dispatched after the server accepted this controller action. |
 | `playerWeaponDrop` | `[player: Player, info: WeaponActionInfo]` | Dispatched after the server accepted this controller action. |
@@ -508,7 +927,7 @@ are defined by your resources.
 
 - `attacker: Player | null` — Player the damage is attributed to, or null when the source is absent or has disconnected.
 - `weaponId: number | null` — Validated weapon used for this damage: 0 is fists, 5 is a Molotov, 15 is a grenade. Null for script, fall, vehicle or unknown damage; remains known if the attacker disconnects after throwing.
-- `cause: "script" | "firearm" | "melee" | "explosion" | "fire" | "fall" | "drowning" | "vehicle"` — Server damage path. Explosions and fires can carry a weapon ID when they came from a thrown weapon.
+- `cause: "script" | "firearm" | "melee" | "explosion" | "fire" | "fall" | "drowning" | "vehicle" | "railway"` — Server damage path; `railway` is a tram or metro train running into the player on foot. Explosions and fires can carry a weapon ID when they came from a thrown weapon.
 - `oldHealth: number` — Health before the change.
 - `health: number` — Health after the change.
 - `amount: number` — oldHealth minus health; negative for healing.
@@ -550,10 +969,10 @@ are defined by your resources.
 
 **VehicleHitInfo** — An accepted firearm pellet against a vehicle.
 
-- `shooter: Player | null` — Player who fired, or null when they have left.
+- `shooter: Player | Npc | null` — Player or simulation host NPC who fired, or null when they are gone.
 - `damage: number` — Damage derived from the accepted shot.
 - `position: { x: number; y: number; z: number }` — World-space impact position.
-- `shotSequence: number` — Shooter's fire sequence.
+- `shotSequence: number` — Shooter's fire sequence; 0 for an NPC.
 - `pelletIndex: number` — Pellet of that shot.
 
 **VehiclePartInfo** — A loose part a vehicle shed.
@@ -562,6 +981,44 @@ are defined by your resources.
 - `type: number` — 1 wheel, 2 bumper, 3 light, 4 license plate, 5 mirror, 6 wing, 7 door.
 - `partIndex: number` — Native part index within the model.
 - `position: { x: number; y: number; z: number }` — Where the part came off.
+
+**VehicleTrafficTakenInfo** — How a player took a traffic car.
+
+- `stolen: boolean` — True when the player pulled its driver out, who stays as a `driver` NPC; false for a seat nobody held.
+
+**PlayerThrownOutInfo** — How an NPC threw a player out of a car.
+
+- `seat: number` — Seat the player was thrown out of; 0 is the driver.
+- `by: Npc` — The NPC that did it: a traffic driver taking its car back, a policeman before an arrest, or a gangster.
+
+**RailwayInfo** — A tram or metro train as the simulation host last reported it.
+
+- `index: number` — Load index within the mission, from 0.
+- `position: { x: number; y: number; z: number }`, `direction: { x: number; y: number; z: number }` — The body.
+- `speed: number` — Units per second.
+- `state` — Retail railway state: `"moving"`, `"stationArrival"`, `"passengersLeaving"`, `"passengersEntering"`, `"stationWait"`, `"scheduleWait"`, `"departing"`, `"collisionBraking"`, `"stopPointBraking"`, `"semaphoreBraking"`, `"driverHit"` (a bullet hit its driver; the host lets it go on after 30 seconds), `"followingRailway"` or `"unknown"`.
+- `wagons: RailwayWagonInfo[]` — Wagons behind the body, each with `position` and `direction`; empty for a tram, one for a freeride metro train.
+
+**BridgeInfo** — A drawbridge as the simulation host last reported it.
+
+- `index: number` — Load index within the mission, from 0.
+- `position: { x: number; y: number; z: number }` — The bridge frame, one of its two leaves.
+- `phase` — Retail bridge phase: `"closed"`, `"signaling"` (a steamer asked for it; the road lights are red), `"preparing"`, `"opening"`, `"open"`, `"closing"` or `"unknown"`.
+- `angle: number` — Leaf angle in radians, 0 closed; the retail bridges open to 50 degrees.
+- `raised: boolean` — Opening, open or closing. A player on foot who walks into the raised bridge dies, as in retail.
+
+**RailwayHitInfo** — A railway running into a player.
+
+- `railway: RailwayInfo | null` — The railway, as last reported.
+- `damage: number` — Damage applied: retail (|speed| - 2.5) × 4.2.
+
+**PedestrianDamageInfo** — A hit the simulation host applied to a pedestrian: `attacker: Player | Vehicle | null`, `hitType: number` (0 bullet, 1 hard knockdown, 2 melee, 3 explosion, 5 car impact), `damage`, `healthBefore`, `healthAfter`.
+
+**NpcDamageInfo** — A hit the simulation host applied to an NPC: `attacker: Player | Npc | Vehicle | null`, `hitType: number` (0 bullet, 1 hard knockdown, 2 melee, 3 explosion, 8 car impact), `damage` (before the body part scale), `healthBefore`, `healthAfter`.
+
+**PoliceRecord** — `level: number` (0 none, 1 minor, 2 arrest, 3 lethal), `crimes: string[]` (`"weaponSeen"`, `"firing"`, `"speeding"`, `"crashObject"`, `"crashCar"`, `"crashPedestrian"`, `"sidewalk"`, `"violence"`, `"redLight"`, `"carTheft"`, `"signDamage"`, `"assaultOnPolice"`, `"forcedArrest"`, `"policeCarRammed"`), `officers: number`.
+
+**PlayerCrimeInfo** — `crime`: one of the PoliceRecord crime names. **PlayerWantedInfo** — `level`, `previous`. **PlayerArrestInfo** — `kind: "arrest" | "fine"`.
 
 **VehicleSeatInfo** — An accepted seat transition.
 
@@ -584,8 +1041,23 @@ are defined by your resources.
   being relayed.
 - **Pickups.** Dropped and dead players' weapons become pickups for two
   minutes; scripts create their own with `Pickup.create`.
-- **Mission changes** remove every vehicle, pickup and sound and clear frame
-  overrides; weather and city music carry over.
+- **Mission changes** remove every vehicle, pickup, map object and sound and
+  clear frame overrides; weather and city music carry over.
+- **World props.** Breakables (phone booths, hydrants, trash bins, barrels and
+  the other scene models a car, bullet, explosion or bat knocks down) and
+  physical props (boxes, railings, mail boxes, cans) are the same for every
+  player. The client where a prop broke reports it and the others break theirs
+  the same way; a remote fuel pump bursts into flame and smoke there without
+  damage, which only the client that broke it applies. A physical prop that a
+  player (or the simulation host's traffic, NPCs and trains) sent somewhere new
+  is placed there for everyone; one a remote player's copy pushed on another
+  client goes back. Late joiners load the state without debris. The city cache
+  traffic signs (`dopravni1B`–`8B`) are the exception: they fall only for the
+  client that hit them and stay down until the mission changes. Each player has
+  at most 256 breaks standing until a repair, and everyone together 2048 (the
+  stock freeride scene has 1,044 breakables). Nothing repairs itself: call
+  `World.repairProps()` (the Free Ride gamemode does it every few minutes and lets
+  anyone call it once a minute). A mission change starts whole.
 
 ### Durable vehicle condition
 

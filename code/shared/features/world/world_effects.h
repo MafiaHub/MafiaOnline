@@ -11,7 +11,7 @@ namespace Mafia1Online::Shared::World {
     // generation is not the mission it has loaded; the server has already
     // applied any player damage.
     struct Explosion {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::WorldExplosion");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::WorldExplosion");
         static constexpr float kMaxRadius        = 30.0f;
         static constexpr float kMaxDamage        = 1000.0f;
 
@@ -34,7 +34,7 @@ namespace Mafia1Online::Shared::World {
     };
 
     struct Fire {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::WorldFire");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::WorldFire");
         static constexpr uint32_t kMaxLifeMs     = 60000;
         static constexpr float kMaxRadius        = 10.0f;
         static constexpr float kMaxDamage        = 200.0f;
@@ -60,7 +60,7 @@ namespace Mafia1Online::Shared::World {
 
     // A positional sound the game plays once and releases itself.
     struct PlaySound {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::WorldPlaySound");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::WorldPlaySound");
 
         uint64_t missionGeneration = 0;
         std::string wave;

@@ -1,6 +1,8 @@
 #include "world_service.h"
 
 #include "features/menu/menu_hooks.h"
+#include "features/simulation/simulation_config.h"
+#include "features/simulation/simulation_loop.h"
 #include "features/world/world_hooks.h"
 
 #include "shared/features/world/mission_actors.h"
@@ -14,6 +16,8 @@
 #include <mafia1/sdk/core/mission.h>
 #include <mafia1/sdk/core/system.h>
 #include <mafia1/sdk/menu/native_menu.h>
+#include <mafia1/sdk/traffic/native_traffic.h>
+#include <mafia1/sdk/traffic/native_traffic_car.h>
 #include <networking/network_peer.h>
 #include <networking/replication/replication_manager.h>
 
@@ -163,6 +167,13 @@ namespace Mafia1Online::Features::World {
             }
 
             game->SetTrafficVisible(false);
+            if (Features::Simulation::IsHost()) {
+                // The host runs pedestrians and car traffic for every
+                // player; the police freeze SetTrafficVisible also switched
+                // stays off.
+                SDK::Traffic::SetVisible(true);
+                SDK::Traffic::SetCarsDisabled(false);
+            }
             const auto *nativePlayer = game->Player();
             Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info(
                 "Native game initialized: player {:p}, player dead {}, death triggered {}, state {}, death timer {}",
@@ -174,7 +185,12 @@ namespace Mafia1Online::Features::World {
             Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Native mission '{}' loaded (generation {})", name, generation);
             ReportLoadState(generation, static_cast<uint8_t>(Shared::World::MissionLoadState::Ready));
             _inGameLoop = true;
-            SDK::Core::System::RunGameLoop();
+            if (Features::Simulation::IsHost()) {
+                Features::Simulation::RunLoop();
+            }
+            else {
+                SDK::Core::System::RunGameLoop();
+            }
             _inGameLoop = false;
             SDK::Core::Mission::Close(mission);
             SetNativeMissionActive(false);

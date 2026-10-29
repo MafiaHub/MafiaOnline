@@ -56,10 +56,41 @@ namespace Mafia1Online::Shared::Combat {
         uint16_t reserve = 0;
     };
 
+    // A shot's pellets: only the `count` that were fired travel (a pistol
+    // sends one, a shotgun up to kMaximumShotPellets).
+    inline void SerializePellets(MafiaNet::BitStream *stream, bool write, uint8_t &count, std::array<float, kMaximumShotPellets * 2> &scatterRandom,
+                                 std::array<PelletTrajectory, kMaximumShotPellets> &pellets) {
+        stream->Serialize(write, count);
+        if (!write && count > kMaximumShotPellets) {
+            count = 0;
+            stream->SetReadOffset(stream->GetNumberOfBitsUsed());
+            return;
+        }
+        for (uint8_t i = 0; i < count * 2; ++i) {
+            stream->Serialize(write, scatterRandom[i]);
+        }
+        for (uint8_t i = 0; i < count; ++i) {
+            auto &pellet = pellets[i];
+            stream->Serialize(write, pellet.x);
+            stream->Serialize(write, pellet.y);
+            stream->Serialize(write, pellet.z);
+            stream->Serialize(write, pellet.staticHit);
+            if (pellet.staticHit) {
+                stream->Serialize(write, pellet.hitX);
+                stream->Serialize(write, pellet.hitY);
+                stream->Serialize(write, pellet.hitZ);
+                stream->Serialize(write, pellet.normalX);
+                stream->Serialize(write, pellet.normalY);
+                stream->Serialize(write, pellet.normalZ);
+                stream->Serialize(write, pellet.materialId);
+            }
+        }
+    }
+
     // A complete, versioned state replaces all earlier states for this life.
     // Reliable delivery also repairs a missed action or a late join.
     struct State {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CombatState");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CombatState");
 
         uint64_t networkId         = 0;
         uint64_t missionGeneration = 0;
@@ -79,6 +110,9 @@ namespace Mafia1Online::Shared::Combat {
         float poseTargetOffsetX    = 0.0f;
         float poseTargetOffsetY    = 0.0f;
         float poseTargetOffsetZ    = 0.0f;
+        // The newest AimUpdate relay these aim fields include: a receiver
+        // that has applied a newer one keeps its own.
+        uint16_t aimSequence = 0;
         std::array<WeaponAmmo, kWeaponSlots> ammo {};
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {
@@ -100,6 +134,7 @@ namespace Mafia1Online::Shared::Combat {
             stream->Serialize(write, poseTargetOffsetX);
             stream->Serialize(write, poseTargetOffsetY);
             stream->Serialize(write, poseTargetOffsetZ);
+            stream->Serialize(write, aimSequence);
             for (auto &slot : ammo) {
                 stream->Serialize(write, slot.loaded);
                 stream->Serialize(write, slot.reserve);
@@ -110,7 +145,7 @@ namespace Mafia1Online::Shared::Combat {
     // Only the controller may submit an action. The server checks the life,
     // inventory, cadence and ammunition before publishing a result.
     struct Intent {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CombatIntent");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CombatIntent");
 
         uint64_t networkId             = 0;
         uint64_t missionGeneration     = 0;
@@ -171,23 +206,7 @@ namespace Mafia1Online::Shared::Combat {
                 stream->Serialize(write, nativeDirectionX);
                 stream->Serialize(write, nativeDirectionY);
                 stream->Serialize(write, nativeDirectionZ);
-                stream->Serialize(write, pelletCount);
-                for (auto &value : scatterRandom) {
-                    stream->Serialize(write, value);
-                }
-                for (auto &pellet : pellets) {
-                    stream->Serialize(write, pellet.x);
-                    stream->Serialize(write, pellet.y);
-                    stream->Serialize(write, pellet.z);
-                    stream->Serialize(write, pellet.staticHit);
-                    stream->Serialize(write, pellet.hitX);
-                    stream->Serialize(write, pellet.hitY);
-                    stream->Serialize(write, pellet.hitZ);
-                    stream->Serialize(write, pellet.normalX);
-                    stream->Serialize(write, pellet.normalY);
-                    stream->Serialize(write, pellet.normalZ);
-                    stream->Serialize(write, pellet.materialId);
-                }
+                SerializePellets(stream, write, pelletCount, scatterRandom, pellets);
             }
             stream->Serialize(write, poseTargetOffsetX);
             stream->Serialize(write, poseTargetOffsetY);
@@ -214,7 +233,7 @@ namespace Mafia1Online::Shared::Combat {
     // Discrete actions are ordered with states, and include the server's own
     // revision so clients can drop events from an obsolete life.
     struct Event {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CombatEvent");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CombatEvent");
 
         uint64_t networkId         = 0;
         uint64_t missionGeneration = 0;
@@ -264,23 +283,7 @@ namespace Mafia1Online::Shared::Combat {
                 stream->Serialize(write, nativeDirectionX);
                 stream->Serialize(write, nativeDirectionY);
                 stream->Serialize(write, nativeDirectionZ);
-                stream->Serialize(write, pelletCount);
-                for (auto &value : scatterRandom) {
-                    stream->Serialize(write, value);
-                }
-                for (auto &pellet : pellets) {
-                    stream->Serialize(write, pellet.x);
-                    stream->Serialize(write, pellet.y);
-                    stream->Serialize(write, pellet.z);
-                    stream->Serialize(write, pellet.staticHit);
-                    stream->Serialize(write, pellet.hitX);
-                    stream->Serialize(write, pellet.hitY);
-                    stream->Serialize(write, pellet.hitZ);
-                    stream->Serialize(write, pellet.normalX);
-                    stream->Serialize(write, pellet.normalY);
-                    stream->Serialize(write, pellet.normalZ);
-                    stream->Serialize(write, pellet.materialId);
-                }
+                SerializePellets(stream, write, pelletCount, scatterRandom, pellets);
             }
             if (action == Action::Melee) {
                 stream->Serialize(write, meleeIndex);

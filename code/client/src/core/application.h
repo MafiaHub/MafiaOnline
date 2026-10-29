@@ -1,9 +1,14 @@
 #pragma once
 
+#include <input/polling_input.h>
 #include <integrations/client/instance.h>
 
 #include "features/car/car_service.h"
 #include "features/camera/camera_follow_service.h"
+#include "features/npc/npc_host.h"
+#include "features/npc/npc_replicas.h"
+#include "features/pedestrian/pedestrian_replicas.h"
+#include "features/pedestrian/pedestrian_service.h"
 #include "features/car/debris_service.h"
 #include "features/chat/chat_service.h"
 #include "features/nametag/nametag_service.h"
@@ -11,17 +16,29 @@
 #include "features/combat/combat_service.h"
 #include "features/death/death_service.h"
 #include "features/door/door_service.h"
+#include "features/map_object/map_object_service.h"
 #include "features/effects/effects_service.h"
 #include "features/environment/environment_service.h"
 #include "features/hud/hud_service.h"
 #include "features/script/script_service.h"
 #include "features/sound/sound_service.h"
+#include "features/fire/fire_service.h"
 #include "features/player/player_service.h"
 #include "features/seat/seat_service.h"
+#include "features/traffic/road_barriers.h"
+#include "features/railway/railway_service.h"
+#include "features/bridge/bridge_service.h"
+#include "features/pumper/pumper_service.h"
+#include "features/props/props_service.h"
+#include "features/traffic/traffic_crew.h"
+#include "features/traffic/traffic_host.h"
 #include "features/web_ui/web_ui_service.h"
 #include "features/world/world_service.h"
 #include "features/mod/mod_service.h"
 #include "features/gameplay_menu/gameplay_menu_service.h"
+#include "features/voice/voice_input.h"
+#include "features/settings/remapped_input.h"
+#include "features/settings/settings_service.h"
 
 namespace Mafia1Online::Core {
     class Application final: public Framework::Integrations::Client::Instance {
@@ -35,6 +52,12 @@ namespace Mafia1Online::Core {
         void OnChatMessageReceived(const Framework::Networking::RPC::ChatMessage &message) override;
         void ModuleRegister(Framework::Scripting::Engine *engine) override;
         void PostScriptInit() override;
+
+        // Scripted Key.bind dispatch reads this source; LS3D's own input device
+        // is not exposed to the Framework, so keys are polled from Win32.
+        Framework::Input::IInput *GetBaseInput() const override {
+            return _input.get();
+        }
 
         // The directory the launcher loaded the client from; set before Init.
         void SetProjectPath(std::string projectPath) {
@@ -64,6 +87,41 @@ namespace Mafia1Online::Core {
             return _players;
         }
 
+        Features::Pedestrian::PedestrianService &Pedestrians() {
+            return _pedestrians;
+        }
+        Features::Pedestrian::PedestrianReplicaService &PedestrianReplicas() {
+            return _pedestrianReplicas;
+        }
+
+        Features::Npc::NpcHost &Npcs() {
+            return _npcs;
+        }
+
+        Features::Npc::NpcReplicaService &NpcReplicas() {
+            return _npcReplicas;
+        }
+
+        Features::Traffic::TrafficHost &Traffic() {
+            return _traffic;
+        }
+
+        Features::Traffic::TrafficCrewService &TrafficCrew() {
+            return _trafficCrew;
+        }
+        Features::Seat::SeatService &Seats() {
+            return _seats;
+        }
+        Features::Death::DeathService &Death() {
+            return _death;
+        }
+        Features::Railway::RailwayService &Railways() {
+            return _railways;
+        }
+        Features::Traffic::RoadBarrierService &RoadBarriers() {
+            return _roadBarriers;
+        }
+
         Features::Hud::HudService &Hud() {
             return _hud;
         }
@@ -72,8 +130,17 @@ namespace Mafia1Online::Core {
             return _sounds;
         }
 
+        Features::Settings::SettingsService &Settings() {
+            return _settings;
+        }
+
       private:
         void SubmitChatLine(const std::string &line);
+        // Chat, web UI and gameplay menus; absent on the simulation host.
+        void UpdatePlayerInterface();
+        void ConnectFromConfiguration();
+        // Script key moves from the settings screen apply to what Key.bind polls.
+        std::unique_ptr<Features::Settings::RemappedInput> _input = std::make_unique<Features::Settings::RemappedInput>();
         Features::Mod::ModService _mods;
         std::string _assetError;
         bool _autoEnterPending = false;
@@ -81,6 +148,17 @@ namespace Mafia1Online::Core {
         Features::Player::PlayerService _players;
         Features::Car::CarService _cars;
         Features::Camera::CameraFollowService _cameraFollow;
+        Features::Pedestrian::PedestrianService _pedestrians;
+        Features::Pedestrian::PedestrianReplicaService _pedestrianReplicas;
+        Features::Npc::NpcHost _npcs;
+        Features::Npc::NpcReplicaService _npcReplicas;
+        Features::Traffic::TrafficHost _traffic;
+        Features::Traffic::TrafficCrewService _trafficCrew;
+        Features::Railway::RailwayService _railways;
+        Features::Bridge::BridgeService _bridges;
+        Features::Pumper::PumperService _pumpers;
+        Features::Props::PropsService _props;
+        Features::Traffic::RoadBarrierService _roadBarriers;
         Features::Car::DebrisService _debris;
         Features::Seat::SeatService _seats;
         Features::Combat::CombatService _combat;
@@ -89,13 +167,18 @@ namespace Mafia1Online::Core {
         Features::Nametag::NametagService _nametags;
         Features::Pickup::PickupService _pickups;
         Features::Door::DoorService _doors;
+        Features::MapObject::MapObjectService _mapObjects;
         Features::WebUi::WebUiService _webUi;
         Features::GameplayMenu::GameplayMenuService _gameplayMenus;
         Features::Environment::EnvironmentService _environment;
         Features::Sound::SoundService _sounds;
+        Features::Fire::FireService _fires;
         Features::Effects::EffectsService _effects;
         Features::Hud::HudService _hud;
         Features::Script::ScriptService _script;
+        Features::Voice::VoiceInput _voiceInput;
+        Features::Settings::SettingsService _settings;
+        uint64_t _settingsMissionGeneration = 0;
         std::string _projectPath;
         bool _quickJoinConnectIssued = false;
         bool _quickJoinPlayIssued    = false;

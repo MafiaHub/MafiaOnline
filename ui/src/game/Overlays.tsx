@@ -2,7 +2,8 @@ import * as stylex from '@stylexjs/stylex';
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { send } from '../bridge';
 import { Heading, Panel } from '../components/ui';
-import { pauseOpen, roster, state } from '../store';
+import { SettingsScreen } from '../settings/SettingsScreen';
+import { pauseOpen, roster, settingsOpen, state } from '../store';
 import { colors, fonts, motion } from '../tokens.stylex';
 import { Roster } from './Roster';
 
@@ -120,10 +121,11 @@ export function Scoreboard() {
     );
 }
 
-type Action = 'resume' | 'disconnect' | 'quit';
+type Action = 'resume' | 'settings' | 'disconnect' | 'quit';
 
 const actions: { id: Action; label: string }[] = [
     { id: 'resume', label: 'Resume' },
+    { id: 'settings', label: 'Settings' },
     { id: 'disconnect', label: 'Disconnect' },
     { id: 'quit', label: 'Quit to desktop' },
 ];
@@ -143,6 +145,11 @@ export function PauseMenu() {
                 close();
                 return;
             }
+            if (action === 'settings') {
+                setConfirm(null);
+                settingsOpen.value = true;
+                return;
+            }
             if (confirm !== action) {
                 setConfirm(action);
                 return;
@@ -152,6 +159,10 @@ export function PauseMenu() {
         };
         runRef.current = run;
         const onKey = (event: KeyboardEvent) => {
+            // The settings screen handles its own keys.
+            if (settingsOpen.value) {
+                return;
+            }
             if (event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'Tab') {
                 event.preventDefault();
                 const delta = event.key === 'ArrowUp' || (event.key === 'Tab' && event.shiftKey) ? -1 : 1;
@@ -166,6 +177,13 @@ export function PauseMenu() {
         return () => window.removeEventListener('keydown', onKey);
     }, [selected, confirm]);
 
+    if (settingsOpen.value) {
+        return (
+            <div {...stylex.props(styles.center, styles.dim)}>
+                <SettingsScreen onClose={() => (settingsOpen.value = false)} />
+            </div>
+        );
+    }
     return (
         <div {...stylex.props(styles.center, styles.dim)}>
             <div {...stylex.props(styles.pause)}>

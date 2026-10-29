@@ -306,6 +306,48 @@ declare class Door extends Entity {
     static getAll(): Door[];
 }
 
+/** Euler angles in radians about x, y (up) and z, applied as glm::quat(euler). */
+type MapObjectEuler = { x: number; y: number; z: number };
+
+interface MapObjectOptions {
+    /** Only players in this world see and collide with it. Defaults to every world (-1, read back as 4294967295). */
+    virtualWorld?: number;
+    /** Players, cars and bullets collide with it. Defaults to true. */
+    collision?: boolean;
+    /** 0.01 to 100 per axis; a number scales evenly. */
+    scale?: number | ServerVector3 | { x: number; y: number; z: number };
+    /**
+     * A tables\materials.def id (0 to 46, not glass 24 or crash frames 41) for collision built from the model's mesh.
+     * Omitted, the object takes the mission's own collision for the model where the mission places one with some, and the mesh in concrete (4) otherwise.
+     */
+    material?: number;
+}
+
+/** A script-placed world object built from a stock model, like SA-MP's CreateObject. It lasts until destroyed, a mission change, or the stop of the resource that created it. */
+declare class MapObject extends Entity {
+    constructor(id: number);
+    readonly model: string;
+    readonly collision: boolean;
+    readonly moving: boolean;
+    readonly missionGeneration: number;
+    /** Current position, also while moving. Assigning teleports and stops a running move without mapObjectMoved. */
+    position: ServerVector3;
+    /** Current rotation. Accepts a Quaternion or Euler radians; stops a running move. */
+    rotation: ServerQuaternion;
+    /** -1 assigns every world. */
+    virtualWorld: number;
+    /** Moves smoothly at speed m/s (radians per second for a turn in place), turning evenly to rotation. Fires mapObjectMoved on arrival. */
+    moveTo(position: ServerPosition, speed: number, rotation?: ServerQuaternion | MapObjectEuler): boolean;
+    moveTo(x: number, y: number, z: number, speed: number, rotation?: ServerQuaternion | MapObjectEuler): boolean;
+    /** Stops a running move where the object is. Does not fire mapObjectMoved. */
+    stop(): boolean;
+    destroy(): boolean;
+    toString(): string;
+    /** model is a stock file under models\, such as "bar_fence.4ds" (.i3d is accepted). Null at the limit of 4096 objects. */
+    static create(model: string, position: ServerPosition, rotation?: ServerQuaternion | MapObjectEuler | null, options?: MapObjectOptions): MapObject | null;
+    static getAll(): MapObject[];
+}
+
 declare const Weapon: {
     list(): WeaponInfo[];
     get(weaponId: number): WeaponInfo | null;
@@ -414,6 +456,7 @@ interface ServerEventMap {
     doorStateChange: [door: Door, player: Player | null];
     doorLockChange: [door: Door, player: null];
     doorInteractionChange: [door: Door, player: null];
+    mapObjectMoved: [object: MapObject];
     playerSpawn: [player: Player];
     playerRespawn: [player: Player];
     playerDespawn: [player: Player];

@@ -6,7 +6,7 @@
 
 namespace Mafia1Online::Shared::Car {
     struct ExplosionIntent {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarExplosionIntent");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarExplosionIntent");
 
         uint64_t networkId         = 0;
         uint64_t missionGeneration = 0;

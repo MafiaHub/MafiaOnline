@@ -2,8 +2,10 @@
 
 #include "hud_scripting.h"
 #include "door_scripting.h"
+#include "map_scripting.h"
 #include "pickup_scripting.h"
 #include "player_scripting.h"
+#include "settings_scripting.h"
 #include "world_scripting.h"
 #include "visual_scripting.h"
 
@@ -130,6 +132,8 @@ namespace Mafia1Online::Scripting {
         ClientWorld::Register(isolate, global);
         ClientHud::Register(isolate, global);
         RegisterVisualScripting(isolate, global);
+        ClientCityMap::Register(isolate, global);
+        SettingsApi::Register(isolate, global);
 #ifndef NDEBUG
         auto &catalog = ClientCatalog();
         Framework::Scripting::MergeScriptingCatalog(catalog, v8pp::metadata::catalog("framework-client"));

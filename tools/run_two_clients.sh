@@ -4,7 +4,7 @@ set -euo pipefail
 # Local Wine/Hyprland test harness. All writable paths stay in this repo.
 # Set MAFIA1ONLINE_TEST_WINEDEBUG=-all,+seh to trace Wine exceptions in the
 # per-client console logs without enabling Wine's other diagnostic channels.
-root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../../.." && pwd)
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 runtime="$root/builds/runtime"
 bin="$root/builds/build-32/bin"
 game_root="$runtime/game/Mafia"
@@ -170,5 +170,5 @@ echo "Two ${window_width}x${window_height} clients on $monitor workspace $worksp
 
 # A single monitor follows both Wine prefixes. It survives --late-join and
 # exits once neither client has a window. flock prevents duplicate monitors.
-setsid -f flock -n "$runtime/focus-audio.lock" python3 "$root/code/projects/mafia1online/tools/focus_client_audio.py" \
+setsid -f flock -n "$runtime/focus-audio.lock" python3 "$root/tools/focus_client_audio.py" \
     "$runtime/prefix" "$runtime/prefix-second" </dev/null >>"$runtime/focus-audio.log" 2>&1

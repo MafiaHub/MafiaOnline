@@ -3,7 +3,9 @@
 #include "features/car/car_service.h"
 #include "features/player/player_service.h"
 #include "shared/features/player/player_entity.h"
+#include "shared/features/combat/melee_rules.h"
 #include "shared/features/combat/weapon_inventory.h"
+#include "shared/features/npc/npc_report.h"
 
 #include <core_modules.h>
 #include <networking/network_peer.h>
@@ -158,6 +160,21 @@ namespace Mafia1Online::Features::Combat {
             }
             return true;
         }
+
+        // C_human::Hit's bullet scale per skeleton part: 1-2 0.3, 3-4 0.5,
+        // 5 unscaled, 6 (head) 1.5.
+        float BodyPartDamage(float damage, uint8_t bodyPart) {
+            if (bodyPart <= 2) {
+                return damage * 0.30000001f;
+            }
+            if (bodyPart <= 4) {
+                return damage * 0.5f;
+            }
+            if (bodyPart == 6) {
+                return damage * 1.5f;
+            }
+            return damage;
+        }
     } // namespace
 
     void CombatService::RegisterRPC(Player::PlayerService &players, Car::CarService &cars) {
@@ -165,6 +182,9 @@ namespace Mafia1Online::Features::Combat {
         _cars    = &cars;
         Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Combat::Intent>([this](const Shared::Combat::Intent &intent, MafiaNet::Packet *packet) {
             OnIntent(intent, MafiaNet::ToPeerGuid(packet->guid));
+        });
+        Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Combat::AimUpdate>([this](const Shared::Combat::AimUpdate &update, MafiaNet::Packet *packet) {
+            OnAimUpdate(update, MafiaNet::ToPeerGuid(packet->guid));
         });
         Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Combat::HitReport>([this](const Shared::Combat::HitReport &report, MafiaNet::Packet *packet) {
             OnHitReport(report, MafiaNet::ToPeerGuid(packet->guid));
@@ -240,6 +260,8 @@ namespace Mafia1Online::Features::Combat {
         _fires.clear();
         _vehicleImpacts.clear();
         _pendingVehicleImpacts.clear();
+        _vehicleContactRates.clear();
+        _vehicleContacts.clear();
     }
 
     void CombatService::Update() {
@@ -278,6 +300,7 @@ namespace Mafia1Online::Features::Combat {
                 state.spawned = player->spawned;
                 Publish(session);
             }
+            SettleAim(*player, state, session.aimRelay, Clock::now());
         });
     }
 
@@ -531,8 +554,42 @@ namespace Mafia1Online::Features::Combat {
             Publish(*session);
             return true;
         }
-        if (!GiveWeapon(networkId, weaponId, loaded, reserve)) {
+        if (GiveWeapon(networkId, weaponId, loaded, reserve)) {
+            leftLoaded = leftReserve = 0;
+            return true;
+        }
+        // G_Inventory::InsertNew (reM systems/G_Inventory.cpp): a big weapon or a melee
+        // item goes to the hand, and what the hand held is stowed -- or
+        // dropped where the player stands when there is no room for it, as
+        // the retail pickup menu drops it. A Thompson taken with a bat in the
+        // hand and a shotgun in the coat leaves the bat on the floor.
+        auto *player = _players->FindByNetworkId(networkId);
+        if (!player || (!Shared::Combat::IsLargeWeapon(weaponId) && !Melee(weaponId))) {
             return false;
+        }
+        auto next = state;
+        const uint8_t previous = next.selectedWeapon;
+        next.inventoryMask |= (1u << weaponId);
+        next.ammo[weaponId] = {Firearm(weaponId) ? std::min<uint16_t>(loaded, kRules[weaponId].capacity) : loaded, reserve};
+        next.selectedWeapon = weaponId;
+        uint8_t dropped = 0;
+        if (!RepresentableInventory(next) && previous != 0) {
+            next.inventoryMask &= ~(1u << previous);
+            next.ammo[previous] = {};
+            dropped = previous;
+        }
+        if (!RepresentableInventory(next)) {
+            return false;
+        }
+        // Dropped from the state it is still in, so the floor gets its ammo.
+        const uint64_t pickupId = dropped != 0 ? DropWeapon(*session, *player, dropped) : 0;
+        if (dropped != 0 && pickupId == 0) {
+            return false;
+        }
+        session->state = next;
+        Publish(*session);
+        if (pickupId != 0 && _droppedCallback) {
+            _droppedCallback(pickupId, networkId);
         }
         leftLoaded = leftReserve = 0;
         return true;
@@ -835,43 +892,218 @@ namespace Mafia1Online::Features::Combat {
         }
     }
 
+    void CombatService::OnAimUpdate(const Shared::Combat::AimUpdate &update, MafiaNet::PeerGuid sender) {
+        auto *player  = _players->FindByGuid(sender);
+        auto *session = FindCurrent(update.networkId);
+        if (!player || !session || player->GetNetworkID() != update.networkId || !player->spawned || !player->alive || update.spawnGeneration != player->spawnGeneration) {
+            return;
+        }
+        if (session->hasAimUpdate && !Shared::Combat::NewerSequence(update.sequence, session->lastAimUpdate)) {
+            return;
+        }
+        auto &state = session->state;
+        // Starting or ending an aim is a reliable Intent; this only moves it.
+        if (update.aiming != state.aiming || (update.aiming && state.selectedWeapon == 0)) {
+            return;
+        }
+        const float poseLengthSquared = glm::dot(update.poseTargetOffset, update.poseTargetOffset);
+        if (!std::isfinite(poseLengthSquared) || poseLengthSquared < 1.0f || poseLengthSquared > 625.0f) {
+            return;
+        }
+        const float directionSquared = glm::dot(update.direction, update.direction);
+        if (update.aiming && (!std::isfinite(directionSquared) || directionSquared < 0.8f || directionSquared > 1.2f)) {
+            return;
+        }
+        session->lastAimUpdate  = update.sequence;
+        session->hasAimUpdate   = true;
+        state.poseTargetOffsetX = update.poseTargetOffset.x;
+        state.poseTargetOffsetY = update.poseTargetOffset.y;
+        state.poseTargetOffsetZ = update.poseTargetOffset.z;
+        if (update.aiming) {
+            state.aimDirectionX = update.direction.x;
+            state.aimDirectionY = update.direction.y;
+            state.aimDirectionZ = update.direction.z;
+        }
+        RelayAim(*player, state, sender, session->aimRelay);
+    }
+
+    namespace {
+        void SendAim(Framework::Networking::Replication::NetworkEntity &body, Shared::Combat::State &state, MafiaNet::PeerGuid except, MafiaNet::Reliability reliability) {
+            Shared::Combat::AimUpdate relay;
+            relay.networkId        = state.networkId;
+            relay.spawnGeneration  = state.spawnGeneration;
+            relay.sequence         = ++state.aimSequence;
+            relay.aiming           = state.aiming;
+            relay.direction        = {state.aimDirectionX, state.aimDirectionY, state.aimDirectionZ};
+            relay.poseTargetOffset = {state.poseTargetOffsetX, state.poseTargetOffsetY, state.poseTargetOffsetZ};
+            auto *network          = Framework::CoreModules::GetNetworkPeer();
+            Framework::CoreModules::GetReplication()->ForEachStreamingPeer(&body, [&](MafiaNet::PeerGuid peer) {
+                if (peer != except) {
+                    network->SendRPC(relay, MafiaNet::ToGuid(peer), MafiaNet::Priority::High, reliability);
+                }
+            });
+        }
+    } // namespace
+
+    void CombatService::RelayAim(Framework::Networking::Replication::NetworkEntity &body, Shared::Combat::State &state, MafiaNet::PeerGuid except, AimRelay &relay) {
+        SendAim(body, state, except, MafiaNet::Reliability::Unreliable);
+        relay.lastRelay     = std::chrono::steady_clock::now();
+        relay.except        = except;
+        relay.settlePending = true;
+    }
+
+    void CombatService::SettleAim(Framework::Networking::Replication::NetworkEntity &body, Shared::Combat::State &state, AimRelay &relay,
+                                  std::chrono::steady_clock::time_point now) {
+        if (!relay.settlePending || now - relay.lastRelay < AimRelay::kSettleAfter) {
+            return;
+        }
+        relay.settlePending = false;
+        SendAim(body, state, relay.except, MafiaNet::Reliability::Reliable);
+    }
+
     void CombatService::OnHitReport(const Shared::Combat::HitReport &report, MafiaNet::PeerGuid sender) {
         auto *shooter = _players->FindByGuid(sender);
-        auto *target  = _players->FindByNetworkId(report.targetNetworkId);
         auto *session = FindCurrent(report.shooterNetworkId);
-        if (!shooter || !target || !session || shooter->GetNetworkID() != report.shooterNetworkId || !shooter->spawned || !shooter->alive || !target->spawned || !target->alive || shooter->missionGeneration != report.missionGeneration
-            || target->missionGeneration != report.missionGeneration || shooter->spawnGeneration != report.shooterSpawnGeneration || target->spawnGeneration != report.targetSpawnGeneration || report.shotSequence == 0) {
+        if (!shooter || !session || shooter->GetNetworkID() != report.shooterNetworkId || !shooter->spawned || !shooter->alive || shooter->missionGeneration != report.missionGeneration
+            || shooter->spawnGeneration != report.shooterSpawnGeneration || report.shotSequence == 0) {
+            return;
+        }
+        auto *target = _players->FindByNetworkId(report.targetNetworkId);
+        if (!target) {
+            OnNpcHitReport(report, *shooter, *session);
+            return;
+        }
+        if (!target->spawned || !target->alive || target->missionGeneration != report.missionGeneration || target->spawnGeneration != report.targetSpawnGeneration) {
             return;
         }
         // A seated occupant is hit through the car and reports the in-car
         // marker instead of a skeleton body part.
-        if (report.kind == Shared::Combat::HitReport::Kind::Melee) {
-            OnMeleeHit(report, *shooter, *target, *session);
-            return;
-        }
         const bool targetSeated = _cars->SeatForPlayer(report.targetNetworkId, report.targetSpawnGeneration).has_value();
-        const bool skeletonPart = report.bodyPart >= 1 && report.bodyPart <= 6;
-        if (!skeletonPart && !(targetSeated && report.bodyPart == Shared::Combat::HitReport::kInCarBodyPart)) {
+        const HitTarget hitTarget {target->position, target->rotation, target->health, targetSeated};
+        if (report.kind == Shared::Combat::HitReport::Kind::Melee) {
+            if (targetSeated || _cars->SeatForPlayer(report.shooterNetworkId, report.shooterSpawnGeneration).has_value()) {
+                return;
+            }
+            const auto melee = ValidateMelee(report, *shooter, *session, hitTarget);
+            if (!melee) {
+                return;
+            }
+            if (target->health <= melee->damage) {
+                if (auto *victim = FindCurrent(report.targetNetworkId)) {
+                    victim->state.deathAnimation = 131 + static_cast<uint16_t>((report.shotSequence + report.bodyPart + report.targetNetworkId) % 6);
+                }
+            }
+            PublishDamage(report, melee->damage, 1, melee->weaponId);
             return;
         }
-        const auto fire = std::find_if(session->fires.begin(), session->fires.end(), [&](const Session::FireRecord &candidate) { return candidate.intent.sequence == report.shotSequence; });
-        if (fire == session->fires.end() || fire->intent.missionGeneration != report.missionGeneration || fire->intent.spawnGeneration != report.shooterSpawnGeneration || !Firearm(fire->intent.weaponId)
-            || Clock::now() - fire->acceptedAt > std::chrono::seconds(2) || report.pelletIndex >= fire->intent.pelletCount || (fire->consumedPellets & (1u << report.pelletIndex)) != 0) {
+        const auto bullet = ValidateBullet(report, *session, hitTarget);
+        if (!bullet) {
             return;
+        }
+        float damage = bullet->damage;
+        if (!targetSeated) {
+            damage = BodyPartDamage(damage, report.bodyPart);
+        }
+        // The stock shot-type-10 flag belongs to both shotguns. On foot,
+        // C_human::Hit forces a fatal result within three units of the shooter.
+        // HitInCar returns before that branch and applies unscaled damage.
+        const bool closeRangeShotgun = !targetSeated && (bullet->weaponId == 11 || bullet->weaponId == 12)
+            && glm::dot(target->position - shooter->position, target->position - shooter->position) <= 9.0f;
+        if (target->health <= damage || closeRangeShotgun) {
+            if (auto *victim = FindCurrent(report.targetNetworkId)) {
+                victim->state.deathAnimation = 131 + static_cast<uint16_t>((report.shotSequence + report.pelletIndex + report.bodyPart + report.targetNetworkId) % 6);
+            }
+        }
+        const float appliedDamage = closeRangeShotgun ? target->health : damage;
+        PublishDamage(report, appliedDamage, 0, bullet->weaponId);
+    }
+
+    void CombatService::OnNpcHitReport(const Shared::Combat::HitReport &report, Shared::Entities::PlayerEntity &shooter, Session &session) {
+        const auto npc = _npcTargets.find ? _npcTargets.find(report.targetNetworkId) : std::nullopt;
+        if (!npc) {
+            OnWalkerHitReport(report, shooter, session);
+            return;
+        }
+        if (!npc->alive || npc->missionGeneration != report.missionGeneration || npc->spawnGeneration != report.targetSpawnGeneration) {
+            return;
+        }
+        const HitTarget hitTarget {npc->position, npc->rotation, npc->health, false};
+        const glm::vec3 direction(report.directionX, report.directionY, report.directionZ);
+        const glm::vec3 hit(report.hitX, report.hitY, report.hitZ);
+        // The NPC's own native Hit applies the body part scale, the close
+        // shotgun rule and the reaction; it gets the damage before them.
+        if (report.kind == Shared::Combat::HitReport::Kind::Melee) {
+            if (_cars->SeatForPlayer(report.shooterNetworkId, report.shooterSpawnGeneration).has_value()) {
+                return;
+            }
+            if (const auto melee = ValidateMelee(report, shooter, session, hitTarget)) {
+                _npcTargets.hit(report.targetNetworkId, report.shooterNetworkId, 1, report.bodyPart, melee->damage, direction, hit, melee->weaponId);
+            }
+            return;
+        }
+        if (const auto bullet = ValidateBullet(report, session, hitTarget)) {
+            _npcTargets.hit(report.targetNetworkId, report.shooterNetworkId, 0, report.bodyPart, bullet->damage, direction, hit, bullet->weaponId);
+        }
+    }
+
+    void CombatService::OnWalkerHitReport(const Shared::Combat::HitReport &report, Shared::Entities::PlayerEntity &shooter, Session &session) {
+        // A walker life is its own entity and has no spawn generation.
+        if (report.targetSpawnGeneration != 0 || !_walkerTargets.find || !_walkerTargets.hit || !_walkerTargets.shot) {
+            return;
+        }
+        const auto walker = _walkerTargets.find(report.targetNetworkId);
+        if (!walker || !walker->alive || walker->missionGeneration != report.missionGeneration) {
+            return;
+        }
+        const HitTarget hitTarget {walker->position, glm::quat(1.0f, 0.0f, 0.0f, 0.0f), 0.0f, false};
+        // A bullet the host's replay of the shot missed: the walker there
+        // stood a render delay and a report ahead of the one the player hit.
+        if (report.kind == Shared::Combat::HitReport::Kind::Bullet) {
+            if (const auto bullet = ValidateBullet(report, session, hitTarget)) {
+                _walkerTargets.shot(report.targetNetworkId, report.shooterNetworkId, report.bodyPart, bullet->damage,
+                                    glm::vec3(report.directionX, report.directionY, report.directionZ));
+            }
+            return;
+        }
+        if (report.kind != Shared::Combat::HitReport::Kind::Melee || report.bodyPart != Shared::Combat::kWalkerMeleeBodyPart ||
+            _cars->SeatForPlayer(report.shooterNetworkId, report.shooterSpawnGeneration).has_value()) {
+            return;
+        }
+        const auto melee = ValidateMelee(report, shooter, session, hitTarget, Shared::Combat::WalkerMeleeLagAllowance(walker->velocity));
+        if (!melee) {
+            return;
+        }
+        // C_human::AI's walker branch (0x571347-0x571377) passes the item
+        // damage on without the heavy doubling; C_don_ocas::Hit on the host
+        // applies the backstab from the walker's own facing.
+        const glm::vec3 direction(report.directionX, report.directionY, report.directionZ);
+        _walkerTargets.hit(report.targetNetworkId, report.shooterNetworkId, melee->weaponId, melee->heavy, kRules[melee->weaponId].damage, direction,
+                           glm::vec3(report.hitX, report.hitY, report.hitZ));
+    }
+
+    std::optional<CombatService::ValidatedHit> CombatService::ValidateBullet(const Shared::Combat::HitReport &report, Session &session, const HitTarget &target) {
+        const bool skeletonPart = report.bodyPart >= 1 && report.bodyPart <= 6;
+        if (!skeletonPart && !(target.seated && report.bodyPart == Shared::Combat::HitReport::kInCarBodyPart)) {
+            return std::nullopt;
+        }
+        const auto fire = std::find_if(session.fires.begin(), session.fires.end(), [&](const Session::FireRecord &candidate) { return candidate.intent.sequence == report.shotSequence; });
+        if (fire == session.fires.end() || fire->intent.missionGeneration != report.missionGeneration || fire->intent.spawnGeneration != report.shooterSpawnGeneration || !Firearm(fire->intent.weaponId)
+            || Clock::now() - fire->acceptedAt > std::chrono::seconds(2) || report.pelletIndex >= fire->intent.pelletCount || (fire->consumedPellets & (1u << report.pelletIndex)) != 0) {
+            return std::nullopt;
         }
         const float directionSquared = report.directionX * report.directionX + report.directionY * report.directionY + report.directionZ * report.directionZ;
         if (!std::isfinite(directionSquared) || directionSquared < 0.8f || directionSquared > 1.2f) {
-            return;
+            return std::nullopt;
         }
         const auto &pellet = fire->intent.pellets[report.pelletIndex];
         const glm::vec3 fireDirection = glm::normalize(glm::vec3(pellet.x, pellet.y, pellet.z));
         const glm::vec3 reportedDirection(report.directionX, report.directionY, report.directionZ);
         if (glm::dot(fireDirection, reportedDirection) < 0.995f) {
-            return;
+            return std::nullopt;
         }
         const glm::vec3 origin(fire->intent.originX, fire->intent.originY, fire->intent.originZ);
         const glm::vec3 hit(report.hitX, report.hitY, report.hitZ);
-        const auto delta     = target->position - origin;
+        const auto delta     = target.position - origin;
         const float distance = glm::length(delta);
         const glm::vec3 direction(report.directionX, report.directionY, report.directionZ);
         const float forward = glm::dot(delta, direction);
@@ -884,8 +1116,8 @@ namespace Mafia1Online::Features::Combat {
         const float nativeRange = glm::length(glm::vec3(fire->intent.nativeDirectionX, fire->intent.nativeDirectionY, fire->intent.nativeDirectionZ));
         if (!std::isfinite(distance) || !std::isfinite(hitDistance) || !std::isfinite(hitLateral) || distance > kRules[fire->intent.weaponId].reach + 4.0f
             || forward < -2.0f || forward > pelletReach + 4.0f || lateral > 4.0f || hitForward < 0.0f || hitForward > pelletReach + 1.0f
-            || hitLateral > 1.5f || glm::distance(hit, target->position) > 4.5f || hitDistance >= nativeRange) {
-            return;
+            || hitLateral > 1.5f || glm::distance(hit, target.position) > 4.5f || hitDistance >= nativeRange) {
+            return std::nullopt;
         }
         fire->consumedPellets |= static_cast<uint16_t>(1u << report.pelletIndex);
         // Retail NewShoot splits a shotgun's item damage over its ten queued
@@ -895,43 +1127,50 @@ namespace Mafia1Online::Features::Combat {
         if (hitDistance * 3.0f >= nativeRange) {
             damage *= std::max(0.0f, 1.0f - (hitDistance - nativeRange * 0.33000001f) / (nativeRange * 0.66000003f));
         }
-        if (!targetSeated) {
-            if (report.bodyPart <= 2) {
-                damage *= 0.30000001f;
-            }
-            else if (report.bodyPart <= 4) {
-                damage *= 0.5f;
-            }
-            else if (report.bodyPart == 6) {
-                damage *= 1.5f;
-            }
-        }
-        // The stock shot-type-10 flag belongs to both shotguns. On foot,
-        // C_human::Hit forces a fatal result within three units of the shooter.
-        // HitInCar returns before that branch and applies unscaled damage.
-        const bool closeRangeShotgun = !targetSeated && (fire->intent.weaponId == 11 || fire->intent.weaponId == 12)
-            && glm::dot(target->position - shooter->position, target->position - shooter->position) <= 9.0f;
-        if (target->health <= damage || closeRangeShotgun) {
-            if (auto *victim = FindCurrent(report.targetNetworkId)) {
-                victim->state.deathAnimation = 131 + static_cast<uint16_t>((report.shotSequence + report.pelletIndex + report.bodyPart + report.targetNetworkId) % 6);
-            }
-        }
-        const float appliedDamage = closeRangeShotgun ? target->health : damage;
-        PublishDamage(report, appliedDamage, 0, fire->intent.weaponId);
+        return ValidatedHit {fire->intent.weaponId, damage};
     }
 
     void CombatService::OnVehicleImpact(const Shared::Combat::VehicleImpact &report, MafiaNet::PeerGuid sender) {
+        // A client reports only its own cars' contacts; a flood is dropped
+        // here, before any validation work is queued.
+        if (!Shared::Combat::KnownVehicleContact(report.kind)) {
+            return;
+        }
+        if (_vehicleContactRates.size() > 256 && !_vehicleContactRates.contains(sender)) {
+            _vehicleContactRates.clear();
+        }
+        if (!_vehicleContactRates[sender].Admit(Clock::now())) {
+            return;
+        }
         if (_pendingVehicleImpacts.size() >= 256) {
             _pendingVehicleImpacts.pop_front();
         }
         _pendingVehicleImpacts.push_back({report, sender, Clock::now()});
     }
 
+    bool CombatService::AdmitVehicleContact(uint64_t carId, uint64_t targetId, Shared::Combat::VehicleContact kind) {
+        const auto key = std::make_pair(carId, targetId);
+        const auto now = Clock::now();
+        const auto previous = _vehicleContacts.find(key);
+        if (previous != _vehicleContacts.end() && !Shared::Combat::VehicleContactDue(now - previous->second.at, previous->second.kind, kind)) {
+            return false;
+        }
+        if (_vehicleContacts.size() >= 1024) {
+            _vehicleContacts.clear();
+        }
+        _vehicleContacts[key] = {now, kind};
+        return true;
+    }
+
     void CombatService::ApplyVehicleImpact(const Shared::Combat::VehicleImpact &report, MafiaNet::PeerGuid sender,
                                            Clock::time_point receivedAt) {
         auto *car = _cars->Find(report.carId);
         auto *target = _players->FindByNetworkId(report.targetId);
-        if (!car || !target || !target->spawned || !target->alive || car->terminalState != Shared::Entities::CarEntity::TerminalState::Active ||
+        if (!target) {
+            ApplyNpcVehicleImpact(report, sender, receivedAt);
+            return;
+        }
+        if (!car || !target->spawned || !target->alive || car->terminalState != Shared::Entities::CarEntity::TerminalState::Active ||
             car->simulationControllerGuid == 0 || car->simulationControllerGuid != static_cast<uint64_t>(sender) ||
             car->missionGeneration != report.missionGeneration || target->missionGeneration != report.missionGeneration ||
             target->spawnGeneration != report.targetSpawnGeneration ||
@@ -943,20 +1182,29 @@ namespace Mafia1Online::Features::Combat {
             return;
         }
         const auto impactSpeed = _cars->ValidateVehicleImpactGeometry(report.carId, report.missionGeneration,
-                                                                       contact, target->position, receivedAt);
-        if (!impactSpeed) {
+                                                                       contact, target->position, receivedAt,
+                                                                       Shared::Combat::VehicleContactMinSpeed(report.kind));
+        if (!impactSpeed || !AdmitVehicleContact(report.carId, report.targetId, report.kind)) {
             return;
         }
-        const auto key = std::make_pair(report.carId, report.targetId);
-        const auto now = Clock::now();
-        const auto previous = _vehicleImpacts.find(key);
-        if (previous != _vehicleImpacts.end() && now - previous->second < std::chrono::milliseconds(500)) {
+        if (report.kind == Shared::Combat::VehicleContact::Bump) {
+            // C_human::Collision's slow branch only moves the body: the
+            // bumped player's own client runs it on its player.
+            const auto direction = Shared::Combat::BumpReplayDirection(car->velocity);
+            Shared::Combat::VehicleBump bump;
+            bump.carId = report.carId;
+            bump.missionGeneration = report.missionGeneration;
+            bump.targetSpawnGeneration = report.targetSpawnGeneration;
+            bump.contactX = contact.x;
+            bump.contactY = contact.y;
+            bump.contactZ = contact.z;
+            bump.directionX = direction.x;
+            bump.directionY = direction.y;
+            bump.directionZ = direction.z;
+            Framework::CoreModules::GetNetworkPeer()->SendRPC(bump, MafiaNet::ToGuid(static_cast<MafiaNet::PeerGuid>(target->controllerGuid)), MafiaNet::Priority::High,
+                                                              MafiaNet::Reliability::Unreliable);
             return;
         }
-        if (_vehicleImpacts.size() >= 1024) {
-            _vehicleImpacts.clear();
-        }
-        _vehicleImpacts[key] = now;
         const float damage = (*impactSpeed - 2.5f) * 4.2f; // C_human::Collision, car branch.
         uint64_t driverId = car->occupantIds[0];
         auto *driver = _players->FindByNetworkId(driverId);
@@ -982,7 +1230,78 @@ namespace Mafia1Online::Features::Combat {
         event.directionX = car->velocity.x;
         event.directionY = car->velocity.y;
         event.directionZ = car->velocity.z;
+        event.sourceCarId = report.carId;
         Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(event);
+    }
+
+    void CombatService::ApplyNpcVehicleImpact(const Shared::Combat::VehicleImpact &report, MafiaNet::PeerGuid sender, Clock::time_point receivedAt) {
+        auto *car = _cars->Find(report.carId);
+        const auto npc = _npcTargets.find ? _npcTargets.find(report.targetId) : std::nullopt;
+        if (!car || !npc || !npc->alive || car->terminalState != Shared::Entities::CarEntity::TerminalState::Active || car->simulationControllerGuid == 0 ||
+            car->simulationControllerGuid != static_cast<uint64_t>(sender) || car->missionGeneration != report.missionGeneration ||
+            npc->missionGeneration != report.missionGeneration || npc->spawnGeneration != report.targetSpawnGeneration) {
+            return;
+        }
+        const glm::vec3 contact(report.contactX, report.contactY, report.contactZ);
+        if (!std::isfinite(contact.x) || !std::isfinite(contact.y) || !std::isfinite(contact.z)) {
+            return;
+        }
+        const auto impactSpeed = _cars->ValidateVehicleImpactGeometry(report.carId, report.missionGeneration, contact, npc->position, receivedAt,
+                                                                       Shared::Combat::VehicleContactMinSpeed(report.kind));
+        if (!impactSpeed || !AdmitVehicleContact(report.carId, report.targetId, report.kind)) {
+            return;
+        }
+        if (report.kind == Shared::Combat::VehicleContact::Bump) {
+            // The host runs C_human::Collision's slow branch on its NPC (a
+            // seated one returns at once, as in retail): no damage.
+            _npcTargets.hit(report.targetId, report.carId, Shared::Npc::Hit::kCarBump, 5, 0.0f, Shared::Combat::BumpReplayDirection(car->velocity), contact, 0);
+            return;
+        }
+        // C_human::Collision, car branch, as for a player; it enters the
+        // NPC's native Hit as HIT_TYPE_SNIPER on the torso.
+        const float damage = (*impactSpeed - 2.5f) * 4.2f;
+        _npcTargets.hit(report.targetId, report.carId, Shared::Npc::Hit::kCarImpact, 5, damage, car->velocity, contact, 0);
+    }
+
+    bool CombatService::ApplyRailwayHit(uint64_t targetId, uint64_t missionGeneration, uint64_t targetSpawnGeneration, float damage, const glm::vec3 &direction) {
+        auto *target = _players->FindByNetworkId(targetId);
+        if (!target || !target->spawned || !target->alive || target->missionGeneration != missionGeneration || target->spawnGeneration != targetSpawnGeneration ||
+            _cars->SeatForPlayer(targetId, targetSpawnGeneration).has_value() || !std::isfinite(damage) || damage <= 0.0f || !std::isfinite(direction.x) ||
+            !std::isfinite(direction.y) || !std::isfinite(direction.z)) {
+            return false;
+        }
+        // C_railway::Collide sweeps every frame; one contact is one hit.
+        const auto key = std::make_pair(uint64_t {0}, targetId);
+        const auto now = Clock::now();
+        if (const auto previous = _vehicleImpacts.find(key); previous != _vehicleImpacts.end() && now - previous->second < std::chrono::milliseconds(500)) {
+            return false;
+        }
+        if (_vehicleImpacts.size() >= 1024) {
+            _vehicleImpacts.clear();
+        }
+        _vehicleImpacts[key] = now;
+        if (!SetHealth(targetId, target->health - damage, 0, std::nullopt, DamageCause::Railway)) {
+            return false;
+        }
+        auto *victim = FindCurrent(targetId);
+        if (!victim) {
+            return true;
+        }
+        Shared::Combat::DamageEvent event;
+        event.targetNetworkId = targetId;
+        event.missionGeneration = missionGeneration;
+        event.targetSpawnGeneration = targetSpawnGeneration;
+        event.targetRevision = victim->state.revision;
+        event.bodyPart = 5;
+        // HIT_TYPE_MELEE_STRIKE knocks the human down; clients replay a
+        // knockdown (1).
+        event.hitType = 1;
+        event.damage = damage;
+        event.directionX = direction.x;
+        event.directionY = direction.y;
+        event.directionZ = direction.z;
+        Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(event);
+        return true;
     }
 
     void CombatService::PublishDamage(const Shared::Combat::HitReport &report, float damage, uint8_t hitType, std::optional<uint8_t> weaponId) {
@@ -1009,82 +1328,123 @@ namespace Mafia1Online::Features::Combat {
         Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(event);
     }
 
-    void CombatService::OnMeleeHit(const Shared::Combat::HitReport &report, Shared::Entities::PlayerEntity &attacker,
-                                   Shared::Entities::PlayerEntity &target, Session &session) {
+    void CombatService::ApplyNpcHit(uint64_t sourceId, uint64_t targetId, uint64_t missionGeneration, uint64_t targetSpawnGeneration, uint8_t hitType, uint8_t bodyPart, float damage,
+                                    const glm::vec3 &direction, uint8_t weaponId) {
+        auto *target = _players->FindByNetworkId(targetId);
+        if (!target || !target->spawned || !target->alive || target->missionGeneration != missionGeneration || target->spawnGeneration != targetSpawnGeneration ||
+            !std::isfinite(damage) || damage <= 0.0f || !std::isfinite(direction.x) || !std::isfinite(direction.y) || !std::isfinite(direction.z)) {
+            return;
+        }
+        const bool seated = _cars->SeatForPlayer(targetId, targetSpawnGeneration).has_value();
+        Shared::Combat::HitReport report;
+        report.shooterNetworkId      = sourceId;
+        report.targetNetworkId       = targetId;
+        report.missionGeneration     = missionGeneration;
+        report.targetSpawnGeneration = targetSpawnGeneration;
+        report.bodyPart              = bodyPart;
+        report.directionX            = direction.x;
+        report.directionY            = direction.y;
+        report.directionZ            = direction.z;
+        if (hitType == 0) {
+            // C_car::Hit forwards an occupant hit with zero flags as the body
+            // part, and HitInCar applies it unscaled.
+            if (seated && bodyPart == 0) {
+                report.bodyPart = Shared::Combat::HitReport::kInCarBodyPart;
+            }
+            else if (!seated && bodyPart >= 1 && bodyPart <= 6) {
+                damage = BodyPartDamage(damage, bodyPart);
+            }
+            else {
+                return;
+            }
+        }
+        else if (hitType != 1 || seated || (bodyPart != 5 && bodyPart != 6)) {
+            return;
+        }
+        if (target->health <= damage) {
+            if (auto *victim = FindCurrent(targetId)) {
+                victim->state.deathAnimation = 131 + static_cast<uint16_t>((sourceId + report.bodyPart + targetId) % 6);
+            }
+        }
+        PublishDamage(report, damage, hitType, weaponId);
+    }
+
+    std::optional<CombatService::ValidatedHit> CombatService::ValidateMelee(const Shared::Combat::HitReport &report, const Shared::Entities::PlayerEntity &attacker, Session &session,
+                                                                            const HitTarget &target, float lagAllowance) {
         // C_human::AI sweeps the swing points after the attack animation's
         // strike note and hits torso (5) or head (6) with hit type 1.
-        if (report.targetNetworkId == report.shooterNetworkId || (report.bodyPart != 5 && report.bodyPart != 6) ||
-            _cars->SeatForPlayer(report.shooterNetworkId, report.shooterSpawnGeneration).has_value() ||
-            _cars->SeatForPlayer(report.targetNetworkId, report.targetSpawnGeneration).has_value()) {
-            return;
+        if (report.targetNetworkId == report.shooterNetworkId || (report.bodyPart != 5 && report.bodyPart != 6)) {
+            return std::nullopt;
         }
         const auto now    = Clock::now();
         const auto record = std::find_if(session.melee.begin(), session.melee.end(),
                                          [&](const Session::MeleeRecord &candidate) { return candidate.sequence == report.shotSequence; });
         if (record == session.melee.end() || record->used || now - record->acceptedAt > std::chrono::milliseconds(1800)) {
-            return;
+            return std::nullopt;
         }
-        // Retail reach is the animation itself; the item range is 2 units.
+        const glm::vec3 facing = Facing(attacker);
+        if (!Shared::Combat::MeleeHitPlausible(attacker.position, facing, target.position, glm::vec3(report.hitX, report.hitY, report.hitZ), lagAllowance)) {
+            return std::nullopt;
+        }
         const glm::vec3 offset = target.position - attacker.position;
         const glm::vec3 flat(offset.x, 0.0f, offset.z);
         const float distance   = glm::length(flat);
-        const glm::vec3 hit(report.hitX, report.hitY, report.hitZ);
-        if (!std::isfinite(distance) || distance > 2.6f || std::abs(offset.y) > 1.5f || !std::isfinite(hit.x) || !std::isfinite(hit.y) || !std::isfinite(hit.z) ||
-            glm::length(glm::vec3(hit.x - target.position.x, 0.0f, hit.z - target.position.z)) > 1.6f ||
-            hit.y < target.position.y - 0.5f || hit.y > target.position.y + 2.5f) {
-            return;
-        }
-        const glm::vec3 facing = Facing(attacker);
-        if (distance > 0.2f && glm::dot(glm::normalize(flat), facing) < -0.17f) {
-            return;
-        }
         record->used = true;
         float damage = kRules[record->weaponId].damage * (record->heavy ? 2.0f : 1.0f);
         // A heavy knife or bat blow from behind is lethal in retail when the
         // attacker faces the victim's way (1.2566 rad) and the victim is in
         // front of the attacker (0.9425 rad).
         if (record->heavy && (record->weaponId == 3 || record->weaponId == 4) && distance > 0.2f) {
-            const glm::vec3 targetFacing = Facing(target);
+            const glm::vec3 targetFacing = target.rotation * glm::vec3(0.0f, 0.0f, 1.0f);
             if (glm::dot(facing, targetFacing) > std::cos(1.2566f) && glm::dot(glm::normalize(flat), facing) > std::cos(0.9425f)) {
                 damage = target.health + 1.0f;
             }
         }
-        if (target.health <= damage) {
-            if (auto *victim = FindCurrent(report.targetNetworkId)) {
-                victim->state.deathAnimation = 131 + static_cast<uint16_t>((report.shotSequence + report.bodyPart + report.targetNetworkId) % 6);
-            }
-        }
-        PublishDamage(report, damage, 1, record->weaponId);
+        return ValidatedHit {record->weaponId, damage, record->heavy};
     }
 
-    std::optional<CombatService::CarImpactEvidence> CombatService::InspectCarImpact(const Shared::Car::HitReport &report, MafiaNet::PeerGuid sender) const {
-        auto *shooter = _players->FindByGuid(sender);
+    std::optional<float> CombatService::ConsumeMeleeCarHit(const Shared::Car::HitReport &report, MafiaNet::PeerGuid sender) {
+        auto *attacker = _players->FindByGuid(sender);
         const auto session = _sessions.find(report.shooterId);
-        if (!shooter || session == _sessions.end() || shooter->GetNetworkID() != report.shooterId || !shooter->spawned || !shooter->alive
-            || shooter->missionGeneration != report.missionGeneration || shooter->spawnGeneration != report.shooterSpawnGeneration
-            || report.carId == 0 || report.shotSequence == 0) {
+        if (report.kind != Shared::Car::HitKind::Melee || !attacker || session == _sessions.end() || attacker->GetNetworkID() != report.shooterId || !attacker->spawned ||
+            !attacker->alive || attacker->missionGeneration != report.missionGeneration || attacker->spawnGeneration != report.shooterSpawnGeneration) {
+            return std::nullopt;
+        }
+        auto &melee = session->second.melee;
+        const auto record = std::find_if(melee.begin(), melee.end(), [&](const Session::MeleeRecord &candidate) { return candidate.sequence == report.shotSequence; });
+        if (record == melee.end() || record->carUsed || Clock::now() - record->acceptedAt > std::chrono::milliseconds(1800) ||
+            !Shared::Combat::MeleeCarHitPlausible(attacker->position, Facing(*attacker), glm::vec3(report.hitX, report.hitY, report.hitZ))) {
+            return std::nullopt;
+        }
+        record->carUsed = true;
+        return kRules[record->weaponId].damage * (record->heavy ? 2.0f : 1.0f);
+    }
+
+    std::optional<CombatService::CarImpactEvidence> CombatService::InspectShot(const ShotClaim &claim, MafiaNet::PeerGuid sender) const {
+        auto *shooter = _players->FindByGuid(sender);
+        const auto session = _sessions.find(claim.shooterId);
+        if (!shooter || session == _sessions.end() || shooter->GetNetworkID() != claim.shooterId || !shooter->spawned || !shooter->alive
+            || shooter->missionGeneration != claim.missionGeneration || shooter->spawnGeneration != claim.shooterSpawnGeneration
+            || claim.shotSequence == 0) {
             return std::nullopt;
         }
         const auto fire = std::find_if(session->second.fires.begin(), session->second.fires.end(), [&](const Session::FireRecord &candidate) {
-            return candidate.intent.sequence == report.shotSequence;
+            return candidate.intent.sequence == claim.shotSequence;
         });
-        if (fire == session->second.fires.end() || fire->intent.missionGeneration != report.missionGeneration
-            || fire->intent.spawnGeneration != report.shooterSpawnGeneration || !Firearm(fire->intent.weaponId)
-            || Clock::now() - fire->acceptedAt > std::chrono::seconds(2) || report.pelletIndex >= fire->intent.pelletCount
-            || (fire->consumedPellets & (1u << report.pelletIndex)) != 0) {
+        if (fire == session->second.fires.end() || fire->intent.missionGeneration != claim.missionGeneration
+            || fire->intent.spawnGeneration != claim.shooterSpawnGeneration || !Firearm(fire->intent.weaponId)
+            || Clock::now() - fire->acceptedAt > std::chrono::seconds(2) || claim.pelletIndex >= fire->intent.pelletCount
+            || (fire->consumedPellets & (1u << claim.pelletIndex)) != 0) {
             return std::nullopt;
         }
-        const glm::vec3 reportedDirection(report.directionX, report.directionY, report.directionZ);
-        const glm::vec3 hit(report.hitX, report.hitY, report.hitZ);
-        const glm::vec3 normal(report.normalX, report.normalY, report.normalZ);
+        const glm::vec3 &reportedDirection = claim.direction;
+        const glm::vec3 &hit = claim.hit;
         const float directionSquared = glm::dot(reportedDirection, reportedDirection);
-        const float normalLength = glm::length(normal);
         if (!std::isfinite(directionSquared) || directionSquared < 0.8f || directionSquared > 1.2f
-            || !std::isfinite(hit.x) || !std::isfinite(hit.y) || !std::isfinite(hit.z)
-            || !std::isfinite(normalLength) || normalLength < 0.5f || normalLength > 1.5f) {
+            || !std::isfinite(hit.x) || !std::isfinite(hit.y) || !std::isfinite(hit.z)) {
             return std::nullopt;
         }
-        const auto &pellet = fire->intent.pellets[report.pelletIndex];
+        const auto &pellet = fire->intent.pellets[claim.pelletIndex];
         const glm::vec3 trajectory(pellet.x, pellet.y, pellet.z);
         const glm::vec3 fireDirection = glm::normalize(trajectory);
         const glm::vec3 origin(fire->intent.originX, fire->intent.originY, fire->intent.originZ);
@@ -1104,14 +1464,34 @@ namespace Mafia1Online::Features::Combat {
         return CarImpactEvidence {damage, origin, trajectory, fire->acceptedAt};
     }
 
-    bool CombatService::ConsumeCarImpact(const Shared::Car::HitReport &report, MafiaNet::PeerGuid sender) {
-        if (!InspectCarImpact(report, sender)) {
+    bool CombatService::ConsumeShot(const ShotClaim &claim, MafiaNet::PeerGuid sender) {
+        if (!InspectShot(claim, sender)) {
             return false;
         }
-        auto &fires = _sessions.at(report.shooterId).fires;
-        const auto fire = std::find_if(fires.begin(), fires.end(), [&](const Session::FireRecord &candidate) { return candidate.intent.sequence == report.shotSequence; });
-        fire->consumedPellets |= static_cast<uint16_t>(1u << report.pelletIndex);
+        auto &fires = _sessions.at(claim.shooterId).fires;
+        const auto fire = std::find_if(fires.begin(), fires.end(), [&](const Session::FireRecord &candidate) { return candidate.intent.sequence == claim.shotSequence; });
+        fire->consumedPellets |= static_cast<uint16_t>(1u << claim.pelletIndex);
         return true;
+    }
+
+    namespace {
+        CombatService::ShotClaim CarShotClaim(const Shared::Car::HitReport &report) {
+            return {report.shooterId, report.missionGeneration, report.shooterSpawnGeneration, report.shotSequence, report.pelletIndex,
+                    glm::vec3(report.directionX, report.directionY, report.directionZ), glm::vec3(report.hitX, report.hitY, report.hitZ)};
+        }
+    } // namespace
+
+    std::optional<CombatService::CarImpactEvidence> CombatService::InspectCarImpact(const Shared::Car::HitReport &report, MafiaNet::PeerGuid sender) const {
+        const glm::vec3 normal(report.normalX, report.normalY, report.normalZ);
+        const float normalLength = glm::length(normal);
+        if (report.carId == 0 || !std::isfinite(normalLength) || normalLength < 0.5f || normalLength > 1.5f) {
+            return std::nullopt;
+        }
+        return InspectShot(CarShotClaim(report), sender);
+    }
+
+    bool CombatService::ConsumeCarImpact(const Shared::Car::HitReport &report, MafiaNet::PeerGuid sender) {
+        return InspectCarImpact(report, sender) && ConsumeShot(CarShotClaim(report), sender);
     }
 
     void CombatService::OnDetonationReport(const Shared::Combat::DetonationReport &report, MafiaNet::PeerGuid sender) {
@@ -1138,12 +1518,21 @@ namespace Mafia1Online::Features::Combat {
         }
         const ThrowRecord accepted = *record;
         _throws.erase(record);
+        // The blast stays in the thrower's virtual world: a grenade in the
+        // street does not reach a safehouse copy of the same building.
+        const uint32_t world = thrower->GetVirtualWorld();
         if (grenade) {
-            ApplyAreaDamage(accepted.throwerId, accepted.missionGeneration, position, 15.0f, true, 400.0f, 15);
+            ApplyAreaDamage(accepted.throwerId, accepted.missionGeneration, position, 15.0f, true, 400.0f, 15, world);
         }
         else {
-            const auto now = Clock::now();
-            _fires.push_back({accepted.throwerId, uint8_t {5}, accepted.missionGeneration, position, now, {}});
+            FireArea fire;
+            fire.sourceId          = accepted.throwerId;
+            fire.weaponId          = uint8_t {5};
+            fire.missionGeneration = accepted.missionGeneration;
+            fire.position          = position;
+            fire.startedAt         = Clock::now();
+            fire.virtualWorld      = world;
+            _fires.push_back(fire);
         }
         Shared::Combat::Detonation detonation;
         detonation.throwerNetworkId  = accepted.throwerId;
@@ -1157,7 +1546,7 @@ namespace Mafia1Online::Features::Combat {
     }
 
     void CombatService::ApplyAreaDamage(uint64_t sourceId, uint64_t missionGeneration, const glm::vec3 &position, float radius, bool explosion, float damage,
-                                        std::optional<uint8_t> weaponId) {
+                                        std::optional<uint8_t> weaponId, uint32_t virtualWorld) {
         std::vector<Shared::Entities::PlayerEntity *> victims;
         _players->ForEach([&](Shared::Entities::PlayerEntity *player) {
             victims.push_back(player);
@@ -1166,6 +1555,7 @@ namespace Mafia1Online::Features::Combat {
             // Retail explosions and fires never reach a seated human: HitInCar
             // applies only generic and car-impact damage.
             if (!player->spawned || !player->alive || player->missionGeneration != missionGeneration ||
+                !MafiaNet::VirtualWorldsCanSee(player->GetVirtualWorld(), virtualWorld) ||
                 _cars->SeatForPlayer(player->GetNetworkID(), player->spawnGeneration).has_value()) {
                 continue;
             }
@@ -1236,7 +1626,7 @@ namespace Mafia1Online::Features::Combat {
             if (it->lastTick == Clock::time_point {} || now - it->lastTick >= kTick) {
                 it->lastTick = now;
                 const float remaining = std::chrono::duration<float>(it->life - age).count();
-                ApplyAreaDamage(it->sourceId, it->missionGeneration, it->position, it->radius, false, it->damage * remaining, it->weaponId);
+                ApplyAreaDamage(it->sourceId, it->missionGeneration, it->position, it->radius, false, it->damage * remaining, it->weaponId, it->virtualWorld);
             }
             ++it;
         }
@@ -1246,7 +1636,8 @@ namespace Mafia1Online::Features::Combat {
         ApplyAreaDamage(sourceId, missionGeneration, position, radius, true, damage, std::nullopt);
     }
 
-    void CombatService::StartFire(uint64_t sourceId, uint64_t missionGeneration, const glm::vec3 &position, std::chrono::milliseconds life, float radius, float damage) {
+    void CombatService::StartFire(uint64_t sourceId, uint64_t missionGeneration, const glm::vec3 &position, std::chrono::milliseconds life, float radius, float damage,
+                                  uint32_t virtualWorld) {
         FireArea fire;
         fire.sourceId          = sourceId;
         fire.weaponId          = std::nullopt;
@@ -1256,6 +1647,7 @@ namespace Mafia1Online::Features::Combat {
         fire.life              = life;
         fire.radius            = radius;
         fire.damage            = damage;
+        fire.virtualWorld      = virtualWorld;
         _fires.push_back(fire);
     }
 

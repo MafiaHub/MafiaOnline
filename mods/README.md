@@ -9,6 +9,8 @@ The author's DLL, binary patch and optional add-ons are not included. Original
 single-player mission scripts remain subject to Mafia1Online's existing script
 suppression; multiplayer gameplay comes from server resources.
 
+The Free Ride gamemode plays this map by default when the ZIP is present.
+
 Reproduce the example (adjust the source directory):
 
 ```bash

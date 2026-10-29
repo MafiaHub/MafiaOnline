@@ -11,8 +11,10 @@ add_library(Mafia1OnlineClient SHARED
     ${CMAKE_BINARY_DIR}/mafia1online_version.cpp
 )
 target_include_directories(Mafia1OnlineClient PRIVATE src "${CMAKE_CURRENT_SOURCE_DIR}/..")
-target_link_libraries(Mafia1OnlineClient PRIVATE Framework FrameworkClient Mafia1OnlineSDK imm32)
+target_link_libraries(Mafia1OnlineClient PRIVATE Framework::Framework Framework::Client Mafia1OnlineSDK imm32)
 target_link_options(Mafia1OnlineClient PRIVATE /SAFESEH:NO /MANIFEST:NO)
+# CEF, the helper executables and the crash handler next to the DLL.
+fw_stage_runtime(Mafia1OnlineClient CLIENT)
 
 set(MAFIA1ONLINE_CLIENT_CONFIG_EXAMPLE_OUTPUT "${CMAKE_BINARY_DIR}/bin/config/client.example.json")
 add_custom_command(OUTPUT "${MAFIA1ONLINE_CLIENT_CONFIG_EXAMPLE_OUTPUT}"

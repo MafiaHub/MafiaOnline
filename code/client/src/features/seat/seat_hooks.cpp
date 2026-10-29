@@ -15,14 +15,26 @@ namespace Mafia1Online::Features::Seat {
         using NativeCar = SDK::Seat::NativeCar;
         using UseCall = void(__thiscall *)(NativeHuman *, NativeActor *, int, int, int);
         using StealCall = bool(__thiscall *)(NativeHuman *, NativeCar *, int);
+        using CanDropOutCall = bool(__thiscall *)(NativeHuman *, int);
 
         UseCall gUseOriginal = nullptr;
         StealCall gStealOriginal = nullptr;
+        CanDropOutCall gCanDropOutOriginal = nullptr;
+        int gRemoteExitDepth = 0;
         SeatService *gService = nullptr;
+        RailwayUseHandler gRailwayUse = nullptr;
 
         void __fastcall UseHook(NativeHuman *human, void *, NativeActor *target, int action, int seat, int animationSpeedState) {
             if (gService && !gService->AllowsNativeUse(human)) return;
+            if (target && target->GetType() == NativeActor::Type::Railway) {
+                if (!gRailwayUse || gRailwayUse(human, target, action, seat, animationSpeedState)) {
+                    gUseOriginal(human, target, action, seat, animationSpeedState);
+                }
+                return;
+            }
             auto *car = target && target->GetType() == NativeActor::Type::Car ? static_cast<NativeCar *>(static_cast<void *>(target)) : nullptr;
+            if (gService && car && action == static_cast<int>(SDK::Seat::UseAction::Enter) && gService->BlocksNpcEntry(human, car, seat)) return;
+            if (gService && car && action == static_cast<int>(SDK::Seat::UseAction::Enter) && !gService->AllowsTrafficUse(human, car, seat)) return;
             const int originalSeat = action == static_cast<int>(SDK::Seat::UseAction::Exit) ? human->seatId : seat;
             if (!car && action == static_cast<int>(SDK::Seat::UseAction::Exit) && gService) {
                 car = gService->CurrentNetworkCar(human);
@@ -34,22 +46,50 @@ namespace Mafia1Online::Features::Seat {
         }
 
         bool __fastcall StealHook(NativeHuman *human, void *, NativeCar *car, int seat) {
+            // intern_ThrowMeFromCar clears the seat during the call.
+            NativeActor *victim = car && seat >= 0 ? car->GetOwner(seat) : nullptr;
+            if (gService && !gService->AllowsNativeSteal(human, car, victim)) {
+                return false;
+            }
             const bool started = gStealOriginal(human, car, seat);
             if (started && gService) {
-                gService->OnNativeSteal(human, car, seat);
+                gService->OnNativeSteal(human, car, seat, victim);
             }
             return started;
         }
+        bool __fastcall CanDropOutHook(NativeHuman *human, void *, int seat) {
+            return gRemoteExitDepth != 0 || gCanDropOutOriginal(human, seat);
+        }
     } // namespace
+
+    RemoteExitScope::RemoteExitScope() {
+        ++gRemoteExitDepth;
+    }
+
+    RemoteExitScope::~RemoteExitScope() {
+        --gRemoteExitDepth;
+    }
+
+    void SetRailwayUseHandler(RailwayUseHandler handler) {
+        gRailwayUse = handler;
+    }
+
+    void UseActorNative(NativeHuman *human, NativeActor *target, int action, int seat, int animationSpeedState) {
+        if (gUseOriginal) {
+            gUseOriginal(human, target, action, seat, animationSpeedState);
+        }
+    }
 
     bool InstallSeatHooks(SeatService &service) {
         gService = &service;
         if (MH_CreateHook(reinterpret_cast<void *>(SDK::Seat::kHumanUseActor), reinterpret_cast<void *>(&UseHook), reinterpret_cast<void **>(&gUseOriginal)) != MH_OK ||
-            MH_CreateHook(reinterpret_cast<void *>(SDK::Seat::kHumanThrowFromCar), reinterpret_cast<void *>(&StealHook), reinterpret_cast<void **>(&gStealOriginal)) != MH_OK) {
+            MH_CreateHook(reinterpret_cast<void *>(SDK::Seat::kHumanThrowFromCar), reinterpret_cast<void *>(&StealHook), reinterpret_cast<void **>(&gStealOriginal)) != MH_OK ||
+            MH_CreateHook(reinterpret_cast<void *>(SDK::Seat::kHumanCanDropOutFromCar), reinterpret_cast<void *>(&CanDropOutHook), reinterpret_cast<void **>(&gCanDropOutOriginal)) != MH_OK) {
             UninstallSeatHooks();
             return false;
         }
-        if (MH_EnableHook(reinterpret_cast<void *>(SDK::Seat::kHumanUseActor)) != MH_OK || MH_EnableHook(reinterpret_cast<void *>(SDK::Seat::kHumanThrowFromCar)) != MH_OK) {
+        if (MH_EnableHook(reinterpret_cast<void *>(SDK::Seat::kHumanUseActor)) != MH_OK || MH_EnableHook(reinterpret_cast<void *>(SDK::Seat::kHumanThrowFromCar)) != MH_OK ||
+            MH_EnableHook(reinterpret_cast<void *>(SDK::Seat::kHumanCanDropOutFromCar)) != MH_OK) {
             UninstallSeatHooks();
             return false;
         }
@@ -58,11 +98,13 @@ namespace Mafia1Online::Features::Seat {
 
     void UninstallSeatHooks() {
         gService = nullptr;
-        for (void *address : {reinterpret_cast<void *>(SDK::Seat::kHumanUseActor), reinterpret_cast<void *>(SDK::Seat::kHumanThrowFromCar)}) {
+        for (void *address : {reinterpret_cast<void *>(SDK::Seat::kHumanUseActor), reinterpret_cast<void *>(SDK::Seat::kHumanThrowFromCar),
+                              reinterpret_cast<void *>(SDK::Seat::kHumanCanDropOutFromCar)}) {
             MH_DisableHook(address);
             MH_RemoveHook(address);
         }
         gUseOriginal = nullptr;
         gStealOriginal = nullptr;
+        gCanDropOutOriginal = nullptr;
     }
 } // namespace Mafia1Online::Features::Seat

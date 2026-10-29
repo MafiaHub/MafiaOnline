@@ -431,6 +431,27 @@ declare const Sound: {
     stop(id: number): boolean;
 };
 
+/**
+ * The player's settings screen (Esc, Settings). A resource lists the keys it
+ * binds and the switches it offers there; when the player moves a key, its
+ * Key.bind handlers and Key.isDown follow the new key. Entries are removed
+ * when the resource stops.
+ */
+declare const Settings: {
+    /** Lists a Key.bind key (not the wheel) on the Controls page; false when invalid or past 64 keys per resource. */
+    describeKey(key: string, label: string): boolean;
+    /** The label of the key the player now presses for this key, such as "F8"; "Unbound" when removed. */
+    getKeyLabel(key: string): string;
+    /** An on/off switch on the Gameplay page; flipping it raises `settingToggle`. The resource stores the choice. */
+    defineToggle(id: string, label: string, value: boolean): boolean;
+    /** Updates a switch the resource changed another way; raises no event. */
+    setToggle(id: string, value: boolean): boolean;
+    /** The player's volume for resource web audio, such as a car radio, from 0 to 1. */
+    getMediaVolume(): number;
+    /** Opens the settings screen over the game; false while no mission is loaded. */
+    open(): boolean;
+};
+
 
 interface ClientMissionInfo {
     /** Stock mission directory name. */
@@ -462,6 +483,10 @@ interface ClientEventMap {
     entityStateChange: [entity: Entity, key: string, value: any, previous: any];
     voiceStart: [];
     voiceStop: [];
+    /** The player flipped a switch a resource defined; compare `resource` with your own name. */
+    settingToggle: [id: string, value: boolean, resource: string];
+    /** The player changed the volume Settings.getMediaVolume returns. */
+    mediaVolumeChange: [volume: number];
     browserCreated: [event: ClientBrowserURL];
     browserLoadingStart: [event: ClientBrowserFrameURL];
     browserDocumentReady: [event: ClientBrowserURL];

@@ -1,11 +1,13 @@
 #include <utils/safe_win32.h>
 
 #include "core/boot/lifecycle_hooks.h"
+#include "features/cheats/cheat_hooks.h"
 #include "features/compat/wine_fpu.h"
 #include "features/menu/menu_hooks.h"
 #include "features/display/system_init_hooks.h"
 #include "features/profile/profile_write_hooks.h"
 #include "features/quick_join/quick_join.h"
+#include "features/simulation/simulation_config.h"
 #include "features/startup_video/startup_video_hooks.h"
 #include "shared/version.h"
 
@@ -41,6 +43,8 @@ extern "C" void __declspec(dllexport) InitClient(const wchar_t *projectPath) {
             throw std::runtime_error("Could not install Wine x87 compatibility hook");
         }
         Mafia1Online::Features::QuickJoin::Initialize(path);
+        Mafia1Online::Features::Simulation::Initialize(path);
+        Mafia1Online::Features::Display::Initialize(path);
         if (!Mafia1Online::Features::Profile::InstallWriteHooks()) {
             throw std::runtime_error("Could not install profile write guards");
         }
@@ -49,6 +53,9 @@ extern "C" void __declspec(dllexport) InitClient(const wchar_t *projectPath) {
         }
         if (!Mafia1Online::Features::StartupVideo::InstallHooks()) {
             throw std::runtime_error("Could not install intro video hook");
+        }
+        if (!Mafia1Online::Features::Cheats::InstallHooks()) {
+            throw std::runtime_error("Could not install cheat code hook");
         }
         if (!Mafia1Online::Features::Display::InstallSystemInitHook()) {
             throw std::runtime_error("Could not hook InitSystem");
