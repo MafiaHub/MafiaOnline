@@ -70,31 +70,34 @@ namespace {
     }
 
     // World::RemoteClock: the least delayed arrival maps a host's frame
-    // clock onto this one, followed smoothly; a late report never moves
-    // it, and another clock resets it.
+    // clock onto this one, followed continuously in time; a late report
+    // never moves it, and another clock resets it.
     void RemoteClocks() {
         Features::World::RemoteClock clock;
         CHECK(!clock.Valid());
         // Reports every 133 ms, 20 ms in transit, one of them 80 ms late.
-        double now = 1000.0;
+        const double now = 1000.0;
         CHECK(clock.Observe(500.0, now + 20.0));
-        CHECK(Near(static_cast<float>(clock.Offset()), 520.0f, 1e-3f));
+        CHECK(Near(static_cast<float>(clock.OffsetAt(now + 20.0)), 520.0f, 1e-3f));
         for (int i = 1; i <= 30; ++i) {
-            const double late = i == 10 ? 80.0 : 0.0;
-            const double before = clock.Offset();
-            CHECK(!clock.Observe(500.0 + i * 133.0, now + i * 133.0 + 20.0 + late));
-            CHECK(std::abs(clock.Offset() - before) < 0.01);
+            const double arrival = now + i * 133.0 + 20.0 + (i == 10 ? 80.0 : 0.0);
+            CHECK(!clock.Observe(500.0 + i * 133.0, arrival));
+            CHECK(Near(static_cast<float>(clock.OffsetAt(arrival + 50.0)), 520.0f, 1e-3f));
         }
-        CHECK(Near(static_cast<float>(clock.Offset()), 520.0f, 1e-3f));
-        // A faster transit is followed over seconds, not taken at once.
-        const double before = clock.Offset();
-        clock.Observe(500.0 + 31 * 133.0, now + 31 * 133.0 + 10.0);
-        CHECK(clock.Offset() < before && clock.Offset() > before - 1.0);
+        // A faster transit is followed over seconds, never stepped: the
+        // offset is where it was as the report lands and moves on smoothly.
+        const double landed = now + 31 * 133.0 + 10.0;
+        const double before = clock.OffsetAt(landed);
+        clock.Observe(500.0 + 31 * 133.0, landed);
+        CHECK(Near(static_cast<float>(clock.OffsetAt(landed)), static_cast<float>(before), 1e-4f));
+        CHECK(clock.OffsetAt(landed + 16.0) < before && clock.OffsetAt(landed + 16.0) > before - 0.1);
+        CHECK(clock.OffsetAt(landed + 32.0) < clock.OffsetAt(landed + 16.0));
         for (int i = 32; i < 120; ++i) {
             clock.Observe(500.0 + i * 133.0, now + i * 133.0 + 10.0);
         }
-        CHECK(Near(static_cast<float>(clock.Offset()), 510.0f, 0.5f));
-        CHECK(Near(static_cast<float>(clock.RemoteAt(now + 2000.0)), static_cast<float>(now + 2000.0 - clock.Offset()), 1e-3f));
+        const double late = now + 120 * 133.0;
+        CHECK(Near(static_cast<float>(clock.OffsetAt(late)), 510.0f, 0.5f));
+        CHECK(Near(static_cast<float>(clock.RemoteAt(late)), static_cast<float>(late - clock.OffsetAt(late)), 1e-3f));
         // Another host's clock.
         CHECK(clock.Observe(90000.0, now + 120 * 133.0));
         clock.Reset();

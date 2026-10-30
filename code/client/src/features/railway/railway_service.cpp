@@ -380,8 +380,8 @@ namespace Mafia1Online::Features::Railway {
             }
             // Dated by the host's frame clock at the step that produced it,
             // mapped onto this frame clock by the least delayed report
-            // (World::RemoteClock): it follows smoothly, as any step in it
-            // would move every railway on or back by its speed times the step.
+            // (World::RemoteClock): it follows continuously, as any step in
+            // it would move every railway on or back by its speed times it.
             const double hostTime = UnwrapHostTime(snapshot);
             const double arrival = World::FrameClock::NowMs();
             const bool clockReset = _hostClock.Observe(hostTime, arrival);
@@ -410,8 +410,8 @@ namespace Mafia1Online::Features::Railway {
                     Debug::SyncTrace::Received("railway", TraceId(state.index, 0))
                         .Num("clk", hostTime)
                         .Num("arrival", arrival)
-                        .Num("ptime", hostTime + _hostClock.Offset())
-                        .Num("offset", _hostClock.Offset())
+                        .Num("ptime", hostTime + _hostClock.OffsetAt(arrival))
+                        .Num("offset", _hostClock.OffsetAt(arrival))
                         .Bool("reset", clockReset);
                 }
                 _railways[state.index].lastReport = std::chrono::steady_clock::now();
