@@ -39,6 +39,8 @@ namespace Mafia1Online::Features::Bridge {
 
         void OnGameInit(SDK::World::NativeBridge *bridge);
         void OnGameDone(SDK::World::NativeBridge *bridge);
+        // Every bridge's Update, before it runs, with its frame time.
+        void AdvanceClock(const SDK::World::NativeBridge *bridge, unsigned int frameTimeMs);
         // Players: the host's state at the render time, before Update.
         void BeforeUpdate(SDK::World::NativeBridge *bridge);
         // A raised leaf ran into the local player.
@@ -70,6 +72,14 @@ namespace Mafia1Online::Features::Bridge {
         std::deque<double> _clockOffsets;
         double _clockOffset = 0.0;
         bool _hasClockOffset = false;
+        // The host's clock as the native world moves: it runs on the frame
+        // times Update is given and leans toward the wall clock (the host's
+        // own; on players the host's, the render delay behind). The wall
+        // clock where Update happens to run is up to a frame off them, and
+        // a steamer placed by it surges and lags against everything else.
+        // Hosts date their reports by it, players draw at it.
+        double _frameClockMs = 0.0;
+        bool _hasFrameClock = false;
         // Players: the reporting host's session, and its newest report here.
         uint32_t _hostSession = 0;
         std::chrono::steady_clock::time_point _lastSampleAt {};

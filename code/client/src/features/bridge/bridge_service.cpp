@@ -46,6 +46,11 @@ namespace Mafia1Online::Features::Bridge {
         // A host silent this long has gone: the bridge closes until the next
         // one reports, so it never blocks the river road raised.
         constexpr auto kHostSilence = std::chrono::seconds(3);
+        // The frame clock closes its gap to the wall clock at this share of
+        // it per second, and jumps a gap this wide (a long hitch, which the
+        // game caps at 83 ms a frame, or another host clock).
+        constexpr double kClockFollowMs = 1000.0;
+        constexpr double kClockSnapMs = 250.0;
 
         void __fastcall GameInitHook(NativeBridge *bridge, void *) {
             gGameInitOriginal(bridge);
@@ -62,8 +67,11 @@ namespace Mafia1Online::Features::Bridge {
         }
 
         void __fastcall UpdateHook(NativeBridge *bridge, void *, unsigned int frameTimeMs) {
-            if (gService && !Simulation::IsHost()) {
-                gService->BeforeUpdate(bridge);
+            if (gService) {
+                gService->AdvanceClock(bridge, frameTimeMs);
+                if (!Simulation::IsHost()) {
+                    gService->BeforeUpdate(bridge);
+                }
             }
             gUpdateOriginal(bridge, frameTimeMs);
         }
@@ -175,6 +183,7 @@ namespace Mafia1Online::Features::Bridge {
                 _hostSession = snapshot.hostSession;
                 _samples.clear();
                 _clockOffsets.clear();
+                _hasFrameClock = false;
             }
             else if (!_samples.empty() && static_cast<int32_t>(snapshot.hostTimeMs - _samples.back().hostTimeMs) <= 0) {
                 // A phase change comes reliably and may overtake, or trail,
@@ -205,6 +214,7 @@ namespace Mafia1Online::Features::Bridge {
         _samples.clear();
         _clockOffsets.clear();
         _hasClockOffset = false;
+        _hasFrameClock = false;
         _hostSession = 0;
         _reportedPhases.fill(0xff);
         _lastSnapshot = {};
@@ -275,6 +285,7 @@ namespace Mafia1Online::Features::Bridge {
             _samples.clear();
             _clockOffsets.clear();
             _hasClockOffset = false;
+            _hasFrameClock = false;
             _reportedPhases.fill(0xff);
         }
         for (auto &entry : _bridges) {
@@ -316,14 +327,43 @@ namespace Mafia1Online::Features::Bridge {
         _samples.clear();
         _clockOffsets.clear();
         _hasClockOffset = false;
+        _hasFrameClock = false;
         _hostSession = 0;
+    }
+
+    void BridgeService::AdvanceClock(const NativeBridge *bridge, unsigned int frameTimeMs) {
+        // Once a frame, on the first of the mission's bridges.
+        const auto first = std::find_if(_bridges.begin(), _bridges.end(), [](const Entry &entry) { return entry.bridge != nullptr; });
+        if (first == _bridges.end() || first->bridge != bridge) {
+            return;
+        }
+        double wall = 0.0;
+        if (Simulation::IsHost()) {
+            wall = static_cast<double>(MafiaNet::GetTime());
+        }
+        else if (_hasClockOffset) {
+            wall = LocalMs() - _clockOffset - kRenderDelayMs;
+        }
+        else {
+            _hasFrameClock = false;
+            return;
+        }
+        if (!_hasFrameClock || std::fabs(wall - _frameClockMs) > kClockSnapMs) {
+            _frameClockMs = wall;
+            _hasFrameClock = true;
+            return;
+        }
+        const double frame = static_cast<double>(frameTimeMs);
+        _frameClockMs += frame + (wall - _frameClockMs) * std::min(1.0, frame / kClockFollowMs);
     }
 
     void BridgeService::SendSnapshot(World::WorldService &world, bool reliable) {
         Shared::Bridge::Snapshot snapshot;
         snapshot.missionGeneration = world.LoadedMissionGeneration();
         snapshot.hostSession = Simulation::HostSession();
-        snapshot.hostTimeMs = static_cast<uint32_t>(MafiaNet::GetTime());
+        // Dated by the frame clock: the steamers moved by whole frame times,
+        // which the wall clock at sending would date up to a frame off.
+        snapshot.hostTimeMs = static_cast<uint32_t>(_hasFrameClock ? static_cast<int64_t>(_frameClockMs) : static_cast<int64_t>(MafiaNet::GetTime()));
         bool right = false;
         for (size_t index = 0; index < _bridges.size(); ++index) {
             auto *bridge = _bridges[index].bridge;
@@ -365,12 +405,12 @@ namespace Mafia1Online::Features::Bridge {
 
     void BridgeService::BeforeUpdate(NativeBridge *bridge) {
         const int index = IndexOf(bridge);
-        if (index < 0 || !_bridges[index].prepared || _samples.empty() || !_hasClockOffset) {
+        if (index < 0 || !_bridges[index].prepared || _samples.empty() || !_hasFrameClock) {
             return;
         }
         // Host times are dated relative to the newest sample, as a 32-bit
         // millisecond clock wraps.
-        const double hostTime = LocalMs() - _clockOffset - kRenderDelayMs;
+        const double hostTime = _frameClockMs;
         const uint32_t newestTime = _samples.back().hostTimeMs;
         const double target = static_cast<double>(static_cast<int32_t>(static_cast<uint32_t>(static_cast<int64_t>(hostTime)) - newestTime));
         const auto time = [&](const Sample &sample) { return -static_cast<double>(static_cast<int32_t>(newestTime - sample.hostTimeMs)); };
