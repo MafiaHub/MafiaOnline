@@ -4,9 +4,11 @@
 
 #include "core/application.h"
 #include "features/combat/combat_service.h"
+#include "features/debug/sync_trace.h"
 
 #include "features/seat/seat_hooks.h"
 #include "features/simulation/simulation_config.h"
+#include "features/world/frame_clock.h"
 #include "features/world/world_service.h"
 #include "shared/features/player/player_entity.h"
 
@@ -23,6 +25,7 @@
 #include <networking/replication/replication_manager.h>
 
 #include <glm/geometric.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -109,6 +112,9 @@ namespace Mafia1Online::Features::Railway {
                 gService->BeforeUpdate(railway, static_cast<int>(std::min(frameTimeMs, 100u)));
             }
             gUpdateOriginal(railway, frameTimeMs);
+            if (gService && Simulation::IsHost() && Debug::SyncTrace::Enabled()) {
+                gService->TraceTruth(railway, frameTimeMs);
+            }
         }
 
         bool WriteCodeByte(uintptr_t address, uint8_t value) {
@@ -135,6 +141,22 @@ namespace Mafia1Online::Features::Railway {
             const glm::vec3 mixed = glm::mix(a, b, u);
             const float length = glm::length(mixed);
             return length > 0.0001f ? mixed / length : b;
+        }
+
+        // Sync trace: part `part` of railway `index` (0 the body, n wagon n - 1).
+        uint64_t TraceId(size_t index, uint8_t part) {
+            return static_cast<uint64_t>(index) * 10 + part;
+        }
+        // Sync trace: a part's yaw and pitch as a rotation, alike on every copy.
+        glm::quat TraceRotation(const glm::vec3 &direction) {
+            const float length = glm::length(direction);
+            if (!(length > 0.0001f)) {
+                return {1.0f, 0.0f, 0.0f, 0.0f};
+            }
+            const glm::vec3 unit = direction / length;
+            const float yaw = std::atan2(unit.x, unit.z);
+            const float pitch = std::asin(std::clamp(unit.y, -1.0f, 1.0f));
+            return glm::angleAxis(yaw, glm::vec3(0.0f, 1.0f, 0.0f)) * glm::angleAxis(-pitch, glm::vec3(1.0f, 0.0f, 0.0f));
         }
 
         // A railway part's basis: its direction with the world up. Every
@@ -394,6 +416,13 @@ namespace Mafia1Online::Features::Railway {
                 samples.push_back({snapshot.hostTimeMs, state});
                 while (samples.size() > 16) {
                     samples.pop_front();
+                }
+                if (Debug::SyncTrace::Enabled() && Debug::SyncTrace::Near(Vec(state.position))) {
+                    Debug::SyncTrace::Received("railway", TraceId(state.index, 0))
+                        .Num("clk", snapshot.hostTimeMs)
+                        .Num("arrival", LocalMs())
+                        .Num("ptime", snapshot.hostTimeMs + _clockOffset)
+                        .Num("offset", _clockOffset);
                 }
                 _railways[state.index].lastReport = std::chrono::steady_clock::now();
             }
@@ -1087,6 +1116,14 @@ namespace Mafia1Online::Features::Railway {
                 state.wagonPositions[wagon] = ToWire(entry.railway->WagonPositions()[wagon]);
                 state.wagonDirections[wagon] = ToWire(entry.railway->WagonDirections()[wagon]);
             }
+            if (Debug::SyncTrace::Enabled() && Debug::SyncTrace::Near(Vec(state.position))) {
+                Debug::SyncTrace::Truth("railway", TraceId(index, 0))
+                    .Num("clk", snapshot.hostTimeMs)
+                    .Bool("sent", true)
+                    .Vec("p", Vec(state.position))
+                    .Quat("q", TraceRotation(Vec(state.direction)))
+                    .Vec("v", glm::normalize(Vec(state.direction)) * state.speed);
+            }
         }
         if (snapshot.count) {
             Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(snapshot, MafiaNet::Priority::High, MafiaNet::Reliability::Unreliable);
@@ -1187,6 +1224,52 @@ namespace Mafia1Online::Features::Railway {
         for (int32_t i = 0; i < wagons; ++i) {
             railway->WagonPositions()[i] = ToNative(wagonPositions[i]);
             railway->WagonDirections()[i] = ToNative(wagonDirections[i]);
+        }
+        if (Debug::SyncTrace::Enabled()) {
+            const char *sample = target >= 0.0 ? "extrap" : samples.size() > 1 ? "lerp" : "hold";
+            const size_t index = static_cast<size_t>(&entry - _railways.data());
+            for (uint8_t part = 0; part <= std::min<int32_t>(railway->WagonCount(), Shared::Railway::kMaxWagons); ++part) {
+                glm::vec3 origin;
+                glm::vec3 facing;
+                if (!PartPose(*railway, part, origin, facing) || !Debug::SyncTrace::Near(origin)) {
+                    continue;
+                }
+                Debug::SyncTrace::Observed("railway", TraceId(index, part))
+                    .Str("mode", "world")
+                    .Str("smp", sample)
+                    .Num("oclk", hostTime)
+                    .Int("fms", frameMs)
+                    .Num("delay", entry.renderDelayMs)
+                    .Num("ahead", target)
+                    .Vec("p", origin)
+                    .Quat("q", TraceRotation(facing))
+                    .Num("spd", placed.speed);
+            }
+        }
+    }
+
+    void RailwayService::TraceTruth(NativeRailway *railway, unsigned int frameMs) {
+        const int index = IndexOf(railway);
+        if (index < 0) {
+            return;
+        }
+        // Each step as Update drew it, dated by the frame it ran in.
+        const double clock = World::FrameClock::NowMs();
+        for (uint8_t part = 0; part <= std::min<int32_t>(railway->WagonCount(), Shared::Railway::kMaxWagons); ++part) {
+            glm::vec3 origin;
+            glm::vec3 facing;
+            if (!PartPose(*railway, part, origin, facing) || !Debug::SyncTrace::Near(origin)) {
+                continue;
+            }
+            Debug::SyncTrace::Truth("railway", TraceId(static_cast<size_t>(index), part))
+                .Num("clk", clock)
+                .Bool("sent", false)
+                .Int("fms", frameMs)
+                .Vec("p", origin)
+                .Quat("q", TraceRotation(facing))
+                .Vec("v", glm::length(facing) > 0.0001f ? glm::normalize(facing) * railway->Speed() : glm::vec3(0.0f))
+                .Num("spd", railway->Speed())
+                .Int("st", railway->State());
         }
     }
 

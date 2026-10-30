@@ -77,7 +77,8 @@ namespace Mafia1Online::Features::Debug {
         }
         static bool Near(const glm::vec3 &position);
 
-        // `kind`: "car", "player", "npc", "walker", "train", "steamer".
+        // `kind`: "car", "player", "npc", "walker", "railway" (id: index * 10
+        // + part, 0 the body), "steamer".
         static Record Truth(std::string_view kind, uint64_t networkId);
         static Record Observed(std::string_view kind, uint64_t networkId);
         // "rx": a sample an observer received, with the clock it dates it by.

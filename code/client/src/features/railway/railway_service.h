@@ -55,6 +55,8 @@ namespace Mafia1Online::Features::Railway {
         void BeforeUpdate(SDK::Rail::NativeRailway *railway, int frameMs);
         // Simulation host: one of its railways ran into a player's replica
         // (C_human::Collision, railway branch, into the Hit hook).
+        // Simulation host, sync trace: each part as its Update drew it.
+        void TraceTruth(SDK::Rail::NativeRailway *railway, unsigned int frameMs);
         void OnHitPlayer(World::WorldService &world, SDK::Player::NativeHuman &target, SDK::Player::NativeActor *railway, const SDK::Player::Vector3 &direction, float damage);
 
         // Where a human aboard a railway stands, in the basis of the railway

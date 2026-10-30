@@ -253,6 +253,9 @@ def analyze(reader, args):
         elif k == "event":
             events[(r.get("e"), r.get("id"), r.get("name"), r.get("seq"))].append(r)
     truths = {key: Truth(rs) for key, rs in truth_records.items()}
+    # Every observed entity of a kind pooled, per observer: a railway is a
+    # body and its wagons, a dozen of them in view at once.
+    pooled = defaultdict(lambda: defaultdict(list))
 
     print("=" * 78)
     print("sync trace: %d records, %.1f s, files: %s" % (len(records), (max(r["t"] for r in records) - t0) / 1e6,
@@ -390,6 +393,13 @@ def analyze(reader, args):
         print("  rot d2 obs deg: %s   ideal: %s" % (stats(d2_rot, 1, 3), stats(d2_ideal_rot, 1, 3)))
         print("  camera-car d2 mm: %s   accel m/s2: %s" % (stats(d2_cam, 1000, 2), stats(acc_cam, 1, 2)))
         print("  owner clock step - frame ms: %s   - wall ms: %s" % (stats(clock_dev, 1, 2), stats(qpc_dev, 1, 2)))
+        pool = pooled[(reader.role(src), kind)]
+        pool["entities"].append(eid)
+        pool["rep"] += rep
+        pool["excess"] += acc_excess
+        pool["clock"] += clock_dev
+        pool["delay"] += [r["delay"] for r in interp]
+        pool["smp"] += [r.get("smp") for r, m in zip(interp, moving_flags) if m]
         if truth:
             moving = [r for r, m in zip(interp, moving_flags) if m]
             if moving:
@@ -432,6 +442,25 @@ def analyze(reader, args):
             print("  delivered: %d of %d sent in that clock range (%.1f%%)" % (len(rx), sent, 100.0 * len(rx) / max(sent, 1)))
         print("  arrival - dated ms: %s   offset slew ms: %s   resets: %d" % (stats(late, 1, 2), stats([abs(s) for s in slew], 1, 3),
                                                                            sum(1 for r in rx if r.get("reset"))))
+        pool = pooled[(reader.role(key[0]), key[1])]
+        pool["gaps"] += gaps
+        pool["slew"] += [abs(s) for s in slew]
+
+    for (role, kind), pool in sorted(pooled.items()):
+        if not pool["entities"]:
+            continue
+        print("=" * 78)
+        print("POOLED %s by %s: %d entities" % (kind, role, len(pool["entities"])))
+        print("  rep err mm: %s" % stats(pool["rep"], 1000))
+        print("  accel added by presentation m/s2: %s" % stats(pool["excess"], 1, 2))
+        print("  owner clock step - frame ms: %s" % stats(pool["clock"], 1, 2))
+        print("  delay ms: %s" % stats(pool["delay"], 1, 1))
+        if pool["smp"]:
+            share = defaultdict(int)
+            for value in pool["smp"]:
+                share[value] += 1
+            print("  moving frames %d: " % len(pool["smp"]) + ", ".join("%s %.1f%%" % (k, 100.0 * n / len(pool["smp"])) for k, n in sorted(share.items(), key=lambda kv: -kv[1])))
+        print("  report clock gaps ms: %s   offset slew ms: %s" % (stats(pool["gaps"], 1, 1), stats(pool["slew"], 1, 3)))
 
     if events:
         print("-" * 78)
