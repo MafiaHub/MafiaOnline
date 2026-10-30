@@ -260,8 +260,8 @@ def analyze(reader, args):
 
     for key, truth in sorted(truths.items(), key=lambda kv: str(kv[0])):
         owner = reader.role(truth.samples[0]["src"]) if truth.samples else "?"
-        steps = [b["clk"] - a["clk"] - b.get("fms", b["clk"] - a["clk"]) for a, b in zip(truth.samples, truth.samples[1:])]
-        jumps = [s for s in steps if s != 0]
+        steps = [abs(b["clk"] - a["clk"] - b.get("fms", b["clk"] - a["clk"])) for a, b in zip(truth.samples, truth.samples[1:]) if b.get("f") == a.get("f", -2) + 1]
+        jumps = [s for s in steps if s > 5.0]
         d2 = second_differences([r["p"] for r in truth.by_time])
         # Sent samples against the step that produced them.
         mismatch = []
@@ -280,7 +280,7 @@ def analyze(reader, args):
                 vel.append(norm(sub(chord, mean)) / max(norm(mean), 1e-3))
         print("-" * 78)
         print("TRUTH %s %s owner %s: %d steps, %d sent" % (key[0], key[1], owner, len(truth.samples), len(truth.sent)))
-        print("  clock jumps (step != frame ms): %d, sizes %s" % (len(jumps), stats(jumps, 1, 0)))
+        print("  stamp step - frame ms: %s   jumps > 5 ms: %d %s" % (stats(steps, 1, 3), len(jumps), stats(jumps, 1, 0)))
         print("  owner d2 mm: %s" % stats(d2, 1000))
         print("  sent pose vs its step mm: %s" % stats(mismatch, 1000, 2))
         print("  sent velocity vs chord (relative): %s" % stats(vel, 100, 2) + " %")
@@ -317,7 +317,7 @@ def analyze(reader, args):
             continue
         seated = sum(1 for r in interp if r.get("seat", -1) >= 0)
         print("  local player seated in it: %d frames" % seated)
-        rep, rep_deg, now_err, lag = [], [], [], []
+        rep, rep_deg, now_err, lag, vel_deg = [], [], [], [], []
         ideal_points, ideal_rot, moving_flags = [], [], []
         offenders = []
         for r in interp:
@@ -328,6 +328,12 @@ def analyze(reader, args):
             if at:
                 rep.append(norm(sub(r["p"], at[0])))
                 rep_deg.append(qangle(r["q"], at[1]))
+                a, b = at[2], at[3]
+                span = b["clk"] - a["clk"]
+                tv = lerp(a.get("v", (0, 0, 0)), b.get("v", (0, 0, 0)), (r["oclk"] - a["clk"]) / span if span > 0 else 0.0)
+                if "v" in r and norm(tv) > 3.0 and norm(r["v"]) > 0.0:
+                    cos = sum(x * y for x, y in zip(r["v"], tv)) / (norm(r["v"]) * norm(tv))
+                    vel_deg.append(math.degrees(math.acos(max(-1.0, min(1.0, cos)))))
                 ideal_points.append(at[0])
                 ideal_rot.append(at[1])
             else:
@@ -339,7 +345,7 @@ def analyze(reader, args):
                 lag.append(now[1] - r["oclk"])
         if truth:
             print("  rep err mm: %s" % stats(rep, 1000))
-            print("  rep heading err deg: %s" % stats(rep_deg, 1, 3))
+            print("  rep heading err deg: %s   velocity direction err deg: %s" % (stats(rep_deg, 1, 3), stats(vel_deg, 1, 3)))
             print("  now err m: %s   owner clock lag ms: %s" % (stats(now_err, 1, 2), stats(lag, 1, 1)))
         # Wobble over consecutive frames: the second difference (mm) and the
         # acceleration it implies over the game's frame times (m/s^2), for
@@ -362,7 +368,7 @@ def analyze(reader, args):
             acc_obs.append(ao)
             offenders.append((ao, b))
             d2_rot += rotation_second_differences([a["q"], b["q"], c["q"]])
-            ia, ib, ic = ideal_points[i - 1], ideal_points[i], ideal_points[i + 1]
+            ia, ib, ic = (ideal_points[i - 1], ideal_points[i], ideal_points[i + 1]) if i + 1 < len(ideal_points) else (None, None, None)
             if truth and ia is not None and ib is not None and ic is not None:
                 d2_ideal.append(norm(add(sub(ic, mul(ib, 2.0)), ia)))
                 ai_vec = sub(mul(sub(ic, ib), 1 / dt1), mul(sub(ib, ia), 1 / dt0))
