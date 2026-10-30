@@ -51,6 +51,12 @@ namespace Mafia1Online::Features::Pedestrian {
         // walker shows on this screen now, and the walker leaves at once and
         // is not shown again. Nothing when this client shows no such walker.
         std::optional<Framework::Utils::TransformSnapshot> HandOff(World::WorldService &world, uint64_t walkerId);
+        // A car's body met the replica wearing this model (C_don_ocas::Collision,
+        // the car's velocity as the impact). From knockdown speed retail Hit
+        // takes the walker's collision out and lays it down in that contact;
+        // the host's own knockdown is a round trip and a render delay away,
+        // so this copy does both now, on every client the car meets it.
+        void OnCarContact(const SDK::Scene::NativeFrame *model, const glm::vec3 &velocity);
 
       private:
         // The host reports every 100 ms, and the server's far band every
@@ -88,6 +94,16 @@ namespace Mafia1Online::Features::Pedestrian {
             bool settled = false;
             // Borrowed already dead: its last clip runs to its end at once.
             bool fallen = false;
+            // A car knocked this copy down here first (OnCarContact): its fall
+            // plays where it was hit until the host's knockdown reaches the
+            // shown moment; the host's fall is then taken as this one.
+            struct Knockdown {
+                glm::vec3 facing {0.0f};
+                std::chrono::steady_clock::time_point since;
+            };
+            std::optional<Knockdown> knockdown;
+            // The host's fall that confirmed this copy's own, played already.
+            int32_t confirmedFall = 0;
             int32_t appliedAlpha = -1;
             // The taxi wave shown, Shared::Taxi::kWave*.
             uint8_t appliedWave = 0;

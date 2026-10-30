@@ -7,6 +7,7 @@
 #include "features/world/fading_copies.h"
 #include "features/world/world_service.h"
 #include "shared/features/pedestrian/pedestrian_entity.h"
+#include "shared/features/pedestrian/pedestrian_knockdown.h"
 
 #include <core_modules.h>
 #include <logging/logger.h>
@@ -34,6 +35,12 @@ namespace Mafia1Online::Features::Pedestrian {
         // end of a knockdown (Hit 0x4588d0), whose id comes a moment after
         // this copy's fall ends. Then the corpse settles.
         constexpr std::chrono::milliseconds kCorpseSettleDelay {500};
+        // A car's knockdown this copy played first waits this long for the
+        // host's: past the driver's report, the server, the host and back,
+        // and the render delay. A contact the host never applies (the server
+        // refused it, or only this client's copy of the car met the walker)
+        // then gives the walker back.
+        constexpr std::chrono::milliseconds kKnockdownConfirmLimit {1500};
         // How far a walker streamed in dead runs its clip at once.
         constexpr uint32_t kFallenLimitMs = 10000;
 
@@ -84,6 +91,40 @@ namespace Mafia1Online::Features::Pedestrian {
             }
         }
         return 0;
+    }
+
+    void PedestrianReplicaService::OnCarContact(const SDK::Scene::NativeFrame *model, const glm::vec3 &velocity) {
+        if (!Shared::Pedestrian::KnocksDown(velocity)) {
+            return;
+        }
+        for (auto &[id, replica] : _replicas) {
+            auto *element = replica.element;
+            if (!element || element->Model() != model) {
+                continue;
+            }
+            // Retail Hit returns at once for a dead walker, and a fallen one
+            // has no collision a car could meet.
+            if (replica.dead || replica.settled || replica.fallen || replica.knockdown ||
+                Shared::Pedestrian::KnockdownCollisionDelay(element->CurrentAnimation()) != 0) {
+                return;
+            }
+            const auto direction = element->Direction();
+            const bool fatal = Shared::Pedestrian::CarImpactDamage(velocity) > Shared::Pedestrian::kSurelyFatalDamage;
+            const auto knockdown = Shared::Pedestrian::CarKnockdown(velocity, {direction.x, direction.y, direction.z}, fatal);
+            // Hit's knockdown steps (0x458eea-0x45916f) but the damage, which
+            // is the host's: the umbrella dropped, the collision out until
+            // the fall and its queued clip are over, the body turned to the
+            // impact, and the fall played as Tick's SetAnim would.
+            if (element->HasUmbrella()) {
+                element->DropUmbrella();
+            }
+            element->KnockDown(knockdown.collisionDelay);
+            element->SetPose(element->Position(), {knockdown.facing.x, 0.0f, knockdown.facing.z});
+            element->PlayAnimation(knockdown.animation, element->AnimationFlag());
+            replica.holding = false;
+            replica.knockdown = Replica::Knockdown {knockdown.facing, std::chrono::steady_clock::now()};
+            return;
+        }
     }
 
     void PedestrianReplicaService::Update(World::WorldService &world) {
@@ -184,17 +225,55 @@ namespace Mafia1Online::Features::Pedestrian {
             if (replica.settled) {
                 return;
             }
+            if (replica.knockdown) {
+                if (!shown.alive || Shared::Pedestrian::KnockdownCollisionDelay(shown.id) != 0) {
+                    // The host's knockdown: this copy's fall already plays.
+                    if (Shared::Pedestrian::KnockdownCollisionDelay(shown.id) != 0) {
+                        replica.confirmedFall = shown.id;
+                    }
+                    replica.knockdown.reset();
+                }
+                else if (now - replica.knockdown->since > kKnockdownConfirmLimit) {
+                    replica.knockdown.reset();
+                    element->RestoreCollision();
+                }
+                else {
+                    // Lies where the car hit it, moved by its fall's root
+                    // motion alone: the host's poses still walk on.
+                    if (!replica.holding) {
+                        replica.holding = element->TickAnimation(frameMs);
+                        replica.holdingSince = now;
+                        element->SetPose(element->Position(), {replica.knockdown->facing.x, 0.0f, replica.knockdown->facing.z});
+                        if (!replica.holding) {
+                            element->Model()->Tick(static_cast<int>(frameMs));
+                            replica.holding = element->CountDownClip(frameMs);
+                        }
+                    }
+                    return;
+                }
+            }
+            if (shown.id != replica.confirmedFall) {
+                replica.confirmedFall = 0;
+            }
             // Held at the extrapolation bound: retail's idle (SetAnim
             // blends to it) until the stream resumes, not a walk on the spot.
             const bool stopped = shown.alive && Player::MovingGait(shown.id) &&
                                  Player::Stalled(renderTime, replica.newestTime, kSnapshotConfig.maxExtrapolationMs, replica.newestVelocity);
             const int32_t animation = stopped ? Player::kStopState : shown.id;
             const bool animationFlag = stopped ? false : shown.flag;
-            if (animation != element->CurrentAnimation()) {
+            if (animation != element->CurrentAnimation() && animation != replica.confirmedFall) {
+                // The host's knockdown takes the collision out as its Hit did
+                // there; SetAnim puts it back after the clip queued behind.
+                if (const uint32_t delay = Shared::Pedestrian::KnockdownCollisionDelay(animation)) {
+                    element->KnockDown(delay);
+                }
                 element->PlayAnimation(animation, animationFlag);
                 replica.holding = false;
             }
-            else if (replica.holding && shown.alive && now - replica.holdingSince > kLivingHoldLimit) {
+            // A fall that ended waits for the host's next clip, which comes
+            // later when this copy fell first: restarting it falls again.
+            else if (replica.holding && shown.alive && Shared::Pedestrian::KnockdownCollisionDelay(animation) == 0 &&
+                     now - replica.holdingSince > kLivingHoldLimit) {
                 element->RestartAnimation(animation, animationFlag);
                 replica.holding = false;
             }

@@ -13,6 +13,7 @@
 #include "shared/features/combat/melee_rules.h"
 #include "shared/features/pedestrian/pedestrian_entity.h"
 #include "shared/features/pedestrian/pedestrian_control.h"
+#include "shared/features/pedestrian/pedestrian_knockdown.h"
 #include "shared/features/pedestrian/pedestrian_scream.h"
 #include "shared/features/player/player_entity.h"
 
@@ -130,7 +131,6 @@ namespace Mafia1Online::Features::Pedestrian {
         // C_don_ocas::Collision's car hit (0x44cba3-0x44cbb5).
         constexpr int32_t kCarImpactHit = 5;
         constexpr uint32_t kTorso = 5;
-        constexpr float kCarImpactDamageScale = 4.2f;
 
         // The host alone decides what happens to a walker: on a player the
         // walker is a replica, so a local bullet, blast or car neither hurts
@@ -198,8 +198,11 @@ namespace Mafia1Online::Features::Pedestrian {
         void __fastcall RecruitPoliceHook(void *, uint32_t, void *, bool, float, bool) {}
 
         // A car's physics runs only on its driver's client, which reports the
-        // contact with a walker replica; the host applies it (Impact). The
-        // host's own copies of networked cars never hit walkers.
+        // contact with a walker replica; the host applies it (Impact). Every
+        // client's copy of the car knocks the replica down at once, as Hit
+        // does in this same contact, so the walker is no rigid body on the
+        // driver's screen nor on a passenger's. The host's own copies of
+        // networked cars never hit walkers.
         bool __fastcall WalkerCollisionHook(void *proxy, void *, SDK::Player::NativeActor *actor, const SDK::Player::Vector3 *position, const SDK::Player::Vector3 *direction,
                                             const SDK::Player::Vector3 *normal, float force, SDK::Scene::NativeFrame *frame) {
             if (!Simulation::IsHost()) {
@@ -392,7 +395,7 @@ namespace Mafia1Online::Features::Pedestrian {
                 police->ReportPatrolmanHit(driver);
             }
             auto *previous = game->ExchangePlayer(driver);
-            reinterpret_cast<ElementHit>(SDK::Traffic::kElementHit)(element, kCarImpactHit, &direction, kTorso, car, speed * kCarImpactDamageScale);
+            reinterpret_cast<ElementHit>(SDK::Traffic::kElementHit)(element, kCarImpactHit, &direction, kTorso, car, speed * Shared::Pedestrian::kCarImpactDamageScale);
             game->ExchangePlayer(previous);
             // ...and after it, a walker it killed counts as a run-over
             // (NextNaSrackySoudruh) while the police are active.
@@ -557,12 +560,13 @@ namespace Mafia1Online::Features::Pedestrian {
         if (!_world || !_world->IsReady() || !replication || actor->GetType() != SDK::Player::NativeActor::Type::Car) {
             return;
         }
+        auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
+        application->PedestrianReplicas().OnCarContact(model, {direction.x, direction.y, direction.z});
         const uint64_t carId = _world->NativeObjects().FindByNative(actor).networkId;
         const auto *car = carId ? replication->GetEntity<Shared::Entities::CarEntity>(carId) : nullptr;
         if (!car || car->simulationControllerGuid != static_cast<uint64_t>(replication->GetMyGUID())) {
             return;
         }
-        auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
         const uint64_t walkerId = application->PedestrianReplicas().WalkerOfModel(model);
         const auto now = std::chrono::steady_clock::now();
         // The contact repeats every physics step while the car touches it.

@@ -5,6 +5,7 @@
 #include "shared/features/npc/npc_animation.h"
 #include "shared/features/npc/npc_report.h"
 #include "shared/features/npc/npc_seized.h"
+#include "shared/features/pedestrian/pedestrian_knockdown.h"
 #include "shared/features/railway/railway_report.h"
 
 #include <chrono>
@@ -446,6 +447,54 @@ namespace {
         CHECK(!Shared::Npc::ScriptClip::Holds(kHitReaction) && !Shared::Npc::ScriptClip::Holds(2) && !Shared::Npc::ScriptClip::Holds(8));
         CHECK(!untracked.Continues("GestSklStativ.i3d", true, kHitReaction));
     }
+
+    // A car knocking a walker down: every client's copy plays the fall Hit
+    // (0x4588d0) would, so it must pick the host's clip and collision delay.
+    void WalkerKnockdowns() {
+        namespace Pedestrian = Shared::Pedestrian;
+        // Damage |v| x 4.2 knocks down from 16: 3.81 m/s, not 3.8.
+        CHECK(!Pedestrian::KnocksDown({3.8f, 0.0f, 0.0f}));
+        CHECK(Pedestrian::KnocksDown({0.0f, 0.0f, 3.81f}));
+        CHECK(!Pedestrian::KnocksDown({std::numeric_limits<float>::quiet_NaN(), 0.0f, 10.0f}));
+        CHECK(!Pedestrian::KnocksDown({std::numeric_limits<float>::infinity(), 0.0f, 0.0f}));
+        CHECK(Near(Pedestrian::CarImpactDamage({0.0f, 0.0f, 10.0f}), 42.0f));
+
+        const glm::vec3 facing {0.0f, 0.0f, 1.0f};
+        // Hit from behind (the car drives along the walker's heading): it
+        // falls forward, turned to the impact; a sure kill takes the dead clip.
+        const auto front = Pedestrian::CarKnockdown({1.0f, 0.5f, 10.0f}, facing, false);
+        CHECK(front.animation == Pedestrian::kFallFront);
+        CHECK(front.collisionDelay == 2);
+        CHECK(Near(front.facing.y, 0.0f) && Near(glm::length(front.facing), 1.0f) && front.facing.x > 0.0f && front.facing.z > 0.9f);
+        CHECK(Pedestrian::CarKnockdown({0.0f, 0.0f, 20.0f}, facing, true).animation == Pedestrian::kFallFrontDeadB);
+        // Head-on: it falls back, turned against the impact.
+        const auto back = Pedestrian::CarKnockdown({0.0f, 0.0f, -10.0f}, facing, true);
+        CHECK(back.animation == Pedestrian::kFallBack);
+        CHECK(back.collisionDelay == 3);
+        CHECK(Near(back.facing.z, 1.0f));
+        // From the side the heading stays: AngleTo2 from heading (0, 1) to an
+        // impact along +x is -90 degrees (right), along -x +90 (left).
+        const auto right = Pedestrian::CarKnockdown({10.0f, 0.0f, 0.0f}, facing, false);
+        CHECK(right.animation == Pedestrian::kFallRight);
+        CHECK(right.collisionDelay == 3);
+        CHECK(Near(right.facing.z, 1.0f));
+        CHECK(Pedestrian::CarKnockdown({-10.0f, 0.0f, 0.0f}, facing, false).animation == Pedestrian::kFallLeft);
+        // Front below 45 degrees off the heading, back beyond 135.
+        CHECK(Pedestrian::CarKnockdown({9.0f, 0.0f, 10.0f}, facing, false).animation == Pedestrian::kFallFront);
+        CHECK(Pedestrian::CarKnockdown({10.0f, 0.0f, -10.5f}, facing, false).animation == Pedestrian::kFallBack);
+
+        // Every knockdown clip the host can send takes the collision out;
+        // a walk, a dodge or the get-up does not.
+        for (const int32_t fall : {Pedestrian::kFallBack, Pedestrian::kFallLeft, Pedestrian::kFallRight}) {
+            CHECK(Pedestrian::KnockdownCollisionDelay(fall) == 3);
+        }
+        for (const int32_t fall : {Pedestrian::kFallFrontDeadA, Pedestrian::kFallFrontDeadB, Pedestrian::kFallFront}) {
+            CHECK(Pedestrian::KnockdownCollisionDelay(fall) == 2);
+        }
+        for (const int32_t other : {0, 6, 109, 110, 111, 324}) {
+            CHECK(Pedestrian::KnockdownCollisionDelay(other) == 0);
+        }
+    }
 } // namespace
 
 int main() {
@@ -457,6 +506,7 @@ int main() {
     SeizedMessage();
     RailwayShots();
     ScriptClips();
+    WalkerKnockdowns();
     if (failures == 0) {
         std::printf("contact sync tests passed\n");
     }

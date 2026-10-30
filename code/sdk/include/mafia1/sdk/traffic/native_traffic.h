@@ -216,6 +216,7 @@ namespace Mafia1Online::SDK::Traffic {
     struct NativeTrafficElement {
         [[nodiscard]] bool IsActive() const { return _active; }
         [[nodiscard]] const Player::Vector3 &Position() const { return _position; }
+        [[nodiscard]] const Player::Vector3 &Direction() const { return _direction; }
         [[nodiscard]] int32_t CurrentAnimation() const { return _currentAnimation; }
         [[nodiscard]] bool AnimationFlag() const { return _animationFlag; }
         [[nodiscard]] int32_t WalkStyle() const { return _walkStyle; }
@@ -285,6 +286,21 @@ namespace Mafia1Online::SDK::Traffic {
             *reinterpret_cast<bool *>(Raw()) = true;
             game->DelFrameForShadow(_model);
         }
+        // Hit's knockdown (0x458efb-0x458f80): the collision out of the grid
+        // until SetAnim (0x459450) finds the delay (+0x14c) at 1 and puts it
+        // back, after the fall and the clip queued behind it.
+        void KnockDown(uint32_t collisionDelay) {
+            EraseCollision();
+            *reinterpret_cast<uint32_t *>(Raw() + kCollisionUpdateDelay) = collisionDelay;
+        }
+        // ActivateFree's registration (0x457685-0x4576a5): the collision back
+        // in the grid now, moved by UpdateModel again.
+        void RestoreCollision() {
+            Collision::DynInsert(Raw() + kCollisionObject);
+            *reinterpret_cast<bool *>(Raw() + kHasCollisions) = true;
+            *reinterpret_cast<uint32_t *>(Raw() + kCollisionUpdateDelay) = 0;
+        }
+        [[nodiscard]] bool HasCollisions() const { return *reinterpret_cast<const bool *>(Raw() + kHasCollisions); }
         // Pedestrian nodes only: an element whose allowed node types were
         // never set (Activate sets them) finds no node otherwise.
         bool ActivateFree() {
@@ -409,6 +425,7 @@ namespace Mafia1Online::SDK::Traffic {
         }
 
         static constexpr size_t kCollisionObject      = 0xc4;
+        static constexpr size_t kCollisionUpdateDelay = 0x14c;
         static constexpr size_t kHasCollisions        = 0x150;
         static constexpr size_t kAnimationCountdown   = 0x170;
         static constexpr size_t kUsingObject          = 0x1bc;
