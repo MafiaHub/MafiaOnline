@@ -102,6 +102,8 @@ namespace Mafia1Online::Features::Player {
             std::chrono::steady_clock::time_point pullingUntil {};
             // Since when a door animation holds the pose stream off (diagnostic).
             std::chrono::steady_clock::time_point doorSince {};
+            // Since when a knockdown clip holds the gait off (HoldsKnockdown).
+            std::chrono::steady_clock::time_point knockdownSince {};
         };
         std::optional<RemoteAnimation> RemoteLocomotion(const RemoteStream &stream) const;
 

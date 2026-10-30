@@ -476,10 +476,12 @@ namespace Mafia1Online::Features::Car {
                         report.contactZ = position.z;
                         report.kind = kind;
                         Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(report);
-                        if (kind == Shared::Combat::VehicleContact::Impact) {
+                        if (kind == Shared::Combat::VehicleContact::Impact && npc) {
                             // Retail C_human::Collision hits the human in this
                             // same contact; the server's answer is a round
-                            // trip away.
+                            // trip away. A player's knockdown is the one its
+                            // own client plays, which reaches this replica
+                            // with its poses (PlayerService).
                             application->Death().PredictVehicleImpact(carHandle.networkId, targetHandle.networkId, velocity);
                         }
                     }

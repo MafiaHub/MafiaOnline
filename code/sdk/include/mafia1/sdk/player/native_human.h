@@ -268,6 +268,12 @@ namespace Mafia1Online::SDK::Player {
             // NewScream ends with SetOn(true, true) only when the wave opened.
             return _screamSound->IsPlaying();
         }
+        // Screams `screamId` as C_human::Hit does with a fall it picks
+        // (NewScream, 0x5773a1-0x5773ab): a line of equal or higher priority
+        // still playing keeps it out.
+        void Scream(uint32_t screamId) {
+            reinterpret_cast<void(__thiscall *)(NativeHuman *, uint32_t)>(kHumanNewScream)(this, screamId);
+        }
         [[nodiscard]] float ShotCount() const {
             return _shotCount;
         }

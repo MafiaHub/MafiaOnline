@@ -118,6 +118,49 @@ namespace Mafia1Online::Features::Player {
         return {1, false};
     }
 
+    // C_human::Hit's knockdown of a living human (a car above 3 m/s,
+    // |v|^2 > 9 at 0x576bf4): the fall it picks, back 106, left 107, right
+    // 108 or front 114, and the get-up 111 it queues behind a side fall
+    // (0x577587-0x577712). Each has a displacement track, so PersonAnim
+    // (0x573e50) runs it in work state 4 (0x574366), not in the steps' 6;
+    // C_human::Update idles the body when the track ends. The dead falls
+    // (109, 110, 112, 113) come with a death, which DeathService replays.
+    inline bool KnockdownClip(int32_t state) {
+        switch (state & 0x1ff) {
+        case 106:
+        case 107:
+        case 108:
+        case 111:
+        case 114: return true;
+        default: return false;
+        }
+    }
+
+    // What a player's replica plays for its owner's state: as any human
+    // replica, and each knockdown clip once, when the stream shows the
+    // owner's body going down. Hit turns a random way (0x576c1c) and
+    // reads the facing the body had, so only the owner's own fall is the
+    // one the victim saw.
+    inline HumanAnimation ClassifyPlayerState(int16_t state) {
+        if (KnockdownClip(state)) {
+            return {static_cast<int16_t>(state & 0x1ff), true};
+        }
+        return ClassifyHumanState(state);
+    }
+
+    // Whether a replica that plays the knockdown clip `playing` in work
+    // state `workState` keeps it over the streamed state `streamed`. The
+    // owner lies until its own clip ends, so the replica's runs to its end
+    // as well; a sample of the owner's idle, or its walk once up, does not
+    // cut it. Only the owner's next clip of the knockdown, the get-up after
+    // a side fall, takes over at once.
+    inline bool HoldsKnockdown(int32_t workState, int32_t playing, int32_t streamed) {
+        if (workState != 4 || !KnockdownClip(playing)) {
+            return false;
+        }
+        return !KnockdownClip(streamed) || (streamed & 0x1ff) == (playing & 0x1ff);
+    }
+
     // The C_human call that puts a body in a cover state, so a replica
     // takes it with the work state, action time and aim the host's did.
     // Each takes the corner side (E_corner_view 0-2) and refuses a rifle,

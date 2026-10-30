@@ -35,9 +35,10 @@ namespace Mafia1Online::Features::Death {
         void OnSuppressedHit(SDK::Player::NativeHuman &target, SDK::Player::NativeHitType type, const SDK::Player::Vector3 &direction, const SDK::Player::Vector3 &hitPosition, SDK::Player::NativeActor *attacker, uint32_t bodyPart);
         void OnSuppressedMelee(SDK::Player::NativeHuman &target, const SDK::Player::Vector3 &direction, const SDK::Player::Vector3 &hitPosition, SDK::Player::NativeActor *attacker, uint32_t bodyPart);
         void OnSuppressedFatalFall(SDK::Player::NativeHuman &human, Shared::Combat::FatalFallReport::Cause cause);
-        // The local car just reported running into this network human: play
+        // The local car just reported running into this NPC's replica: play
         // the impact reaction now (retail C_human::Collision hits at once);
-        // the server's damage for that car then only sets health.
+        // the server's damage for that car then only sets health. A player
+        // shows the knockdown its own client played (PlayerService).
         void PredictVehicleImpact(uint64_t carId, uint64_t targetId, const SDK::Player::Vector3 &direction);
 
       private:

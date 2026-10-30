@@ -160,9 +160,22 @@ namespace Mafia1Online::Features::Death {
             // replaying it again would restart the reaction mid-fall. Another
             // car's impact on the same target still plays.
             const auto predicted = event.hitType == 4 ? _predictedImpacts.find({event.sourceCarId, event.targetNetworkId}) : _predictedImpacts.end();
+            // A car's knockdown of another player plays from that player's
+            // own body: its fall reaches this replica with its poses
+            // (PlayerService), where and when it went down there. Replayed
+            // here it would fall a round trip early and, Hit turning the
+            // impact a random way (0x576c1c), often in another clip.
+            const bool streamedKnockdown = event.hitType == 4 && actor != SDK::Player::CurrentPlayer() &&
+                                           replication->GetEntity<Shared::Entities::PlayerEntity>(event.targetNetworkId) != nullptr;
             if (predicted != _predictedImpacts.end()) {
                 _predictedImpacts.erase(predicted);
                 human->SetHealth(state->health);
+                applied = {event.missionGeneration, event.targetSpawnGeneration, event.targetRevision};
+                it      = _pendingDamage.erase(it);
+            }
+            else if (streamedKnockdown) {
+                human->SetHealth(state->health);
+                reportCarContact(event, false);
                 applied = {event.missionGeneration, event.targetSpawnGeneration, event.targetRevision};
                 it      = _pendingDamage.erase(it);
             }

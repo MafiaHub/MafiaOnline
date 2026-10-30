@@ -34,6 +34,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <random>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -48,6 +49,13 @@ namespace Mafia1Online::Features::Player {
         constexpr float kDiagonalComponent = 0.38f;
         // Holds the pose stream off a pull-out whose track never ends.
         constexpr auto kPullLimit          = std::chrono::seconds(5);
+        // Holds the stream off a knockdown clip whose track never ends.
+        constexpr auto kKnockdownLimit     = std::chrono::seconds(5);
+        // The get-up C_human::Hit queues behind a side fall (0x5776fa).
+        constexpr int16_t kKnockdownGetUp  = 111;
+        // reM HUMAN_HIT_ALIVE_SCREAM_BASE and _COUNT (rnd(7) + 85, 0x5773a1).
+        constexpr uint32_t kKnockdownFirstScream = 85;
+        constexpr uint32_t kKnockdownScreams     = 7;
 
         bool IsFinite(const Framework::Utils::TransformSnapshot &snapshot) {
             return std::isfinite(snapshot.position.x) && std::isfinite(snapshot.position.y) && std::isfinite(snapshot.position.z) && std::isfinite(snapshot.velocity.x) && std::isfinite(snapshot.velocity.y) && std::isfinite(snapshot.velocity.z)
@@ -697,7 +705,7 @@ namespace Mafia1Online::Features::Player {
     }
 
     PlayerService::RemoteAnimation PlayerService::ClassifyLocomotion(int16_t state) {
-        const auto animation = ClassifyHumanState(state);
+        const auto animation = ClassifyPlayerState(state);
         return RemoteAnimation {animation.state, animation.oneShot};
     }
 
@@ -806,6 +814,22 @@ namespace Mafia1Online::Features::Player {
             if (melee.canWork == SDK::Player::kHumanAnimationSequenceWorkState) {
                 return;
             }
+            // A knockdown's fall leaves those steps at once for work state 4
+            // (KnockdownClip), where the next sample's gait used to replace
+            // it a frame after it started. It runs to its end, as on the
+            // owner's screen, while the stream places the body.
+            const auto now = std::chrono::steady_clock::now();
+            if (HoldsKnockdown(melee.canWork, human->AnimationState(), locomotion ? locomotion->state : kStopState)) {
+                if (owned->second.knockdownSince == std::chrono::steady_clock::time_point {}) {
+                    owned->second.knockdownSince = now;
+                }
+                if (now - owned->second.knockdownSince < kKnockdownLimit) {
+                    return;
+                }
+            }
+            else {
+                owned->second.knockdownSince = {};
+            }
             // Do_Shoot(false) starts the retail grenade throw as state 163.
             // Its animation notify releases the held model and the native
             // Update returns to idle when the full track finishes. Replacing
@@ -828,6 +852,12 @@ namespace Mafia1Online::Features::Player {
                 // Started once: the native animation returns to idle by
                 // itself while the replicated state still names the jump.
                 human->SetLocomotionAnimation(static_cast<SDK::Player::LocomotionAnimation>(locomotion->state));
+                // The owner's knockdown, where its body went down: Hit
+                // screams with the fall it picks (0x5773a1), not the get-up.
+                if (KnockdownClip(locomotion->state) && locomotion->state != kKnockdownGetUp) {
+                    static std::mt19937 random {std::random_device {}()};
+                    human->Scream(kKnockdownFirstScream + std::uniform_int_distribution<uint32_t>(0, kKnockdownScreams - 1)(random));
+                }
             }
             owned->second.lastAnimation = locomotion ? locomotion->state : 0;
         }

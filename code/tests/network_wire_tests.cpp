@@ -935,6 +935,40 @@ namespace {
         CHECK(!HoldsCorner(1, 88) && !HoldsCorner(78, 88));
     }
 
+    // A car's knockdown of a player reaches its replicas only as the owner's
+    // locomotion state: each clip plays once and runs to its end there.
+    void PlayerKnockdowns() {
+        using namespace Features::Player;
+        // Hit's living falls and the side fall's get-up play once on a
+        // player's replica; an NPC's or walker's replica still idles.
+        for (const int16_t state : {106, 107, 108, 111, 114}) {
+            CHECK(KnockdownClip(state));
+            const auto animation = ClassifyPlayerState(state);
+            CHECK(animation.state == state && animation.oneShot);
+            CHECK(ClassifyHumanState(state).state == 1);
+        }
+        // The dead falls come with a death; the variant bits are dropped.
+        for (const int16_t state : {109, 110, 112, 113, 105, 115}) {
+            CHECK(!KnockdownClip(state));
+        }
+        CHECK(ClassifyPlayerState(0x2000 | 114).state == 114);
+        // Everything else classifies as for any human.
+        for (const int16_t state : {1, 6, 10, 78, 97, 287, 322}) {
+            CHECK(ClassifyPlayerState(state).state == ClassifyHumanState(state).state);
+            CHECK(ClassifyPlayerState(state).oneShot == ClassifyHumanState(state).oneShot);
+        }
+
+        // The fall runs in work state 4 to its end over a sample of the
+        // owner's idle or walk, or the same fall still streamed.
+        CHECK(HoldsKnockdown(4, 106, 1) && HoldsKnockdown(4, 107, 6) && HoldsKnockdown(4, 114, 114));
+        // The get-up the owner queued behind a side fall takes over.
+        CHECK(!HoldsKnockdown(4, 107, 111) && !HoldsKnockdown(4, 108, 111));
+        // Not once the track ended (idle again), nor in the steps (6), a
+        // swing (5) or for a clip that is no knockdown (a jump).
+        CHECK(!HoldsKnockdown(1, 106, 1) && !HoldsKnockdown(6, 106, 1) && !HoldsKnockdown(5, 114, 6));
+        CHECK(!HoldsKnockdown(4, 97, 1) && !HoldsKnockdown(4, 1, 106));
+    }
+
     void ReleaseBlend() {
         using namespace Features::Npc;
         // The whole gap at the release, none at its end or after.
@@ -1076,6 +1110,7 @@ int main() {
     RideBlend();
     StalledGait();
     HumanStates();
+    PlayerKnockdowns();
     ReleaseBlend();
     ContactStep();
     DeathDrawing();
