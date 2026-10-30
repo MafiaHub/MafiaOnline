@@ -220,8 +220,9 @@ function choose(player, request) {
     reply(fromGarage(player, request.id - 1000));
 }
 
-// A locked car keeps everyone but its owner and their crew out of the driver's seat.
-Events.on("vehiclePlayerEntered", (vehicle, player, {seat}) => {
+// A locked car keeps everyone but its owner and their crew out of the driver's
+// seat, whether they open its door or slide across from the passenger's.
+function keepOutOfLockedCar(vehicle, player, seat) {
     if (seat !== 0) return;
     for (const [ownerId, entry] of out) {
         if (entry.vehicleId !== vehicle.id || ownerId === player.id || !entry.locked) continue;
@@ -233,7 +234,10 @@ Events.on("vehiclePlayerEntered", (vehicle, player, {seat}) => {
         if (owner) toast(owner, `${player.nickname} tried the door of your car.`, {seconds: 4});
         return;
     }
-});
+}
+
+Events.on("vehiclePlayerEntered", (vehicle, player, {seat}) => keepOutOfLockedCar(vehicle, player, seat));
+Events.on("vehiclePlayerSeatChanged", (vehicle, player, {seat}) => keepOutOfLockedCar(vehicle, player, seat));
 
 Events.on("vehicleTerminal", (vehicle, state) => {
     for (const [ownerId, entry] of out) {
