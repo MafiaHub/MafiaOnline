@@ -3,22 +3,26 @@ import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { send } from '../bridge';
 import { Button, Heading, Panel } from '../components/ui';
 import { gameplayMenu, type GameplayMenu as Menu } from '../store';
-import { colors, fonts } from '../tokens.stylex';
+import { colors } from '../tokens.stylex';
 
 const styles = stylex.create({
     overlay: {
         position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        backgroundColor: 'rgba(6, 4, 3, 0.45)', pointerEvents: 'auto',
+        backgroundColor: 'rgba(6, 6, 7, 0.5)', pointerEvents: 'auto',
     },
     panel: { width: '30rem', maxWidth: '92vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column' },
-    rows: { overflowY: 'auto', minHeight: 0, display: 'flex', flexDirection: 'column', gap: '0.35rem', marginBottom: '1rem' },
-    row: { display: 'flex', gap: '0.35rem', alignItems: 'stretch' },
-    choice: { flexGrow: 1, minWidth: 0, justifyContent: 'flex-start', textAlign: 'left', whiteSpace: 'normal', padding: '0.6rem 0.8rem', letterSpacing: '0.05em' },
-    selected: { borderColor: colors.goldBright, backgroundColor: colors.blood },
-    number: { color: colors.gold, width: '1.4rem', flexShrink: 0 },
-    description: { display: 'flex', flexDirection: 'column', gap: '0.2rem' },
-    detail: { fontFamily: fonts.body, fontSize: '0.8rem', textTransform: 'none', color: colors.muted },
-    hint: { fontFamily: fonts.body, color: colors.muted, fontSize: '0.8rem', textAlign: 'center', marginTop: '0.8rem' },
+    rows: { overflowY: 'auto', minHeight: 0, display: 'flex', flexDirection: 'column', gap: '0.375rem', marginBottom: '1rem' },
+    row: { display: 'flex', gap: '0.375rem', alignItems: 'stretch' },
+    choice: {
+        flexGrow: 1, minWidth: 0, justifyContent: 'flex-start', textAlign: 'left', whiteSpace: 'normal', padding: '0.625rem 0.75rem',
+        fontSize: '0.92rem', fontWeight: 500, letterSpacing: 0, textTransform: 'none', borderColor: colors.border,
+    },
+    // The red bar every selected item carries.
+    selected: { borderColor: colors.text, backgroundColor: colors.raised, boxShadow: `inset 3px 0 0 ${colors.accent}` },
+    number: { color: colors.muted, width: '1.5rem', flexShrink: 0, fontVariantNumeric: 'tabular-nums' },
+    description: { display: 'flex', flexDirection: 'column', gap: '0.25rem' },
+    detail: { fontSize: '0.8rem', fontWeight: 400, color: colors.muted },
+    hint: { color: colors.muted, fontSize: '0.8rem', textAlign: 'center', marginTop: '0.75rem' },
 });
 
 export function GameplayMenu({ menu }: { menu: Menu }) {

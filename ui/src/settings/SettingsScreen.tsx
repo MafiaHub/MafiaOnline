@@ -4,8 +4,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { send } from '../bridge';
 import { Button, Heading, Panel, Toggle } from '../components/ui';
 import { type GameSettings, type Preferences, type SettingsSlot, defaultPreferences, gameSettings, preferences, voiceLevel } from '../store';
-import { colors, fonts, motion } from '../tokens.stylex';
+import { colors, radii } from '../tokens.stylex';
 import { keyNameFromEvent, keyNameFromMouse } from './keys';
+
+// The selection marker shared with the rest of the UI: a red bar on the left.
+const marker = `inset 3px 0 0 ${colors.accent}`;
 
 const styles = stylex.create({
     panel: {
@@ -20,19 +23,18 @@ const styles = stylex.create({
     tabs: {
         display: 'flex',
         flexWrap: 'wrap',
-        justifyContent: 'center',
-        gap: '0.3rem',
-        marginBottom: '0.9rem',
+        gap: '0.375rem',
+        marginBottom: '1rem',
     },
     tab: {
         minHeight: '2rem',
-        padding: '0 0.9rem',
-        fontSize: '0.72rem',
+        padding: '0 0.875rem',
+        fontSize: '0.7rem',
     },
     tabActive: {
-        borderColor: colors.gold,
-        color: colors.goldBright,
-        backgroundColor: 'rgba(77, 13, 15, 0.6)',
+        borderColor: colors.text,
+        backgroundColor: colors.raised,
+        boxShadow: marker,
     },
     body: {
         flexGrow: 1,
@@ -41,87 +43,86 @@ const styles = stylex.create({
         paddingRight: '0.5rem',
     },
     note: {
-        margin: '0 0 0.8rem',
-        fontFamily: fonts.body,
-        fontStyle: 'italic',
-        fontSize: '0.92rem',
+        margin: '0 0 1rem',
+        fontSize: '0.85rem',
+        lineHeight: 1.5,
         color: colors.muted,
     },
     section: {
-        marginBottom: '1.2rem',
+        marginBottom: '1.5rem',
     },
     sectionTitle: {
-        margin: '0 0 0.3rem',
-        fontFamily: fonts.heading,
-        fontWeight: 700,
-        fontSize: '0.72rem',
-        letterSpacing: '0.22em',
+        margin: '0 0 0.25rem',
+        paddingBottom: '0.375rem',
+        borderBottomWidth: '1px',
+        borderBottomStyle: 'solid',
+        borderBottomColor: colors.line,
+        fontWeight: 600,
+        fontSize: '0.68rem',
+        letterSpacing: '0.18em',
         textTransform: 'uppercase',
-        color: colors.gold,
+        color: colors.text,
     },
     row: {
         display: 'grid',
         gridTemplateColumns: 'minmax(0, 1fr) 9.5rem 9.5rem',
         alignItems: 'center',
         gap: '0.5rem',
-        padding: '0.28rem 0',
+        padding: '0.25rem 0',
         borderBottomWidth: '1px',
         borderBottomStyle: 'solid',
-        borderBottomColor: colors.goldHair,
+        borderBottomColor: colors.border,
     },
     rowLabel: {
-        fontFamily: fonts.body,
-        fontSize: '1rem',
-        color: colors.parchment,
+        fontSize: '0.92rem',
+        color: colors.text,
         minWidth: 0,
     },
     conflict: {
         display: 'block',
-        fontSize: '0.78rem',
-        fontStyle: 'italic',
-        color: '#e6b45a',
+        fontSize: '0.75rem',
+        color: colors.danger,
     },
     slot: {
         appearance: 'none',
         position: 'relative',
-        height: '1.9rem',
+        height: '1.875rem',
         minWidth: '8rem',
         padding: '0 0.5rem',
         borderWidth: '1px',
         borderStyle: 'solid',
-        borderColor: colors.goldLine,
-        backgroundColor: 'rgba(0, 0, 0, 0.35)',
-        color: colors.cream,
-        fontFamily: fonts.body,
-        fontSize: '0.95rem',
+        borderColor: colors.border,
+        borderRadius: radii.sm,
+        backgroundColor: colors.bg,
+        color: colors.text,
+        fontSize: '0.875rem',
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         cursor: 'pointer',
         outline: 'none',
-        transitionProperty: 'border-color, background-color',
-        transitionDuration: motion.quick,
         ':hover': {
-            borderColor: colors.gold,
-            backgroundColor: 'rgba(58, 40, 25, 0.75)',
+            borderColor: colors.line,
+            backgroundColor: colors.raised,
         },
         ':focus-visible': {
-            borderColor: colors.goldBright,
+            borderColor: colors.line,
+            boxShadow: marker,
         },
     },
     slotEmpty: {
         color: colors.faint,
-        fontStyle: 'italic',
     },
     slotChanged: {
-        color: colors.goldBright,
+        fontWeight: 600,
     },
     slotCapturing: {
-        borderColor: colors.goldBright,
-        backgroundColor: colors.blood,
+        borderColor: colors.accent,
+        backgroundColor: colors.accentSoft,
+        boxShadow: marker,
     },
     slotConflict: {
-        borderColor: '#e6b45a',
+        borderColor: colors.danger,
     },
     none: {
         visibility: 'hidden',
@@ -133,7 +134,8 @@ const styles = stylex.create({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(5, 3, 2, 0.7)',
+        borderRadius: radii.md,
+        backgroundColor: colors.scrim,
         pointerEvents: 'auto',
     },
     captureBox: {
@@ -142,46 +144,42 @@ const styles = stylex.create({
         textAlign: 'center',
     },
     captureText: {
-        margin: '0 0 0.6rem',
-        fontFamily: fonts.body,
-        fontSize: '1.15rem',
-        color: colors.cream,
+        margin: '0 0 0.5rem',
+        fontSize: '1rem',
+        color: colors.text,
     },
     captureHint: {
         margin: '0 0 1rem',
-        fontFamily: fonts.body,
-        fontStyle: 'italic',
-        fontSize: '0.9rem',
+        fontSize: '0.85rem',
         color: colors.muted,
     },
     captureActions: {
         display: 'flex',
         justifyContent: 'center',
-        gap: '0.6rem',
+        gap: '0.5rem',
     },
     field: {
         display: 'grid',
-        gridTemplateColumns: 'minmax(0, 1fr) 13rem 3.6rem',
+        gridTemplateColumns: 'minmax(0, 1fr) 13rem 3.5rem',
         alignItems: 'center',
-        gap: '0.8rem',
-        padding: '0.45rem 0',
+        gap: '0.75rem',
+        padding: '0.5rem 0',
         borderBottomWidth: '1px',
         borderBottomStyle: 'solid',
-        borderBottomColor: colors.goldHair,
-        fontFamily: fonts.body,
-        fontSize: '1rem',
-        color: colors.parchment,
+        borderBottomColor: colors.border,
+        fontSize: '0.92rem',
+        color: colors.text,
     },
     fieldWide: {
         gridTemplateColumns: 'minmax(0, 1fr) auto',
     },
     range: {
         width: '100%',
-        accentColor: colors.gold,
+        accentColor: colors.accent,
     },
     value: {
         textAlign: 'right',
-        color: colors.cream,
+        color: colors.muted,
         fontVariantNumeric: 'tabular-nums',
     },
     segmented: {
@@ -189,33 +187,36 @@ const styles = stylex.create({
         gap: '0.25rem',
     },
     chip: {
-        minHeight: '1.8rem',
-        padding: '0 0.7rem',
+        minHeight: '1.75rem',
+        padding: '0 0.75rem',
         fontSize: '0.66rem',
-        letterSpacing: '0.1em',
     },
     select: {
         appearance: 'none',
         maxWidth: '22rem',
         height: '2rem',
-        padding: '0 0.6rem',
+        padding: '0 0.625rem',
         borderWidth: '1px',
         borderStyle: 'solid',
-        borderColor: colors.goldLine,
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-        color: colors.cream,
-        fontFamily: fonts.body,
-        fontSize: '0.95rem',
+        borderColor: colors.border,
+        borderRadius: radii.sm,
+        backgroundColor: colors.bg,
+        color: colors.text,
+        fontSize: '0.875rem',
         outline: 'none',
+        ':focus': {
+            borderColor: colors.line,
+            boxShadow: marker,
+        },
     },
     meterTrack: {
         position: 'relative',
-        height: '0.7rem',
-        marginTop: '0.4rem',
+        height: '0.625rem',
+        marginTop: '0.5rem',
         borderWidth: '1px',
         borderStyle: 'solid',
-        borderColor: colors.goldLine,
-        backgroundColor: 'rgba(0, 0, 0, 0.45)',
+        borderColor: colors.border,
+        backgroundColor: colors.bg,
         overflow: 'hidden',
     },
     meterFill: {
@@ -224,32 +225,28 @@ const styles = stylex.create({
         bottom: 0,
         left: 0,
         backgroundColor: colors.muted,
-        transitionProperty: 'width',
-        transitionDuration: '60ms',
     },
     meterLive: {
         backgroundColor: colors.success,
     },
     meterMark: {
         position: 'absolute',
-        top: '-2px',
-        bottom: '-2px',
+        top: 0,
+        bottom: 0,
         width: '2px',
-        backgroundColor: colors.goldBright,
+        backgroundColor: colors.accentHover,
     },
     footer: {
         display: 'flex',
         alignItems: 'center',
-        gap: '0.7rem',
-        marginTop: '0.9rem',
+        gap: '0.75rem',
+        marginTop: '1rem',
     },
     spacer: {
         flexGrow: 1,
     },
     hint: {
-        fontFamily: fonts.body,
         fontSize: '0.8rem',
-        fontStyle: 'italic',
         color: colors.muted,
     },
 });
@@ -564,7 +561,6 @@ function InterfacePage() {
             <Slider label="Chat text size" value={prefs.chatScale} min={0.8} max={1.5} step={0.05} format={percent} onChange={(value) => save('chatScale', value)} />
             <Slider label="Interface scale" value={prefs.uiScale} min={0.8} max={1.4} step={0.05} format={percent} onChange={(value) => save('uiScale', value)} />
             <Toggle label="Chat timestamps" value={prefs.chatTimestamps} onChange={(value) => save('chatTimestamps', value)} />
-            <Toggle label="Film grain" value={prefs.filmGrain} onChange={(value) => save('filmGrain', value)} />
             <Toggle label="Reduce motion" value={prefs.reduceMotion} onChange={(value) => save('reduceMotion', value)} />
         </Section>
     );

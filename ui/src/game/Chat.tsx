@@ -2,11 +2,10 @@ import * as stylex from '@stylexjs/stylex';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { send } from '../bridge';
 import { type ChatLine, chat, chatOpen, clampCodePoints, codePoints, now, preferences, state } from '../store';
-import { colors, motion } from '../tokens.stylex';
+import { colors, radii } from '../tokens.stylex';
 
 const kVisibleRows = 10;
 const kHistory = 30;
-const chatFont = 'Arial, "Helvetica Neue", Helvetica, sans-serif';
 
 const styles = stylex.create({
     root: {
@@ -16,8 +15,7 @@ const styles = stylex.create({
         width: 'min(44vw, 34rem)',
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.35rem',
-        fontFamily: chatFont,
+        gap: '0.375rem',
         pointerEvents: 'none',
     },
     log: {
@@ -25,24 +23,23 @@ const styles = stylex.create({
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'flex-end',
-        padding: '0.5rem 0.7rem',
+        padding: '0.5rem 0.75rem',
         overflow: 'hidden',
         borderWidth: '1px',
         borderStyle: 'solid',
         borderColor: 'transparent',
-        transitionProperty: 'background-color, border-color',
-        transitionDuration: motion.medium,
+        borderRadius: radii.md,
     },
     logOpen: {
-        backgroundColor: 'rgba(10, 7, 5, 0.66)',
-        borderColor: colors.goldHair,
-        backgroundImage: 'linear-gradient(90deg, rgba(77, 13, 15, 0.18), rgba(0, 0, 0, 0))',
+        backgroundColor: 'rgba(11, 11, 12, 0.8)',
+        borderColor: colors.border,
     },
+    // The shadow keeps closed-chat lines readable over a bright scene.
     line: {
         overflowWrap: 'anywhere',
-        lineHeight: 1.38,
-        color: colors.cream,
-        textShadow: '0 1px 1px rgba(0, 0, 0, 0.95), 0 0 0.6rem rgba(0, 0, 0, 0.7)',
+        lineHeight: 1.4,
+        color: colors.text,
+        textShadow: '0 1px 2px rgba(0, 0, 0, 0.95), 0 0 3px rgba(0, 0, 0, 0.7)',
         transitionProperty: 'opacity',
         transitionDuration: '1.2s',
     },
@@ -51,45 +48,44 @@ const styles = stylex.create({
     },
     time: {
         marginRight: '0.4rem',
-        fontFamily: chatFont,
         fontSize: '0.78em',
         color: colors.muted,
+        fontVariantNumeric: 'tabular-nums',
     },
     author: {
-        fontFamily: chatFont,
-        fontWeight: 700,
+        fontWeight: 600,
         marginRight: '0.35rem',
     },
     more: {
         position: 'absolute',
-        top: '0.2rem',
+        top: '0.25rem',
         right: '0.5rem',
-        fontFamily: chatFont,
         fontSize: '0.72rem',
-        color: colors.gold,
+        color: colors.muted,
     },
+    // Always focused while open, so it always carries the red focus bar.
     input: {
         display: 'flex',
         alignItems: 'center',
         gap: '0.5rem',
-        padding: '0 0.7rem',
-        height: '2.3rem',
-        backgroundColor: 'rgba(10, 7, 5, 0.88)',
+        padding: '0 0.75rem',
+        height: '2.25rem',
+        backgroundColor: colors.panel,
         borderWidth: '1px',
         borderStyle: 'solid',
-        borderColor: colors.goldLine,
-        boxShadow: '0 0.4rem 1.4rem rgba(0, 0, 0, 0.5)',
+        borderColor: colors.line,
+        borderRadius: radii.sm,
+        boxShadow: `inset 3px 0 0 ${colors.accent}`,
     },
     prompt: {
-        fontFamily: chatFont,
-        fontWeight: 700,
-        fontSize: '0.7rem',
-        letterSpacing: '0.2em',
+        fontWeight: 600,
+        fontSize: '0.65rem',
+        letterSpacing: '0.18em',
         textTransform: 'uppercase',
-        color: colors.gold,
+        color: colors.muted,
     },
     command: {
-        color: colors.bloodBright,
+        color: colors.accentHover,
     },
     field: {
         flexGrow: 1,
@@ -98,15 +94,14 @@ const styles = stylex.create({
         borderWidth: 0,
         outline: 'none',
         backgroundColor: 'transparent',
-        color: colors.cream,
-        fontFamily: chatFont,
+        color: colors.text,
         fontSize: '0.95em',
-        caretColor: colors.goldBright,
+        caretColor: colors.accentHover,
     },
     counter: {
-        fontFamily: chatFont,
         fontSize: '0.72rem',
-        color: colors.muted,
+        color: colors.faint,
+        fontVariantNumeric: 'tabular-nums',
     },
     counterFull: {
         color: colors.danger,
@@ -130,10 +125,10 @@ function Line(props: { line: ChatLine; faded: boolean; timestamps: boolean }) {
     const { line } = props;
     const isNotice = !line.author;
     return (
-        <div {...stylex.props(styles.line, props.faded && styles.faded)} style={isNotice ? { color: wireColor(line.color, '#f4dfb0') } : undefined}>
+        <div {...stylex.props(styles.line, props.faded && styles.faded)} style={isNotice ? { color: wireColor(line.color, '#b9b5ae') } : undefined}>
             {props.timestamps && <span {...stylex.props(styles.time)}>{clock(line.time)}</span>}
             {!isNotice && (
-                <span {...stylex.props(styles.author)} style={{ color: wireColor(line.color, '#e8c070') }}>
+                <span {...stylex.props(styles.author)} style={{ color: wireColor(line.color, '#ece8e1') }}>
                     {line.author}:
                 </span>
             )}

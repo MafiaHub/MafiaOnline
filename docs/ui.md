@@ -93,10 +93,18 @@ The root font size is `clamp(11px, min(1.9vh, 1.35vw), 40px)` times the
 interface scale, and every size is in `rem`, so the screens scale from
 640x480 to 4K. Below 620 px of height the menu compacts (smaller title, no
 tagline, tighter panels); below 560 px of width the server book hides.
-Connected-state buttons stack, so nothing can overflow its panel. Type is
-Limelight (title), Playfair Display (headings, toasts) and EB Garamond (menu
-body and inputs), all bundled. In-game chat uses a larger Arial-based sans
-serif stack with upright notices for clearer reading over the scene.
+Connected-state buttons stack, so nothing can overflow its panel. The look
+is clean film noir: near-black panels with a light hairline border, paper
+white text, greys, and one blood red for primary buttons and for the marker
+every selected or focused item carries (a red bar on its left); green and
+red mark status (`src/tokens.stylex.ts`). Corners are sharp, and titles sit
+on a double hairline. Two bundled fonts: Playfair Display (700) for the title
+and headings, Inter (400/500/600) for everything else, the in-game chat
+included; small labels and buttons are uppercase and letter-spaced. Over the
+menu scene the backdrop is static noir lighting: deep shadow on the left, a
+diagonal edge and faint venetian-blind stripes on the right. Nothing
+animates in a loop: CEF paints on the CPU and uploads each changed rect, so
+motion is kept to short opacity/transform transitions on interaction.
 
 ### Input
 

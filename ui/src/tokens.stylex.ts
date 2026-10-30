@@ -1,38 +1,42 @@
 import * as stylex from '@stylexjs/stylex';
 
+// Clean noir: black, paper white and the greys between them, one blood red
+// for primary actions, focus and selection, and two status colors.
 export const colors = stylex.defineVars({
-    ink: '#0b0806',
-    night: 'rgba(10, 7, 5, 0.94)',
-    smoke: 'rgba(14, 10, 7, 0.78)',
-    veil: 'rgba(12, 8, 6, 0.55)',
-    panel: 'rgba(24, 17, 12, 0.92)',
-    panelRaised: 'rgba(38, 27, 19, 0.95)',
-    sepia: '#3a2819',
-    leather: '#5b3a22',
-    cream: '#f2e6cb',
-    parchment: '#e3cfa6',
-    muted: '#a8926d',
-    faint: 'rgba(242, 230, 203, 0.45)',
-    gold: '#c9a45c',
-    goldBright: '#ecd08d',
-    goldLine: 'rgba(201, 164, 92, 0.55)',
-    goldHair: 'rgba(201, 164, 92, 0.22)',
-    blood: '#8b1a1a',
-    bloodBright: '#b8281f',
-    bloodDeep: '#4d0d0f',
-    success: '#8fb572',
-    danger: '#e0625a',
+    bg: '#0b0b0c',
+    panel: '#111112',
+    raised: '#1a1a1b',
+    hover: '#242425',
+    border: '#2c2c2e',
+    borderStrong: '#4a4a4c',
+    line: '#77746f',
+    text: '#ece8e1',
+    muted: '#9b9892',
+    faint: '#64625e',
+    accent: '#a3201c',
+    accentHover: '#c42b25',
+    accentSoft: 'rgba(163, 32, 28, 0.2)',
+    scrim: 'rgba(6, 6, 7, 0.78)',
+    success: '#7fb08a',
+    danger: '#e0544d',
 });
 
+// A display serif for titles and headings only; Inter for everything else.
 export const fonts = stylex.defineVars({
-    display: '"Limelight", "Playfair Display", Georgia, serif',
-    heading: '"Playfair Display", Georgia, serif',
-    body: '"EB Garamond", Georgia, serif',
+    display: '"Playfair Display", Georgia, serif',
+    sans: '"Inter", "Segoe UI", Arial, sans-serif',
 });
 
+// Sharp corners: controls are square, panels barely softened.
+export const radii = stylex.defineVars({
+    sm: '0px',
+    md: '2px',
+});
+
+// Short and only on interaction: CEF paints on the CPU, so anything that
+// keeps moving costs frame time in the game.
 export const motion = stylex.defineVars({
-    quick: '140ms',
-    medium: '260ms',
-    slow: '600ms',
+    quick: '120ms',
+    medium: '180ms',
     ease: 'cubic-bezier(0.2, 0.7, 0.2, 1)',
 });

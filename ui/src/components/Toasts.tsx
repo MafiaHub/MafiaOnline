@@ -1,10 +1,10 @@
 import * as stylex from '@stylexjs/stylex';
 import { type Toast, toasts } from '../store';
-import { colors, fonts, motion } from '../tokens.stylex';
+import { colors, motion, radii } from '../tokens.stylex';
 
 const slide = stylex.keyframes({
-    from: { opacity: 0, transform: 'translateY(-0.6rem)', filter: 'blur(3px)' },
-    to: { opacity: 1, transform: 'translateY(0)', filter: 'blur(0)' },
+    from: { opacity: 0, transform: 'translateY(-0.25rem)' },
+    to: { opacity: 1, transform: 'translateY(0)' },
 });
 
 const styles = stylex.create({
@@ -15,7 +15,7 @@ const styles = stylex.create({
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'flex-end',
-        gap: '0.6rem',
+        gap: '0.5rem',
         maxWidth: 'min(24rem, 60vw)',
         pointerEvents: 'none',
         zIndex: 50,
@@ -24,59 +24,40 @@ const styles = stylex.create({
         position: 'relative',
         display: 'flex',
         flexDirection: 'column',
-        alignItems: 'center',
-        gap: '0.2rem',
+        gap: '0.25rem',
         minWidth: '12rem',
-        padding: '0.65rem 1.4rem 0.75rem',
+        padding: '0.75rem 1rem',
         borderWidth: '1px',
+        borderLeftWidth: '3px',
         borderStyle: 'solid',
-        borderColor: colors.goldLine,
-        outlineWidth: '1px',
-        outlineStyle: 'solid',
-        outlineColor: colors.goldHair,
-        outlineOffset: '-0.3rem',
-        backgroundColor: colors.night,
-        backgroundImage: 'radial-gradient(120% 120% at 50% 0%, rgba(201, 164, 92, 0.14), rgba(0, 0, 0, 0) 65%)',
-        boxShadow: '0 0.6rem 1.8rem rgba(0, 0, 0, 0.65)',
-        textAlign: 'center',
+        borderColor: colors.line,
+        borderLeftColor: colors.text,
+        borderRadius: radii.sm,
+        backgroundColor: colors.panel,
         animationName: slide,
         animationDuration: motion.medium,
         animationTimingFunction: motion.ease,
     },
     success: {
-        borderColor: 'rgba(143, 181, 114, 0.6)',
+        borderLeftColor: colors.success,
     },
     error: {
-        borderColor: 'rgba(184, 40, 31, 0.8)',
-        backgroundImage: 'radial-gradient(120% 120% at 50% 0%, rgba(139, 26, 26, 0.35), rgba(0, 0, 0, 0) 65%)',
+        borderLeftColor: colors.accent,
     },
     kicker: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: '0.5rem',
-        fontFamily: fonts.heading,
-        fontSize: '0.62rem',
-        fontWeight: 700,
-        letterSpacing: '0.34em',
+        fontSize: '0.65rem',
+        fontWeight: 600,
+        letterSpacing: '0.18em',
         textTransform: 'uppercase',
-        color: colors.gold,
+        color: colors.muted,
     },
     kickerSuccess: { color: colors.success },
-    kickerError: { color: '#e88a7f' },
-    rule: {
-        width: '1.2rem',
-        height: '1px',
-        backgroundColor: 'currentColor',
-        opacity: 0.6,
-    },
+    kickerError: { color: colors.danger },
     text: {
-        fontFamily: fonts.heading,
-        fontStyle: 'italic',
-        fontSize: '1.05rem',
-        lineHeight: 1.3,
-        color: colors.cream,
+        fontSize: '0.92rem',
+        lineHeight: 1.4,
+        color: colors.text,
         overflowWrap: 'anywhere',
-        textShadow: '0 1px 1px rgba(0, 0, 0, 0.8)',
     },
 });
 
@@ -91,11 +72,7 @@ export function Toasts() {
         <div {...stylex.props(styles.stack)} aria-live="polite">
             {toasts.value.map((toast) => (
                 <div key={toast.id} {...stylex.props(styles.toast, toast.kind === 'success' && styles.success, toast.kind === 'error' && styles.error)}>
-                    <span {...stylex.props(styles.kicker, toast.kind === 'success' && styles.kickerSuccess, toast.kind === 'error' && styles.kickerError)}>
-                        <span {...stylex.props(styles.rule)} />
-                        {kicker[toast.kind]}
-                        <span {...stylex.props(styles.rule)} />
-                    </span>
+                    <span {...stylex.props(styles.kicker, toast.kind === 'success' && styles.kickerSuccess, toast.kind === 'error' && styles.kickerError)}>{kicker[toast.kind]}</span>
                     <span {...stylex.props(styles.text)}>{toast.text}</span>
                 </div>
             ))}

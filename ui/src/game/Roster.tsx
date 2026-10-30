@@ -1,76 +1,80 @@
 import * as stylex from '@stylexjs/stylex';
 import { roster } from '../store';
-import { colors, fonts } from '../tokens.stylex';
+import { colors } from '../tokens.stylex';
 
 const styles = stylex.create({
     table: {
         width: '100%',
         borderCollapse: 'collapse',
-        fontFamily: fonts.body,
-        fontSize: '1rem',
+        fontSize: '0.92rem',
     },
     head: {
-        fontFamily: fonts.heading,
         fontSize: '0.62rem',
-        fontWeight: 700,
-        letterSpacing: '0.22em',
+        fontWeight: 600,
+        letterSpacing: '0.16em',
         textTransform: 'uppercase',
         color: colors.muted,
         textAlign: 'left',
-        paddingBottom: '0.4rem',
+        paddingBottom: '0.5rem',
         borderBottomWidth: '1px',
         borderBottomStyle: 'solid',
-        borderBottomColor: colors.goldLine,
+        borderBottomColor: colors.line,
     },
     cell: {
-        padding: '0.35rem 0.4rem 0.35rem 0',
+        padding: '0.375rem 0.5rem 0.375rem 0',
         borderBottomWidth: '1px',
         borderBottomStyle: 'solid',
-        borderBottomColor: colors.goldHair,
-        color: colors.cream,
+        borderBottomColor: colors.border,
+        color: colors.text,
         whiteSpace: 'nowrap',
     },
     index: {
         width: '2rem',
-        fontFamily: fonts.body,
-        color: colors.muted,
+        color: colors.faint,
+        fontVariantNumeric: 'tabular-nums',
     },
     local: {
-        color: colors.goldBright,
+        fontWeight: 600,
     },
     health: {
         width: '7rem',
     },
     bar: {
-        height: '0.35rem',
-        backgroundColor: 'rgba(242, 230, 203, 0.12)',
+        height: '0.3rem',
+        backgroundColor: colors.raised,
+        overflow: 'hidden',
     },
     fill: {
         height: '100%',
-        backgroundImage: 'linear-gradient(90deg, #7a1515, #c23a2a)',
+        backgroundColor: colors.accentHover,
     },
     ping: {
         width: '3.5rem',
-        fontFamily: fonts.body,
         fontSize: '0.78rem',
         color: colors.muted,
         textAlign: 'right',
         fontVariantNumeric: 'tabular-nums',
     },
+    // The ping column's cell size must not leak into its header.
+    headPing: {
+        fontSize: '0.62rem',
+    },
     state: {
         width: '5rem',
-        fontFamily: fonts.body,
-        fontSize: '0.78rem',
+        fontSize: '0.65rem',
+        fontWeight: 600,
+        letterSpacing: '0.14em',
+        textTransform: 'uppercase',
         color: colors.muted,
         textAlign: 'right',
     },
     dead: {
-        color: colors.bloodBright,
+        color: colors.danger,
     },
     empty: {
         padding: '1rem 0',
         textAlign: 'center',
-        fontStyle: 'italic',
+        fontSize: '0.875rem',
         color: colors.muted,
     },
 });
@@ -87,7 +91,7 @@ export function Roster() {
                     <th {...stylex.props(styles.head)}>#</th>
                     <th {...stylex.props(styles.head)}>Name</th>
                     <th {...stylex.props(styles.head)}>Health</th>
-                    <th {...stylex.props(styles.head, styles.ping)}>Ping</th>
+                    <th {...stylex.props(styles.head, styles.ping, styles.headPing)}>Ping</th>
                     <th {...stylex.props(styles.head)} />
                 </tr>
             </thead>

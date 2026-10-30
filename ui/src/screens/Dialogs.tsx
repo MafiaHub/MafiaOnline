@@ -2,7 +2,7 @@ import * as stylex from '@stylexjs/stylex';
 import { send } from '../bridge';
 import { Button, Heading, Panel } from '../components/ui';
 import { SettingsScreen } from '../settings/SettingsScreen';
-import { colors, fonts } from '../tokens.stylex';
+import { colors } from '../tokens.stylex';
 
 const styles = stylex.create({
     scrim: {
@@ -11,7 +11,7 @@ const styles = stylex.create({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(5, 3, 2, 0.72)',
+        backgroundColor: colors.scrim,
         zIndex: 20,
     },
     dialog: {
@@ -19,18 +19,16 @@ const styles = stylex.create({
         maxWidth: '92vw',
     },
     text: {
-        margin: '0 0 1.2rem',
-        textAlign: 'center',
-        fontFamily: fonts.body,
-        fontStyle: 'italic',
-        fontSize: '1.1rem',
-        color: colors.parchment,
+        margin: '0 0 1.5rem',
+        fontSize: '0.95rem',
+        lineHeight: 1.5,
+        color: colors.muted,
     },
     actions: {
         display: 'flex',
         justifyContent: 'flex-end',
-        gap: '0.7rem',
-        marginTop: '1.2rem',
+        gap: '0.75rem',
+        marginTop: '1.5rem',
     },
 });
 

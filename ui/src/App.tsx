@@ -5,12 +5,15 @@ import { Toasts } from './components/Toasts';
 import { GameHud } from './game/GameHud';
 import { MainMenu } from './screens/MainMenu';
 import { chatOpen, pauseOpen, gameplayMenu, preferences, settingsOpen, state } from './store';
+import { colors, fonts } from './tokens.stylex';
 
 const styles = stylex.create({
     root: {
         position: 'fixed',
         inset: 0,
         overflow: 'hidden',
+        color: colors.text,
+        fontFamily: fonts.sans,
     },
 });
 

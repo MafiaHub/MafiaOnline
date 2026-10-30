@@ -4,7 +4,7 @@ import { send } from '../bridge';
 import { Heading, Panel } from '../components/ui';
 import { SettingsScreen } from '../settings/SettingsScreen';
 import { pauseOpen, roster, settingsOpen, state } from '../store';
-import { colors, fonts, motion } from '../tokens.stylex';
+import { colors } from '../tokens.stylex';
 import { Roster } from './Roster';
 
 const styles = stylex.create({
@@ -17,8 +17,7 @@ const styles = stylex.create({
         pointerEvents: 'none',
     },
     dim: {
-        backgroundColor: 'rgba(6, 4, 3, 0.6)',
-        backgroundImage: 'radial-gradient(ellipse at center, rgba(0, 0, 0, 0) 30%, rgba(0, 0, 0, 0.7) 100%)',
+        backgroundColor: 'rgba(6, 6, 7, 0.66)',
     },
     scoreboard: {
         width: '32rem',
@@ -27,8 +26,7 @@ const styles = stylex.create({
     meta: {
         display: 'flex',
         justifyContent: 'space-between',
-        marginBottom: '0.6rem',
-        fontFamily: fonts.body,
+        marginBottom: '0.75rem',
         fontSize: '0.8rem',
         color: colors.muted,
     },
@@ -39,7 +37,7 @@ const styles = stylex.create({
             default: '17rem 22rem',
             '@media (max-width: 760px)': '17rem',
         },
-        gap: '1.6rem',
+        gap: '1.5rem',
     },
     side: {
         display: {
@@ -50,7 +48,7 @@ const styles = stylex.create({
     items: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.3rem',
+        gap: '0.125rem',
     },
     item: {
         appearance: 'none',
@@ -59,44 +57,37 @@ const styles = stylex.create({
         cursor: 'pointer',
         display: 'flex',
         alignItems: 'center',
-        gap: '0.7rem',
-        padding: '0.55rem 0.8rem',
-        fontFamily: fonts.heading,
-        fontWeight: 700,
-        fontSize: '0.9rem',
-        letterSpacing: '0.2em',
+        gap: '0.75rem',
+        padding: '0.625rem 0.75rem 0.625rem 0',
+        fontWeight: 600,
+        fontSize: '0.8rem',
+        letterSpacing: '0.18em',
         textTransform: 'uppercase',
-        color: colors.parchment,
-        borderWidth: '1px',
-        borderStyle: 'solid',
-        borderColor: 'transparent',
-        transitionProperty: 'background-color, color, border-color',
-        transitionDuration: motion.quick,
+        color: colors.muted,
+        borderWidth: 0,
+        outline: 'none',
     },
     itemActive: {
-        color: colors.cream,
-        borderColor: colors.gold,
-        backgroundColor: colors.blood,
-        backgroundImage: 'linear-gradient(90deg, rgba(0, 0, 0, 0.25), rgba(0, 0, 0, 0))',
+        color: colors.text,
+        backgroundColor: colors.raised,
     },
+    // The red bar every selected item carries.
     marker: {
-        width: '0.45rem',
-        height: '0.45rem',
-        transform: 'rotate(45deg)',
+        alignSelf: 'stretch',
+        width: '3px',
         backgroundColor: 'transparent',
     },
     markerActive: {
-        backgroundColor: colors.goldBright,
+        backgroundColor: colors.accent,
     },
     hint: {
         marginTop: '1rem',
-        fontFamily: fonts.body,
-        fontSize: '0.72rem',
+        fontSize: '0.75rem',
         color: colors.muted,
         textAlign: 'center',
     },
     confirm: {
-        color: '#f7d9c9',
+        color: colors.danger,
     },
 });
 
