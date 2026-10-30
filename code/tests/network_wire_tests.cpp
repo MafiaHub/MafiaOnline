@@ -6,6 +6,7 @@
 #include "client/src/features/player/human_states.h"
 #include "client/src/features/player/ride_blend.h"
 #include "client/src/features/player/stalled_gait.h"
+#include "client/src/features/world/fading_copies.h"
 #include "shared/features/car/car_entity.h"
 #include "shared/features/car/car_movement.h"
 #include "shared/features/combat/aim_update.h"
@@ -850,6 +851,23 @@ namespace {
         CHECK(DeathDrawFor(true, false) == DeathDraw::Stand);
     }
 
+    void FadingReclaim() {
+        struct Copy {
+            uint64_t walkerId = 0;
+            float alpha = 1.0f;
+            std::vector<int> state;
+        };
+        std::vector<Copy> fading {{7, 0.6f, {1, 2}}, {9, 0.3f, {3}}};
+        // Nothing of an entity with no fading copy.
+        CHECK(!Features::World::TakeFading(fading, &Copy::walkerId, 8) && fading.size() == 2);
+        // Its own copy, with what it carried, and only that one leaves.
+        const auto copy = Features::World::TakeFading(fading, &Copy::walkerId, 9);
+        CHECK(copy && copy->walkerId == 9 && copy->alpha == 0.3f && copy->state == std::vector<int> {3});
+        CHECK(fading.size() == 1 && fading.front().walkerId == 7 && fading.front().state.size() == 2);
+        // Taken once: a second stream-in makes a new copy.
+        CHECK(!Features::World::TakeFading(fading, &Copy::walkerId, 9));
+    }
+
     void DoorEnd() {
         using namespace Features;
         // Use_Actor's door clips: 271 + side/no door/rear/exit bits, the
@@ -930,6 +948,7 @@ int main() {
     ReleaseBlend();
     ContactStep();
     DeathDrawing();
+    FadingReclaim();
     DoorEnd();
     HostView();
     if (failures == 0) {

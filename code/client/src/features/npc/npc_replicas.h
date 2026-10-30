@@ -66,6 +66,11 @@ namespace Mafia1Online::Features::Npc {
         // replica closes to striking range of it (ApplyContact). Only this
         // screen's picture; the server checks hits by the host's poses.
         void Engage(uint64_t networkId, std::chrono::steady_clock::time_point until);
+        // A copy fading out after its NPC went (Remove) that was alive when
+        // it began to: bound to no network id any more, it is still only a
+        // picture of the host's NPC, which no local hit may kill
+        // (DeathService::Protect).
+        [[nodiscard]] bool FadingAlive(const void *actor) const;
 
       private:
         // The host reports every 100 ms, and the server's far band every
@@ -153,7 +158,10 @@ namespace Mafia1Online::Features::Npc {
         // A copy drawn this pass fades out first, as a retail walker leaving
         // its despawn radius in view does (C_traffic_element::Tick); `fade`
         // false removes it at once.
-        void Remove(World::WorldService &world, uint64_t networkId, const Replica &replica, bool fade);
+        void Remove(World::WorldService &world, uint64_t networkId, Replica &replica, bool fade);
+        // The NPC streamed back while its copy still fades: that copy, its
+        // state kept, is opaque and bound to it again.
+        void Reclaim(World::WorldService &world, uint64_t networkId);
         void AdvanceFades();
         // What rode with the pose drawn at `time`: the newest at or before
         // it, else the oldest held.
@@ -178,12 +186,16 @@ namespace Mafia1Online::Features::Npc {
         std::unordered_map<uint64_t, Replica> _replicas;
         // Every human this created, until its destructor hands the frame back.
         std::unordered_map<void *, SDK::Scene::NativeFrame *> _frames;
-        // Copies whose NPC went, fading out: the actor, its "base" visual
-        // (SetTransparency) and the opacity left.
+        // Copies whose NPC went, fading out: its network id and replica
+        // (Reclaim), the actor, its "base" visual (SetTransparency), the
+        // opacity left and whether it was alive when it began to fade.
         struct Fading {
+            uint64_t networkId = 0;
+            Replica replica;
             void *actor = nullptr;
             SDK::Scene::NativeFrame *base = nullptr;
             float alpha = 1.0f;
+            bool alive = false;
         };
         std::vector<Fading> _fading;
         std::chrono::steady_clock::time_point _fadedAt {};

@@ -101,14 +101,17 @@ namespace Mafia1Online::Features::Pedestrian {
         // A walker the stream dropped: one drawn this pass fades out first,
         // the rest go at once (Release).
         void Retire(World::WorldService &world, uint64_t walkerId, Replica &replica);
+        // The walker streamed back while its element still fades: that
+        // element, its replica's state kept, shows it again.
+        void Reclaim(uint64_t walkerId);
         void AdvanceFades(uint32_t frameMs);
 
         std::unordered_map<uint64_t, Replica> _replicas;
         // Walkers an NPC replica replaced, while the server still streams them.
         std::unordered_set<uint64_t> _handedOff;
         // Walkers fading out: the element (still active, so no replica
-        // borrows it), the opacity left, where it stands, and whether its
-        // clip still plays there.
+        // borrows it), the opacity left, where it stands, whether its clip
+        // still plays there, and the replica it was (Reclaim).
         struct Fading {
             uint64_t walkerId = 0;
             SDK::Traffic::NativeTrafficElement *element = nullptr;
@@ -116,6 +119,7 @@ namespace Mafia1Online::Features::Pedestrian {
             glm::vec3 position {0.0f};
             glm::vec3 direction {0.0f};
             bool animating = false;
+            Replica replica;
         };
         std::vector<Fading> _fading;
         std::chrono::steady_clock::time_point _lastUpdate;

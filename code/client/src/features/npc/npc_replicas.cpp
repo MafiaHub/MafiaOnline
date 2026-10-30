@@ -9,6 +9,7 @@
 #include "features/player/stalled_gait.h"
 #include "features/seat/seat_service.h"
 #include "features/simulation/simulation_config.h"
+#include "features/world/fading_copies.h"
 #include "features/world/world_service.h"
 #include "shared/features/combat/melee_rules.h"
 #include "shared/features/npc/npc_entity.h"
@@ -136,6 +137,10 @@ namespace Mafia1Online::Features::Npc {
             }
             seen.insert(id);
             snapshot.rotation = glm::normalize(snapshot.rotation);
+            // Back before its copy faded out: that copy goes on.
+            if (!_replicas.contains(id)) {
+                Reclaim(world, id);
+            }
             auto &replica = _replicas[id];
             const MafiaNet::Time transformTime = npc->GetLastTransformTime();
             const bool newPose                 = replica.snapshots.Empty() || replica.lastTransformTime != transformTime;
@@ -680,7 +685,7 @@ namespace Mafia1Online::Features::Npc {
         return found == _replicas.end() || !found->second.frame || found->second.deathShown;
     }
 
-    void NpcReplicaService::Remove(World::WorldService &world, uint64_t networkId, const Replica &replica, bool fade) {
+    void NpcReplicaService::Remove(World::WorldService &world, uint64_t networkId, Replica &replica, bool fade) {
         auto *actor = static_cast<SDK::Player::NativeActor *>(world.NativeObjects().Resolve(replica.handle));
         world.NativeObjects().InvalidateNetwork(networkId);
         if (!actor || !world.IsReady()) {
@@ -700,10 +705,27 @@ namespace Mafia1Online::Features::Npc {
             if (!actor->IsDead() && Player::MovingGait(human->AnimationState())) {
                 human->SetLocomotionAnimation(SDK::Player::LocomotionAnimation::Idle);
             }
-            _fading.push_back({actor, base, 1.0f});
+            const bool alive = actor->IsAlive() && !actor->IsDead();
+            _fading.push_back({networkId, std::move(replica), actor, base, 1.0f, alive});
             return;
         }
         SDK::Core::Mission::Get()->Game()->RemoveTemporaryActor(actor);
+    }
+
+    void NpcReplicaService::Reclaim(World::WorldService &world, uint64_t networkId) {
+        auto copy = World::TakeFading(_fading, &Fading::networkId, networkId);
+        if (!copy) {
+            return;
+        }
+        copy->base->SetTransparency(1.0f);
+        auto &replica = _replicas.emplace(networkId, std::move(copy->replica)).first->second;
+        replica.handle = world.NativeObjects().Bind(copy->actor, networkId);
+        // Remove stood it idle: the streamed state plays again.
+        replica.lastAnimation = 0;
+    }
+
+    bool NpcReplicaService::FadingAlive(const void *actor) const {
+        return std::any_of(_fading.begin(), _fading.end(), [actor](const Fading &fading) { return fading.actor == actor && fading.alive; });
     }
 
     void NpcReplicaService::AdvanceFades() {
@@ -751,7 +773,7 @@ namespace Mafia1Online::Features::Npc {
     void NpcReplicaService::Reset(World::WorldService &world) {
         auto replicas = std::move(_replicas);
         _replicas.clear();
-        for (const auto &[id, replica] : replicas) {
+        for (auto &[id, replica] : replicas) {
             Remove(world, id, replica, false);
         }
         auto fading = std::move(_fading);

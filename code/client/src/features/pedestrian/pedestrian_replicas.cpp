@@ -4,6 +4,7 @@
 
 #include "features/player/stalled_gait.h"
 #include "features/simulation/simulation_config.h"
+#include "features/world/fading_copies.h"
 #include "features/world/world_service.h"
 #include "shared/features/pedestrian/pedestrian_entity.h"
 
@@ -113,6 +114,10 @@ namespace Mafia1Online::Features::Pedestrian {
                 return;
             }
             seen.insert(id);
+            // Back before its element faded out: that element goes on.
+            if (!_replicas.contains(id)) {
+                Reclaim(id);
+            }
             auto &replica = _replicas[id];
             Framework::Utils::TransformSnapshot snapshot {walker->position, walker->velocity, walker->rotation};
             if (!Finite(snapshot)) {
@@ -339,9 +344,23 @@ namespace Mafia1Online::Features::Pedestrian {
         }
         const auto position = element->Model()->WorldPosition();
         const auto direction = element->Model()->WorldDirection();
-        _fading.push_back({walkerId, element, std::clamp(element->Alpha(), 0.0f, 1.0f), {position.x, position.y, position.z}, {direction.x, 0.0f, direction.z},
-                           !replica.settled && !replica.holding});
+        const bool animating = !replica.settled && !replica.holding;
         replica.element = nullptr;
+        _fading.push_back({walkerId, element, std::clamp(element->Alpha(), 0.0f, 1.0f), {position.x, position.y, position.z}, {direction.x, 0.0f, direction.z},
+                           animating, std::move(replica)});
+    }
+
+    void PedestrianReplicaService::Reclaim(uint64_t walkerId) {
+        auto copy = World::TakeFading(_fading, &Fading::walkerId, walkerId);
+        if (!copy || !copy->element->IsActive()) {
+            return;
+        }
+        auto &replica = _replicas.emplace(walkerId, std::move(copy->replica)).first->second;
+        replica.element = copy->element;
+        // Update applies the walker's own opacity again, and its taxi wave,
+        // which Retire ended.
+        replica.appliedAlpha = -1;
+        replica.appliedWave = 0;
     }
 
     void PedestrianReplicaService::AdvanceFades(uint32_t frameMs) {

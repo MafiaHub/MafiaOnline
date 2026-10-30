@@ -278,7 +278,14 @@ namespace Mafia1Online::Features::Death {
                 return false;
             }
         }
-        return handle.networkId != 0 || SDK::Player::CurrentPlayer() == &actor;
+        if (handle.networkId != 0 || SDK::Player::CurrentPlayer() == &actor) {
+            return true;
+        }
+        // A living NPC's copy fading out after it left the stream: a local
+        // shot would kill it on this screen alone. One already dying there
+        // finishes its death natively.
+        auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
+        return application->NpcReplicas().FadingAlive(&actor);
     }
 
     void DeathService::RestoreLiving(NativeActor &actor) const {
