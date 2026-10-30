@@ -133,6 +133,7 @@ namespace Mafia1Online::Features::Player {
     struct CornerAction {
         CornerCall call = CornerCall::None;
         int32_t view = 0;
+        bool operator==(const CornerAction &) const = default;
     };
     inline CornerAction CornerActionFor(int32_t state) {
         switch (state & 0x1ff) {
@@ -151,6 +152,15 @@ namespace Mafia1Online::Features::Player {
         case 92: return {CornerCall::FireAimed, 2};
         default: return {};
         }
+    }
+
+    // Whether a body playing `current` already holds the cover the stream
+    // shows as `streamed`: the same call on the same side. The call picks
+    // the side's alternative clip by its own stance and weapon (0x58ab80
+    // sets 89 or 91 for an uncrouched body whose gun's corner-fire type is
+    // 4), so the exact state may differ from the host's for good.
+    inline bool HoldsCorner(int32_t current, int32_t streamed) {
+        return CornerActionFor(current) == CornerActionFor(streamed);
     }
 
     // C_human::Use_Actor's door clips into and out of a car's seat: the

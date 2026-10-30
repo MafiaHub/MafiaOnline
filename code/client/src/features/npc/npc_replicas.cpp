@@ -360,8 +360,10 @@ namespace Mafia1Online::Features::Npc {
         // peek's or shot's timed action and raises the gun; one the body
         // refuses yet (its stance comes with the next CombatService pass)
         // is tried again, and one it never takes plays as the bare state.
+        // A held lean is re-issued only once the body left that cover: its
+        // own pick of the side's clip may never equal the host's state.
         if (const auto corner = Player::CornerActionFor(animation.state); corner.call != Player::CornerCall::None) {
-            if (replica.lastAnimation != animation.state || (!animation.oneShot && (human->AnimationState() & 0x1ff) != animation.state)) {
+            if (replica.lastAnimation != animation.state || (!animation.oneShot && !Player::HoldsCorner(human->AnimationState(), animation.state))) {
                 const bool taken = corner.call == Player::CornerCall::View ? human->CornerView(corner.view)
                                    : corner.call == Player::CornerCall::Fire ? human->CornerFire(corner.view)
                                                                              : human->CornerFireAimed(corner.view);

@@ -797,6 +797,12 @@ namespace {
         CHECK(CornerActionFor(0x4000 | 87).call == CornerCall::Fire && CornerActionFor(0x4000 | 87).view == 2);
         CHECK(CornerActionFor(89).call == CornerCall::FireAimed && CornerActionFor(89).view == 0);
         CHECK(CornerActionFor(92).call == CornerCall::FireAimed && CornerActionFor(92).view == 2);
+        // A lean the body's own call took on the side's other clip, or with
+        // variant bits, still holds the streamed cover; another side, call
+        // or a state out of cover does not.
+        CHECK(HoldsCorner(89, 88) && HoldsCorner(88, 89) && HoldsCorner(91, 90) && HoldsCorner(0x2000 | 92, 92));
+        CHECK(!HoldsCorner(90, 88) && !HoldsCorner(84, 89) && !HoldsCorner(92, 88));
+        CHECK(!HoldsCorner(1, 88) && !HoldsCorner(78, 88));
     }
 
     void ReleaseBlend() {
