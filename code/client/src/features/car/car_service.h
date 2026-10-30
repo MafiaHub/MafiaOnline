@@ -19,6 +19,7 @@
 #include <deque>
 #include <map>
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -238,6 +239,16 @@ namespace Mafia1Online::Features::Car {
             glm::vec3 camera {0.0f};
             glm::vec3 local {0.0f};
             int localSeat = -1;
+            // After C_car::Update: each wheel's flags and visible spin, and
+            // the pedals, gear, revs and lights the native car holds.
+            std::string wheelFlags;
+            std::string wheelSpin;
+            float power     = 0.0f;
+            float brake     = 0.0f;
+            float handbrake = 0.0f;
+            int gear        = 0;
+            float rpm       = 0.0f;
+            uint32_t lights = 0;
         };
         void TraceObserver(uint64_t networkId, const Stream &stream, SDK::Scene::NativeFrame &frame, unsigned int frameMs, double renderTime,
                            const CarPoseSample &presented, bool contact, bool predict);

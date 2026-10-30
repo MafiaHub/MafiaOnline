@@ -163,7 +163,14 @@ namespace Mafia1Online::SDK::Car {
         int32_t surfaceMaterial;
         std::byte _unusedB8[0x108 - 0xb8];
         float slipValue;
-        std::byte _unused10C[0x120 - 0x10c];
+        float rollingRadius;
+        float contactSpeed;
+        // m_fContactAngle: the visible spin, which C_Vehicle::
+        // UpdateRotationWheels (0x4de020) advances by the wheel's ground
+        // travel, or by the engine for a powered wheel, but not while the
+        // wheel is FULL_SKID.
+        float contactAngle;
+        std::byte _unused118[0x120 - 0x118];
         uint32_t flags;
         std::byte _unused124[0x188 - 0x124];
         // m_fCurrentDeformAngle drives the visible wheel wobble; retail's
@@ -175,6 +182,8 @@ namespace Mafia1Online::SDK::Car {
     static_assert(offsetof(NativeWheel, surfaceMaterial) == 0xb4);
     static_assert(offsetof(NativeWheel, flags) == 0x120);
     static_assert(offsetof(NativeWheel, slipValue) == 0x108);
+    static_assert(offsetof(NativeWheel, rollingRadius) == 0x10c);
+    static_assert(offsetof(NativeWheel, contactAngle) == 0x114);
     // reM E_vehicle_wheel_flags; the replay record keeps a wheel skidding
     // while it is in contact.
     inline constexpr uint32_t kWheelInContact = 0x00000008;

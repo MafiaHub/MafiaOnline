@@ -39,6 +39,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <iterator>
 #include <limits>
 #include <string>
@@ -1334,7 +1335,12 @@ namespace Mafia1Online::Features::Car {
                 .Num("steer", movement.steeringInput)
                 .Int("gear", movement.gear)
                 .Num("power", movement.powerInput)
-                .Num("brake", movement.brakeInput);
+                .Num("brake", movement.brakeInput)
+                .Num("hb", movement.handbrakeInput)
+                .Num("clutch", movement.clutchInput)
+                .Num("rpm", movement.engineRotations)
+                .Int("lights", movement.lightState)
+                .Int("skid", movement.skidMask);
         }
         // A schedule far behind (a hitch, a car at rest) starts over.
         stream.nextSend     = stream.nextSend != std::chrono::steady_clock::time_point {} && now - stream.nextSend < kMovementSendInterval
@@ -2232,6 +2238,25 @@ namespace Mafia1Online::Features::Car {
                 const auto eye = camera->WorldPosition();
                 trace.camera   = {eye.x, eye.y, eye.z};
             }
+            auto &vehicle = car->Vehicle();
+            trace.wheelFlags.clear();
+            trace.wheelSpin.clear();
+            for (int i = 0; i < std::min(vehicle.WheelCount(), 8); ++i) {
+                if (const auto *wheel = vehicle.Wheel(i)) {
+                    char text[32];
+                    std::snprintf(text, sizeof(text), "%s%x", i ? "/" : "", wheel->flags);
+                    trace.wheelFlags += text;
+                    std::snprintf(text, sizeof(text), "%s%.3f", i ? "/" : "", wheel->contactAngle);
+                    trace.wheelSpin += text;
+                }
+            }
+            const auto inputs = vehicle.Inputs();
+            trace.power     = inputs.power;
+            trace.brake     = inputs.brake;
+            trace.handbrake = inputs.handbrake;
+            trace.gear      = vehicle.Gear();
+            trace.rpm       = vehicle.EngineRotations();
+            trace.lights    = vehicle.LightState();
             trace.localSeat = -1;
             if (local && local->actor.Frame()) {
                 const auto at = local->actor.Frame()->WorldPosition();
@@ -2253,6 +2278,16 @@ namespace Mafia1Online::Features::Car {
             if (native != _nativeById.end() && !native->second.removalQueued && _world && _world->NativeObjects().Resolve(native->second.handle)) {
                 const auto shown = native->second.frame->WorldPosition();
                 record.Vec("fin", {shown.x, shown.y, shown.z});
+            }
+            if (trace.afterTick) {
+                record.Str("wf", trace.wheelFlags)
+                    .Str("ws", trace.wheelSpin)
+                    .Num("power", trace.power)
+                    .Num("brake", trace.brake)
+                    .Num("hb", trace.handbrake)
+                    .Int("gear", trace.gear)
+                    .Num("rpm", trace.rpm)
+                    .Int("lights", trace.lights);
             }
             if (trace.own) {
                 record.Str("mode", "own").Int("ticks", trace.ticks).Int("fms", trace.frameMs).Vec("p", trace.presented.position).Quat("q", trace.presented.rotation);
