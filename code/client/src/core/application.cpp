@@ -7,6 +7,7 @@
 #include "features/car/debris_hooks.h"
 #include "features/combat/combat_hooks.h"
 #include "features/death/death_service.h"
+#include "features/debug/sync_trace.h"
 #include "features/menu/menu_hooks.h"
 #include "features/player/player_hooks.h"
 #include "features/quick_join/quick_join.h"
@@ -23,7 +24,13 @@
 #include "features/script/visual_scripting.h"
 #include "features/world/world_hooks.h"
 
+#include "shared/features/player/player_entity.h"
+
+#include <core_modules.h>
+#include <mafia1/sdk/core/mission.h>
+#include <mafia1/sdk/scene/native_scene.h>
 #include <mafia1/sdk/ui/native_indicators.h>
+#include <networking/replication/replication_manager.h>
 #include <mafia1/sdk/graphics/native_graph.h>
 #include <integrations/client/networking/engine.h>
 #include <logging/logger.h>
@@ -266,6 +273,34 @@ namespace Mafia1Online::Core {
         }
         UpdatePlayerInterface();
         ConnectFromConfiguration();
+        if (Features::Debug::SyncTrace::Enabled()) {
+            _cars.TraceFrameEnd();
+            Features::Debug::SyncTrace::EndFrame();
+            Features::Debug::SyncTrace::BeginFrame(SyncTraceFocus());
+        }
+    }
+
+    std::vector<glm::vec3> Application::SyncTraceFocus() const {
+        // A player traces around its camera; the host, which nobody watches,
+        // around every player.
+        std::vector<glm::vec3> focus;
+        if (!Features::Simulation::IsHost()) {
+            auto *mission = SDK::Core::Mission::Get();
+            auto *scene   = mission ? mission->GetScene() : nullptr;
+            if (auto *camera = scene ? scene->ActiveCamera() : nullptr) {
+                const auto eye = camera->WorldPosition();
+                focus.emplace_back(eye.x, eye.y, eye.z);
+            }
+            return focus;
+        }
+        if (auto *replication = Framework::CoreModules::GetReplication()) {
+            replication->ForEach<Shared::Entities::PlayerEntity>([&](Shared::Entities::PlayerEntity *player) {
+                if (player->spawned) {
+                    focus.push_back(player->position);
+                }
+            });
+        }
+        return focus;
     }
 
     void Application::UpdatePlayerInterface() {
@@ -345,6 +380,23 @@ namespace Mafia1Online::Core {
             // Keep this local and use the same ordered shutdown as the Quit
             // button. Server scripts never receive the built-in command.
             PostMessageA(static_cast<HWND>(SDK::Graphics::GetGraph()->MainWindow()), WM_CLOSE, 0, 0);
+            return;
+        }
+        // Local, never sent: "/synctrace" toggles the sync trace,
+        // "/synctrace mark <text>" writes a marker event into it.
+        if (first != std::string::npos && line.compare(first, 10, "/synctrace") == 0 && (line.size() == first + 10 || line[first + 10] == ' ')) {
+            const auto rest = line.find_first_not_of(' ', first + 10);
+            const char *status = nullptr;
+            if (rest != std::string::npos && line.compare(rest, 4, "mark") == 0) {
+                const auto text = line.find_first_not_of(' ', rest + 4);
+                Features::Debug::SyncTrace::Event("mark", 0, text == std::string::npos ? "" : line.substr(text, last - text + 1));
+                status = Features::Debug::SyncTrace::Enabled() ? "Sync trace: marked" : "Sync trace is off";
+            }
+            else {
+                status = Features::Debug::SyncTrace::Toggle() ? "Sync trace on: logs/synctrace" : "Sync trace off";
+            }
+            _chat.OnMessage("", status, 0xE0C080FF);
+            _webUi.OnChatMessage("", status, 0xE0C080FF);
             return;
         }
         SendChatMessage(line);

@@ -3,6 +3,7 @@
 #include "core/boot/lifecycle_hooks.h"
 #include "features/cheats/cheat_hooks.h"
 #include "features/compat/wine_fpu.h"
+#include "features/debug/sync_trace.h"
 #include "features/menu/menu_hooks.h"
 #include "features/display/system_init_hooks.h"
 #include "features/profile/profile_write_hooks.h"
@@ -45,6 +46,11 @@ extern "C" void __declspec(dllexport) InitClient(const wchar_t *projectPath) {
         Mafia1Online::Features::QuickJoin::Initialize(path);
         Mafia1Online::Features::Simulation::Initialize(path);
         Mafia1Online::Features::Display::Initialize(path);
+        {
+            const auto &quickJoin = Mafia1Online::Features::QuickJoin::GetConfig();
+            Mafia1Online::Features::Debug::SyncTrace::Initialize(
+                path, Mafia1Online::Features::Simulation::IsHost() ? std::string("host") : quickJoin.enabled ? quickJoin.nickname : std::string("client"));
+        }
         if (!Mafia1Online::Features::Profile::InstallWriteHooks()) {
             throw std::runtime_error("Could not install profile write guards");
         }

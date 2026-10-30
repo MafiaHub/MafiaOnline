@@ -93,6 +93,38 @@ namespace Mafia1Online::Features::Car {
             return _leadMs;
         }
 
+        // What the last Sample did, for the sync trace.
+        enum class SampleMode : uint8_t {
+            None,
+            Hermite,
+            Linear,
+            Extrapolated,
+            BeforeOldest,
+        };
+        struct SampleTrace {
+            SampleMode mode = SampleMode::None;
+            float u         = 0.0f;
+            float spanMs    = 0.0f;
+            double oldest   = 0.0;
+            double newest   = 0.0;
+            uint32_t count  = 0;
+        };
+        const SampleTrace &LastSample() const {
+            return _sampleTrace;
+        }
+        float JitterMs() const {
+            return _jitterMs;
+        }
+        float LatenessPeakMs() const {
+            return _latenessPeak;
+        }
+        glm::vec3 CorrectionOffset() const {
+            return _offset;
+        }
+        float CorrectionRadians() const {
+            return 2.0f * std::acos(std::clamp(std::abs(_turn.w), 0.0f, 1.0f));
+        }
+
         // The native car's mass centre in its frame (C_Vehicle 0x3f8).
         void SetMassCenter(const glm::vec3 &local) {
             _massCenter = local;
@@ -170,15 +202,21 @@ namespace Mafia1Online::Features::Car {
         // up to a delay ahead of the render time: the car runs into it rather
         // than standing there for the delay.
         bool Sample(double time, CarPoseSample &out) const {
+            _sampleTrace = {};
             if (_poses.empty()) {
                 return false;
             }
+            _sampleTrace.oldest = _poses.front().time;
+            _sampleTrace.newest = _poses.back().time;
+            _sampleTrace.count  = static_cast<uint32_t>(_poses.size());
             if (time <= _poses.front().time) {
+                _sampleTrace.mode = SampleMode::BeforeOldest;
                 out = Extrapolate(_poses.front(), time, kMaxDelayMs + kExtrapolationEaseMs);
                 return true;
             }
             const auto &newest = _poses.back();
             if (time >= newest.time) {
+                _sampleTrace.mode = SampleMode::Extrapolated;
                 out = Extrapolate(newest, time, kMaxExtrapolationMs + std::max(0.0, static_cast<double>(_leadMs - _delayMs)));
                 return true;
             }
@@ -190,6 +228,9 @@ namespace Mafia1Online::Features::Car {
             const glm::quat to = glm::dot(a.rotation, b.rotation) < 0.0f ? -b.rotation : b.rotation;
             out.time            = time;
             out.angularVelocity = glm::mix(a.angularVelocity, b.angularVelocity, u);
+            _sampleTrace.u      = u;
+            _sampleTrace.spanMs = span * 1000.0f;
+            _sampleTrace.mode   = span > kHermiteSpanSeconds ? SampleMode::Linear : SampleMode::Hermite;
             if (span > kHermiteSpanSeconds) {
                 out.position = glm::mix(a.position, b.position, u);
                 out.velocity = glm::mix(a.velocity, b.velocity, u);
@@ -374,5 +415,6 @@ namespace Mafia1Online::Features::Car {
         float _leadRate    = 0.0f;
         double _lastRender = 0.0;
         bool _presented    = false;
+        mutable SampleTrace _sampleTrace;
     };
 } // namespace Mafia1Online::Features::Car

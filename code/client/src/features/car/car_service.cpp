@@ -2,6 +2,7 @@
 
 #include "features/car/car_hooks.h"
 #include "features/car/car_mesh_capture.h"
+#include "features/debug/sync_trace.h"
 #include "features/seat/seat_service.h"
 #include "features/simulation/simulation_config.h"
 #include "features/world/world_service.h"
@@ -330,6 +331,15 @@ namespace Mafia1Online::Features::Car {
             }
             const glm::vec3 angular = IsFiniteVector(car->angularVelocity) && glm::length(car->angularVelocity) <= 30.0f ? car->angularVelocity : glm::vec3(0.0f);
             stream.poses.Push({poseTime, snapshot.position, snapshot.velocity, glm::normalize(snapshot.rotation), angular}, arrival, clockReset);
+            if (Debug::SyncTrace::Enabled() && Debug::SyncTrace::Near(snapshot.position)) {
+                Debug::SyncTrace::Received("car", id)
+                    .Int("clk", car->poseClockMs)
+                    .Num("arrival", arrival)
+                    .Num("ptime", poseTime)
+                    .Num("offset", stream.poseClockOffset)
+                    .Bool("reset", clockReset)
+                    .Vec("p", snapshot.position);
+            }
             stream.lastPoseTime = poseTime;
             stream.lastPacketTime = packetTime;
         });
@@ -392,6 +402,11 @@ namespace Mafia1Online::Features::Car {
                              state->terminalState == Shared::Entities::CarEntity::TerminalState::Submerged ||
                              state->terminalState == Shared::Entities::CarEntity::TerminalState::FatalFall) && Sample(it->first, pose)) {
                             ApplyPose(world, it->first, pose);
+                            // Not ticked by the game this frame: placed after
+                            // the camera, from the wall clock.
+                            if (Debug::SyncTrace::Enabled() && Debug::SyncTrace::Near(pose.position)) {
+                                Debug::SyncTrace::Observed("car", it->first).Str("mode", "update").Vec("p", pose.position).Quat("q", pose.rotation);
+                            }
                         }
                     }
                     if (!state || (state->terminalState != Shared::Entities::CarEntity::TerminalState::Submerged &&
@@ -1280,6 +1295,20 @@ namespace Mafia1Online::Features::Car {
             state->angularVelocity = {movement.angularVelocityX, movement.angularVelocityY, movement.angularVelocityZ};
         }
         Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(movement, MafiaNet::Priority::High, MafiaNet::Reliability::Unreliable);
+        if (Debug::SyncTrace::Enabled() && Debug::SyncTrace::Near({movement.x, movement.y, movement.z})) {
+            Debug::SyncTrace::Truth("car", networkId)
+                .Int("clk", movement.clockMs)
+                .Bool("sent", true)
+                .Int("seq", movement.sequence)
+                .Vec("p", {movement.x, movement.y, movement.z})
+                .Quat("q", rotation)
+                .Vec("v", {movement.velocityX, movement.velocityY, movement.velocityZ})
+                .Vec("w", {movement.angularVelocityX, movement.angularVelocityY, movement.angularVelocityZ})
+                .Num("steer", movement.steeringInput)
+                .Int("gear", movement.gear)
+                .Num("power", movement.powerInput)
+                .Num("brake", movement.brakeInput);
+        }
         // A schedule far behind (a hitch, a car at rest) starts over.
         stream.nextSend     = stream.nextSend != std::chrono::steady_clock::time_point {} && now - stream.nextSend < kMovementSendInterval
                                   ? stream.nextSend + kMovementSendInterval
@@ -1900,6 +1929,36 @@ namespace Mafia1Online::Features::Car {
             const auto center    = vehicle.WorldCenter();
             const auto velocity  = vehicle.LinearVelocity();
             _simulatedCars.push_back({glm::vec3(center.x, center.y, center.z), glm::vec3(velocity.x, velocity.y, velocity.z)});
+            if (Debug::SyncTrace::Enabled()) {
+                // Every physics step, not only the sent ones: the dense truth
+                // an observer's shown pose is measured against.
+                const auto native = _nativeById.find(id->second);
+                if (native != _nativeById.end() && native->second.frame) {
+                    const auto position = native->second.frame->WorldPosition();
+                    const auto angular  = vehicle.AngularVelocity();
+                    auto *local = reinterpret_cast<SDK::Seat::NativeHuman *>(SDK::Player::CurrentPlayer());
+                    if (local && local->usedActorEnter == static_cast<const SDK::Player::NativeActor *>(static_cast<const void *>(car))) {
+                        auto &trace              = _traceFrames[id->second];
+                        trace.own                = true;
+                        ++trace.ticks;
+                        trace.frameMs            = frameMs;
+                        trace.presented.position = {position.x, position.y, position.z};
+                        trace.presented.rotation = FrameRotation(*native->second.frame);
+                        trace.written            = trace.presented.position;
+                        trace.writtenRotation    = trace.presented.rotation;
+                    }
+                    if (Debug::SyncTrace::Near({position.x, position.y, position.z})) {
+                        Debug::SyncTrace::Truth("car", id->second)
+                            .Int("clk", stream.simClockMs)
+                            .Bool("sent", false)
+                            .Int("fms", frameMs)
+                            .Vec("p", {position.x, position.y, position.z})
+                            .Quat("q", FrameRotation(*native->second.frame))
+                            .Vec("v", {velocity.x, velocity.y, velocity.z})
+                            .Vec("w", {angular.x, angular.y, angular.z});
+                    }
+                }
+            }
         }
     }
 
@@ -2055,6 +2114,7 @@ namespace Mafia1Online::Features::Car {
             const glm::vec3 angular = glm::mix(glm::vec3(nativeAngular.x, nativeAngular.y, nativeAngular.z), pose.angularVelocity, velocityBlend);
             vehicle.SetMotion({velocity.x, velocity.y, velocity.z}, {angular.x, angular.y, angular.z});
             vehicle.UpdateImportantVariables();
+            TraceObserver(networkId, stream, *frame, frameMs, renderTime, pose, true, predict);
             stream.drivenSerial = _updateSerial;
             return true;
         }
@@ -2103,8 +2163,127 @@ namespace Mafia1Online::Features::Car {
         }
         vehicle.DoWheelsCollision(dt);
         vehicle.EngineFreq(dt);
+        TraceObserver(networkId, stream, *frame, frameMs, renderTime, pose, false, predict);
         stream.drivenSerial = _updateSerial;
         return true;
+    }
+
+    void CarService::TraceObserver(uint64_t networkId, const Stream &stream, SDK::Scene::NativeFrame &frame, unsigned int frameMs, double renderTime,
+                                   const CarPoseSample &presented, bool contact, bool predict) {
+        if (!Debug::SyncTrace::Enabled() || !Debug::SyncTrace::Near(presented.position)) {
+            return;
+        }
+        auto &trace = _traceFrames[networkId];
+        ++trace.ticks;
+        trace.frameMs           = frameMs;
+        trace.wall              = LocalClockMs();
+        trace.frameClock        = _frameClock;
+        trace.renderTime        = renderTime;
+        trace.ownerClock        = renderTime - stream.poseClockOffset;
+        trace.delayMs           = stream.poses.DelayMs();
+        trace.leadMs            = stream.poses.LeadMs();
+        trace.transitMs         = stream.transitMs;
+        trace.intervalMs        = stream.poses.IntervalMs();
+        trace.jitterMs          = stream.poses.JitterMs();
+        trace.latenessMs        = stream.poses.LatenessPeakMs();
+        trace.sample            = stream.poses.LastSample();
+        trace.correctionMeters  = glm::length(stream.poses.CorrectionOffset());
+        trace.correctionRadians = stream.poses.CorrectionRadians();
+        trace.contact           = contact;
+        trace.predict           = predict;
+        trace.presented         = presented;
+        const auto written      = frame.WorldPosition();
+        trace.written           = {written.x, written.y, written.z};
+        trace.writtenRotation   = FrameRotation(frame);
+        trace.afterTick         = false;
+    }
+
+    void CarService::TraceAfterGameTick() {
+        if (_traceFrames.empty()) {
+            return;
+        }
+        auto *mission = SDK::Core::Mission::Get();
+        auto *scene   = mission ? mission->GetScene() : nullptr;
+        auto *camera  = scene ? scene->ActiveCamera() : nullptr;
+        auto *local   = reinterpret_cast<SDK::Seat::NativeHuman *>(SDK::Player::CurrentPlayer());
+        for (auto &[networkId, trace] : _traceFrames) {
+            const auto native = _nativeById.find(networkId);
+            auto *car = native != _nativeById.end() && !native->second.removalQueued && _world
+                            ? static_cast<SDK::Car::NativeCar *>(_world->NativeObjects().Resolve(native->second.handle))
+                            : nullptr;
+            if (!car) {
+                continue;
+            }
+            const auto position      = native->second.frame->WorldPosition();
+            const auto center        = car->Vehicle().WorldCenter();
+            trace.afterTick          = true;
+            trace.afterUpdate        = {position.x, position.y, position.z};
+            trace.worldCenter        = {center.x, center.y, center.z};
+            if (camera) {
+                const auto eye = camera->WorldPosition();
+                trace.camera   = {eye.x, eye.y, eye.z};
+            }
+            trace.localSeat = -1;
+            if (local && local->actor.Frame()) {
+                const auto at = local->actor.Frame()->WorldPosition();
+                trace.local   = {at.x, at.y, at.z};
+                if (local->usedActorEnter == static_cast<const SDK::Player::NativeActor *>(static_cast<const void *>(car))) {
+                    trace.localSeat = local->seatId;
+                }
+            }
+        }
+    }
+
+    void CarService::TraceFrameEnd() {
+        for (auto &[networkId, trace] : _traceFrames) {
+            auto record = Debug::SyncTrace::Observed("car", networkId);
+            if (!record) {
+                break;
+            }
+            const auto native = _nativeById.find(networkId);
+            if (native != _nativeById.end() && !native->second.removalQueued && _world && _world->NativeObjects().Resolve(native->second.handle)) {
+                const auto shown = native->second.frame->WorldPosition();
+                record.Vec("fin", {shown.x, shown.y, shown.z});
+            }
+            if (trace.own) {
+                record.Str("mode", "own").Int("ticks", trace.ticks).Int("fms", trace.frameMs).Vec("p", trace.presented.position).Quat("q", trace.presented.rotation);
+                if (trace.afterTick) {
+                    record.Vec("nat", trace.afterUpdate).Vec("wc", trace.worldCenter).Vec("cam", trace.camera).Vec("lp", trace.local).Int("seat", trace.localSeat);
+                }
+                continue;
+            }
+            static constexpr const char *kModes[] = {"none", "hermite", "linear", "extrap", "before"};
+            record.Str("mode", trace.contact ? "contact" : "interp")
+                .Int("ticks", trace.ticks)
+                .Int("fms", trace.frameMs)
+                .Num("wall", trace.wall)
+                .Num("fclk", trace.frameClock)
+                .Num("rt", trace.renderTime)
+                .Num("oclk", trace.ownerClock)
+                .Num("delay", trace.delayMs)
+                .Num("lead", trace.leadMs)
+                .Num("transit", trace.transitMs)
+                .Num("interval", trace.intervalMs)
+                .Num("jitter", trace.jitterMs)
+                .Num("late", trace.latenessMs)
+                .Str("smp", kModes[static_cast<int>(trace.sample.mode)])
+                .Num("u", trace.sample.u)
+                .Num("span", trace.sample.spanMs)
+                .Num("ahead", trace.renderTime - trace.sample.newest)
+                .Int("n", trace.sample.count)
+                .Num("corr", trace.correctionMeters)
+                .Num("corrDeg", glm::degrees(trace.correctionRadians))
+                .Bool("predict", trace.predict)
+                .Vec("p", trace.presented.position)
+                .Quat("q", trace.presented.rotation)
+                .Vec("v", trace.presented.velocity)
+                .Vec("wr", trace.written)
+                .Quat("wq", trace.writtenRotation);
+            if (trace.afterTick) {
+                record.Vec("nat", trace.afterUpdate).Vec("wc", trace.worldCenter).Vec("cam", trace.camera).Vec("lp", trace.local).Int("seat", trace.localSeat);
+            }
+        }
+        _traceFrames.clear();
     }
 
     void CarService::Reset() {

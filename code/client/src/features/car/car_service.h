@@ -73,6 +73,13 @@ namespace Mafia1Online::Features::Car {
         // Switches observers between interpolation of the replicated path
         // and native physics corrected toward the pose predicted to now.
         bool ToggleSyncMode();
+        // Sync trace (Debug::SyncTrace) of the cars DriveObserver placed this
+        // frame: completed once C_game::Tick returns, after C_car::Update and
+        // the camera, and written at the end of the frame, before rendering,
+        // so a write after the camera read or a frame the car moved twice or
+        // not at all shows.
+        void TraceAfterGameTick();
+        void TraceFrameEnd();
 
         // Simulation host: a car the retail game owns (a traffic pool car, or
         // a temporary car it created) is this network car's native car. The
@@ -203,6 +210,42 @@ namespace Mafia1Online::Features::Car {
             bool hasAppliedOpacity         = false;
         };
 
+        struct TraceFrame {
+            // How many times this frame DriveObserver placed it.
+            uint32_t ticks      = 0;
+            // The car the local player sits in and this client simulates:
+            // its camera is the baseline an observer's is held to.
+            bool own            = false;
+            unsigned int frameMs = 0;
+            double wall         = 0.0;
+            double frameClock   = 0.0;
+            double renderTime   = 0.0;
+            // The controller's physics clock the render time stands for.
+            double ownerClock   = 0.0;
+            float delayMs       = 0.0f;
+            float leadMs        = 0.0f;
+            float transitMs     = 0.0f;
+            float intervalMs    = 0.0f;
+            float jitterMs      = 0.0f;
+            float latenessMs    = 0.0f;
+            CarPoseBuffer::SampleTrace sample;
+            float correctionMeters  = 0.0f;
+            float correctionRadians = 0.0f;
+            bool contact = false;
+            bool predict = false;
+            CarPoseSample presented;
+            glm::vec3 written {0.0f};
+            glm::quat writtenRotation {1.0f, 0.0f, 0.0f, 0.0f};
+            bool afterTick = false;
+            glm::vec3 afterUpdate {0.0f};
+            glm::vec3 worldCenter {0.0f};
+            glm::vec3 camera {0.0f};
+            glm::vec3 local {0.0f};
+            int localSeat = -1;
+        };
+        void TraceObserver(uint64_t networkId, const Stream &stream, SDK::Scene::NativeFrame &frame, unsigned int frameMs, double renderTime,
+                           const CarPoseSample &presented, bool contact, bool predict);
+
         void CreateNativeCar(World::WorldService &world, uint64_t networkId, const char *model, const Framework::Utils::TransformSnapshot &pose);
         void ReportLoadFailure(World::WorldService &world, uint64_t networkId);
         // The damage, mesh and hit state a new native car has to rebuild.
@@ -270,5 +313,6 @@ namespace Mafia1Online::Features::Car {
         // When this client last applied a reported contact between two
         // network cars (lower id first), local clock ms.
         std::map<std::pair<uint64_t, uint64_t>, double> _replayedContacts;
+        std::unordered_map<uint64_t, TraceFrame> _traceFrames;
     };
 } // namespace Mafia1Online::Features::Car

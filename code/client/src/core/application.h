@@ -139,6 +139,8 @@ namespace Mafia1Online::Core {
         void SubmitChatLine(const std::string &line);
         // Chat, web UI and gameplay menus; absent on the simulation host.
         void UpdatePlayerInterface();
+        // Where the sync trace keeps records this frame (Debug::SyncTrace).
+        std::vector<glm::vec3> SyncTraceFocus() const;
         void ConnectFromConfiguration();
         // Script key moves from the settings screen apply to what Key.bind polls.
         std::unique_ptr<Features::Settings::RemappedInput> _input = std::make_unique<Features::Settings::RemappedInput>();

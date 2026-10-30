@@ -3,6 +3,7 @@
 #include "world_hooks.h"
 
 #include "core/application.h"
+#include "features/debug/sync_trace.h"
 #include "features/quick_join/quick_join.h"
 #include "features/simulation/simulation_config.h"
 #include "shared/features/world/mission_actors.h"
@@ -202,6 +203,11 @@ namespace Mafia1Online::Features::World {
                 }
             }
             gGameTickOriginal(game, frameTimeMs);
+            if (Debug::SyncTrace::Enabled()) {
+                // After C_car::Update and G_Camera::Tick, before the frame's
+                // PostUpdate and rendering.
+                static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->Cars().TraceAfterGameTick();
+            }
         }
 
         constexpr std::array<uintptr_t, 9> kHookAddresses {
