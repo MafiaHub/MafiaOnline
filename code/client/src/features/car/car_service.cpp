@@ -289,40 +289,24 @@ namespace Mafia1Online::Features::Car {
             if (car->lastUpdateTime == 0 && stream.lastPacketTime != 0) {
                 return;
             }
-            const MafiaNet::Time packetTime = car->lastUpdateTime == 0 ? MafiaNet::GetTime() : car->lastUpdateTime;
-            const double now = LocalClockMs();
-            double poseTime = static_cast<double>(packetTime);
-            double arrival = poseTime;
-            bool clockReset = true;
-            if (car->poseClockSource != 0) {
-                // The server re-sends poses on its own tick, and state-channel
-                // updates also advance lastUpdateTime. Date each pose by the
-                // controller's physics clock instead, mapped onto the local
-                // clock by the least-delayed arrival of the last two seconds.
-                // The offset only slews, so one early or late packet never
-                // moves a sample's time; a jump resets it.
-                if (stream.poseClockSource == car->poseClockSource && stream.poseClockMs == car->poseClockMs) {
-                    return;
+            if (car->poseClockSource != 0 || !car->receivedPoses.empty()) {
+                // Every pose the transform channel delivered since the last
+                // frame, not only the one the entity holds now: two often
+                // arrive together, and dropping one left a gap of two send
+                // intervals the car was extrapolated across.
+                const auto received = std::move(car->receivedPoses);
+                car->receivedPoses.clear();
+                for (const auto &pose : received) {
+                    if (pose.poseClockSource != 0) {
+                        ReceivePose(id, stream, pose);
+                    }
                 }
-                arrival = now;
-                const double offset = now - static_cast<double>(car->poseClockMs);
-                const bool sourceChanged = stream.poseClockSource != car->poseClockSource;
-                if (sourceChanged || std::abs(offset - stream.poseClockOffset) > 1000.0) {
-                    stream.offsetWindow.clear();
-                    stream.poseClockOffset = offset;
-                }
-                stream.offsetWindow.push_back(offset);
-                while (stream.offsetWindow.size() > 60) {
-                    stream.offsetWindow.pop_front();
-                }
-                const double floor = *std::min_element(stream.offsetWindow.begin(), stream.offsetWindow.end());
-                stream.poseClockOffset += std::clamp(floor - stream.poseClockOffset, -0.5, 0.5);
-                stream.poseClockSource = car->poseClockSource;
-                stream.poseClockMs = car->poseClockMs;
-                poseTime = static_cast<double>(car->poseClockMs) + stream.poseClockOffset;
-                clockReset = sourceChanged;
+                return;
             }
-            if ((!clockReset && poseTime <= stream.lastPoseTime) || (car->poseClockSource == 0 && stream.lastPacketTime == packetTime)) {
+            // A pose without a controller clock (none since the clock was
+            // added): dated by its packet.
+            const MafiaNet::Time packetTime = car->lastUpdateTime == 0 ? MafiaNet::GetTime() : car->lastUpdateTime;
+            if (stream.lastPacketTime == packetTime) {
                 return;
             }
             Framework::Utils::TransformSnapshot snapshot {car->position, car->velocity, car->rotation};
@@ -330,17 +314,9 @@ namespace Mafia1Online::Features::Car {
                 return;
             }
             const glm::vec3 angular = IsFiniteVector(car->angularVelocity) && glm::length(car->angularVelocity) <= 30.0f ? car->angularVelocity : glm::vec3(0.0f);
-            stream.poses.Push({poseTime, snapshot.position, snapshot.velocity, glm::normalize(snapshot.rotation), angular}, arrival, clockReset);
-            if (Debug::SyncTrace::Enabled() && Debug::SyncTrace::Near(snapshot.position)) {
-                Debug::SyncTrace::Received("car", id)
-                    .Int("clk", car->poseClockMs)
-                    .Num("arrival", arrival)
-                    .Num("ptime", poseTime)
-                    .Num("offset", stream.poseClockOffset)
-                    .Bool("reset", clockReset)
-                    .Vec("p", snapshot.position);
-            }
-            stream.lastPoseTime = poseTime;
+            const auto poseTime = static_cast<double>(packetTime);
+            stream.poses.Push({poseTime, snapshot.position, snapshot.velocity, glm::normalize(snapshot.rotation), angular}, poseTime, true);
+            stream.lastPoseTime   = poseTime;
             stream.lastPacketTime = packetTime;
         });
         for (auto it = _streams.begin(); it != _streams.end();) {
@@ -423,6 +399,51 @@ namespace Mafia1Online::Features::Car {
                 ++it;
             }
         }
+    }
+
+    void CarService::ReceivePose(uint64_t networkId, Stream &stream, const Shared::Entities::CarEntity::ReceivedPose &pose) {
+        // Dated by the controller's physics clock, mapped onto the local
+        // clock by the least-delayed arrival of the last two seconds. The
+        // offset only slews, so one early or late packet never moves a
+        // sample's time; a jump resets it.
+        if (stream.poseClockSource == pose.poseClockSource && stream.poseClockMs == pose.poseClockMs) {
+            return;
+        }
+        Framework::Utils::TransformSnapshot snapshot {pose.position, pose.velocity, pose.rotation};
+        if (!IsFinite(snapshot) || glm::length(snapshot.rotation) < 0.0001f) {
+            return;
+        }
+        const double now         = LocalClockMs();
+        const double offset      = now - static_cast<double>(pose.poseClockMs);
+        const bool sourceChanged = stream.poseClockSource != pose.poseClockSource;
+        if (sourceChanged || std::abs(offset - stream.poseClockOffset) > 1000.0) {
+            stream.offsetWindow.clear();
+            stream.poseClockOffset = offset;
+        }
+        stream.offsetWindow.push_back(offset);
+        while (stream.offsetWindow.size() > 60) {
+            stream.offsetWindow.pop_front();
+        }
+        const double floor = *std::min_element(stream.offsetWindow.begin(), stream.offsetWindow.end());
+        stream.poseClockOffset += std::clamp(floor - stream.poseClockOffset, -0.5, 0.5);
+        stream.poseClockSource = pose.poseClockSource;
+        stream.poseClockMs     = pose.poseClockMs;
+        const double poseTime  = static_cast<double>(pose.poseClockMs) + stream.poseClockOffset;
+        if (!sourceChanged && poseTime <= stream.lastPoseTime) {
+            return;
+        }
+        const glm::vec3 angular = IsFiniteVector(pose.angularVelocity) && glm::length(pose.angularVelocity) <= 30.0f ? pose.angularVelocity : glm::vec3(0.0f);
+        stream.poses.Push({poseTime, snapshot.position, snapshot.velocity, glm::normalize(snapshot.rotation), angular}, now, sourceChanged);
+        if (Debug::SyncTrace::Enabled() && Debug::SyncTrace::Near(snapshot.position)) {
+            Debug::SyncTrace::Received("car", networkId)
+                .Int("clk", pose.poseClockMs)
+                .Num("arrival", now)
+                .Num("ptime", poseTime)
+                .Num("offset", stream.poseClockOffset)
+                .Bool("reset", sourceChanged)
+                .Vec("p", snapshot.position);
+        }
+        stream.lastPoseTime = poseTime;
     }
 
     void CarService::CreateNativeCar(World::WorldService &world, uint64_t networkId, const char *model, const Framework::Utils::TransformSnapshot &pose) {

@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace Mafia1Online::Shared::Entities {
     class CarEntity final: public Framework::Networking::Replication::NetworkEntity {
@@ -141,6 +142,21 @@ namespace Mafia1Online::Shared::Entities {
         uint32_t poseClockMs     = 0;
         uint64_t poseClockSource = 0;
 
+        // Client: every pose the transform channel delivered, oldest first,
+        // until CarService takes them. Two often arrive between one frame's
+        // reads (they bunch on the way, or the server relays two owner
+        // reports in one pass); the entity alone keeps only the newest.
+        struct ReceivedPose {
+            glm::vec3 position {0.0f};
+            glm::quat rotation {1.0f, 0.0f, 0.0f, 0.0f};
+            glm::vec3 velocity {0.0f};
+            glm::vec3 angularVelocity {0.0f};
+            uint32_t poseClockMs     = 0;
+            uint64_t poseClockSource = 0;
+        };
+        static constexpr size_t kMaxReceivedPoses = 32;
+        std::vector<ReceivedPose> receivedPoses;
+
         // Per-wheel skid bits in the retail replay record's layout.
         uint8_t skidMask = 0;
 
@@ -205,6 +221,7 @@ namespace Mafia1Online::Shared::Entities {
                 }
                 if (!write) {
                     poseClockSource = source;
+                    QueueReceivedPose();
                     steeringInput   = steering / 16383.0f;
                     engineRotations = rpm;
                     gear            = gearValue;
@@ -235,6 +252,7 @@ namespace Mafia1Online::Shared::Entities {
             fields.Field(clutch);
             fields.Field(skidMask);
             if (!fields.Writing()) {
+                QueueReceivedPose();
                 steeringInput   = steering / 16383.0f;
                 engineRotations = rpm;
                 gear            = gearValue;
@@ -243,6 +261,13 @@ namespace Mafia1Online::Shared::Entities {
                 handbrakeInput  = handbrake / 255.0f;
                 clutchInput     = clutch / 255.0f;
             }
+        }
+
+        void QueueReceivedPose() {
+            if (receivedPoses.size() >= kMaxReceivedPoses) {
+                receivedPoses.erase(receivedPoses.begin());
+            }
+            receivedPoses.push_back({position, rotation, velocity, angularVelocity, poseClockMs, poseClockSource});
         }
 
         void OnSerializeConstruction(Framework::Networking::Replication::FieldSerializer &fields) override {

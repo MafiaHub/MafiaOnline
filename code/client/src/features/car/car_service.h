@@ -4,6 +4,7 @@
 #include "game/entities/native_object_registry.h"
 #include "shared/features/car/car_contact.h"
 #include "shared/features/car/car_damage_state.h"
+#include "shared/features/car/car_entity.h"
 #include "shared/features/car/car_hit_report.h"
 #include "shared/features/car/car_mesh_checkpoint.h"
 #include "shared/features/car/car_movement.h"
@@ -31,9 +32,6 @@ namespace Mafia1Online::SDK::Car {
 namespace Mafia1Online::SDK::Player {
     struct NativeActor;
     struct Vector3;
-}
-namespace Mafia1Online::Shared::Entities {
-    class CarEntity;
 }
 
 namespace Mafia1Online::Features::World {
@@ -246,6 +244,8 @@ namespace Mafia1Online::Features::Car {
         void TraceObserver(uint64_t networkId, const Stream &stream, SDK::Scene::NativeFrame &frame, unsigned int frameMs, double renderTime,
                            const CarPoseSample &presented, bool contact, bool predict);
 
+        // One pose the transform channel delivered, into the stream's buffer.
+        void ReceivePose(uint64_t networkId, Stream &stream, const Shared::Entities::CarEntity::ReceivedPose &pose);
         void CreateNativeCar(World::WorldService &world, uint64_t networkId, const char *model, const Framework::Utils::TransformSnapshot &pose);
         void ReportLoadFailure(World::WorldService &world, uint64_t networkId);
         // The damage, mesh and hit state a new native car has to rebuild.
