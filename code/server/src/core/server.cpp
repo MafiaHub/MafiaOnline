@@ -413,12 +413,14 @@ namespace Mafia1Online::Core {
                 car->simulationControllerGuid == static_cast<uint64_t>(sender)) {
                 return;
             }
-            const auto maxDeltaV = _cars.ValidateContact(report, std::chrono::steady_clock::now());
+            const auto controller    = MafiaNet::ToGuid(static_cast<MafiaNet::PeerGuid>(car->simulationControllerGuid));
+            auto *peer               = Framework::CoreModules::GetNetworkPeer();
+            const int reporterPing   = std::max(peer->GetPing(packet->guid), 0);
+            const int controllerPing = std::max(peer->GetPing(controller), 0);
+            const auto maxDeltaV     = _cars.ValidateContact(report, std::chrono::steady_clock::now(), reporterPing, controllerPing);
             if (!maxDeltaV) {
                 return;
             }
-            const auto controller = MafiaNet::ToGuid(static_cast<MafiaNet::PeerGuid>(car->simulationControllerGuid));
-            auto *peer            = Framework::CoreModules::GetNetworkPeer();
             Shared::Car::ContactImpact impact;
             impact.carId             = report.carId;
             impact.strikerId         = report.strikerId;
@@ -430,7 +432,7 @@ namespace Mafia1Online::Core {
             impact.localNormal       = report.localNormal;
             impact.mass              = report.mass;
             impact.maxDeltaV         = *maxDeltaV;
-            impact.ageMs             = static_cast<uint16_t>(std::clamp((std::max(peer->GetPing(packet->guid), 0) + std::max(peer->GetPing(controller), 0)) / 2, 0, 1000));
+            impact.ageMs             = static_cast<uint16_t>(std::clamp((reporterPing + controllerPing) / 2, 0, 1000));
             peer->SendRPC(impact, controller);
         });
         Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Car::HitReport>([this](const Shared::Car::HitReport &report, MafiaNet::Packet *packet) {

@@ -51,11 +51,13 @@ namespace Mafia1Online::Features::Car {
                                                             const glm::vec3 &contact, const glm::vec3 &targetPosition,
                                                             std::chrono::steady_clock::time_point receivedAt,
                                                             float minSpeed = Shared::Combat::kVehicleImpactMinSpeed) const;
-        // A car's report that it hit another (ContactReport): the contact
-        // must lie on both cars' recent poses. The bound on the hit car's
-        // velocity change (MaxContactDeltaV), or nothing; at most one per
-        // pair every kContactReportGapMs.
-        std::optional<float> ValidateContact(const Shared::Car::ContactReport &report, std::chrono::steady_clock::time_point receivedAt);
+        // A car's report that it hit another (ContactReport), from a client
+        // and to a controller this far away (round trips, ms): the contact
+        // must lie on both cars' bodies at their poses then (CheckContact).
+        // The bound on the hit car's velocity change, or nothing; one per
+        // pair and contact (kContactReportGapMs).
+        std::optional<float> ValidateContact(const Shared::Car::ContactReport &report, std::chrono::steady_clock::time_point receivedAt, int reporterPingMs,
+                                             int controllerPingMs);
         void SendMeshCheckpoint(uint64_t networkId, uint64_t recipientGuid) const;
         void TransferController(uint64_t formerGuid, uint64_t replacementGuid);
         void AssignUncontrolled(uint64_t controllerGuid);
@@ -149,8 +151,9 @@ namespace Mafia1Online::Features::Car {
         std::unordered_map<uint64_t, MeshAssembly> _mesh;
         std::unordered_map<uint64_t, uint64_t> _authoredDamageRevision;
         std::unordered_map<uint64_t, std::deque<HitPose>> _hitPoses;
-        // The last accepted ContactReport of each (hit car, striker) pair.
-        std::map<std::pair<uint64_t, uint64_t>, std::chrono::steady_clock::time_point> _lastContact;
+        // The last accepted ContactReport of each (hit car, striker) pair, in
+        // steady clock ms.
+        std::map<std::pair<uint64_t, uint64_t>, double> _lastContact;
         uint64_t _seatEventSequence = 0;
     };
 } // namespace Mafia1Online::Features::Car

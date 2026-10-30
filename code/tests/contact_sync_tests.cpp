@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <limits>
 #include <string_view>
+#include <vector>
 
 using namespace Mafia1Online;
 
@@ -176,22 +177,83 @@ namespace {
         const glm::vec3 shove(0.0f, 0.0f, 30000.0f);
         CHECK(Near(ContactDeltaV(glm::length(ClampContactImpulse(shove, 1200.0f, 10.0f)), 1200.0f), 10.0f, 1e-3f));
         CHECK(ClampContactImpulse(shove, 1200.0f, 40.0f) == shove);
-        CHECK(Near(MaxContactDeltaV(10.0f, 4.0f), 22.0f) && Near(MaxContactDeltaV(0.0f, 0.0f), 1.0f));
+        CHECK(Near(MaxContactDeltaV(20.0f), 31.0f) && Near(MaxContactDeltaV(0.0f), 1.0f));
 
-        // Only a stronger hit than any before in one contact is reported; a
-        // pause over the episode gap starts another.
+        // A contact is reported at its first hit only; hits keep it going
+        // until a pause over the episode gap starts another.
         double lastAt = -1.0e9;
-        float peak    = 0.0f;
-        CHECK(ContactReportDue(1000.0, 500.0f, lastAt, peak));
-        CHECK(!ContactReportDue(1010.0, 400.0f, lastAt, peak) && !ContactReportDue(1020.0, 500.0f, lastAt, peak));
-        CHECK(ContactReportDue(1030.0, 900.0f, lastAt, peak) && Near(peak, 900.0f));
-        CHECK(!ContactReportDue(1400.0, 100.0f, lastAt, peak));
-        CHECK(ContactReportDue(1400.0 + kContactEpisodeGapMs + 1.0, 100.0f, lastAt, peak));
+        CHECK(ContactReportDue(1000.0, lastAt));
+        CHECK(!ContactReportDue(1010.0, lastAt) && !ContactReportDue(1400.0, lastAt) && !ContactReportDue(1850.0, lastAt));
+        CHECK(ContactReportDue(1850.0 + kContactEpisodeGapMs + 1.0, lastAt));
 
         // The controller's own contact within the window is the reported one.
         const double seen[] = {5000.0, 5600.0};
         CHECK(ContactSeenLocally(seen, 5100.0) && ContactSeenLocally(seen, 5600.0 + kContactWindowMs));
         CHECK(!ContactSeenLocally(seen, 5300.0) && !ContactSeenLocally(std::span<const double> {}, 5000.0));
+    }
+
+    // A car's accepted poses at the server, `step` ms apart from `from` to
+    // `to`, moving at `velocity` (m/s) from `start` at 0 ms.
+    std::vector<Shared::Car::ContactPose> Poses(double from, double to, double step, const glm::vec3 &start, const glm::vec3 &velocity) {
+        std::vector<Shared::Car::ContactPose> poses;
+        for (double at = from; at <= to + 1e-6; at += step) {
+            poses.push_back({at, start + velocity * static_cast<float>(at / 1000.0), glm::quat(1.0f, 0.0f, 0.0f, 0.0f)});
+        }
+        return poses;
+    }
+
+    // The server's check of a reported contact against both cars' poses: a
+    // striker at 20 m/s runs into the back of a parked car, the point 4 m
+    // behind its centre, 4.2 m ahead of the striker's.
+    void ContactValidation() {
+        using namespace Shared::Car;
+        ContactReport report;
+        report.position      = {0.3f, 0.6f, -4.0f};
+        report.localPosition = report.position;
+        report.localNormal   = {0.0f, 0.0f, -1.0f};
+        report.localImpulse  = {0.0f, 0.0f, -12000.0f};
+        report.mass          = 1400.0f;
+        const auto parked    = Poses(-1800.0, -800.0, 1000.0, {}, {});
+        const auto striker   = Poses(-1000.0, 0.0, 25.0, {0.0f, 0.0f, -8.2f}, {0.0f, 0.0f, 20.0f});
+        const auto bound     = CheckContact(report, parked, -20.0, striker, 0.0);
+        CHECK(bound && Near(*bound, MaxContactDeltaV(20.0f), 0.5f));
+
+        // Only where the poses put the striker counts: one standing there
+        // closed at nothing, whatever its controller says of its speed, as
+        // does one sliding past across the normal.
+        const auto standing = Poses(-1000.0, 0.0, 25.0, {0.0f, 0.0f, -8.2f}, {});
+        const auto sliding  = Poses(-1000.0, 0.0, 25.0, {0.0f, 0.0f, -8.2f}, {20.0f, 0.0f, 0.0f});
+        const auto still    = CheckContact(report, parked, -20.0, standing, 0.0);
+        const auto glancing = CheckContact(report, parked, -20.0, sliding, 0.0);
+        CHECK(still && Near(*still, 1.0f) && glancing && Near(*glancing, 1.0f, 0.05f));
+
+        // The bodies must meet: a striker 4 m short, a point off the hit
+        // car's body, one the hit car was not at, or an impulse not along
+        // the normal is no contact.
+        CHECK(!CheckContact(report, parked, -20.0, Poses(-1000.0, 0.0, 25.0, {0.0f, 0.0f, -12.2f}, {0.0f, 0.0f, 20.0f}), 0.0));
+        ContactReport off = report;
+        off.position = off.localPosition = {0.3f, 0.6f, -5.5f};
+        CHECK(!CheckContact(off, parked, -20.0, Poses(-1000.0, 0.0, 25.0, {0.0f, 0.0f, -9.7f}, {0.0f, 0.0f, 20.0f}), 0.0));
+        off               = report;
+        off.localPosition = {0.3f, 0.6f, 2.0f};
+        CHECK(!CheckContact(off, parked, -20.0, striker, 0.0));
+        off              = report;
+        off.localImpulse = {12000.0f, 0.0f, 0.0f};
+        CHECK(!CheckContact(off, parked, -20.0, striker, 0.0));
+
+        // A moving car's newest pose stands for it 150 ms, a parked car's
+        // (once a second) 1.5 s; nothing before the oldest.
+        CHECK(!CheckContact(report, parked, -20.0, Poses(-1000.0, -400.0, 25.0, {0.0f, 0.0f, -8.2f}, {0.0f, 0.0f, 20.0f}), 0.0));
+        CHECK(CheckContact(report, Poses(-2400.0, -1400.0, 1000.0, {}, {}), -20.0, striker, 0.0));
+        CHECK(!CheckContact(report, Poses(-2600.0, -1600.0, 1000.0, {}, {}), -20.0, striker, 0.0));
+        CHECK(!CheckContact(report, parked, -20.0, Poses(-100.0, 0.0, 25.0, {0.0f, 0.0f, -8.2f}, {0.0f, 0.0f, 20.0f}), 0.0));
+
+        // One report per pair and contact: the reporter's episode gap less
+        // the network's jitter.
+        double lastAt = -std::numeric_limits<double>::infinity();
+        CHECK(ContactReportAccepted(1000.0, lastAt));
+        CHECK(!ContactReportAccepted(1020.0, lastAt) && !ContactReportAccepted(1000.0 + kContactReportGapMs - 1.0, lastAt));
+        CHECK(ContactReportAccepted(1000.0 + kContactReportGapMs, lastAt));
     }
 
     void SeizedMessage() {
@@ -379,6 +441,7 @@ int main() {
     ContactRules();
     ContactRate();
     CarContacts();
+    ContactValidation();
     SeizedMessage();
     RailwayShots();
     ScriptClips();

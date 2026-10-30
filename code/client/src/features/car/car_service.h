@@ -261,11 +261,7 @@ namespace Mafia1Online::Features::Car {
         // Local clock times of the contacts between each pair of network
         // cars (lower id first) one of which this client simulates.
         std::map<std::pair<uint64_t, uint64_t>, std::vector<double>> _contacts;
-        // Each (hit car, striker) pair's current reported contact.
-        struct ReportedContact {
-            double lastAt = -1.0e9;
-            float peak    = 0.0f;
-        };
-        std::map<std::pair<uint64_t, uint64_t>, ReportedContact> _reportedContacts;
+        // Each (hit car, striker) pair's last hit, local clock ms.
+        std::map<std::pair<uint64_t, uint64_t>, double> _reportedContacts;
     };
 } // namespace Mafia1Online::Features::Car

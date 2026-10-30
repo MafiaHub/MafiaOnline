@@ -862,8 +862,8 @@ namespace Mafia1Online::Features::Car {
             !(Shared::Car::ContactDeltaV(strength, car->Vehicle().Mass()) >= Shared::Car::kContactMinDeltaV)) {
             return;
         }
-        auto &reported = _reportedContacts[{id->second, strikerId->second}];
-        if (!Shared::Car::ContactReportDue(LocalClockMs(), strength, reported.lastAt, reported.peak)) {
+        auto &lastAt = _reportedContacts.try_emplace({id->second, strikerId->second}, -1.0e9).first->second;
+        if (!Shared::Car::ContactReportDue(LocalClockMs(), lastAt)) {
             return;
         }
         const auto center = frame->WorldPosition();
