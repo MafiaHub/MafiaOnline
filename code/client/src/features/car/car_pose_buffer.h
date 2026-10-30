@@ -257,9 +257,18 @@ namespace Mafia1Online::Features::Car {
             const float u2     = u * u;
             const float u3     = u2 * u;
             out.position = (2.0f * u3 - 3.0f * u2 + 1.0f) * a.position + (u3 - 2.0f * u2 + u) * span * va + (-2.0f * u3 + 3.0f * u2) * b.position + (u3 - u2) * span * vb;
-            const glm::vec3 origin =
-                ((6.0f * u2 - 6.0f * u) * a.position + (-6.0f * u2 + 6.0f * u) * b.position) / span + (3.0f * u2 - 4.0f * u + 1.0f) * va + (3.0f * u2 - 2.0f * u) * vb;
-            out.velocity = origin - glm::cross(out.angularVelocity, out.rotation * _massCenter);
+            // The velocity the native car is given is the poses' own, not the
+            // curve's slope: the slope bends wherever a pose's velocity and
+            // the chord to the next disagree by a few percent, and the chase
+            // camera aims along the velocity (G_Camera::Tick's car modes), so
+            // the slope swung a passenger's camera by up to 1.5 degrees, 9 cm
+            // at its distance, every frame. Each turns with its heading's
+            // yaw to this time, as Extrapolate carries it, then they blend.
+            const glm::vec3 upA = a.rotation * glm::vec3(0.0f, 1.0f, 0.0f);
+            const glm::vec3 upB = to * glm::vec3(0.0f, 1.0f, 0.0f);
+            const glm::vec3 fromA = Spin(upA * glm::dot(a.angularVelocity, upA), span * u) * a.velocity;
+            const glm::vec3 fromB = Spin(upB * glm::dot(b.angularVelocity, upB), span * (u - 1.0f)) * b.velocity;
+            out.velocity = glm::mix(fromA, fromB, u);
             return true;
         }
 

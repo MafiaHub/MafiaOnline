@@ -567,7 +567,8 @@ namespace {
         buffer.Push(exact(0.1f), 1100.0, false);
         CHECK(buffer.Sample(1050.0, out) && Near(out.position, exact(0.05f).position, 2e-4f));
         CHECK(std::abs(glm::dot(out.rotation, exact(0.05f).rotation)) > 0.99999f);
-        CHECK(Near(out.velocity, exact(0.05f).velocity, 0.02f));
+        // The poses' velocities turned along the arc, not the curve's slope.
+        CHECK(Near(out.velocity, exact(0.05f).velocity, 1e-3f));
 
         // Spinning on the spot about the mass centre: the origin circles it.
         Features::Car::CarPoseBuffer spin;
