@@ -125,6 +125,9 @@ namespace Mafia1Online::Features::Railway {
             // Players: how far behind the host this railway is drawn; far
             // railways are reported less often and need a longer one.
             double renderDelayMs = 0.0;
+            // Players: the newest moving report's speed, which the host's
+            // parts keep swaying by once it stops (SpringProcess).
+            float lastMovingSpeed = 0.0f;
             // Players: the doorway use objects this client registered.
             enum class Entries : uint8_t { None, Outer, Inner } entries = Entries::None;
             // Host: since when a hit driver has stopped it (state 11).

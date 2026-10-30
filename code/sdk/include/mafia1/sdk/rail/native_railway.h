@@ -2,6 +2,7 @@
 
 #include <mafia1/sdk/player/native_actor.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 
@@ -94,6 +95,28 @@ namespace Mafia1Online::SDK::Rail {
         // or collisions, and Update hides the model.
         static constexpr uintptr_t kNearCameraBranch = 0x4881ee;
 
+        // void __thiscall Place(int frameTime), retn 4 (reM C_railway.cpp:
+        // 3481): moves the front (+0x90) frameTime * speed toward the node
+        // m_BackPathNodes[0], taking the node's last forward link once it is
+        // reached (within 0.1 m, or the angle to the rail direction +0x70 at
+        // or past 90 degrees; m_ForwardPathNodes first), rebuilds the paths,
+        // and sets the body (+0x24/+0x30) and each wagon midway between a
+        // front and a back point FindBackPos finds a body length behind on
+        // the back path, with SpringProcess's sway, which leaves them as
+        // they were below the speed 1e-8 (MRG_ZERO, 0x62323c).
+        static constexpr uintptr_t kPlace = 0x48f860;
+        static constexpr size_t kRailDirectionOffset = 0x70;
+        // std::vector<unsigned> m_BackPathNodes at +0x7c and m_ForwardPathNodes
+        // at +0xa8 (VC6: allocator, first, last, end).
+        static constexpr size_t kBackPathFirstOffset = 0x80;
+        static constexpr size_t kBackPathLastOffset = 0x84;
+        static constexpr size_t kForwardPathFirstOffset = 0xac;
+        static constexpr size_t kForwardPathLastOffset = 0xb0;
+        static constexpr size_t kFrontPositionOffset = 0x90;
+        // SpringProcess's sway phase per part, the body first.
+        static constexpr size_t kWagonSwayPhasesOffset = 0xb8;
+        static constexpr size_t kMaxSpeedOffset = 0x1b4;
+        static constexpr float kMinimumPlacedSpeed = 0.0001f;
         static constexpr size_t kWagonPositionsOffset = 0xbc;
         static constexpr size_t kWagonDirectionsOffset = 0xc0;
         static constexpr size_t kSpeedOffset = 0xd4;
@@ -170,6 +193,48 @@ namespace Mafia1Online::SDK::Rail {
         }
         [[nodiscard]] Player::Vector3 *WagonDirections() const {
             return Field<Player::Vector3 *>(kWagonDirectionsOffset);
+        }
+        [[nodiscard]] Player::Vector3 FrontPosition() const {
+            return Field<Player::Vector3>(kFrontPositionOffset);
+        }
+        // The web path node the front moves toward; none before GameInit
+        // built the back path.
+        [[nodiscard]] bool HeadNode(uint32_t &node) const {
+            const auto *first = Field<uint32_t *>(kBackPathFirstOffset);
+            if (!first || first == Field<uint32_t *>(kBackPathLastOffset)) {
+                return false;
+            }
+            node = *first;
+            return true;
+        }
+        [[nodiscard]] float MaxSpeed() const {
+            return Field<float>(kMaxSpeedOffset);
+        }
+        // SpringProcess's sway phase of each part (radians, the body first;
+        // WagonCount() + 1 of them), which Place(0) leaves as they are.
+        [[nodiscard]] float *SwayPhases() const {
+            return Field<float *>(kWagonSwayPhasesOffset);
+        }
+        // Places the front at `front`, heading for `node`, and the body and
+        // wagons behind it as Place does, without moving it on: the front
+        // path's head and rail direction are this one, the forward path is
+        // dropped (Place builds it again from the node's links). The parts
+        // sway (SpringProcess) as at `swaySpeed`, which places a stopped
+        // railway too. False without a back path to place on.
+        bool PlaceFront(const Player::Vector3 &front, uint32_t node, const Player::Vector3 &nodePosition, float swaySpeed) {
+            auto *first = Field<uint32_t *>(kBackPathFirstOffset);
+            if (!first || first == Field<uint32_t *>(kBackPathLastOffset)) {
+                return false;
+            }
+            *first = node;
+            Field<uint32_t *>(kForwardPathLastOffset) = Field<uint32_t *>(kForwardPathFirstOffset);
+            Field<Player::Vector3>(kFrontPositionOffset) = front;
+            Field<Player::Vector3>(kRailDirectionOffset) = {nodePosition.x - front.x, nodePosition.y - front.y, nodePosition.z - front.z};
+            const float speed = Speed();
+            SetSpeed(std::max(swaySpeed, kMinimumPlacedSpeed));
+            reinterpret_cast<void(__thiscall *)(NativeRailway *, int)>(kPlace)(this, 0);
+            SetSpeed(speed);
+            return true;
         }
         [[nodiscard]] bool IsMetro() const {
             return Field<uint8_t>(kMetroOffset) != 0;

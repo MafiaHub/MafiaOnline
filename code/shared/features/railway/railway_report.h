@@ -60,10 +60,21 @@ namespace Mafia1Online::Shared::Railway {
         uint8_t wagonCount = 0;
         std::array<Vector, kMaxWagons> wagonPositions {};
         std::array<Vector, kMaxWagons> wagonDirections {};
+        // The front C_railway::Place moves along the track (+0x90) and the
+        // web path node it heads for (m_BackPathNodes[0]): players move it
+        // along the same track and place the body and wagons from it as
+        // Place does. Not on a track before GameInit built the back path.
+        bool onTrack = false;
+        uint16_t frontNode = 0;
+        Vector front;
+        // SpringProcess's sway phase of the body and each wagon (+0xb8), so
+        // the parts rock on players as on the host.
+        std::array<float, kMaxWagons + 1> swayPhases {};
 
-        // About 20 bytes plus 10 a wagon (39 plus 24 before): the body at
+        // About 20 bytes plus 10 a wagon and 9 for the front: the body at
         // 1/64 m, wagons as offsets from it at 1/512 m, directions as yaw
-        // and pitch, speed at 1/16 m/s.
+        // and pitch, speed at 1/16 m/s, the front at 1/256 m, the sway
+        // phases at 1/256 turn.
         void Serialize(MafiaNet::BitStream *stream, bool write) {
             stream->SerializeBitsFromIntegerRange(write, index, uint8_t {0}, static_cast<uint8_t>(kMaxRailways - 1));
             stream->Serialize(write, nameHash);
@@ -93,6 +104,18 @@ namespace Mafia1Online::Shared::Railway {
                 if (!write) {
                     wagonPositions[i]  = {body.x + offset.x, body.y + offset.y, body.z + offset.z};
                     wagonDirections[i] = {wagonFacing.x, wagonFacing.y, wagonFacing.z};
+                }
+            }
+            stream->Serialize(write, onTrack);
+            if (onTrack) {
+                glm::vec3 point {front.x, front.y, front.z};
+                stream->Serialize(write, frontNode);
+                Net::SerializeWorldPosition(stream, write, point, Net::kCarPlaneBits, Net::kCarHeightBits);
+                if (!write) {
+                    front = {point.x, point.y, point.z};
+                }
+                for (uint8_t i = 0; i <= wagonCount; ++i) {
+                    Net::SerializeAngle(stream, write, swayPhases[i], 8);
                 }
             }
         }

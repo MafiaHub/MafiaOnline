@@ -6,6 +6,7 @@
 #include "features/combat/combat_service.h"
 #include "features/debug/sync_trace.h"
 
+#include "features/railway/track_path.h"
 #include "features/seat/seat_hooks.h"
 #include "features/simulation/simulation_config.h"
 #include "features/world/frame_clock.h"
@@ -21,6 +22,7 @@
 #include <mafia1/sdk/scene/native_scene.h>
 #include <mafia1/sdk/seat/native_seat.h>
 #include <mafia1/sdk/traffic/native_traffic_car.h>
+#include <mafia1/sdk/world/native_web_path.h>
 #include <networking/network_peer.h>
 #include <networking/replication/replication_manager.h>
 
@@ -79,8 +81,17 @@ namespace Mafia1Online::Features::Railway {
         // jitter move a railway by a fraction of a percent, never in steps.
         constexpr double kRenderDelayFollowMs = 2000.0;
         constexpr double kRenderDelayEaseRate = 0.1;
-        // Past the newest report, continue along it for at most this long.
-        constexpr double kExtrapolationMs = 300.0;
+        // Past the newest report a railway runs on along its track for at
+        // most this long (as a steamer does along its route), its speed
+        // changing as the last pair's did, within kMaxTrackAcceleration (the
+        // native 3 m/s2, a stop point's braking more); a late report would
+        // otherwise stop it dead and jump it on when it lands. Off a track,
+        // straight along its heading, for less.
+        constexpr double kTrackExtrapolationMs = 1000.0;
+        constexpr float kMaxTrackAcceleration = 8.0f;
+        constexpr double kWorldExtrapolationMs = 300.0;
+        // SpringProcess: the sway phase runs at speed / max speed * 12 rad/s.
+        constexpr float kSwayPhaseRate = 12.0f;
         // A hit driver stops a railway until Update's out-of-range reset,
         // which never comes on the host: every railway counts as near.
         constexpr auto kDriverHitStop = std::chrono::seconds(30);
@@ -221,6 +232,80 @@ namespace Mafia1Online::Features::Railway {
             yaw = std::atan2(glm::dot(facing, basis.right), glm::dot(facing, basis.forward));
         }
 
+        float LerpAngle(float a, float b, float u) {
+            float delta = std::remainder(b - a, 6.2831853f);
+            return a + delta * u;
+        }
+
+        // reM C_web_path through NativeWebPath, for TrackPath.
+        struct WebGraph {
+            const SDK::World::NativeWebPath &path;
+
+            [[nodiscard]] glm::vec3 Position(uint32_t node) const {
+                const auto *found = path.Node(node);
+                return found ? Vec(found->position) : glm::vec3(0.0f);
+            }
+            [[nodiscard]] std::optional<uint32_t> Next(uint32_t node) const {
+                return path.RailwayNext(node);
+            }
+            [[nodiscard]] std::optional<uint32_t> Previous(uint32_t node) const {
+                return path.RailwayPrevious(node);
+            }
+        };
+
+        // Places the railway's front on its track at u between two reports
+        // (`ahead` past the later one, when not negative) and the body and
+        // wagons behind it as C_railway::Place does; `speed` is the speed it
+        // shows there. The distance between the reports is the track's, not
+        // the chord's, and runs at the native speeds at either end; the body
+        // and wagons are where the native puts them for that front, so they
+        // never leave the rails on a curve. A stopped railway sways as the
+        // host's last step before it stopped did, at `restSwaySpeed`. False
+        // without a track to follow.
+        bool PlaceOnTrack(NativeRailway &railway, const Shared::Railway::State &a, const Shared::Railway::State &b, double spanMs, float u, double ahead, float restSwaySpeed,
+                          float &speed) {
+            const auto *web = SDK::World::NativeWebPath::Get();
+            if (!web || !a.onTrack || !b.onTrack || !web->Node(a.frontNode) || !web->Node(b.frontNode)) {
+                return false;
+            }
+            const WebGraph graph {*web};
+            const TrackPath<WebGraph> track(graph);
+            const TrackPoint from = track.Settle({Vec(a.front), a.frontNode});
+            const TrackPoint to = track.Settle({Vec(b.front), b.frontNode});
+            const float maximum = railway.MaxSpeed() > 0.0f ? railway.MaxSpeed() : 32.0f;
+            TrackPoint front;
+            if (ahead >= 0.0) {
+                const float acceleration = spanMs > 0.0 ? std::clamp(static_cast<float>((b.speed - a.speed) / (spanMs * 0.001)), -kMaxTrackAcceleration, kMaxTrackAcceleration) : 0.0f;
+                const auto motion = ExtrapolateAlong(b.speed, acceleration, ahead, kTrackExtrapolationMs, maximum);
+                front = track.Advance(to, motion.distance);
+                speed = motion.speed;
+            }
+            else {
+                const auto length = track.Distance(from, to);
+                if (!length) {
+                    return false;
+                }
+                const auto motion = HermiteAlong(*length, a.speed, b.speed, spanMs, u);
+                front = track.Advance(from, motion.distance);
+                speed = std::max(motion.speed, 0.0f);
+            }
+            railway.SetSpeed(speed);
+            // The sway as the host's: between the reports' phases, and on
+            // past the newer one at SpringProcess's rate for this speed.
+            if (auto *phases = railway.SwayPhases()) {
+                const float rate = maximum > 0.0f ? speed / maximum * kSwayPhaseRate * 0.001f : 0.0f;
+                const uint8_t parts = std::min<uint8_t>(std::min(a.wagonCount, b.wagonCount), static_cast<uint8_t>(std::max(railway.WagonCount(), 0)));
+                for (uint8_t part = 0; part <= parts; ++part) {
+                    const float phase = ahead >= 0.0 ? b.swayPhases[part] + rate * static_cast<float>(std::min(ahead, kTrackExtrapolationMs))
+                                                     : LerpAngle(a.swayPhases[part], b.swayPhases[part], u);
+                    phases[part] = phase - 6.2831853f * std::floor(phase / 6.2831853f);
+                }
+            }
+            // The host's SpringProcess leaves a stopped railway's parts as its
+            // last step swayed them, at the speed it had.
+            return railway.PlaceFront(ToNative(front.position), front.node, ToNative(graph.Position(front.node)), b.speed > 0.0f ? speed : restSwaySpeed);
+        }
+
         // ranims index 1, walk1.i3d.
         constexpr uint8_t kWalkAnimation = 1;
         // Players ease a puppet across one passenger report.
@@ -232,11 +317,6 @@ namespace Mafia1Online::Features::Railway {
         constexpr int kMaximumPuppetTickMs = 100;
         // A puppet takes its scene sector again after moving this far.
         constexpr float kPuppetSectorStep = 4.0f;
-
-        float LerpAngle(float a, float b, float u) {
-            float delta = std::remainder(b - a, 6.2831853f);
-            return a + delta * u;
-        }
 
         uint64_t LocalPlayerId(World::WorldService &world) {
             auto *player = SDK::Player::CurrentPlayer();
@@ -403,6 +483,9 @@ namespace Mafia1Online::Features::Railway {
                     continue;
                 }
                 samples.push_back({hostTime, state});
+                if (state.speed > 0.0f) {
+                    _railways[state.index].lastMovingSpeed = state.speed;
+                }
                 while (samples.size() > 16) {
                     samples.pop_front();
                 }
@@ -1120,6 +1203,15 @@ namespace Mafia1Online::Features::Railway {
             state.position = ToWire(entry.railway->Actor().Position());
             state.direction = ToWire(entry.railway->Actor().Direction());
             state.wagonCount = static_cast<uint8_t>(std::clamp<int32_t>(entry.railway->WagonCount(), 0, Shared::Railway::kMaxWagons));
+            uint32_t node = 0;
+            state.onTrack = entry.railway->HeadNode(node) && node <= 0xffff;
+            state.frontNode = static_cast<uint16_t>(node);
+            state.front = ToWire(entry.railway->FrontPosition());
+            if (const float *phases = entry.railway->SwayPhases()) {
+                for (uint8_t part = 0; part <= state.wagonCount; ++part) {
+                    state.swayPhases[part] = std::remainder(phases[part], 6.2831853f);
+                }
+            }
             for (uint8_t wagon = 0; wagon < state.wagonCount; ++wagon) {
                 state.wagonPositions[wagon] = ToWire(entry.railway->WagonPositions()[wagon]);
                 state.wagonDirections[wagon] = ToWire(entry.railway->WagonDirections()[wagon]);
@@ -1172,26 +1264,15 @@ namespace Mafia1Online::Features::Railway {
         const double newestTime = samples.back().hostTime;
         const auto age = [&](const Sample &sample) { return newestTime - sample.hostTime; };
         const double target = hostTime - newestTime;
-        Shared::Railway::State placed = samples.back().state;
-        glm::vec3 position = Vec(placed.position);
-        glm::vec3 direction = Vec(placed.direction);
-        std::array<glm::vec3, Shared::Railway::kMaxWagons> wagonPositions {};
-        std::array<glm::vec3, Shared::Railway::kMaxWagons> wagonDirections {};
-        for (uint8_t i = 0; i < placed.wagonCount; ++i) {
-            wagonPositions[i] = Vec(placed.wagonPositions[i]);
-            wagonDirections[i] = Vec(placed.wagonDirections[i]);
-        }
-        // Sample times relative to the newest are <= 0, oldest first.
+        // The pair the render time falls in, oldest first; past the newest
+        // the newest pair, `ahead` past its later report.
+        const Sample *a = &samples.back();
+        const Sample *b = a;
+        float u = 1.0f;
+        double ahead = -1.0;
         if (target >= 0.0) {
-            // Continue along the newest report's heading at its speed.
-            const float seconds = static_cast<float>(std::min(target, kExtrapolationMs) * 0.001);
-            const glm::vec3 step = glm::normalize(direction) * placed.speed * seconds;
-            if (std::isfinite(step.x) && std::isfinite(step.y) && std::isfinite(step.z)) {
-                position += step;
-                for (uint8_t i = 0; i < placed.wagonCount; ++i) {
-                    wagonPositions[i] += step;
-                }
-            }
+            a = samples.size() > 1 ? &samples[samples.size() - 2] : b;
+            ahead = target;
         }
         else if (samples.size() > 1) {
             // The first pair whose later sample is not before the render time;
@@ -1200,41 +1281,60 @@ namespace Mafia1Online::Features::Railway {
             while (later + 1 < samples.size() && -age(samples[later]) < target) {
                 ++later;
             }
-            {
-                const auto &a = samples[later - 1];
-                const auto &b = samples[later];
-                const double timeA = -age(a);
-                const double timeB = -age(b);
-                const float u = timeB > timeA ? static_cast<float>(std::clamp((target - timeA) / (timeB - timeA), 0.0, 1.0)) : 1.0f;
-                position = glm::mix(Vec(a.state.position), Vec(b.state.position), u);
-                direction = Direction(Vec(a.state.direction), Vec(b.state.direction), u);
-                placed = b.state;
-                placed.speed = glm::mix(a.state.speed, b.state.speed, u);
-                placed.doorAngle = glm::mix(a.state.doorAngle, b.state.doorAngle, u);
-                const uint8_t wagons = std::min(a.state.wagonCount, b.state.wagonCount);
-                for (uint8_t w = 0; w < wagons; ++w) {
-                    wagonPositions[w] = glm::mix(Vec(a.state.wagonPositions[w]), Vec(b.state.wagonPositions[w]), u);
-                    wagonDirections[w] = Direction(Vec(a.state.wagonDirections[w]), Vec(b.state.wagonDirections[w]), u);
-                }
-                placed.wagonCount = wagons;
-            }
+            a = &samples[later - 1];
+            b = &samples[later];
+            const double timeA = -age(*a);
+            const double timeB = -age(*b);
+            u = timeB > timeA ? static_cast<float>(std::clamp((target - timeA) / (timeB - timeA), 0.0, 1.0)) : 1.0f;
         }
         auto *railway = entry.railway;
-        railway->Actor().SetStoredTransform(ToNative(position), ToNative(direction));
-        railway->SetSpeed(placed.speed);
+        Shared::Railway::State placed = b->state;
+        placed.doorAngle = ahead >= 0.0 ? b->state.doorAngle : glm::mix(a->state.doorAngle, b->state.doorAngle, u);
         // The doorway use objects follow the state; Update swings the doors.
         railway->SetState(placed.state);
         if (std::isfinite(placed.doorAngle)) {
             railway->SetDoorAngle(std::clamp(placed.doorAngle, 0.0f, 1.5707964f));
         }
-        // The native wagon arrays have the mission's own wagon count.
-        const int32_t wagons = std::min<int32_t>(railway->WagonCount(), placed.wagonCount);
-        for (int32_t i = 0; i < wagons; ++i) {
-            railway->WagonPositions()[i] = ToNative(wagonPositions[i]);
-            railway->WagonDirections()[i] = ToNative(wagonDirections[i]);
+        const bool onTrack = PlaceOnTrack(*railway, a->state, b->state, b->hostTime - a->hostTime, u, ahead, entry.lastMovingSpeed, placed.speed);
+        if (!onTrack) {
+            // No track between the reports (no back path yet, a node this web
+            // path lacks, the later report not ahead on it): straight between
+            // them.
+            glm::vec3 position = Vec(b->state.position);
+            glm::vec3 direction = Vec(b->state.direction);
+            std::array<glm::vec3, Shared::Railway::kMaxWagons> wagonPositions {};
+            std::array<glm::vec3, Shared::Railway::kMaxWagons> wagonDirections {};
+            uint8_t wagonCount = std::min(a->state.wagonCount, b->state.wagonCount);
+            for (uint8_t i = 0; i < wagonCount; ++i) {
+                wagonPositions[i] = glm::mix(Vec(a->state.wagonPositions[i]), Vec(b->state.wagonPositions[i]), u);
+                wagonDirections[i] = Direction(Vec(a->state.wagonDirections[i]), Vec(b->state.wagonDirections[i]), u);
+            }
+            placed.speed = ahead >= 0.0 ? b->state.speed : glm::mix(a->state.speed, b->state.speed, u);
+            if (ahead >= 0.0) {
+                const float seconds = static_cast<float>(std::min(ahead, kWorldExtrapolationMs) * 0.001);
+                const glm::vec3 step = glm::normalize(direction) * b->state.speed * seconds;
+                if (std::isfinite(step.x) && std::isfinite(step.y) && std::isfinite(step.z)) {
+                    position += step;
+                    for (uint8_t i = 0; i < wagonCount; ++i) {
+                        wagonPositions[i] += step;
+                    }
+                }
+            }
+            else {
+                position = glm::mix(Vec(a->state.position), Vec(b->state.position), u);
+                direction = Direction(Vec(a->state.direction), Vec(b->state.direction), u);
+            }
+            railway->Actor().SetStoredTransform(ToNative(position), ToNative(direction));
+            railway->SetSpeed(placed.speed);
+            // The native wagon arrays have the mission's own wagon count.
+            const int32_t wagons = std::min<int32_t>(railway->WagonCount(), wagonCount);
+            for (int32_t i = 0; i < wagons; ++i) {
+                railway->WagonPositions()[i] = ToNative(wagonPositions[i]);
+                railway->WagonDirections()[i] = ToNative(wagonDirections[i]);
+            }
         }
         if (Debug::SyncTrace::Enabled()) {
-            const char *sample = target >= 0.0 ? "extrap" : samples.size() > 1 ? "lerp" : "hold";
+            const char *sample = ahead >= 0.0 ? "extrap" : samples.size() > 1 ? "interp" : "hold";
             const size_t index = static_cast<size_t>(&entry - _railways.data());
             for (uint8_t part = 0; part <= std::min<int32_t>(railway->WagonCount(), Shared::Railway::kMaxWagons); ++part) {
                 glm::vec3 origin;
@@ -1243,7 +1343,7 @@ namespace Mafia1Online::Features::Railway {
                     continue;
                 }
                 Debug::SyncTrace::Observed("railway", TraceId(index, part))
-                    .Str("mode", "world")
+                    .Str("mode", onTrack ? "track" : "world")
                     .Str("smp", sample)
                     .Num("oclk", hostTime)
                     .Int("fms", frameMs)

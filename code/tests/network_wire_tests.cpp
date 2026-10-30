@@ -6,6 +6,7 @@
 #include "client/src/features/player/human_states.h"
 #include "client/src/features/player/ride_blend.h"
 #include "client/src/features/player/stalled_gait.h"
+#include "client/src/features/railway/track_path.h"
 #include "client/src/features/world/fading_copies.h"
 #include "client/src/features/world/remote_clock.h"
 #include "shared/features/car/car_entity.h"
@@ -102,6 +103,77 @@ namespace {
         CHECK(clock.Observe(90000.0, now + 120 * 133.0));
         clock.Reset();
         CHECK(!clock.Valid());
+    }
+
+    // A web path's railway track: node i at points[i], each leading to the
+    // next; the last one leads nowhere.
+    struct LineGraph {
+        std::vector<glm::vec3> points;
+
+        [[nodiscard]] glm::vec3 Position(uint32_t node) const {
+            return points[node];
+        }
+        [[nodiscard]] std::optional<uint32_t> Next(uint32_t node) const {
+            return node + 1 < points.size() ? std::optional<uint32_t>(node + 1) : std::nullopt;
+        }
+        [[nodiscard]] std::optional<uint32_t> Previous(uint32_t node) const {
+            return node > 0 ? std::optional<uint32_t>(node - 1) : std::nullopt;
+        }
+    };
+
+    // Features::Railway::TrackPath: a front moves along the polyline Place
+    // follows, never along the chord between two reports.
+    void RailwayTrack() {
+        using Features::Railway::TrackPoint;
+        // A right-angle bend at (10, 0, 0), then 10 m on along +z.
+        const LineGraph graph {{{0.0f, 0.0f, 0.0f}, {10.0f, 0.0f, 0.0f}, {10.0f, 0.0f, 10.0f}, {10.0f, 0.0f, 20.0f}}};
+        const Features::Railway::TrackPath<LineGraph> track(graph);
+        const TrackPoint before = track.Settle({{6.0f, 0.0f, 0.0f}, 1});
+        const TrackPoint after  = track.Settle({{10.0f, 0.0f, 4.0f}, 2});
+        CHECK(before.node == 1 && after.node == 2);
+        // 4 m to the bend and 4 m on: 8 m of track, though the chord is 5.7.
+        const auto length = track.Distance(before, after);
+        CHECK(length && Near(*length, 8.0f, 1e-4f));
+        // Halfway is the bend itself, not the chord's midpoint inside it.
+        const TrackPoint half = track.Advance(before, 4.0f);
+        CHECK(Near(half.position, {10.0f, 0.0f, 0.0f}, 1e-4f));
+        const TrackPoint on = track.Advance(before, 6.0f);
+        CHECK(Near(on.position, {10.0f, 0.0f, 2.0f}, 1e-4f) && on.node == 2);
+        // Past the end it stops there, on the track.
+        CHECK(Near(track.Advance(after, 100.0f).position, {10.0f, 0.0f, 20.0f}, 1e-4f));
+        // A front Place moved a step past its node heads for the next one,
+        // however sharp the bend after it.
+        const TrackPoint overshot = track.Settle({{10.3f, 0.0f, 0.0f}, 1});
+        CHECK(overshot.node == 2);
+        const LineGraph hairpin {{{0.0f, 0.0f, 0.0f}, {10.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}}};
+        const Features::Railway::TrackPath<LineGraph> back(hairpin);
+        CHECK(back.Settle({{9.0f, 0.0f, 0.0f}, 1}).node == 1 && back.Settle({{10.2f, 0.0f, 0.0f}, 1}).node == 2);
+        CHECK(track.Settle({{9.95f, 0.0f, 0.0f}, 1}).node == 2);
+        // A report behind the earlier one is not on the way.
+        CHECK(!track.Distance(after, before));
+
+        // At equal end speeds the distance runs at that speed throughout.
+        const auto steady = Features::Railway::HermiteAlong(1.25f, 12.5f, 12.5f, 100.0, 0.5f);
+        CHECK(Near(steady.distance, 0.625f, 1e-4f) && Near(steady.speed, 12.5f, 1e-3f));
+        // Accelerating at 3 m/s2 from 5 m/s over 100 ms: the exact curve.
+        const auto speeding = Features::Railway::HermiteAlong(0.515f, 5.0f, 5.3f, 100.0, 0.5f);
+        CHECK(Near(speeding.distance, 0.25375f, 1e-4f) && Near(speeding.speed, 5.15f, 1e-3f));
+        // Tangents larger than the gap allows never run it backward.
+        float last = 0.0f;
+        for (int i = 0; i <= 20; ++i) {
+            const float d = Features::Railway::HermiteAlong(0.1f, 12.0f, 0.0f, 133.0, i / 20.0f).distance;
+            CHECK(d >= last - 1e-6f && d <= 0.1f + 1e-6f);
+            last = d;
+        }
+
+        // Past the newest report: on at its speed, a braking one to rest.
+        const auto cruise = Features::Railway::ExtrapolateAlong(10.0f, 0.0f, 500.0, 1000.0, 12.5f);
+        CHECK(Near(cruise.distance, 5.0f, 1e-4f) && Near(cruise.speed, 10.0f, 1e-4f));
+        const auto braking = Features::Railway::ExtrapolateAlong(3.0f, -3.0f, 2000.0, 1000.0, 12.5f);
+        CHECK(Near(braking.distance, 1.5f, 1e-4f) && Near(braking.speed, 0.0f, 1e-4f));
+        const auto speedingUp = Features::Railway::ExtrapolateAlong(12.0f, 3.0f, 1000.0, 1000.0, 12.5f);
+        CHECK(Near(speedingUp.speed, 12.5f, 1e-4f) && speedingUp.distance < 12.5f && speedingUp.distance > 12.0f);
+        CHECK(Features::Railway::ExtrapolateAlong(0.0f, -3.0f, 500.0, 1000.0, 12.5f).distance == 0.0f);
     }
 
     void FixedValues() {
@@ -330,7 +402,13 @@ namespace {
         railway.wagonCount       = 2;
         railway.wagonPositions[1] = {100.0f, 20.5f, -330.0f};
         railway.wagonDirections[1] = {0.0f, 0.0f, 1.0f};
+        railway.onTrack          = true;
+        railway.frontNode        = 65535;
+        railway.front            = {100.25f, 20.5f, -295.75f};
+        railway.swayPhases       = {1.0f, 0.0f, -2.0f, 0.0f, 0.0f};
         const auto railwayRead   = RoundTrip(railway);
+        CHECK(railwayRead.onTrack && railwayRead.frontNode == 65535 && Near(glm::vec3(railwayRead.front.x, railwayRead.front.y, railwayRead.front.z), {100.25f, 20.5f, -295.75f}, 0.004f));
+        CHECK(Near(railwayRead.swayPhases[0], 1.0f, 0.013f) && Near(railwayRead.swayPhases[2], -2.0f, 0.013f));
         CHECK(railwayRead.index == 63 && railwayRead.wagonCount == 2 && Near(railwayRead.speed, -12.0f, 0.04f));
         CHECK(Near(railwayRead.wagonPositions[1].z, -330.0f, 0.01f) && Near(railwayRead.wagonPositions[1].y, 20.5f, 0.01f));
         // A snapshot is dated by the host's step to 1/256 ms.
@@ -977,6 +1055,7 @@ namespace {
 int main() {
     FixedValues();
     RemoteClocks();
+    RailwayTrack();
     Angles();
     Quaternions();
     PlayerTransform();

@@ -25,7 +25,7 @@ namespace Mafia1Online::Features::Railway {
 
         bool Valid(const Shared::Railway::State &state) {
             if (state.index >= Shared::Railway::kMaxRailways || state.wagonCount > Shared::Railway::kMaxWagons || !std::isfinite(state.speed) || !Finite(state.position) ||
-                !Finite(state.direction)) {
+                !Finite(state.direction) || (state.onTrack && !Finite(state.front))) {
                 return false;
             }
             for (uint8_t i = 0; i < state.wagonCount; ++i) {
