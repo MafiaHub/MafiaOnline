@@ -19,8 +19,13 @@ namespace Mafia1Online::Shared::World::Props {
     // turns one off and throws C_crash_obj pieces in its place. They are
     // named by their scene frame, which every client loads the same. The
     // stock freeride scene2.bin places 1,044 of them; the city cache holds
-    // one barrel and the traffic signs (dopravni1B-8B), which break through
-    // HandleSignalMarkCrash (0x5b7be0) instead and are not synchronized.
+    // one barrel (left to retail) and 154 traffic signs (dopravni1B-8B).
+    //
+    // Traffic signs break through HandleSignalMarkCrash (0x5b7be0) instead:
+    // it closes the sign's cache placement and turns off the static tree
+    // primitive the car or shot struck. They are named by the cache.bin
+    // segment and placement and the primitive's index in the tree.klz
+    // arrays, which every client loads the same.
     //
     // Physical props are scene2.bin type 35 actors (C_box_new): boxes,
     // railings, mail boxes, cans. Every client loads them in the same order;
@@ -57,6 +62,23 @@ namespace Mafia1Online::Shared::World::Props {
     inline constexpr float kMaxBreakImpulse = 100.0f;
     inline constexpr float kMaxBreakForce = 1000.0f;
     inline constexpr float kMaxBreakOrigin = 40.0f;
+    // Signs broken until a repair, everyone together; they count towards
+    // kMaxBrokenPerPlayer with the breakables.
+    inline constexpr size_t kMaxSigns = 1024;
+    // HandleSignalMarkCrash takes the nearest sign within 10 m across and
+    // 5 m up of the hit (0x5b7d42, 0x5b7dac).
+    inline constexpr float kSignReach = 10.0f;
+    inline constexpr float kSignHeight = 5.0f;
+    // The static tree arrays a struck primitive can lie in
+    // (SDK::World::TreePrimitiveKind); 0: none of them.
+    inline constexpr uint8_t kSignPrimitiveKinds = 7;
+    // The C_crash_obj pieces a break throws (CreateCrashActors, one per
+    // visual of the crash model) are physics bodies each client runs. The
+    // client whose break stood reports where they came to rest, the first
+    // kMaxPieces of them in the order they were thrown, at most
+    // kMaxPieceTravel from the prop.
+    inline constexpr size_t kMaxPieces = 16;
+    inline constexpr float kMaxPieceTravel = 50.0f;
 
     inline uint32_t NameHash(std::string_view name) {
         uint32_t hash = 2166136261u;
@@ -140,45 +162,6 @@ namespace Mafia1Online::Shared::World::Props {
         return (a - b).Length();
     }
 
-    // The arguments of SpawnCrashActorFromFrame: the struck frame (empty:
-    // the model itself), the ray origin and sweep CreateCrashActors finds
-    // the struck part with, and the force the pieces fly off with. position
-    // is the model's, to find it again. ParseCrashConfigFromFrameName
-    // (0x431a00) reads the crash settings from the struck frame's
-    // properties, so a replay strikes the same frame.
-    struct Break {
-        std::string name;
-        std::string frame;
-        Vector position;
-        Vector origin;
-        Vector impulse;
-        float force = 0.0f;
-
-        bool Serialize(MafiaNet::BitStream *stream, bool write) {
-            if (!SerializeName(stream, write, name) || !SerializeName(stream, write, frame)) {
-                return false;
-            }
-            position.Serialize(stream, write);
-            origin.Serialize(stream, write);
-            impulse.Serialize(stream, write);
-            return stream->Serialize(write, force);
-        }
-        [[nodiscard]] bool Valid() const {
-            return ValidName(name) && (frame.empty() || ValidName(frame)) && position.Finite() && origin.Finite() && impulse.Finite() && std::isfinite(force);
-        }
-        // Within what the natives pass (kMaxBreak*); the ray keeps its line.
-        void Clamp() {
-            force = std::clamp(force, 0.0f, kMaxBreakForce);
-            if (const float length = impulse.Length(); length > kMaxBreakImpulse) {
-                impulse = impulse * (kMaxBreakImpulse / length);
-            }
-            const auto offset = origin - position;
-            if (const float distance = offset.Length(); distance > kMaxBreakOrigin) {
-                origin = position + offset * (kMaxBreakOrigin / distance);
-            }
-        }
-    };
-
     // What C_PhThing::MoveCount places a prop's frame from: its position
     // (C_actor +0x24), direction (+0x30) and up (C_PhThing +0xac).
     struct Pose {
@@ -216,6 +199,121 @@ namespace Mafia1Online::Shared::World::Props {
         }
     };
 
+    // Resting poses of a break's pieces; index: the order they were thrown.
+    inline bool SerializePieces(MafiaNet::BitStream *stream, bool write, std::vector<Pose> &pieces) {
+        uint8_t count = static_cast<uint8_t>(std::min(pieces.size(), kMaxPieces));
+        if (!stream->Serialize(write, count)) {
+            return false;
+        }
+        if (!write) {
+            if (count > kMaxPieces) {
+                pieces.clear();
+                return false;
+            }
+            pieces.resize(count);
+        }
+        for (uint8_t i = 0; i < count; ++i) {
+            pieces[i].Serialize(stream, write);
+        }
+        return true;
+    }
+    inline bool ValidPieces(const std::vector<Pose> &pieces, const Vector &place) {
+        if (pieces.empty() || pieces.size() > kMaxPieces) {
+            return false;
+        }
+        for (const auto &piece : pieces) {
+            if (!piece.Valid() || piece.index >= kMaxPieces || !(Distance(piece.position, place) <= kMaxPieceTravel)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // The arguments of SpawnCrashActorFromFrame: the struck frame (empty:
+    // the model itself), the ray origin and sweep CreateCrashActors finds
+    // the struck part with, and the force the pieces fly off with. position
+    // is the model's, to find it again. ParseCrashConfigFromFrameName
+    // (0x431a00) reads the crash settings from the struck frame's
+    // properties, so a replay strikes the same frame.
+    struct Break {
+        std::string name;
+        std::string frame;
+        Vector position;
+        Vector origin;
+        Vector impulse;
+        float force = 0.0f;
+        // Where its pieces came to rest, once the breaker reported them.
+        std::vector<Pose> pieces;
+
+        bool Serialize(MafiaNet::BitStream *stream, bool write) {
+            if (!SerializeName(stream, write, name) || !SerializeName(stream, write, frame)) {
+                return false;
+            }
+            position.Serialize(stream, write);
+            origin.Serialize(stream, write);
+            impulse.Serialize(stream, write);
+            return stream->Serialize(write, force) && SerializePieces(stream, write, pieces);
+        }
+        [[nodiscard]] bool Valid() const {
+            return ValidName(name) && (frame.empty() || ValidName(frame)) && position.Finite() && origin.Finite() && impulse.Finite() && std::isfinite(force);
+        }
+        // Within what the natives pass (kMaxBreak*); the ray keeps its line.
+        void Clamp() {
+            force = std::clamp(force, 0.0f, kMaxBreakForce);
+            if (const float length = impulse.Length(); length > kMaxBreakImpulse) {
+                impulse = impulse * (kMaxBreakImpulse / length);
+            }
+            const auto offset = origin - position;
+            if (const float distance = offset.Length(); distance > kMaxBreakOrigin) {
+                origin = position + offset * (kMaxBreakOrigin / distance);
+            }
+        }
+    };
+
+    // A traffic sign of the city cache: its cache.bin segment and placement,
+    // the placement's position to find it again, and what struck it: the
+    // static primitive (kind 0: one outside the tree, nothing to turn off),
+    // the hit point and the impulse (a car's velocity, a shot's 10-unit
+    // direction) its pieces fly off with, at force |impulse|.
+    struct SignBreak {
+        uint16_t segment = 0;
+        uint16_t placement = 0;
+        uint8_t primitiveKind = 0;
+        uint32_t primitiveIndex = 0;
+        Vector position;
+        Vector hit;
+        Vector impulse;
+        // Where its pieces came to rest, once the breaker reported them.
+        std::vector<Pose> pieces;
+
+        bool Serialize(MafiaNet::BitStream *stream, bool write) {
+            stream->Serialize(write, segment);
+            stream->Serialize(write, placement);
+            stream->Serialize(write, primitiveKind);
+            stream->Serialize(write, primitiveIndex);
+            position.Serialize(stream, write);
+            hit.Serialize(stream, write);
+            impulse.Serialize(stream, write);
+            return SerializePieces(stream, write, pieces);
+        }
+        [[nodiscard]] uint32_t Key() const {
+            return static_cast<uint32_t>(segment) << 16 | placement;
+        }
+        // Struck where HandleSignalMarkCrash finds this sign.
+        [[nodiscard]] bool Valid() const {
+            if (primitiveKind >= kSignPrimitiveKinds || !position.Finite() || !hit.Finite() || !impulse.Finite()) {
+                return false;
+            }
+            const auto offset = hit - position;
+            return offset.x * offset.x + offset.z * offset.z < kSignReach * kSignReach && std::abs(offset.y) < kSignHeight;
+        }
+        void Clamp() {
+            if (const float length = impulse.Length(); length > kMaxBreakImpulse) {
+                impulse = impulse * (kMaxBreakImpulse / length);
+            }
+        }
+    };
+
     // Client -> server: a breakable broke here. Server -> every client: it
     // broke; the others break theirs the same way.
     struct BreakReport {
@@ -227,6 +325,41 @@ namespace Mafia1Online::Shared::World::Props {
         void Serialize(MafiaNet::BitStream *stream, bool write) {
             stream->Serialize(write, missionGeneration);
             prop.Serialize(stream, write);
+        }
+    };
+
+    // Client -> server: a traffic sign broke here. Server -> every client:
+    // it broke; the others break theirs the same way.
+    struct SignBreakReport {
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::PropSignBreak");
+
+        uint64_t missionGeneration = 0;
+        SignBreak sign;
+
+        void Serialize(MafiaNet::BitStream *stream, bool write) {
+            stream->Serialize(write, missionGeneration);
+            sign.Serialize(stream, write);
+        }
+    };
+
+    // Client -> server: where the pieces of a break this client reported
+    // came to rest (a breakable by name, or a sign by SignBreak::Key).
+    // Server -> every client: place them there.
+    struct PiecesReport {
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::PropPieces");
+
+        uint64_t missionGeneration = 0;
+        bool sign = false;
+        std::string name;
+        uint32_t signKey = 0;
+        std::vector<Pose> pieces;
+
+        void Serialize(MafiaNet::BitStream *stream, bool write) {
+            stream->Serialize(write, missionGeneration);
+            stream->Serialize(write, sign);
+            if (!SerializeName(stream, write, name) || !stream->Serialize(write, signKey) || !SerializePieces(stream, write, pieces)) {
+                pieces.clear();
+            }
         }
     };
 
@@ -265,37 +398,50 @@ namespace Mafia1Online::Shared::World::Props {
         uint64_t missionGeneration = 0;
         std::vector<Break> broken;
         std::vector<Pose> moved;
+        std::vector<SignBreak> signs;
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {
             stream->Serialize(write, missionGeneration);
             uint16_t brokenCount = static_cast<uint16_t>(std::min(broken.size(), kMaxBroken));
             uint16_t movedCount = static_cast<uint16_t>(std::min<size_t>(moved.size(), kMaxPhysical));
+            uint16_t signCount = static_cast<uint16_t>(std::min(signs.size(), kMaxSigns));
             stream->Serialize(write, brokenCount);
             stream->Serialize(write, movedCount);
+            stream->Serialize(write, signCount);
             if (!write) {
-                if (brokenCount > kMaxBroken || movedCount > kMaxPhysical) {
-                    broken.clear();
-                    moved.clear();
+                if (brokenCount > kMaxBroken || movedCount > kMaxPhysical || signCount > kMaxSigns) {
+                    Clear();
                     return;
                 }
                 broken.resize(brokenCount);
                 moved.resize(movedCount);
+                signs.resize(signCount);
             }
             for (uint16_t i = 0; i < brokenCount; ++i) {
                 if (!broken[i].Serialize(stream, write) && !write) {
-                    broken.clear();
-                    moved.clear();
+                    Clear();
                     return;
                 }
             }
             for (uint16_t i = 0; i < movedCount; ++i) {
                 moved[i].Serialize(stream, write);
             }
+            for (uint16_t i = 0; i < signCount; ++i) {
+                if (!signs[i].Serialize(stream, write) && !write) {
+                    Clear();
+                    return;
+                }
+            }
+        }
+        void Clear() {
+            broken.clear();
+            moved.clear();
+            signs.clear();
         }
     };
 
-    // Server -> every client: put every breakable back up and every
-    // physical prop back where the mission placed it.
+    // Server -> every client: put every breakable and traffic sign back up
+    // and every physical prop back where the mission placed it.
     struct Repair {
         static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::PropRepair");
 

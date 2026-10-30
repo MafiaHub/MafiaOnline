@@ -22,6 +22,12 @@ namespace Mafia1Online::Features::World {
         network->RegisterRPC<Wire::BreakReport>([this](const Wire::BreakReport &received, MafiaNet::Packet *packet) {
             OnBreak(received, MafiaNet::ToPeerGuid(packet->guid));
         });
+        network->RegisterRPC<Wire::SignBreakReport>([this](const Wire::SignBreakReport &received, MafiaNet::Packet *packet) {
+            OnSignBreak(received, MafiaNet::ToPeerGuid(packet->guid));
+        });
+        network->RegisterRPC<Wire::PiecesReport>([this](const Wire::PiecesReport &received, MafiaNet::Packet *packet) {
+            OnPieces(received, MafiaNet::ToPeerGuid(packet->guid));
+        });
         network->RegisterRPC<Wire::RestReport>([this](const Wire::RestReport &received, MafiaNet::Packet *packet) {
             OnRest(received, MafiaNet::ToPeerGuid(packet->guid));
         });
@@ -73,8 +79,62 @@ namespace Mafia1Online::Features::World {
         ++standing;
         auto report = received;
         report.prop.Clamp();
+        report.prop.pieces.clear();
         _broken.push_back(report.prop);
+        _brokenOwners.push_back(*key);
         Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(report, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
+    }
+
+    void PropsService::OnSignBreak(const Wire::SignBreakReport &received, MafiaNet::PeerGuid sender) {
+        // Struck where the native code finds that sign, by a player near it
+        // (the simulation host anywhere); the clients check the placement
+        // and the primitive against their own cache.bin and tree.
+        const auto key = SenderKey(sender, received.missionGeneration);
+        if (!key || !received.sign.Valid() || !Accept(sender, *key, received.sign.position)) {
+            return;
+        }
+        auto &standing = _brokenBy[*key];
+        if (_signs.size() >= Wire::kMaxSigns || (*key != 0 && standing >= Wire::kMaxBrokenPerPlayer) || !_signKeys.insert(received.sign.Key()).second) {
+            return;
+        }
+        ++standing;
+        auto report = received;
+        report.sign.Clamp();
+        report.sign.pieces.clear();
+        _signs.push_back(report.sign);
+        _signOwners.push_back(*key);
+        Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(report, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
+    }
+
+    void PropsService::OnPieces(const Wire::PiecesReport &received, MafiaNet::PeerGuid sender) {
+        // Once, from the client whose break stood, near where it broke.
+        const auto key = SenderKey(sender, received.missionGeneration);
+        if (!key) {
+            return;
+        }
+        std::vector<Wire::Pose> *pieces = nullptr;
+        const Wire::Vector *place = nullptr;
+        if (received.sign) {
+            for (size_t i = 0; i < _signs.size(); ++i) {
+                if (_signs[i].Key() == received.signKey && _signOwners[i] == *key) {
+                    pieces = &_signs[i].pieces;
+                    place = &_signs[i].position;
+                }
+            }
+        } else {
+            for (size_t i = 0; i < _broken.size(); ++i) {
+                if (_broken[i].name == received.name && _brokenOwners[i] == *key) {
+                    pieces = &_broken[i].pieces;
+                    place = &_broken[i].position;
+                }
+            }
+        }
+        if (!pieces || !pieces->empty() || !Wire::ValidPieces(received.pieces, *place) || !Accept(sender, *key, *place)) {
+            return;
+        }
+        *pieces = received.pieces;
+        auto report = received;
+        Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(report, MafiaNet::Priority::Medium, MafiaNet::Reliability::ReliableOrdered);
     }
 
     void PropsService::OnRest(const Wire::RestReport &received, MafiaNet::PeerGuid sender) {
@@ -121,6 +181,7 @@ namespace Mafia1Online::Features::World {
         Wire::Snapshot snapshot;
         snapshot.missionGeneration = _missionGeneration;
         snapshot.broken = _broken;
+        snapshot.signs = _signs;
         snapshot.moved.reserve(_poses.size());
         for (const auto &[index, resting] : _poses) {
             // A late joiner has the mission's own pose already.
@@ -138,7 +199,11 @@ namespace Mafia1Online::Features::World {
     void PropsService::SetMissionGeneration(uint64_t generation) {
         _missionGeneration = generation;
         _broken.clear();
+        _brokenOwners.clear();
         _brokenNames.clear();
+        _signs.clear();
+        _signOwners.clear();
+        _signKeys.clear();
         _brokenBy.clear();
         _poses.clear();
         _nameHashes.clear();
@@ -147,9 +212,13 @@ namespace Mafia1Online::Features::World {
     }
 
     size_t PropsService::Repair() {
-        const size_t count = _broken.size() + MovedCount();
+        const size_t count = BrokenCount() + MovedCount();
         _broken.clear();
+        _brokenOwners.clear();
         _brokenNames.clear();
+        _signs.clear();
+        _signOwners.clear();
+        _signKeys.clear();
         _brokenBy.clear();
         _poses.clear();
         // Clients put back what they have; one still loading the mission

@@ -1,10 +1,14 @@
 // Map object motion, model names, and static collision patching checked
-// against ports of the retail per-cell queries (reM g_collision.cpp:
+// against ports of the retail per-cell queries, and the traffic sign break
+// reports that name a static tree primitive (reM g_collision.cpp:
 // LineInGridCell 0x5c66a0, LineInVolume 0x5c60e0, the contact half of
 // SphereInFace 0x5cc470).
 #include "features/map_object/collision_template.h"
 #include "features/map_object/static_collision.h"
 #include "shared/features/map_object/map_object_motion.h"
+#include "shared/features/world/world_props.h"
+
+#include <mafia1/sdk/world/native_city_cache.h>
 
 #include <glm/geometric.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -17,8 +21,13 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <vector>
+
+// The networking headers bring in windows.h and its far and near macros.
+#undef far
+#undef near
 
 namespace {
     namespace Native = Mafia1Online::SDK::Collision;
@@ -524,12 +533,166 @@ namespace {
         }
         std::printf("%zu of %zu placed models have mission collision to reuse\n", models, seen.size());
     }
+
+    // --- Traffic signs -------------------------------------------------------
+    template <typename T>
+    T RoundTrip(T value) {
+        MafiaNet::BitStream stream;
+        value.Serialize(&stream, true);
+        T read;
+        read.Serialize(&stream, false);
+        return read;
+    }
+
+    void TestSigns() {
+        namespace Props = Mafia1Online::Shared::World::Props;
+        namespace World = Mafia1Online::SDK::World;
+        Props::SignBreak sign;
+        sign.segment = 12;
+        sign.placement = 345;
+        sign.primitiveKind = static_cast<uint8_t>(World::TreePrimitiveKind::OrientedBox);
+        sign.primitiveIndex = 70001;
+        sign.position = {-1520.0f, 2.0f, 610.0f};
+        sign.hit = {-1513.0f, -1.5f, 616.0f};
+        sign.impulse = {30.0f, 0.0f, -40.0f};
+        CHECK(sign.Valid());
+        CHECK(sign.Key() == (12u << 16 | 345u));
+
+        // Where HandleSignalMarkCrash finds the sign: under 10 m across and
+        // 5 m up or down of the hit.
+        auto distant = sign;
+        distant.hit = {-1520.0f + 8.0f, 2.0f, 610.0f + 6.1f};
+        CHECK(!distant.Valid());
+        distant.hit = {-1520.0f, 7.5f, 610.0f};
+        CHECK(!distant.Valid());
+        auto odd = sign;
+        odd.primitiveKind = Props::kSignPrimitiveKinds;
+        CHECK(!odd.Valid());
+        odd = sign;
+        odd.impulse.x = std::numeric_limits<float>::quiet_NaN();
+        CHECK(!odd.Valid());
+
+        auto strong = sign;
+        strong.impulse = {300.0f, 0.0f, -400.0f};
+        strong.Clamp();
+        CHECK(Near(strong.impulse.Length(), Props::kMaxBreakImpulse) && Near(strong.impulse.x, 60.0f) && Near(strong.impulse.z, -80.0f));
+
+        Props::SignBreakReport report;
+        report.missionGeneration = 7;
+        report.sign = sign;
+        const auto read = RoundTrip(report);
+        CHECK(read.missionGeneration == 7 && read.sign.Key() == sign.Key() && read.sign.primitiveKind == sign.primitiveKind &&
+              read.sign.primitiveIndex == 70001 && Near(read.sign.hit.z, 616.0f) && Near(read.sign.impulse.z, -40.0f) && read.sign.Valid());
+
+        Props::Snapshot snapshot;
+        snapshot.missionGeneration = 7;
+        snapshot.broken.resize(1);
+        snapshot.broken[0].name = "PHbox01 12";
+        snapshot.moved.resize(2);
+        snapshot.signs = {sign, sign};
+        snapshot.signs[1].placement = 346;
+        const auto readSnapshot = RoundTrip(snapshot);
+        CHECK(readSnapshot.broken.size() == 1 && readSnapshot.broken[0].name == "PHbox01 12" && readSnapshot.moved.size() == 2);
+        CHECK(readSnapshot.signs.size() == 2 && readSnapshot.signs[1].Key() == (12u << 16 | 346u) && readSnapshot.signs[0].Valid());
+
+        // A snapshot claiming more signs than kMaxSigns is dropped whole.
+        MafiaNet::BitStream stream;
+        uint64_t generation = 7;
+        uint16_t brokenCount = 0, movedCount = 0, signCount = static_cast<uint16_t>(Props::kMaxSigns + 1);
+        stream.Write(generation);
+        stream.Write(brokenCount);
+        stream.Write(movedCount);
+        stream.Write(signCount);
+        Props::Snapshot forged;
+        forged.Serialize(&stream, false);
+        CHECK(forged.signs.empty() && forged.broken.empty() && forged.moved.empty());
+
+        // A break's pieces at rest: up to kMaxPieces, near the prop.
+        auto piece = [](uint16_t index, Props::Vector position) {
+            Props::Pose pose;
+            pose.index = index;
+            pose.position = position;
+            pose.direction = {1.0f, 0.0f, 0.0f};
+            pose.up = {0.0f, 1.0f, 0.0f};
+            return pose;
+        };
+        std::vector<Props::Pose> pieces {piece(0, {-1521.0f, 1.0f, 612.0f}), piece(2, {-1518.0f, 0.5f, 615.0f})};
+        CHECK(Props::ValidPieces(pieces, sign.position));
+        CHECK(!Props::ValidPieces({}, sign.position));
+        auto flung = pieces;
+        flung[1].position = {-1520.0f + Props::kMaxPieceTravel + 1.0f, 2.0f, 610.0f};
+        CHECK(!Props::ValidPieces(flung, sign.position));
+        flung = pieces;
+        flung[0].index = static_cast<uint16_t>(Props::kMaxPieces);
+        CHECK(!Props::ValidPieces(flung, sign.position));
+        flung = pieces;
+        flung[0].up = {1.0f, 0.0f, 0.0f};
+        CHECK(!Props::ValidPieces(flung, sign.position));
+        std::vector<Props::Pose> many(Props::kMaxPieces + 1, piece(0, sign.position));
+        CHECK(!Props::ValidPieces(many, sign.position));
+
+        Props::PiecesReport piecesReport;
+        piecesReport.missionGeneration = 7;
+        piecesReport.sign = true;
+        piecesReport.signKey = sign.Key();
+        piecesReport.pieces = pieces;
+        const auto readPieces = RoundTrip(piecesReport);
+        CHECK(readPieces.sign && readPieces.signKey == sign.Key() && readPieces.name.empty() && readPieces.pieces.size() == 2 && readPieces.pieces[1].index == 2 &&
+              Near(readPieces.pieces[1].position.z, 615.0f) && Props::ValidPieces(readPieces.pieces, sign.position));
+        Props::PiecesReport namedPieces;
+        namedPieces.name = "PHbox01 12";
+        namedPieces.pieces = pieces;
+        CHECK(RoundTrip(namedPieces).name == "PHbox01 12" && RoundTrip(namedPieces).pieces.size() == 2);
+
+        // A snapshot carries each break's pieces.
+        Props::Snapshot withPieces;
+        withPieces.missionGeneration = 7;
+        withPieces.broken.resize(2);
+        withPieces.broken[0].name = "kos01 3";
+        withPieces.broken[0].pieces = pieces;
+        withPieces.broken[1].name = "popel01 9";
+        withPieces.signs = {sign};
+        withPieces.signs[0].pieces = pieces;
+        const auto readWithPieces = RoundTrip(withPieces);
+        CHECK(readWithPieces.broken.size() == 2 && readWithPieces.broken[0].pieces.size() == 2 && readWithPieces.broken[1].pieces.empty() &&
+              readWithPieces.broken[1].name == "popel01 9");
+        CHECK(readWithPieces.signs.size() == 1 && readWithPieces.signs[0].pieces.size() == 2 && Near(readWithPieces.signs[0].pieces[0].position.x, -1521.0f));
+
+        // A struck primitive is named by its kind's array and index.
+        std::array<Native::Face, 3> faces {};
+        std::array<Native::Cylinder, 2> cylinders {};
+        std::array<Native::OrientedBox, 2> boxes {};
+        Native::TreeLevel tree {};
+        tree.faceCount = static_cast<uint32_t>(faces.size());
+        tree.faces = faces.data();
+        tree.cylinderCount = static_cast<uint32_t>(cylinders.size());
+        tree.cylinders = cylinders.data();
+        tree.orientedBoxCount = static_cast<uint32_t>(boxes.size());
+        tree.orientedBoxes = boxes.data();
+        const auto cylinder = World::IdentifyTreePrimitive(&tree, &cylinders[1].header);
+        CHECK(cylinder.kind == World::TreePrimitiveKind::Cylinder && cylinder.index == 1);
+        CHECK(World::ResolveTreePrimitive(&tree, cylinder) == reinterpret_cast<uint32_t *>(&cylinders[1].header));
+        const auto face = World::IdentifyTreePrimitive(&tree, &faces[2].header);
+        CHECK(face.kind == World::TreePrimitiveKind::Face && face.index == 2);
+        const auto box = World::IdentifyTreePrimitive(&tree, &boxes[1].header);
+        CHECK(box.kind == World::TreePrimitiveKind::OrientedBox && box.index == 1);
+        // Inside an element, or another body's memory: none.
+        CHECK(World::IdentifyTreePrimitive(&tree, &faces[1].normal).kind == World::TreePrimitiveKind::None);
+        Native::Cylinder other {};
+        CHECK(World::IdentifyTreePrimitive(&tree, &other.header).kind == World::TreePrimitiveKind::None);
+        // An index past this tree's array, or no tree: nothing to turn off.
+        CHECK(World::ResolveTreePrimitive(&tree, {World::TreePrimitiveKind::Cylinder, 2}) == nullptr);
+        CHECK(World::ResolveTreePrimitive(&tree, {World::TreePrimitiveKind::Sphere, 0}) == nullptr);
+        CHECK(World::ResolveTreePrimitive(&tree, {}) == nullptr);
+        CHECK(World::ResolveTreePrimitive(nullptr, cylinder) == nullptr);
+    }
 } // namespace
 
 int main(int argc, char **argv) {
     TestMotion();
     TestPatch();
     TestTemplate();
+    TestSigns();
     if (argc == 3) {
         TestFiles(argv[1], argv[2]);
     }
@@ -537,6 +700,6 @@ int main(int argc, char **argv) {
         std::printf("%d map object checks failed\n", gFailures);
         return 1;
     }
-    std::puts("Map object motion, collision patching and templates behave as the retail queries expect");
+    std::puts("Map object motion, collision patching, templates and sign reports behave as the retail queries expect");
     return 0;
 }

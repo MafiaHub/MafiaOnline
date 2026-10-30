@@ -1,5 +1,7 @@
 #pragma once
 
+#include "city_signs.h"
+#include "crash_pieces.h"
 #include "shared/features/world/world_props.h"
 
 #include <mafia1/sdk/world/native_props.h>
@@ -15,16 +17,18 @@ namespace Mafia1Online::Features::World {
 
 namespace Mafia1Online::Features::Props {
     // The mission's breakables and physical props, the same for everyone.
-    // A prop this client breaks natively (its player's car, a bullet, an
-    // explosion, a replica's car here) is reported and the server tells
-    // the others, who break theirs the same way. Physical props run on every
-    // client; one this client's player (on the simulation host: its traffic,
-    // NPCs and trains) sent to sleep away from the server's pose reports it,
-    // one a remote player's copy pushed here waits for that client's report
-    // and otherwise goes back, and the newest pose the server sends is
-    // placed, asleep. A late joiner gets the whole state once its mission has
-    // loaded, without debris; a repair puts every breakable back up and
-    // every physical prop where it began.
+    // A prop or traffic sign this client breaks natively (its player's car,
+    // a bullet, an explosion, a replica's car here) is reported and the
+    // server tells the others, who break theirs the same way. Physical
+    // props run on every client; one this client's player (on the
+    // simulation host: its traffic, NPCs and trains) sent to sleep away from
+    // the server's pose reports it, one a remote player's copy pushed here
+    // waits for that client's report and otherwise goes back, and the
+    // newest pose the server sends is placed, asleep. A break's pieces come
+    // to rest where its breaker has them (CrashPieces); a late joiner gets
+    // the whole state once its mission has loaded, pieces included; a repair
+    // puts every breakable and sign back up and every physical prop where it
+    // began.
     class PropsService final {
       public:
         bool Install();
@@ -81,7 +85,13 @@ namespace Mafia1Online::Features::Props {
         SDK::Scene::NativeFrame *Spawn(SDK::Scene::NativeFrame *struck, const SDK::Player::Vector3 &origin, const SDK::Player::Vector3 &impulse, float force,
                                        std::vector<uint32_t *> live = {});
         void SendBreak(const Shared::World::Props::Break &prop);
+        void SendSign(const Shared::World::Props::SignBreak &sign);
+        void SendPieces(const CrashPieces::Key &key, const std::vector<Shared::World::Props::Pose> &poses);
+        // No camera, or the camera farther than the debris range.
+        [[nodiscard]] bool FarFromCamera(const Shared::World::Props::Vector &position) const;
+        // silent: without the pieces.
         void ApplyBreak(Shared::World::Props::Break prop, bool silent);
+        void ApplySign(const Shared::World::Props::SignBreak &sign, bool silent);
         void ApplyPose(Physical &entry, const Shared::World::Props::Pose &pose);
         void Place(Physical &entry, const Shared::World::Props::Pose &pose);
         void ScanPhysical();
@@ -97,6 +107,20 @@ namespace Mafia1Online::Features::Props {
         std::unordered_map<const void *, size_t> _physicalIndex;
         // Breaks from before this client knew the mission's generation.
         std::vector<Shared::World::Props::Break> _pendingBreaks;
+        std::vector<Shared::World::Props::SignBreak> _pendingSigns;
+        CitySigns _signs;
+        CrashPieces _pieces;
+        // A remote break or sign far from the camera, until its pieces come.
+        struct Held {
+            bool isSign = false;
+            Shared::World::Props::Break prop;
+            Shared::World::Props::SignBreak sign;
+            std::chrono::steady_clock::time_point deadline {};
+        };
+        std::vector<Held> _held;
+        [[nodiscard]] static CrashPieces::Key KeyOf(const Held &held);
+        void OnRemoteBreak(Held held, const Shared::World::Props::Vector &position);
+        void ApplyHeld(const Held &held, bool silent);
         World::WorldService *_world = nullptr;
         uint64_t _missionGeneration = 0;
         std::chrono::steady_clock::time_point _lastScan {};

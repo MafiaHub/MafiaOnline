@@ -567,7 +567,7 @@ namespace Mafia1Online::Scripting {
         weather.add_property("intensity", "number | null", "Rain or snow intensity from 0 to 100, or null for the preset's own.");
         auto &propDamage = ServerCatalog().data_type("PropDamageInfo", "What happened to the mission's world props since it loaded or was last repaired.");
         propDamage.add_property("broken", "number",
-            "Breakables knocked down: phone booths, hydrants, trash bins, barrels and the other crash-material scene models. Traffic signs from the city cache are not counted or synchronized.");
+            "Breakables knocked down: phone booths, hydrants, trash bins, barrels, the other crash-material scene models and the city's traffic signs.");
         propDamage.add_property("moved", "number", "Physical props (boxes, railings, mail boxes, cans) resting away from where the mission placed them.");
 
         v8pp::module world(isolate, ServerCatalog(), "World", "The shared Mafia 1 world: mission, collections, weather, scene frames, city music and effects everyone sees.");
@@ -605,9 +605,8 @@ namespace Mafia1Online::Scripting {
             docs("PropDamageInfo", {}, "Counts the world props broken or moved in this mission, which every client and late joiner sees the same.", "The broken and moved counts."));
         world.function("repairProps", &JS_RepairProps,
             docs("number", {},
-                "Puts every broken booth, hydrant, bin and other breakable back up, with its collision, and every box or other physical prop back where the mission placed it, for every client. "
-                "The debris pieces and hydrant jets go. Traffic signs from the city cache (dopravni1B-8B), which a car or shot knocks down on that client only, stay down until the mission changes. "
-                "Mission changes start with every prop whole.",
+                "Puts every broken booth, hydrant, bin, traffic sign and other breakable back up, with its collision, and every box or other physical prop back where the mission placed it, for "
+                "every client. The debris pieces and hydrant jets go. Mission changes start with every prop whole.",
                 "How many props were broken or moved."));
         world.function("createExplosion", &JS_CreateExplosion,
             docs("void", {param("position", "Vector3 | { x: number; y: number; z: number }", false, "Explosion centre."),

@@ -23,14 +23,16 @@ namespace Mafia1Online::Features::Player {
 namespace Mafia1Online::Features::World {
     // The mission's breakable and physical props (Shared::World::Props).
     // The client where a break or a push natively happened reports it; the
-    // server keeps the first break of each breakable and the newest resting
-    // pose of each physical prop, tells every client, and hands the whole
-    // state to a client once its mission has loaded. A repair clears it and
-    // has every client put the props back.
+    // server keeps the first break of each breakable and traffic sign, where
+    // that break's pieces came to rest as its breaker reports them, and the
+    // newest resting pose of each physical prop, tells every client, and
+    // hands the whole state to a client once its mission has loaded. A
+    // repair clears it and has every client put the props back.
     //
-    // The server has no scene: a break's name is only known to be a scene
-    // frame by the clients that look it up. Each player has kMaxBrokenPerPlayer
-    // breaks standing until a repair and everyone together kMaxBroken, so one
+    // The server has no scene: a break's name (a sign's cache placement and
+    // primitive) is only known to be real by the clients that look it up.
+    // Each player has kMaxBrokenPerPlayer breaks standing until a repair and
+    // everyone together kMaxBroken breakables and kMaxSigns signs, so one
     // client inventing names cannot use up the others' sync.
     class PropsService final {
       public:
@@ -45,8 +47,9 @@ namespace Mafia1Online::Features::World {
         void RegisterRPC(const Simulation::SimulationService &simulation, Player::PlayerService &players);
         void SetMissionGeneration(uint64_t generation);
 
+        // Breakables and traffic signs knocked down.
         [[nodiscard]] size_t BrokenCount() const {
-            return _broken.size();
+            return _broken.size() + _signs.size();
         }
         // Physical props resting away from where the mission placed them.
         [[nodiscard]] size_t MovedCount() const;
@@ -62,6 +65,8 @@ namespace Mafia1Online::Features::World {
         // within its report budget.
         bool Accept(MafiaNet::PeerGuid sender, uint64_t key, const Shared::World::Props::Vector &place);
         void OnBreak(const Shared::World::Props::BreakReport &received, MafiaNet::PeerGuid sender);
+        void OnSignBreak(const Shared::World::Props::SignBreakReport &received, MafiaNet::PeerGuid sender);
+        void OnPieces(const Shared::World::Props::PiecesReport &received, MafiaNet::PeerGuid sender);
         void OnRest(const Shared::World::Props::RestReport &received, MafiaNet::PeerGuid sender);
         void OnSnapshotRequest(const Shared::World::Props::SnapshotRequest &request, MafiaNet::Packet *packet);
 
@@ -83,8 +88,15 @@ namespace Mafia1Online::Features::World {
         Player::PlayerService *_players = nullptr;
         uint64_t _missionGeneration = 0;
         std::vector<Shared::World::Props::Break> _broken;
+        // The sender key whose break of each of _broken (and _signs) stood:
+        // only it reports the pieces.
+        std::vector<uint64_t> _brokenOwners;
+        std::vector<uint64_t> _signOwners;
         std::unordered_set<std::string> _brokenNames;
-        // Standing breaks by sender key.
+        std::vector<Shared::World::Props::SignBreak> _signs;
+        // SignBreak::Key of each sign in _signs.
+        std::unordered_set<uint32_t> _signKeys;
+        // Standing breaks (breakables and signs) by sender key.
         std::unordered_map<uint64_t, size_t> _brokenBy;
         // The newest resting pose of each physical prop reported since the
         // last repair.

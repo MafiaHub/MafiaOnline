@@ -148,8 +148,7 @@ builds its pieces through `CreateCrashActors` (`0x430c50`, `ret 0x20`).
 reports scene models by frame name together with the struck frame's name and
 replays remote breaks on that frame, because `ParseCrashConfigFromFrameName`
 (`0x431a00`) reads the crash settings from the struck frame's properties
-(`+0xc`; a model's own from its last visual child); a late joiner's breaks
-skip `CreateCrashActors`. Replayed pieces lose `CRASH_FLAG_EXPLODE` (`0x20`)
+(`+0xc`; a model's own from its last visual child). Replayed pieces lose `CRASH_FLAG_EXPLODE` (`0x20`)
 and `CRASH_FLAG_START_FIRE` (`0x8`, `m_uCrashFlags` `+0x38c`): `C_crash_obj::AI`
 (`0x431be0`) would call `NewExplosion`/`NewFire` with damage on every client.
 Of the stock crash models only `xpumpa 2_c1` (`;M1000N22X1EF;`, three fuel
@@ -167,11 +166,37 @@ The stock freeride `scene2.bin` places 1,044 crash-model breakables (369
 fuel pumps and four cans); its `cache.bin` places one `xbarel 1` and 154 traffic signs
 (`dopravni1B`-`8B`). City cache instances (`off<n>seg<n>`) are left to retail,
 and the signs never reach `SpawnCrashActorFromFrame`: a car
-(`Collision_Filter_Body` `0x426d7e`) or shot (`TickShoot` `0x5aa76e`) breaks
-one through `HandleSignalMarkCrash` (`0x5b7be0`), which calls
-`CreateCrashActors` itself, sets the primitive's `0x20` flag and closes the
-cache placement (`0x402cf0`). They stay down on that client alone until the
-mission changes.
+(`Collision_Filter_Body` `0x426d7e`, faster than 6 with someone in it) or shot
+(`TickShoot` `0x5aa76e`) that meets a static primitive with flag `0x20000`
+breaks one through `HandleSignalMarkCrash` (`0x5b7be0`). It takes the nearest
+active placement of a `C_game::m_SignalMarkIds` (`+0x1e4`) group within 10 m
+across and 5 m up, but only in segments streamed in around the camera, calls
+`CreateCrashActors` with the pooled model and its file name (`+0x154`), sets
+the primitive's `0x20` flag, closes the cache placement (`0x402cf0`) and tells
+the police. `CitySigns` hooks it and reports the `g_cacheBaseBlock`
+(`0x63d268`) segment and placement and the struck primitive's index in its
+`tree.klz` array; with no sign streamed in (the simulation host's traffic far
+from its camera) it breaks the nearest one itself without pieces. A remote
+break throws the pieces of the pooled model while its segment is in, sets the
+same primitive's flag and closes the placement, without the police. A repair
+clears the flags and turns the placements back on between streaming their
+segment out (`0x402a50`) and in (`0x4025d0`), so no stale pooled index takes
+another placement's model.
+
+The pieces of a break (breakable or sign) are `C_crash_obj` temporary actors
+(type 26, appended to `C_game::m_TemporaryActors`) whose physics each client
+runs; `C_crash_obj : C_PhThing`, the same body as a `C_box_new` up to
+`+0x38c`, so a piece sleeps and is placed as a physical prop is. Every client
+throws them from the same hit and impulse. `CrashPieces` takes the pieces a
+break appended; the client whose break stood reports, in throw order, where
+they came to rest once all sleep (the server keeps only that client's report),
+and the others put theirs there as they sleep, or at once when they throw them
+only then: a late joiner's snapshot breaks with the reported pieces, and a
+remote break farther than 200 m from the camera waits up to 30 s for them. The
+game drops pieces itself (`C_crash_obj::AI` on `CRASH_FLAG_REMOVE`, the
+farthest from the camera past its limit at `0x432740`), so a piece is looked
+up among the temporary actors before it is touched. The simulation host
+breaks without pieces.
 
 Every client loads the type 35 `C_box_new` props; `GameInit` (`0x567650`) and
 `GameDone` (`0x567720`) number them, and a pose is placed the way

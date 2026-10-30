@@ -71,6 +71,9 @@ namespace Mafia1Online::Features::Props {
         // A remote break farther from the camera than this skips the pieces.
         constexpr float kDebrisRange = 200.0f;
         constexpr size_t kMaxPendingBreaks = 64;
+        // A remote break farther than kDebrisRange waits this long for the
+        // breaker's pieces before it falls without them.
+        constexpr auto kHoldFarBreak = std::chrono::seconds(30);
 
         void __fastcall GameInitHook(NativePhysicalProp *prop, void *) {
             gGameInitOriginal(prop);
@@ -156,6 +159,14 @@ namespace Mafia1Online::Features::Props {
                 return false;
             }
         }
+        _pieces.SetReport([this](const CrashPieces::Key &key, const std::vector<Wire::Pose> &poses) { SendPieces(key, poses); });
+        if (!_signs.Install([this](const Wire::SignBreak &sign, size_t piecesMark) {
+                _pieces.Capture({true, {}, sign.Key()}, piecesMark, true);
+                SendSign(sign);
+            })) {
+            Uninstall();
+            return false;
+        }
         return true;
     }
 
@@ -171,6 +182,7 @@ namespace Mafia1Online::Features::Props {
         gSpawnCrashOriginal = nullptr;
         gCreateCrashActorsOriginal = nullptr;
         gService = nullptr;
+        _signs.Uninstall();
         Reset();
     }
 
@@ -179,8 +191,35 @@ namespace Mafia1Online::Features::Props {
         network->RegisterRPC<Wire::BreakReport>([this](const Wire::BreakReport &report, MafiaNet::Packet *) {
             // The client that reported it has it off already.
             if (_missionGeneration != 0 && report.missionGeneration == _missionGeneration && report.prop.Valid()) {
-                ApplyBreak(report.prop, false);
+                Held held;
+                held.prop = report.prop;
+                OnRemoteBreak(std::move(held), report.prop.position);
             }
+        });
+        network->RegisterRPC<Wire::SignBreakReport>([this](const Wire::SignBreakReport &report, MafiaNet::Packet *) {
+            if (_missionGeneration != 0 && report.missionGeneration == _missionGeneration && report.sign.Valid()) {
+                Held held;
+                held.isSign = true;
+                held.sign = report.sign;
+                OnRemoteBreak(std::move(held), report.sign.position);
+            }
+        });
+        network->RegisterRPC<Wire::PiecesReport>([this](const Wire::PiecesReport &report, MafiaNet::Packet *) {
+            if (_missionGeneration == 0 || report.missionGeneration != _missionGeneration || report.pieces.empty()) {
+                return;
+            }
+            const CrashPieces::Key key {report.sign, report.sign ? std::string() : report.name, report.sign ? report.signKey : 0};
+            // A break far away waited for these: it falls with its pieces
+            // where the breaker has them.
+            const auto held = std::find_if(_held.begin(), _held.end(), [&](const Held &entry) { return KeyOf(entry) == key; });
+            if (held == _held.end()) {
+                _pieces.Apply(key, report.pieces, false);
+                return;
+            }
+            auto entry = std::move(*held);
+            _held.erase(held);
+            (entry.isSign ? entry.sign.pieces : entry.prop.pieces) = report.pieces;
+            ApplyHeld(entry, false);
         });
         network->RegisterRPC<Wire::RestReport>([this](const Wire::RestReport &report, MafiaNet::Packet *) {
             if (_missionGeneration == 0 || report.missionGeneration != _missionGeneration || !report.pose.Valid()) {
@@ -209,9 +248,17 @@ namespace Mafia1Online::Features::Props {
             if (_missionGeneration == 0 || snapshot.missionGeneration != _missionGeneration) {
                 return;
             }
+            // With their pieces where the breaker has them, when it reported
+            // them.
+            const bool host = Simulation::IsHost();
             for (const auto &prop : snapshot.broken) {
                 if (prop.Valid()) {
-                    ApplyBreak(prop, true);
+                    ApplyBreak(prop, host || prop.pieces.empty());
+                }
+            }
+            for (const auto &sign : snapshot.signs) {
+                if (sign.Valid()) {
+                    ApplySign(sign, host || sign.pieces.empty());
                 }
             }
             size_t placed = 0;
@@ -221,7 +268,8 @@ namespace Mafia1Online::Features::Props {
                     ++placed;
                 }
             }
-            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("World props: {} broken and {} of {} moved from the server", snapshot.broken.size(), placed, snapshot.moved.size());
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("World props: {} broken, {} traffic signs down and {} of {} moved from the server", snapshot.broken.size(),
+                                                                        snapshot.signs.size(), placed, snapshot.moved.size());
         });
         network->RegisterRPC<Wire::Repair>([this](const Wire::Repair &repair, MafiaNet::Packet *) {
             if (_missionGeneration != 0 && repair.missionGeneration == _missionGeneration) {
@@ -235,6 +283,10 @@ namespace Mafia1Online::Features::Props {
         _physical.clear();
         _physicalIndex.clear();
         _pendingBreaks.clear();
+        _pendingSigns.clear();
+        _signs.Reset();
+        _pieces.Reset();
+        _held.clear();
         _missionGeneration = 0;
         _lastScan = {};
         _reportedMismatch = false;
@@ -251,16 +303,33 @@ namespace Mafia1Online::Features::Props {
             Wire::SnapshotRequest request;
             request.missionGeneration = _missionGeneration;
             Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(request, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
-            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("World props: {} physical props loaded; asking the server for the mission's state", _physical.size());
+            const auto [signs, signPrimitives] = _signs.Count();
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info(
+                "World props: {} physical props and {} traffic signs ({} sign primitives) loaded; asking the server for the mission's state", _physical.size(), signs, signPrimitives);
             for (const auto &prop : _pendingBreaks) {
                 SendBreak(prop);
             }
             _pendingBreaks.clear();
+            for (const auto &sign : _pendingSigns) {
+                SendSign(sign);
+            }
+            _pendingSigns.clear();
         }
         const auto now = std::chrono::steady_clock::now();
         if (now - _lastScan >= kScanInterval) {
             _lastScan = now;
             ScanPhysical();
+            _pieces.Update();
+            // Far breaks whose pieces never came fall without them.
+            for (size_t i = 0; i < _held.size();) {
+                if (now < _held[i].deadline) {
+                    ++i;
+                    continue;
+                }
+                auto entry = std::move(_held[i]);
+                _held.erase(_held.begin() + static_cast<std::ptrdiff_t>(i));
+                ApplyHeld(entry, true);
+            }
         }
     }
 
@@ -411,6 +480,7 @@ namespace Mafia1Online::Features::Props {
     }
 
     bool PropsService::OnSpawnCrash(NativeFrame *struck, const Vector3 *origin, const Vector3 *impulse, float force) {
+        const size_t piecesMark = CrashPieces::Mark();
         auto *model = Spawn(struck, *origin, *impulse, force);
         if (!model) {
             return false;
@@ -433,6 +503,7 @@ namespace Mafia1Online::Features::Props {
         if (!prop.Valid()) {
             return true;
         }
+        _pieces.Capture({false, prop.name, 0}, piecesMark, true);
         if (!_world || !_world->IsReady() || _missionGeneration == 0) {
             // Broken while the mission was still coming up: sent with the
             // snapshot request.
@@ -450,6 +521,78 @@ namespace Mafia1Online::Features::Props {
         report.missionGeneration = _missionGeneration;
         report.prop = prop;
         Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(report, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
+    }
+
+    void PropsService::SendSign(const Wire::SignBreak &sign) {
+        if (!_world || !_world->IsReady() || _missionGeneration == 0) {
+            // Broken while the mission was still coming up: sent with the
+            // snapshot request.
+            if (_pendingSigns.size() < kMaxPendingBreaks) {
+                _pendingSigns.push_back(sign);
+            }
+            return;
+        }
+        Wire::SignBreakReport report;
+        report.missionGeneration = _missionGeneration;
+        report.sign = sign;
+        Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(report, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
+    }
+
+    void PropsService::SendPieces(const CrashPieces::Key &key, const std::vector<Wire::Pose> &poses) {
+        if (_missionGeneration == 0) {
+            return;
+        }
+        Wire::PiecesReport report;
+        report.missionGeneration = _missionGeneration;
+        report.sign = key.sign;
+        report.name = key.name;
+        report.signKey = key.signKey;
+        report.pieces = poses;
+        Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(report, MafiaNet::Priority::Medium, MafiaNet::Reliability::ReliableOrdered);
+    }
+
+    CrashPieces::Key PropsService::KeyOf(const Held &held) {
+        return held.isSign ? CrashPieces::Key {true, {}, held.sign.Key()} : CrashPieces::Key {false, held.prop.name, 0};
+    }
+
+    void PropsService::OnRemoteBreak(Held held, const Wire::Vector &position) {
+        // The simulation host needs no pieces; a break far from the camera
+        // waits for the breaker's pieces, so it falls with them where the
+        // breaker has them.
+        if (Simulation::IsHost()) {
+            ApplyHeld(held, true);
+        } else if (FarFromCamera(position)) {
+            held.deadline = std::chrono::steady_clock::now() + kHoldFarBreak;
+            _held.push_back(std::move(held));
+        } else {
+            ApplyHeld(held, false);
+        }
+    }
+
+    void PropsService::ApplyHeld(const Held &held, bool silent) {
+        if (held.isSign) {
+            ApplySign(held.sign, silent);
+        } else {
+            ApplyBreak(held.prop, silent);
+        }
+    }
+
+    void PropsService::ApplySign(const Wire::SignBreak &sign, bool silent) {
+        const size_t piecesMark = CrashPieces::Mark();
+        _signs.Apply(sign, silent);
+        if (silent) {
+            return;
+        }
+        const CrashPieces::Key key {true, {}, sign.Key()};
+        _pieces.Capture(key, piecesMark, false);
+        if (!sign.pieces.empty()) {
+            _pieces.Apply(key, sign.pieces, true);
+        }
+    }
+
+    bool PropsService::FarFromCamera(const Wire::Vector &position) const {
+        auto *camera = SDK::Core::Mission::Get()->GetScene()->ActiveCamera();
+        return !camera || Wire::Distance(ToWire(camera->WorldPosition()), position) > kDebrisRange;
     }
 
     void PropsService::ApplyBreak(Wire::Break prop, bool silent) {
@@ -488,10 +631,6 @@ namespace Mafia1Online::Features::Props {
         if (!breakable) {
             return;
         }
-        if (!silent) {
-            auto *camera = scene->ActiveCamera();
-            silent = !camera || Wire::Distance(ToWire(camera->WorldPosition()), prop.position) > kDebrisRange;
-        }
         prop.Clamp();
         SDK::World::NativeCrashWorld world {mission->Game()};
         const size_t before = world.TemporaryActors().size();
@@ -523,6 +662,13 @@ namespace Mafia1Online::Features::Props {
             }
             if (effects & SDK::World::NativeCrashPiece::kExplode) {
                 SDK::Combat::NewExplosion(mission->Game(), at, SDK::World::NativeCrashPiece::kExplosionRadius, 0.0f, false);
+            }
+        }
+        if (!silent) {
+            const CrashPieces::Key key {false, prop.name, 0};
+            _pieces.Capture(key, before, false);
+            if (!prop.pieces.empty()) {
+                _pieces.Apply(key, prop.pieces, true);
             }
         }
     }
@@ -594,6 +740,7 @@ namespace Mafia1Online::Features::Props {
 
     void PropsService::RepairAll() {
         SDK::World::NativeCrashWorld world {SDK::Core::Mission::Get()->Game()};
+        const size_t signs = _signs.Repair();
         size_t repaired = 0;
         for (auto &broken : _broken) {
             for (auto *primitive : broken.primitives) {
@@ -623,6 +770,8 @@ namespace Mafia1Online::Features::Props {
             world.InvalidateActor(piece);
             world.game->RemoveTemporaryActor(piece);
         }
+        _pieces.Reset();
+        _held.clear();
         world.DelAllHydrants();
         // The booths are callable again for the police, and a traffic light
         // DelSemaphore may have dropped (it matches an unset field) is lit
@@ -643,7 +792,7 @@ namespace Mafia1Online::Features::Props {
             entry.prop->RestoreTransform(entry.spawnTransform);
             ++moved;
         }
-        Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("World props repaired: {} breakables back up, {} pieces removed, {} physical props back in place", repaired,
-                                                                    pieces.size(), moved);
+        Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("World props repaired: {} breakables and {} traffic signs back up, {} pieces removed, {} physical props back in place",
+                                                                    repaired, signs, pieces.size(), moved);
     }
 } // namespace Mafia1Online::Features::Props

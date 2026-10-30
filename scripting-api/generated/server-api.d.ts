@@ -3244,7 +3244,7 @@ declare global {
    */
   interface PropDamageInfo {
     /**
-     * Breakables knocked down: phone booths, hydrants, trash bins, barrels and the other crash-material scene models. Traffic signs from the city cache are not counted or synchronized.
+     * Breakables knocked down: phone booths, hydrants, trash bins, barrels, the other crash-material scene models and the city's traffic signs.
      */
     broken: number;
 
@@ -3378,7 +3378,7 @@ declare global {
     getPropDamage(): PropDamageInfo;
 
     /**
-     * Puts every broken booth, hydrant, bin and other breakable back up, with its collision, and every box or other physical prop back where the mission placed it, for every client. The debris pieces and hydrant jets go. Traffic signs from the city cache (dopravni1B-8B), which a car or shot knocks down on that client only, stay down until the mission changes. Mission changes start with every prop whole.
+     * Puts every broken booth, hydrant, bin, traffic sign and other breakable back up, with its collision, and every box or other physical prop back where the mission placed it, for every client. The debris pieces and hydrant jets go. Mission changes start with every prop whole.
      * @returns How many props were broken or moved.
      */
     repairProps(): number;

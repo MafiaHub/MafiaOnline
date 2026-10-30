@@ -755,8 +755,8 @@ player holding the hose (or the vehicle jet's `player`).
 - `World.resetFrames(): void` — Restores every overridden frame to the scene's own visibility.
 - `World.setFrameOpacity(name: string, opacity: number): boolean` — Applies `FRM_SETALPHA` to a named static visual frame for everyone in this mission, including late joiners. Opacity is 0–1; returns false at the 128-frame limit.
 - `World.resetFrameOpacity(name?: string): void` — Restores the original opacity for one overridden frame or all of them. Mission changes clear these overrides.
-- `World.getPropDamage(): PropDamageInfo` — Counts the world props broken (`broken`) or moved (`moved`) in this mission since it loaded or was last repaired. City cache traffic signs are not counted.
-- `World.repairProps(): number` — Puts every broken phone booth, hydrant, trash bin, barrel and other breakable back up, with its collision, and every box, railing, mail box or can back where the mission placed it, for every client. Debris pieces and hydrant jets go. City cache traffic signs (`dopravni1B`–`8B`) are not synchronized and stay down on the client that knocked them over until the mission changes. Returns: How many props were broken or moved.
+- `World.getPropDamage(): PropDamageInfo` — Counts the world props broken (`broken`, traffic signs included) or moved (`moved`) in this mission since it loaded or was last repaired.
+- `World.repairProps(): number` — Puts every broken phone booth, hydrant, trash bin, barrel, traffic sign and other breakable back up, with its collision, and every box, railing, mail box or can back where the mission placed it, for every client. Debris pieces and hydrant jets go. Returns: How many props were broken or moved.
 - `World.createExplosion(position: Vector3 | { x: number; y: number; z: number }, options?: { radius?: number; damage?: number }): void` — Explodes for every client. The server applies player damage and fires playerDamage and playerDeath; clients damage cars and objects.
 - `World.createFire(position: Vector3 | { x: number; y: number; z: number }, options?: { duration?: number; radius?: number; damage?: number }): void` — Starts a fire every client sees; the server burns players standing in it.
 
@@ -1043,21 +1043,21 @@ are defined by your resources.
   minutes; scripts create their own with `Pickup.create`.
 - **Mission changes** remove every vehicle, pickup, map object and sound and
   clear frame overrides; weather and city music carry over.
-- **World props.** Breakables (phone booths, hydrants, trash bins, barrels and
-  the other scene models a car, bullet, explosion or bat knocks down) and
-  physical props (boxes, railings, mail boxes, cans) are the same for every
-  player. The client where a prop broke reports it and the others break theirs
+- **World props.** Breakables (phone booths, hydrants, trash bins, barrels,
+  the city's traffic signs and the other scene models a car, bullet, explosion
+  or bat knocks down) and physical props (boxes, railings, mail boxes, cans)
+  are the same for every player. The client where a prop broke reports it and the others break theirs
   the same way; a remote fuel pump bursts into flame and smoke there without
   damage, which only the client that broke it applies. A physical prop that a
   player (or the simulation host's traffic, NPCs and trains) sent somewhere new
   is placed there for everyone; one a remote player's copy pushed on another
-  client goes back. Late joiners load the state without debris. The city cache
-  traffic signs (`dopravni1B`–`8B`) are the exception: they fall only for the
-  client that hit them and stay down until the mission changes. Each player has
-  at most 256 breaks standing until a repair, and everyone together 2048 (the
-  stock freeride scene has 1,044 breakables). Nothing repairs itself: call
-  `World.repairProps()` (the Free Ride gamemode does it every few minutes and lets
-  anyone call it once a minute). A mission change starts whole.
+  client goes back. A break's pieces come to rest where the client that broke
+  it has them, for late joiners too. Each player has
+  at most 256 breaks standing until a repair, and everyone together 2048
+  breakables and 1024 traffic signs (the stock freeride scene has 1,044
+  breakables and 154 signs). Nothing repairs itself: call `World.repairProps()`
+  (the Free Ride gamemode does it every few minutes and lets anyone call it
+  once a minute). A mission change starts whole.
 
 ### Durable vehicle condition
 

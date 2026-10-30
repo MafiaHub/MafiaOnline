@@ -217,6 +217,13 @@ namespace Mafia1Online::SDK::World {
         [[nodiscard]] bool GoesOff() {
             return (Flags() & kDamageable) && *reinterpret_cast<const float *>(reinterpret_cast<std::byte *>(this) + 0x390) < 0.0f;
         }
+        // C_crash_obj : C_PhThing (0x38c bytes), the body a C_box_new has
+        // too: its pose, sleep and placement (NativePhysicalProp below)
+        // touch nothing past it. C_crash_obj::AI runs C_PhThing::AI while
+        // the piece is whole (0x431be0).
+        [[nodiscard]] struct NativePhysicalProp &Body() {
+            return *reinterpret_cast<struct NativePhysicalProp *>(this);
+        }
     };
 
     // A scene2.bin type 35 actor (reM C_box_new : C_PhThing, vtable

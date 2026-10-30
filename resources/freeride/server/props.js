@@ -1,10 +1,8 @@
-// City upkeep. Phone booths, hydrants, trash bins and barrels stay knocked
-// down and boxes stay where they were pushed, for every player alike, until
-// the server repairs them. Traffic signs are the exception: they come from
-// the city cache, fall only for the player who hit them and stay down until
-// the mission changes. Here the city crew comes round a few minutes after
-// the first damage; /props shows the damage and /repairprops calls the crew
-// at once. Anyone may call the crew, at most once a minute.
+// City upkeep. Phone booths, hydrants, trash bins, barrels and traffic signs
+// stay knocked down and boxes stay where they were pushed, for every player
+// alike, until the server repairs them. Here the city crew comes round a few
+// minutes after the first damage; /props shows the damage and /repairprops
+// calls the crew at once. Anyone may call the crew, at most once a minute.
 const commands = require("./lib/commands.js");
 const {toast, toastAll} = require("./lib/notify.js");
 const {onStart, onStop} = require("./lib/util.js");
@@ -57,7 +55,7 @@ Events.on("missionChange", () => {
 
 commands.register({name: "props", usage: "/props", help: "How much of the city lies broken.", category: "Showcase"}, (player) => {
     const due = damagedSince === null ? "" : `; the crew comes in ${Math.max(0, Math.ceil((damagedSince + REPAIR_AFTER_MS - Date.now()) / 60_000))} min`;
-    toast(player, `City props: ${describe(World.getPropDamage())}${due}. Traffic signs are not tracked.`);
+    toast(player, `City props: ${describe(World.getPropDamage())}${due}.`);
 });
 
 commands.register({name: "repairprops", usage: "/repairprops", help: "Call the city crew to fix every broken prop.", category: "Showcase"}, (player) => {
