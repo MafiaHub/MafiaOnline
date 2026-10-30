@@ -839,6 +839,17 @@ namespace {
         CHECK(StepFor(glm::vec3(0.0f), north).state == 6 && StepFor(north, glm::vec3(0.0f)).state == 6);
     }
 
+    void DeathDrawing() {
+        using namespace Features::Npc;
+        // The stream drives it until the host's moment of death is drawn,
+        // even on a body something else killed here.
+        CHECK(DeathDrawFor(false, false) == DeathDraw::Stream && DeathDrawFor(false, true) == DeathDraw::Stream);
+        // Then only a dead body is drawn onto the host's corpse; a living
+        // one waiting for its death stands.
+        CHECK(DeathDrawFor(true, true) == DeathDraw::Settle);
+        CHECK(DeathDrawFor(true, false) == DeathDraw::Stand);
+    }
+
     void DoorEnd() {
         using namespace Features;
         // Use_Actor's door clips: 271 + side/no door/rear/exit bits, the
@@ -918,6 +929,7 @@ int main() {
     HumanStates();
     ReleaseBlend();
     ContactStep();
+    DeathDrawing();
     DoorEnd();
     HostView();
     if (failures == 0) {

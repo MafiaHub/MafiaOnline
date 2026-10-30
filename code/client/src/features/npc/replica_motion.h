@@ -80,4 +80,22 @@ namespace Mafia1Online::Features::Npc {
         }
         return end;
     }
+
+    // How a replica's body is drawn around its death. Until the replica
+    // draws the host's moment of it (deathShown) the stream drives it. Then
+    // the corpse is drawn onto the host's once the body is dead here; one
+    // DeathService has not killed yet (no Combat::State, damage still held,
+    // a refused Hit) stands where it is, neither running on nor drawn
+    // along the host's falling corpse.
+    enum class DeathDraw : uint8_t {
+        Stream,
+        Stand,
+        Settle,
+    };
+    inline DeathDraw DeathDrawFor(bool deathShown, bool dead) {
+        if (!deathShown) {
+            return DeathDraw::Stream;
+        }
+        return dead ? DeathDraw::Settle : DeathDraw::Stand;
+    }
 } // namespace Mafia1Online::Features::Npc

@@ -208,11 +208,16 @@ namespace Mafia1Online::Features::Npc {
                     }
                 }
                 ApplyAnimation(replica, actor, *npc);
-                if (replica.deathShown) {
-                    SettleCorpse(replica, actor);
-                }
-                else {
-                    ApplyPose(replica, actor);
+                switch (DeathDrawFor(replica.deathShown, static_cast<SDK::Player::NativeActor *>(actor)->IsDead())) {
+                case DeathDraw::Stream: ApplyPose(replica, actor); break;
+                case DeathDraw::Settle: SettleCorpse(replica, actor); break;
+                case DeathDraw::Stand:
+                    // Due to die, not dead yet (DeathService still holds the
+                    // death back): ShiftBody would slide a standing body.
+                    if (auto *human = static_cast<SDK::Player::NativeHuman *>(actor); Player::MovingGait(human->AnimationState())) {
+                        human->SetLocomotionAnimation(SDK::Player::LocomotionAnimation::Idle);
+                    }
+                    break;
                 }
                 replica.seenAlive = replica.seenAlive || alive;
                 if (!alive && !replica.deathShown) {
