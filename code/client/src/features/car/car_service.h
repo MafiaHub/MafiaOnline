@@ -61,6 +61,10 @@ namespace Mafia1Online::Features::Car {
         // to its controller, which applies it unless its own physics had it.
         void OnCarHit(SDK::Car::NativeCar *car, SDK::Player::NativeActor *striker, const SDK::Player::Vector3 &position,
                       const SDK::Player::Vector3 &impulse, const SDK::Player::Vector3 &normal, float mass);
+        // Collision_Filter_Body: whether `car`'s sweep passes through `other`,
+        // the two cars of a reported contact this client applied
+        // (ContactReplayed).
+        bool ContactGhosted(SDK::Car::NativeCar *car, SDK::Player::NativeActor *other) const;
         // C_car::AI detour. An observer car skips native physics: the
         // interpolated pose is written inside the actor tick, before the
         // camera reads it, and only wheels and engine sound are refreshed.
@@ -263,5 +267,8 @@ namespace Mafia1Online::Features::Car {
         std::map<std::pair<uint64_t, uint64_t>, std::vector<double>> _contacts;
         // Each (hit car, striker) pair's last hit, local clock ms.
         std::map<std::pair<uint64_t, uint64_t>, double> _reportedContacts;
+        // When this client last applied a reported contact between two
+        // network cars (lower id first), local clock ms.
+        std::map<std::pair<uint64_t, uint64_t>, double> _replayedContacts;
     };
 } // namespace Mafia1Online::Features::Car

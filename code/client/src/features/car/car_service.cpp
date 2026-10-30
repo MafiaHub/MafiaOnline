@@ -833,6 +833,19 @@ namespace Mafia1Online::Features::Car {
         }
     }
 
+    bool CarService::ContactGhosted(SDK::Car::NativeCar *car, SDK::Player::NativeActor *other) const {
+        if (_replayedContacts.empty()) {
+            return false;
+        }
+        const auto id      = _idByNative.find(car);
+        const auto otherId = _idByNative.find(other);
+        if (id == _idByNative.end() || otherId == _idByNative.end()) {
+            return false;
+        }
+        const auto replayed = _replayedContacts.find(std::minmax(id->second, otherId->second));
+        return replayed != _replayedContacts.end() && Shared::Car::ContactReplayed(replayed->second, LocalClockMs());
+    }
+
     void CarService::OnCarHit(SDK::Car::NativeCar *car, SDK::Player::NativeActor *striker, const SDK::Player::Vector3 &position,
                               const SDK::Player::Vector3 &impulse, const SDK::Player::Vector3 &normal, float mass) {
         const auto id        = _idByNative.find(car);
@@ -916,15 +929,17 @@ namespace Mafia1Online::Features::Car {
                 stream.pendingContacts.pop_front();
                 continue;
             }
-            // Its own physics had this contact: it is in the car already.
-            if (const auto seen = _contacts.find(std::minmax(networkId, impact.strikerId));
-                seen != _contacts.end() && Shared::Car::ContactSeenLocally(seen->second, pending.contactAt)) {
+            // Its own physics had this contact, so it is in the car already,
+            // or may yet: the striker's replica is predicted to the present,
+            // but the estimate of when is only as good as the pings.
+            const auto seen   = _contacts.find(std::minmax(networkId, impact.strikerId));
+            const auto replay = Shared::Car::ContactReplayDue(seen != _contacts.end() ? std::span<const double>(seen->second) : std::span<const double> {},
+                                                              pending.contactAt, now);
+            if (replay == Shared::Car::ContactReplay::Drop) {
                 stream.pendingContacts.pop_front();
                 continue;
             }
-            // It may yet: the striker's replica is predicted to the present,
-            // but the estimate of when is only as good as the pings.
-            if (now < pending.contactAt + Shared::Car::kContactWindowMs) {
+            if (replay == Shared::Car::ContactReplay::Wait) {
                 return;
             }
             const auto native = _nativeById.find(networkId);
@@ -960,6 +975,10 @@ namespace Mafia1Online::Features::Car {
             ApplyCarContact(car, static_cast<SDK::Car::NativeCar *>(static_cast<void *>(striker)), {position.x, position.y, position.z},
                             {impulse.x, impulse.y, impulse.z}, {normal.x, normal.y, normal.z}, mass);
             stream.meshDirty = true;
+            if (_replayedContacts.size() > 256) {
+                std::erase_if(_replayedContacts, [&](const auto &entry) { return !Shared::Car::ContactReplayed(entry.second, now); });
+            }
+            _replayedContacts[std::minmax(networkId, impact.strikerId)] = now;
         }
     }
 
@@ -2081,5 +2100,6 @@ namespace Mafia1Online::Features::Car {
         _streams.clear();
         _contacts.clear();
         _reportedContacts.clear();
+        _replayedContacts.clear();
     }
 } // namespace Mafia1Online::Features::Car

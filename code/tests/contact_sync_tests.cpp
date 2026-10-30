@@ -186,10 +186,22 @@ namespace {
         CHECK(!ContactReportDue(1010.0, lastAt) && !ContactReportDue(1400.0, lastAt) && !ContactReportDue(1850.0, lastAt));
         CHECK(ContactReportDue(1850.0 + kContactEpisodeGapMs + 1.0, lastAt));
 
-        // The controller's own contact within the window is the reported one.
-        const double seen[] = {5000.0, 5600.0};
-        CHECK(ContactSeenLocally(seen, 5100.0) && ContactSeenLocally(seen, 5600.0 + kContactWindowMs));
-        CHECK(!ContactSeenLocally(seen, 5300.0) && !ContactSeenLocally(std::span<const double> {}, 5000.0));
+        // The controller waits out the window for its own contact with the
+        // striker, then applies the report; one of its own in that contact,
+        // however late its copy of the striker got there, drops it.
+        const std::span<const double> none;
+        CHECK(ContactReplayDue(none, 5000.0, 5100.0) == ContactReplay::Wait);
+        CHECK(ContactReplayDue(none, 5000.0, 5000.0 + kContactWindowMs) == ContactReplay::Apply);
+        const double late[]   = {5400.0};
+        const double early[]  = {5000.0 - kContactEpisodeGapMs + 10.0};
+        const double before[] = {5000.0 - kContactEpisodeGapMs - 10.0};
+        CHECK(ContactReplayDue(late, 5000.0, 5450.0) == ContactReplay::Drop && ContactReplayDue(early, 5000.0, 5100.0) == ContactReplay::Drop);
+        CHECK(ContactReplayDue(before, 5000.0, 5000.0 + kContactWindowMs) == ContactReplay::Apply);
+        // Once it applied one, its own physics passes the two cars through
+        // each other for the rest of the contact, so a late copy of the
+        // striker cannot hit a second time.
+        CHECK(ContactReplayed(5150.0, 5400.0) && ContactReplayed(5150.0, 5150.0 + kContactEpisodeGapMs));
+        CHECK(!ContactReplayed(5150.0, 5151.0 + kContactEpisodeGapMs));
     }
 
     // A car's accepted poses at the server, `step` ms apart from `from` to

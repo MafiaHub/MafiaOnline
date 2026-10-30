@@ -388,6 +388,16 @@ namespace Mafia1Online::Features::Car {
             // are ghosted: their replicated pose cannot yield to a car's
             // native impulse, so treating one as a rigid body stops the car.
             const auto *dynamic = static_cast<const SDK::Car::NativeDynamicCollision *>(collision);
+            // So are two cars whose reported contact this client applied, for
+            // the rest of that contact: on a null BodyCollision skips the
+            // emitter's hit, its impulse and Call_Collision alike.
+            if ((dynamic->packed & SDK::Car::NativeDynamicCollision::kDynamicTypeMask) != 0 && dynamic->ownerActor &&
+                dynamic->ownerActor->GetType() == SDK::Player::NativeActor::Type::Car) {
+                auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
+                if (application->Cars().ContactGhosted(car, dynamic->ownerActor)) {
+                    return nullptr;
+                }
+            }
             if ((dynamic->packed & SDK::Car::NativeDynamicCollision::kDynamicTypeMask) != 0 && dynamic->ownerActor &&
                 dynamic->ownerActor->GetType() == SDK::Player::NativeActor::Type::Barrier) {
                 // A road block's spike strip: Collision_Filter_Body flattens a

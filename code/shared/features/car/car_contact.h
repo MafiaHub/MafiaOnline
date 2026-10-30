@@ -150,10 +150,27 @@ namespace Mafia1Online::Shared::Car {
         return glm::all(glm::greaterThanEqual(local, kContactBodyMin - margin)) && glm::all(glm::lessThanEqual(local, kContactBodyMax + margin));
     }
 
-    // Controller: whether one of its own contacts with the striker, at the
-    // local clock times `seen`, is the reported one estimated at `contactAt`.
-    inline bool ContactSeenLocally(std::span<const double> seen, double contactAt) {
-        return std::any_of(seen.begin(), seen.end(), [&](double at) { return std::abs(at - contactAt) <= kContactWindowMs; });
+    // Controller: what becomes of a report of the striker that the reporter
+    // had at about `contactAt`, at `now` (local clock ms). Its own physics
+    // and the report never both apply one contact: one of its own contacts
+    // with the striker (at `seen`) in it, less than an episode gap before or
+    // any time after, has applied it; otherwise it waits out
+    // kContactWindowMs for one, as the striker's copy here may be a little
+    // ahead or behind, and then applies it.
+    enum class ContactReplay { Wait, Drop, Apply };
+    inline ContactReplay ContactReplayDue(std::span<const double> seen, double contactAt, double now) {
+        if (std::any_of(seen.begin(), seen.end(), [&](double at) { return at >= contactAt - kContactEpisodeGapMs; })) {
+            return ContactReplay::Drop;
+        }
+        return now < contactAt + kContactWindowMs ? ContactReplay::Wait : ContactReplay::Apply;
+    }
+
+    // Controller: whether the car and the striker of a report it applied at
+    // `appliedAt` pass through each other at `now`. The striker's copy here
+    // may still be on its way to the contact, and its own physics must not
+    // have it a second time.
+    inline bool ContactReplayed(double appliedAt, double now) {
+        return now - appliedAt <= kContactEpisodeGapMs;
     }
 
     // Client -> server: a car this client simulates (striker) hit a car
