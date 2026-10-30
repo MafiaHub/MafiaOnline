@@ -32,6 +32,14 @@ namespace Mafia1Online::SDK::Seat {
     // prompt only while its bit is set (0x41ffb0, removed at 0x4200d5).
     inline constexpr size_t kCarSeatProtectionMask = 0x21c4;
 
+    // C_human +0xb4 (m_iAnimSpeedAccum): Use_Actor's last argument stores
+    // 1 there; ending that door (Intern_UseCar(true)) adds 100, and the next
+    // C_human::AI tick (0x570740) climbs to the paired seat on 101
+    // (Do_ClimbInCarLR) and clears it. The passenger door's slide across
+    // (C_player::Do_AB_OwnerNULL, USING_OBJECT_CAR_EXIT) passes 1. A
+    // network-controlled human runs NetDirect instead of AI and never climbs.
+    inline constexpr int32_t kHumanCarEventClimb = 101;
+
     enum class UseAction : int32_t {
         Enter = 1,
         Exit = 2,
@@ -80,7 +88,11 @@ namespace Mafia1Online::SDK::Seat {
         NativeCar *controlOverrideCar;
         NativeCar *currentCar2;
         int32_t seatId;
-        std::byte _unusedB0[0x410 - 0xb0];
+        int32_t vehicleAnimSubState;
+        // kHumanCarEventClimb while a slide across waits for C_human::AI.
+        int32_t carEvent;
+        int32_t carEventTime;
+        std::byte _unusedBC[0x410 - 0xbc];
         // 1 while a Use_Actor door animation holds the car's boarding lock.
         int32_t transitionState;
 
@@ -147,5 +159,6 @@ namespace Mafia1Online::SDK::Seat {
     static_assert(offsetof(NativeHuman, usedActorEnter) == 0x98);
     static_assert(offsetof(NativeHuman, usedActorLeave) == 0x9c);
     static_assert(offsetof(NativeHuman, seatId) == 0xac);
+    static_assert(offsetof(NativeHuman, carEvent) == 0xb4);
     static_assert(offsetof(NativeHuman, transitionState) == 0x410);
 } // namespace Mafia1Online::SDK::Seat

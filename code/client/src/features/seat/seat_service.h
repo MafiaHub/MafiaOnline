@@ -68,12 +68,27 @@ namespace Mafia1Online::Features::Seat {
             // occupant array reflects it or the acknowledgement times out.
             bool sent = false;
             bool moving = false;
+            // The entry was reported; a slide across is still to come.
+            bool entered = false;
         };
         struct QueuedEvent {
             Shared::Car::SeatEvent event;
             std::chrono::steady_clock::time_point until;
         };
         struct Animation {
+            std::chrono::steady_clock::time_point until;
+            uint64_t carId = 0;
+            uint8_t seat = 0;
+            // Also holds the paired seat: a door into it, then the climb.
+            bool paired = false;
+
+            [[nodiscard]] bool Holds(uint64_t car, uint8_t at, std::chrono::steady_clock::time_point now) const {
+                return carId == car && (seat == at || (paired && (seat ^ 1) == at)) && now < until;
+            }
+        };
+        // A move to `seat` for a human whose door into the paired seat
+        // still plays here: climb across once it ends, as retail's slide.
+        struct DeferredClimb {
             std::chrono::steady_clock::time_point until;
             uint64_t carId = 0;
             uint8_t seat = 0;
@@ -84,6 +99,8 @@ namespace Mafia1Online::Features::Seat {
         // Simulation host: one of its NPCs threw a player's replica out.
         void OnNpcSteal(SDK::Seat::NativeHuman *human, SDK::Seat::NativeCar *car, int seat, SDK::Player::NativeActor *victim);
         void PollLocal(World::WorldService &world);
+        bool DeferClimb(SDK::Seat::NativeHuman *human, SDK::Seat::NativeCar *car, uint64_t actorId, uint64_t carId, uint8_t seat);
+        void ClimbAfterDoors(World::WorldService &world);
         void Replay(World::WorldService &world);
         void Reconcile(World::WorldService &world);
         // Seats a door animation started here (Use_Actor clears their bit)
@@ -95,6 +112,7 @@ namespace Mafia1Online::Features::Seat {
         PendingLocal _pending;
         std::deque<QueuedEvent> _events;
         std::unordered_map<uint64_t, Animation> _animations;
+        std::unordered_map<uint64_t, DeferredClimb> _climbs;
         std::unordered_map<uint64_t, uint64_t> _seatSequences;
         // (car, seat) of every Use_Actor door on a network car here, until
         // that seat's bit is set again.

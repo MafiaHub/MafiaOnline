@@ -92,12 +92,26 @@ namespace {
         CHECK(PlaceStepFor(1, 2, true) == PlaceStep::FinishAndMove);
         CHECK(PlaceStepFor(0, 3, true) == PlaceStep::FinishAndMove);
     }
+
+    void LocalEntry() {
+        CHECK(NextLocalEntryStep(false, false, false) == LocalEntryStep::Wait);
+        CHECK(NextLocalEntryStep(true, false, false) == LocalEntryStep::Report);
+        // The passenger door's slide: seated, C_human::AI climbs next tick.
+        CHECK(NextLocalEntryStep(true, true, false) == LocalEntryStep::AwaitClimb);
+        // Climbed before it was seen seated, or after the entry was sent.
+        CHECK(NextLocalEntryStep(false, false, true) == LocalEntryStep::ReportSlide);
+        CHECK(NextLocalEntryStep(false, true, true) == LocalEntryStep::ReportSlide);
+        // Do_ClimbInCarLR refused (the paired seat got taken): +0xb4 is
+        // cleared anyway, so the entry stands.
+        CHECK(NextLocalEntryStep(true, false, false) == LocalEntryStep::Report);
+    }
 } // namespace
 
 int main() {
     Prompts();
     Owners();
     Placing();
+    LocalEntry();
     if (failures != 0) {
         std::printf("%d seat rule check(s) failed\n", failures);
         return 1;

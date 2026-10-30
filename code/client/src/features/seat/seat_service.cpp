@@ -33,6 +33,8 @@ namespace Mafia1Online::Features::Seat {
         constexpr auto kLocalAcknowledgementLimit = std::chrono::seconds(2);
         constexpr auto kTransientEventLimit = std::chrono::seconds(5);
         constexpr auto kRemoteExitGrace = std::chrono::milliseconds(500);
+        // A replayed door entry ends well within this; the climb follows.
+        constexpr auto kDeferredClimbLimit = std::chrono::seconds(5);
         // A steal the server neither took nor refused by then (reliable, so
         // a lost connection) no longer blocks a new try.
         constexpr auto kStealAnswerLimit = std::chrono::seconds(5);
@@ -146,6 +148,7 @@ namespace Mafia1Online::Features::Seat {
         _pending = {};
         _events.clear();
         _animations.clear();
+        _climbs.clear();
         _seatSequences.clear();
         _doorSeats.clear();
         _pendingSteals.clear();
@@ -172,6 +175,7 @@ namespace Mafia1Online::Features::Seat {
             _pending = {};
             _events.clear();
             _animations.clear();
+            _climbs.clear();
             _seatSequences.clear();
             _doorSeats.clear();
             _pendingSteals.clear();
@@ -192,6 +196,7 @@ namespace Mafia1Online::Features::Seat {
             }
         }
         Replay(world);
+        ClimbAfterDoors(world);
         Reconcile(world);
         HealSeatPrompts(world);
     }
@@ -469,9 +474,26 @@ namespace Mafia1Online::Features::Seat {
             if (completed) {
                 Send(_pending.carId, _pending.playerId, seat, Action::Exit);
             }
-        } else if (car->GetOwner(seat) == &human->actor && human->IsSeatedIn(car, seat)) {
-            completed = true;
-            Send(_pending.carId, _pending.playerId, seat, _pending.stealing ? Action::Steal : Action::Enter);
+        } else {
+            // The passenger door's slide across (Use_Actor's last argument 1)
+            // ends its door in this seat and C_human::AI climbs to the paired
+            // one on the next tick: report both, or the server keeps this
+            // player in the seat the door led to and every client puts the
+            // driver there.
+            const uint8_t pairedSeat = static_cast<uint8_t>(seat ^ 1);
+            const bool inPairedSeat  = !_pending.stealing && pairedSeat < Shared::Entities::CarEntity::kMaxSeats &&
+                                      car->GetOwner(pairedSeat) == &human->actor && human->IsSeatedIn(car, pairedSeat);
+            const bool seated = car->GetOwner(seat) == &human->actor && human->IsSeatedIn(car, seat);
+            const auto step   = NextLocalEntryStep(seated, human->carEvent == SDK::Seat::kHumanCarEventClimb, inPairedSeat);
+            if (step != LocalEntryStep::Wait && !_pending.entered) {
+                Send(_pending.carId, _pending.playerId, seat, _pending.stealing ? Action::Steal : Action::Enter);
+                _pending.entered = true;
+            }
+            if (step == LocalEntryStep::ReportSlide) {
+                Send(_pending.carId, _pending.playerId, pairedSeat, Action::Move);
+                _pending.moving = true;
+            }
+            completed = step == LocalEntryStep::Report || step == LocalEntryStep::ReportSlide;
         }
         if (completed) {
             _pending.sent = true;
@@ -598,6 +620,9 @@ namespace Mafia1Online::Features::Seat {
                     human->ClimbToPairedSeat()) {
                     _animations[event.playerId] = {now + std::chrono::seconds(2), event.carId, event.seat};
                 }
+                else {
+                    DeferClimb(human, car, event.playerId, event.carId, event.seat);
+                }
                 break;
             }
         }
@@ -634,6 +659,36 @@ namespace Mafia1Online::Features::Seat {
         }
         _animations[npcId] = {now + std::chrono::seconds(2), carId, seat};
         return human->usedActorLeave == static_cast<NativeActor *>(car);
+    }
+
+    bool SeatService::DeferClimb(NativeHuman *human, NativeCar *car, uint64_t actorId, uint64_t carId, uint8_t seat) {
+        if (seat >= Shared::Entities::CarEntity::kMaxSeats || !human->HasPendingEntry(car) || human->seatId != (seat ^ 1) || car->GetOwner(seat)) {
+            return false;
+        }
+        // A replica never climbs by itself (NetDirect, not C_human::AI);
+        // hold both seats from reconciliation until it has.
+        const auto until  = std::chrono::steady_clock::now() + kDeferredClimbLimit;
+        _climbs[actorId]     = {until, carId, seat};
+        _animations[actorId] = {until, carId, seat, true};
+        return true;
+    }
+
+    void SeatService::ClimbAfterDoors(World::WorldService &world) {
+        const auto now = std::chrono::steady_clock::now();
+        for (auto it = _climbs.begin(); it != _climbs.end();) {
+            auto *human     = Human(world, it->first);
+            auto *car       = Car(world, it->second.carId);
+            const auto seat = it->second.seat;
+            if (human && car && now < it->second.until && human->HasPendingEntry(car)) {
+                ++it;
+                continue;
+            }
+            if (human && car && now < it->second.until && human->IsSeatedIn(car, seat ^ 1) && !car->GetOwner(seat) && human->ClimbToPairedSeat()) {
+                _animations[it->first] = {now + std::chrono::seconds(2), it->second.carId, seat};
+            }
+            // Otherwise reconciliation links it where the server has it.
+            it = _climbs.erase(it);
+        }
     }
 
     void SeatService::HealSeatPrompts(World::WorldService &world) {
@@ -673,9 +728,7 @@ namespace Mafia1Online::Features::Seat {
             }
             const NativeActor *self = car;
             view.doorBusy = std::any_of(doors.begin(), doors.end(), [&](const auto &door) { return door.first == self && door.second == seat; }) ||
-                            std::any_of(_animations.begin(), _animations.end(), [&](const auto &entry) {
-                                return entry.second.carId == carId && entry.second.seat == seat && now < entry.second.until;
-                            });
+                            std::any_of(_animations.begin(), _animations.end(), [&](const auto &entry) { return entry.second.Holds(carId, seat, now); });
             if (!RestoresEnterable(view)) {
                 ++it;
                 continue;
@@ -713,11 +766,14 @@ namespace Mafia1Online::Features::Seat {
                     _animations[state->seatActorId] = {now + kRemoteExitGrace, state->GetNetworkID(), state->seatIndex};
                 }
             }
-            if (freshMove && !_animations.contains(state->seatActorId)) {
-                if (auto *moving = Human(world, state->seatActorId);
-                    moving && moving->IsSeatedIn(car, state->seatIndex ^ 1) && !car->GetOwner(state->seatIndex) &&
-                    moving->ClimbToPairedSeat()) {
+            if (freshMove) {
+                if (auto *moving = Human(world, state->seatActorId); moving && !_animations.contains(state->seatActorId) &&
+                                                                    moving->IsSeatedIn(car, state->seatIndex ^ 1) && !car->GetOwner(state->seatIndex) &&
+                                                                    moving->ClimbToPairedSeat()) {
                     _animations[state->seatActorId] = {now + std::chrono::seconds(2), state->GetNetworkID(), state->seatIndex};
+                }
+                else if (moving) {
+                    DeferClimb(moving, car, state->seatActorId, state->GetNetworkID(), state->seatIndex);
                 }
             }
             const auto place = [&](NativeHuman *human, uint8_t seat) {
@@ -780,8 +836,7 @@ namespace Mafia1Online::Features::Seat {
                 if (owner == (expected ? &expected->actor : nullptr)) {
                     if (expected && !expected->IsSeatedIn(car, seat) && expectedId != _pending.playerId) {
                         const auto animation = _animations.find(expectedId);
-                        const bool animationRunning = animation != _animations.end() && animation->second.carId == state->GetNetworkID() &&
-                                                      animation->second.seat == seat && now < animation->second.until;
+                        const bool animationRunning = animation != _animations.end() && animation->second.Holds(state->GetNetworkID(), seat, now);
                         if (!animationRunning && (!expected->usedActorEnter || expected->usedActorEnter == car) && !place(expected, seat)) {
                             _animations[expectedId] = {now + std::chrono::milliseconds(500), state->GetNetworkID(), seat};
                         }
@@ -792,7 +847,7 @@ namespace Mafia1Online::Features::Seat {
                     continue;
                 }
                 if (auto anim = _animations.find(expectedId ? expectedId : ownerHandle.networkId); anim != _animations.end()) {
-                    if (anim->second.carId == state->GetNetworkID() && anim->second.seat == seat && now < anim->second.until) {
+                    if (anim->second.Holds(state->GetNetworkID(), seat, now)) {
                         continue;
                     }
                     _animations.erase(anim);

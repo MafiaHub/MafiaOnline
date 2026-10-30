@@ -62,4 +62,27 @@ namespace Mafia1Online::Features::Seat {
         }
         return (entrySeat ^ 1) == seat && seatFree ? PlaceStep::FinishAndClimb : PlaceStep::FinishAndMove;
     }
+
+    // What the local player's door entry into a seat has come to.
+    enum class LocalEntryStep {
+        // The door still plays.
+        Wait,
+        // In the seat, but C_human::AI climbs to the paired one next (the
+        // passenger door's slide across): report the entry, not the end.
+        AwaitClimb,
+        // In the seat for good: report the entry.
+        Report,
+        // Already climbed across: report the entry and the move.
+        ReportSlide,
+    };
+
+    constexpr LocalEntryStep NextLocalEntryStep(bool seated, bool climbPending, bool inPairedSeat) {
+        if (inPairedSeat) {
+            return LocalEntryStep::ReportSlide;
+        }
+        if (!seated) {
+            return LocalEntryStep::Wait;
+        }
+        return climbPending ? LocalEntryStep::AwaitClimb : LocalEntryStep::Report;
+    }
 } // namespace Mafia1Online::Features::Seat
