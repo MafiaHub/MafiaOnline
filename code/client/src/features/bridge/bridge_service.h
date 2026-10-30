@@ -1,5 +1,6 @@
 #pragma once
 
+#include "features/world/remote_clock.h"
 #include "shared/features/bridge/bridge_report.h"
 
 #include <array>
@@ -39,8 +40,6 @@ namespace Mafia1Online::Features::Bridge {
 
         void OnGameInit(SDK::World::NativeBridge *bridge);
         void OnGameDone(SDK::World::NativeBridge *bridge);
-        // Every bridge's Update, before it runs, with its frame time.
-        void AdvanceClock(const SDK::World::NativeBridge *bridge, unsigned int frameTimeMs);
         // Players: the host's state at the render time, before Update.
         void BeforeUpdate(SDK::World::NativeBridge *bridge);
         // Sync trace, after Update: the steamers as the host moved them
@@ -64,25 +63,14 @@ namespace Mafia1Online::Features::Bridge {
         void SendSnapshot(World::WorldService &world, bool reliable);
         void CloseWithoutHost();
         [[nodiscard]] int IndexOf(const SDK::World::NativeBridge *bridge) const;
-        [[nodiscard]] static double LocalMs();
 
         std::vector<Entry> _bridges;
         uint64_t _missionGeneration = 0;
         // Players: the host's reports, oldest first.
         std::deque<Sample> _samples;
-        // Players: local clock minus host clock, the least over recent
-        // packets (the least delayed one), to date the samples here.
-        std::deque<double> _clockOffsets;
-        double _clockOffset = 0.0;
-        bool _hasClockOffset = false;
-        // The host's clock as the native world moves: it runs on the frame
-        // times Update is given and leans toward the wall clock (the host's
-        // own; on players the host's, the render delay behind). The wall
-        // clock where Update happens to run is up to a frame off them, and
-        // a steamer placed by it surges and lags against everything else.
-        // Hosts date their reports by it, players draw at it.
-        double _frameClockMs = 0.0;
-        bool _hasFrameClock = false;
+        // Players: this frame clock minus the host's (World::FrameClock on
+        // both), to date the samples here.
+        World::RemoteClock _hostClock;
         // Players: the reporting host's session, and its newest report here.
         uint32_t _hostSession = 0;
         std::chrono::steady_clock::time_point _lastSampleAt {};
