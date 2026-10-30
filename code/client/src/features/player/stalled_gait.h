@@ -19,6 +19,19 @@ namespace Mafia1Online::Features::Player {
         return base >= 5 && base <= 20 && base != 8 && base != 9 && base != 10;
     }
 
+    // The work state (C_human m_iCanWork, +0x40c) a replica shows `state`
+    // with. C_player::AI calls Do_Breath (1) and then, while a move key is
+    // held, a Go_* (2: Go_Front writes it at 0x57d3a8) every frame. Do_Shoot's
+    // melee release reads it (0x583adc, 0x583cb6, 0x583ddd): a standing
+    // body swings whole as a timed action (5), a moving one as an overlay
+    // over the legs' gait. Any other work state is the native's to end.
+    inline int32_t GaitWorkState(int32_t workState, int32_t state) {
+        if (workState != 1 && workState != 2) {
+            return workState;
+        }
+        return MovingGait(state) ? 2 : 1;
+    }
+
     // A replica stands still only because its stream stalled: the snapshot
     // buffer ran its newest pose (at `newestTime`, moving at `velocity`) on
     // for its whole extrapolation bound and holds it there. Retail never

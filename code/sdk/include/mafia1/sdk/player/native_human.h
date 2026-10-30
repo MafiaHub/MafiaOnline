@@ -403,6 +403,9 @@ namespace Mafia1Online::SDK::Player {
             using Call      = void(__thiscall *)(NativeHuman *, float, bool, bool);
             reinterpret_cast<Call>(kPersonAnim)(this, 0.0f, true, false);
         }
+        void SetWorkState(int32_t workState) {
+            _canWork = workState;
+        }
         void RefreshAnimation() {
             using Call = void(__thiscall *)(NativeHuman *, float, bool, bool);
             reinterpret_cast<Call>(kPersonAnim)(this, 0.0f, true, false);

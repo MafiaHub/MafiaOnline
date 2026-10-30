@@ -794,9 +794,11 @@ namespace Mafia1Online::Features::Player {
             auto *human = static_cast<SDK::Player::NativeHuman *>(static_cast<void *>(actor));
             // C_human::Do_Shoot owns its melee animation until native
             // Movement/Update clears the action state. Do not replace that
-            // animation with a network locomotion sample mid-swing.
+            // animation with a network locomotion sample mid-swing. A swing
+            // on the move is an overlay (m_iWeaponChangeTime counts it down)
+            // over legs that keep the gait, as the owner's Go_* keeps them.
             const auto melee = human->Melee();
-            if (melee.canWork == SDK::Player::kHumanTimedActionWorkState || melee.weaponChangeTime >= 0) {
+            if (melee.canWork == SDK::Player::kHumanTimedActionWorkState) {
                 return;
             }
             // A server-accepted hit starts retail's pain/knockdown steps in
@@ -813,8 +815,12 @@ namespace Mafia1Online::Features::Player {
             if (human->AnimationState() == SDK::Player::kHumanThrowGrenadeAnimation) {
                 return;
             }
+            // Walking as the owner's body walks, so a replayed swing takes
+            // the same full-body or overlay branch of Do_Shoot.
+            const auto fromPose = LocomotionFromPose(pose);
+            human->SetWorkState(GaitWorkState(melee.canWork, locomotion ? locomotion->state : static_cast<int32_t>(fromPose)));
             if (!locomotion) {
-                human->SetLocomotionAnimation(LocomotionFromPose(pose));
+                human->SetLocomotionAnimation(fromPose);
             }
             else if (!locomotion->oneShot) {
                 human->SetLocomotionAnimation(static_cast<SDK::Player::LocomotionAnimation>(locomotion->state));

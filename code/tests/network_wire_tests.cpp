@@ -765,6 +765,14 @@ namespace {
         // spot, the breath, a jump or a death.
         CHECK(MovingGait(5) && MovingGait(6) && MovingGait(11) && MovingGait(20) && MovingGait(0x400 | 7));
         CHECK(!MovingGait(1) && !MovingGait(8) && !MovingGait(9) && !MovingGait(10) && !MovingGait(97) && !MovingGait(131));
+        // A walking replica is in Go_*'s work state, so a swing overlays
+        // its gait; standing or turning, Do_Breath's, so it swings whole.
+        CHECK(GaitWorkState(1, 6) == 2 && GaitWorkState(2, 0x400 | 5) == 2 && GaitWorkState(1, 18) == 2);
+        CHECK(GaitWorkState(2, 1) == 1 && GaitWorkState(2, 10) == 1 && GaitWorkState(1, 97) == 1);
+        // A timed swing, hit steps, a clip or a fall stay the native's.
+        for (const int32_t work : {3, 4, 5, 6, 8}) {
+            CHECK(GaitWorkState(work, 6) == work && GaitWorkState(work, 1) == work);
+        }
         const glm::vec3 running {0.0f, 0.0f, 5.0f};
         // Inside the bound the body still moves; past it, held moving.
         CHECK(!Stalled(1149.0, 1000.0, 150.0f, running));
