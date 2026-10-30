@@ -205,6 +205,10 @@ namespace Mafia1Online::Features::Npc {
             std::chrono::steady_clock::time_point policeTickAt;
             // The replica it grabbed, while the arrest or fine runs.
             SDK::Player::NativeActor *grabbed = nullptr;
+            // The offender and mode of its police board case as last seen,
+            // for the log of each case's start, mode changes and end.
+            SDK::Player::NativeActor *caseOffender = nullptr;
+            uint32_t caseMode = 0;
             // The anger PickTarget lent a player's log entry (actor, its own
             // value, the value written), restored before the next pick.
             struct LentAnger {
@@ -247,6 +251,9 @@ namespace Mafia1Online::Features::Npc {
         // Officers on foot after one player move to a wanted player much
         // closer to them.
         void RetargetOfficers(SDK::Police::NativePoliceManager &police);
+        void LogPoliceCases(SDK::Police::NativePoliceManager &police);
+        void LogPoliceCaseEnd(SDK::Player::NativeActor *officer, Tracked &tracked, SDK::Police::NativePoliceManager *police, bool despawned, bool newOffender);
+        [[nodiscard]] uint64_t CaseTargetId(SDK::Player::NativeActor *offender) const;
         // Turns the police manager on for the loaded mission and keeps every
         // spawned player's replica in its crime records, except the police
         // officers', which it treats as retail treats its own.

@@ -6,9 +6,11 @@
 #include "shared/features/player/player_entity.h"
 
 #include <core_modules.h>
+#include <logging/logger.h>
 #include <networking/network_peer.h>
 
 #include <algorithm>
+#include <string>
 #include <vector>
 
 namespace Mafia1Online::Features::Npc {
@@ -213,6 +215,9 @@ namespace Mafia1Online::Features::Npc {
         if (!host || !player || !player->spawned || player->missionGeneration != _missionGeneration) {
             return false;
         }
+        // Lowering or clearing a record calls off every officer on the player
+        // (NpcHost::BeforePoliceTick); the log names who ended those cases.
+        Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->info("Script order for player {}: {}", playerId, clear ? std::string("clear the record") : "wanted level " + std::to_string(level));
         Shared::Npc::PoliceOrder order;
         order.missionGeneration = _missionGeneration;
         order.playerNetworkId = playerId;

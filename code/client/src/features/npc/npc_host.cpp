@@ -3,6 +3,7 @@
 #include "npc_host.h"
 
 #include "gangster_spawn.h"
+#include "police_case.h"
 #include "police_host.h"
 
 #include "features/combat/combat_hooks.h"
@@ -363,6 +364,10 @@ namespace Mafia1Online::Features::Npc {
             return;
         }
         const uint32_t key = found->second.key;
+        if (found->second.caseOffender) {
+            auto *game = SDK::Core::Mission::Get()->Game();
+            LogPoliceCaseEnd(static_cast<NativeActor *>(actor), found->second, game ? SDK::Police::PoliceManager(game) : nullptr, true, false);
+        }
         _npcs.erase(found);
         ReportRetired(key);
         if (Shared::Npc::IsScriptedKey(key)) {
@@ -798,6 +803,9 @@ namespace Mafia1Online::Features::Npc {
                 continue;
             }
             auto *person = static_cast<NativeActor *>(*it);
+            // DelPerson hands the record's officers to the retirement list.
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Police record of player {} dropped ({})", CaseTargetId(person),
+                                                                       found != current.end() ? "on police duty" : "replica gone");
             police->DelPerson(person);
             _reportedRecords.erase(*it);
             if (found != current.end()) {
@@ -833,6 +841,61 @@ namespace Mafia1Online::Features::Npc {
             }
         }
         RetargetOfficers(*police);
+        LogPoliceCases(*police);
+    }
+
+    void NpcHost::LogPoliceCases(SDK::Police::NativePoliceManager &police) {
+        for (auto &[native, tracked] : _npcs) {
+            if (tracked.kind != Shared::Entities::NpcKind::Police) {
+                continue;
+            }
+            auto *officer = static_cast<NativeActor *>(native);
+            const auto *action = officer->IsDead() ? nullptr : SDK::Police::OfficerBoardAction(officer);
+            NativeActor *offender = action ? action->Offender() : nullptr;
+            const uint32_t mode = action ? action->Mode() : 0;
+            if (offender == tracked.caseOffender) {
+                if (offender && mode != tracked.caseMode) {
+                    Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("NPC {} case on player {}: {} -> {}", tracked.key, CaseTargetId(offender),
+                                                                               PoliceCaseModeName(tracked.caseMode), PoliceCaseModeName(mode));
+                    tracked.caseMode = mode;
+                }
+                continue;
+            }
+            if (tracked.caseOffender) {
+                LogPoliceCaseEnd(officer, tracked, &police, false, offender != nullptr);
+            }
+            tracked.caseOffender = offender;
+            tracked.caseMode = mode;
+            if (offender) {
+                Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("NPC {} took a case on player {}: {}", tracked.key, CaseTargetId(offender),
+                                                                           PoliceCaseModeName(mode));
+            }
+        }
+    }
+
+    uint64_t NpcHost::CaseTargetId(NativeActor *offender) const {
+        return _world && offender ? _world->NativeObjects().FindByNative(offender).networkId : 0;
+    }
+
+    void NpcHost::LogPoliceCaseEnd(NativeActor *officer, Tracked &tracked, SDK::Police::NativePoliceManager *police, bool despawned, bool newOffender) {
+        NativeActor *offender = tracked.caseOffender;
+        // A removed replica is no longer a person; only a recorded one is
+        // still safe to read.
+        const bool recorded = _policePersons.contains(offender);
+        PoliceCaseFacts facts;
+        facts.despawned = despawned;
+        facts.officerDead = !despawned && officer->IsDead();
+        facts.grabbedHere = tracked.grabbed == offender;
+        facts.grabbedElsewhere = std::any_of(_npcs.begin(), _npcs.end(), [&](const auto &entry) { return &entry.second != &tracked && entry.second.grabbed == offender; });
+        facts.targetGone = !recorded;
+        facts.targetDead = recorded && offender->IsDead();
+        facts.newOffender = newOffender;
+        const auto *record = recorded && police ? police->FindRecord(offender) : nullptr;
+        facts.recordCleared = record && record->Level() == SDK::Police::NativeCrimeRecord::kLevelNone;
+        facts.windingDown = tracked.caseMode == SDK::Police::kBoardModeWindDown;
+        Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("NPC {} left its case on player {} ({}): {}", tracked.key, CaseTargetId(offender),
+                                                                   PoliceCaseModeName(tracked.caseMode), PoliceCaseEndName(ClassifyPoliceCaseEnd(facts)));
+        tracked.caseOffender = nullptr;
     }
 
     void NpcHost::ForgetContacts(NativeActor *replica) {
@@ -998,6 +1061,8 @@ namespace Mafia1Online::Features::Npc {
             }
             const uint16_t level = std::min<uint16_t>(order.level, SDK::Police::NativeCrimeRecord::kLevelLethal);
             if (order.action == Shared::Npc::PoliceOrder::Action::Clear || level < record->Level()) {
+                Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Police called off player {} by the server's order ({} at level {})", order.playerNetworkId,
+                                                                           order.action == Shared::Npc::PoliceOrder::Action::Clear ? "clear" : "lowered", record->Level());
                 police.SettleRecord(native, false);
                 SDK::Police::CallOffOfficers(native);
             }
