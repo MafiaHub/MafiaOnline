@@ -186,8 +186,16 @@ namespace Mafia1Online::SDK::Car {
     static_assert(offsetof(NativeWheel, contactAngle) == 0x114);
     // reM E_vehicle_wheel_flags; the replay record keeps a wheel skidding
     // while it is in contact.
+    inline constexpr uint32_t kWheelHandbrakeAxle = 0x00000004;
     inline constexpr uint32_t kWheelInContact = 0x00000008;
     inline constexpr uint32_t kWheelSkidding  = 0x00000010;
+    // Outputs of C_Vehicle::Move (0x4e2090), which clears and recomputes
+    // them every physics step: a locked wheel, one the engine drives, ABS
+    // and ESP intervening.
+    inline constexpr uint32_t kWheelFullSkid  = 0x00000020;
+    inline constexpr uint32_t kWheelPowered   = 0x00000080;
+    inline constexpr uint32_t kWheelAbsActive = 0x00000100;
+    inline constexpr uint32_t kWheelEspActive = 0x00000200;
     inline constexpr uint32_t kWheelHasVisual = 0x01000000;
     static_assert(offsetof(NativeWheel, deformAngle) == 0x188);
     static_assert(offsetof(NativeWheel, health) == 0x18c);

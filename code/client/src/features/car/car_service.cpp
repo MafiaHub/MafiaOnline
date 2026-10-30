@@ -1410,11 +1410,16 @@ namespace Mafia1Online::Features::Car {
         }
         // Brake and reverse lights, wheel lock, skids and engine revs are all
         // derived by the native tick from the pedals and the engaged gear.
-        // Skipped while the local player is entering or seated: Use_Actor
-        // sets that driver's gearbox mode and AI_drive owns the pedals.
+        // Skipped while the local player is entering or in the driver's
+        // seat: Use_Actor sets that driver's gearbox mode and AI_drive owns
+        // the pedals. A passenger's AI_drive never runs (C_player::AI only
+        // drives from seat 0), so in another seat the car keeps the
+        // controller's pedals and gear like any observed car; skipping them
+        // there froze them at whatever they were when the passenger got in.
         const auto *local = static_cast<const SDK::Seat::NativeHuman *>(static_cast<const void *>(SDK::Player::CurrentPlayer()));
         const SDK::Player::NativeActor *self = actor;
-        if (!local || (local->usedActorEnter != self && local->usedActorLeave != self)) {
+        const bool localDriving = local && ((local->usedActorEnter == self && local->seatId == 0) || local->usedActorLeave == self);
+        if (!localDriving) {
             vehicle.ApplyInputs({state->powerInput, state->brakeInput, state->handbrakeInput, state->clutchInput});
             vehicle.DisableAutomaticGearbox();
             if (vehicle.Gear() != state->gear && state->gear >= -1 && state->gear <= vehicle.MaximumGear()) {
@@ -2165,10 +2170,27 @@ namespace Mafia1Online::Features::Car {
         }
         // As UpdateReplayPlayback: the recorded skid bits drive skid marks,
         // tyre smoke and squeal in C_Vehicle::Update.
+        //
+        // C_Vehicle::Move clears and recomputes the locked, powered, ABS
+        // and ESP bits every physics step; here Move never runs, so they
+        // kept whatever the car's last native step left: braking at rest
+        // (before the first pose, in contact mode, or as this client's own
+        // car before a hand-over) locked every wheel for good. Locked
+        // (FULL_SKID) wheels never turn in UpdateRotationWheels, and powered
+        // ones turn with an engaged gear this car never engages, so the car
+        // slid along on still wheels as if braked. They are cleared, so each
+        // wheel turns with its ground travel, and locked only while it skids
+        // under the controller's handbrake (on its axle) or full brake.
+        const bool locking = state->brakeInput >= 0.99f;
+        const bool handbrake = state->handbrakeInput > 0.0f;
         for (int i = 0; i < std::min(vehicle.WheelCount(), 8); ++i) {
             if (auto *wheel = vehicle.MutableWheel(i)) {
+                wheel->flags &= ~(SDK::Car::kWheelFullSkid | SDK::Car::kWheelPowered | SDK::Car::kWheelAbsActive | SDK::Car::kWheelEspActive);
                 if (state->skidMask & (1u << i)) {
                     wheel->flags |= SDK::Car::kWheelHasVisual | SDK::Car::kWheelSkidding;
+                    if (locking || (handbrake && (wheel->flags & SDK::Car::kWheelHandbrakeAxle))) {
+                        wheel->flags |= SDK::Car::kWheelFullSkid;
+                    }
                 }
                 else {
                     wheel->flags &= ~(SDK::Car::kWheelHasVisual | SDK::Car::kWheelSkidding);
