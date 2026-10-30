@@ -21,6 +21,7 @@
 #include "shared/features/player/player_entity.h"
 #include "shared/features/world/mission_catalog.h"
 #include "shared/features/world/mission_entity.h"
+#include "shared/features/world/world_state_entity.h"
 #include "shared/register_entities.h"
 
 #include "features/car/vehicle_scripting.h"
@@ -690,15 +691,25 @@ namespace Mafia1Online::Core {
         // passenger seat, otherwise the nearest mission-ready player. An empty
         // car only moves to another player who is clearly closer, and not more
         // often than every two seconds, so a hand-off never flaps.
-        constexpr auto kInterval         = std::chrono::milliseconds(250);
-        constexpr auto kEmptyHandoffHold = std::chrono::seconds(2);
-        constexpr float kEmptyHysteresis = 10.0f;
-        const auto now                   = std::chrono::steady_clock::now();
+        constexpr auto kInterval            = std::chrono::milliseconds(250);
+        constexpr auto kEmptyHandoffHold    = std::chrono::seconds(2);
+        constexpr float kEmptyHysteresis    = 10.0f;
+        constexpr int kSimulationPingChange = 5;
+        const auto now                      = std::chrono::steady_clock::now();
         if (now - _lastControllerUpdate < kInterval) {
             return;
         }
         _lastControllerUpdate = now;
-        _cars.RefreshControllerPings();
+        // The host's ping for its cars' observers, once for all of them (a
+        // player's is on its PlayerEntity); a reliable field, so only when
+        // it moved noticeably.
+        if (const auto host = _simulation.Host()) {
+            const int ping = Framework::CoreModules::GetNetworkPeer()->GetPing(MafiaNet::ToGuid(*host));
+            auto &state    = _worldScript.State();
+            if (ping >= 0 && std::abs(std::min(ping, 9999) - static_cast<int>(state.simulationPing)) >= kSimulationPingChange) {
+                state.simulationPing = static_cast<uint16_t>(std::min(ping, 9999));
+            }
+        }
         const auto usable = [&](uint64_t carId, uint64_t guid) {
             if (guid == 0 || !_missionReadiness.IsReady(static_cast<MafiaNet::PeerGuid>(guid)) || !_players.FindByGuid(static_cast<MafiaNet::PeerGuid>(guid))) {
                 return false;

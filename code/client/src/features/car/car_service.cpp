@@ -15,6 +15,7 @@
 #include "shared/features/car/car_movement.h"
 #include "shared/features/car/car_siren_intent.h"
 #include "shared/features/player/player_entity.h"
+#include "shared/features/world/world_state_entity.h"
 
 #include <core_modules.h>
 #include <integrations/client/instance.h>
@@ -204,8 +205,19 @@ namespace Mafia1Online::Features::Car {
         std::unordered_set<uint64_t> seen;
         const uint64_t myGuid = static_cast<uint64_t>(replication->GetMyGUID());
         // With the server's to each controller, the round trip that brings a
-        // car's poses here.
-        const int ownPing = Framework::CoreModules::GetClientInstance()->GetNetworkingEngine()->GetNetworkClient()->GetPing();
+        // car's poses here. A controller is a player or else the simulation
+        // host, whose ping the world state carries.
+        const int ownPing       = Framework::CoreModules::GetClientInstance()->GetNetworkingEngine()->GetNetworkClient()->GetPing();
+        uint16_t simulationPing = 0;
+        std::unordered_map<uint64_t, uint16_t> controllerPings;
+        replication->ForEach<Shared::Entities::WorldStateEntity>([&](Shared::Entities::WorldStateEntity *state) {
+            simulationPing = state->simulationPing;
+        });
+        replication->ForEach<Shared::Entities::PlayerEntity>([&](Shared::Entities::PlayerEntity *player) {
+            if (player->controllerGuid != 0) {
+                controllerPings[player->controllerGuid] = player->ping;
+            }
+        });
         replication->ForEach<Shared::Entities::CarEntity>([&](Shared::Entities::CarEntity *car) {
             if (car->missionGeneration != loadedMissionGeneration) {
                 return;
@@ -214,7 +226,8 @@ namespace Mafia1Online::Features::Car {
             seen.insert(id);
             auto &stream                    = _streams[id];
             const bool simulationController = car->simulationControllerGuid != 0 && car->simulationControllerGuid == myGuid;
-            stream.transitMs                = CarPoseBuffer::TransitMs(car->controllerPing, ownPing);
+            const auto controllerPing       = controllerPings.find(car->simulationControllerGuid);
+            stream.transitMs                = CarPoseBuffer::TransitMs(controllerPing != controllerPings.end() ? controllerPing->second : simulationPing, ownPing);
             if (stream.simulationController != simulationController) {
                 stream.simulationController   = simulationController;
                 stream.lastSent               = {};

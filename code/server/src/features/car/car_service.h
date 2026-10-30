@@ -62,9 +62,6 @@ namespace Mafia1Online::Features::Car {
         void TransferController(uint64_t formerGuid, uint64_t replacementGuid);
         void AssignUncontrolled(uint64_t controllerGuid);
         void SetController(uint64_t networkId, uint64_t controllerGuid);
-        // Publishes each car's controller's ping (CarEntity::controllerPing)
-        // when it moved by a few ms or the controller changed.
-        void RefreshControllerPings();
 
         bool SetTransform(uint64_t networkId, glm::vec3 position, glm::vec3 velocity, glm::quat rotation);
         bool SetEngineOn(uint64_t networkId, bool on);

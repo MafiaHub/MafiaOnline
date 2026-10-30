@@ -273,8 +273,9 @@ namespace Mafia1Online::Features::Car {
         }
 
         // How far the controller's car is past its newest pose here: half the
-        // server's round trip to the controller (CarEntity::controllerPing)
-        // and half this client's.
+        // server's round trip to the controller (its PlayerEntity::ping, or
+        // WorldStateEntity::simulationPing for the simulation host) and half
+        // this client's.
         static float TransitMs(uint16_t controllerPing, int ownPing) {
             const float transit = 0.5f * (static_cast<float>(controllerPing) + static_cast<float>(std::max(ownPing, 0)));
             return std::clamp(transit, 0.0f, kMaxTransitMs);

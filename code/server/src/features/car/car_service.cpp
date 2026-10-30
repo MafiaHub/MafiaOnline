@@ -590,26 +590,6 @@ namespace Mafia1Online::Features::Car {
         }
     }
 
-    void CarService::RefreshControllerPings() {
-        constexpr int kPingChange = 5;
-        for (uint64_t id : _ids) {
-            auto *car = Find(id);
-            if (!car) {
-                continue;
-            }
-            const int ping = car->simulationControllerGuid != 0
-                                 ? Framework::CoreModules::GetNetworkPeer()->GetPing(MafiaNet::ToGuid(static_cast<MafiaNet::PeerGuid>(car->simulationControllerGuid)))
-                                 : 0;
-            if (ping < 0) {
-                continue;
-            }
-            const auto clamped = static_cast<uint16_t>(std::min(ping, 9999));
-            if (std::abs(static_cast<int>(clamped) - static_cast<int>(car->controllerPing)) >= kPingChange) {
-                car->controllerPing = clamped;
-            }
-        }
-    }
-
     void CarService::AssignUncontrolled(uint64_t controllerGuid) {
         if (controllerGuid == 0) {
             return;
