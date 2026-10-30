@@ -43,9 +43,6 @@ namespace Mafia1Online::Features::Npc {
         }
         // Holds the pose stream off a pull-out whose track never ends.
         constexpr auto kPullLimit = std::chrono::seconds(5);
-        // As PlayerService's kSeizedLimit: the longest an arrest half holds
-        // the pose stream off.
-        constexpr std::chrono::milliseconds kSeizingLimit {15000};
 
         // A copy constructed here later than this into its throw-out, or its
         // door exit or entry, stands where the host's is: replaying it would
@@ -281,7 +278,7 @@ namespace Mafia1Online::Features::Npc {
         const auto now = std::chrono::steady_clock::now();
         // The officer's arrest half plays from the aligned place.
         if (replica.seizingUntil != std::chrono::steady_clock::time_point {}) {
-            if (human->IsPlayingAnimation() && now < replica.seizingUntil) {
+            if (now < replica.seizingUntil) {
                 HoldPose(replica);
                 return;
             }
@@ -653,7 +650,7 @@ namespace Mafia1Online::Features::Npc {
         if (duration == 0) {
             return;
         }
-        replica.seizingUntil = std::chrono::steady_clock::now() + std::min(std::chrono::milliseconds(duration), kSeizingLimit);
+        replica.seizingUntil = std::chrono::steady_clock::now() + Shared::Npc::SeizedHold(duration);
     }
 
     bool NpcReplicaService::Reached(uint64_t networkId, uint16_t hostClock, std::chrono::steady_clock::time_point received) const {

@@ -48,8 +48,6 @@ namespace Mafia1Online::Features::Player {
         constexpr float kDiagonalComponent = 0.38f;
         // Holds the pose stream off a pull-out whose track never ends.
         constexpr auto kPullLimit          = std::chrono::seconds(5);
-        // Bounds a police arrest or fine animation (both last a few seconds).
-        constexpr auto kSeizedLimit        = std::chrono::seconds(15);
 
         bool IsFinite(const Framework::Utils::TransformSnapshot &snapshot) {
             return std::isfinite(snapshot.position.x) && std::isfinite(snapshot.position.y) && std::isfinite(snapshot.position.z) && std::isfinite(snapshot.velocity.x) && std::isfinite(snapshot.velocity.y) && std::isfinite(snapshot.velocity.z)
@@ -511,8 +509,8 @@ namespace Mafia1Online::Features::Player {
         });
     }
 
-    void PlayerService::HoldSeized(uint64_t networkId) {
-        _seizedUntil[networkId] = std::chrono::steady_clock::now() + kSeizedLimit;
+    void PlayerService::HoldSeized(uint64_t networkId, std::chrono::milliseconds hold) {
+        _seizedUntil[networkId] = std::chrono::steady_clock::now() + hold;
         _alignedUntil.erase(networkId);
     }
 
@@ -590,17 +588,21 @@ namespace Mafia1Online::Features::Player {
                 // it when the fine ends (0x5172a8); the weapon goes away
                 // before the cuffs (Do_Holster, 0x5171d4).
                 SDK::Police::LockPlayerControls(actor, true);
-                _localSeizedUntil = now + kSeizedLimit;
+                _localSeizedUntil = now + Shared::Npc::kSeizedHoldLimit;
                 human->Holster();
             }
-            if (!human->PlayAnimationOnce(Shared::Npc::SeizedAnimation(outcome))) {
+            const auto hold = Shared::Npc::SeizedHold(human->PlayAnimationOnce(Shared::Npc::SeizedAnimation(outcome)));
+            if (hold.count() == 0) {
                 if (owned->second.local) {
                     ReleaseLocalSeized(world, true);
                 }
                 continue;
             }
-            if (!owned->second.local) {
-                HoldSeized(seized.targetNetworkId);
+            if (owned->second.local) {
+                _localSeizedUntil = now + hold;
+            }
+            else {
+                HoldSeized(seized.targetNetworkId, hold);
             }
         }
     }
@@ -610,8 +612,7 @@ namespace Mafia1Online::Features::Player {
             return;
         }
         auto *actor = static_cast<SDK::Player::NativeActor *>(world.NativeObjects().Resolve(_local));
-        const auto *human = static_cast<const SDK::Player::NativeHuman *>(static_cast<const void *>(actor));
-        if (!force && actor && human->IsPlayingAnimation() && std::chrono::steady_clock::now() < _localSeizedUntil) {
+        if (!force && actor && std::chrono::steady_clock::now() < _localSeizedUntil) {
             return;
         }
         if (actor) {
@@ -715,9 +716,7 @@ namespace Mafia1Online::Features::Player {
             _climbingUntil.erase(climbing);
         }
         if (const auto seized = _seizedUntil.find(networkId); seized != _seizedUntil.end()) {
-            const auto held = _ownedByNative.find(current->second);
-            auto *human = held == _ownedByNative.end() ? nullptr : static_cast<SDK::Player::NativeHuman *>(world.NativeObjects().Resolve(held->second.handle));
-            if (human && human->IsPlayingAnimation() && std::chrono::steady_clock::now() < seized->second) {
+            if (std::chrono::steady_clock::now() < seized->second) {
                 return;
             }
             _seizedUntil.erase(seized);

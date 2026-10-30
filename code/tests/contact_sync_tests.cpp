@@ -299,6 +299,11 @@ namespace {
         CHECK(std::string_view(Shared::Npc::SeizingAnimation(Shared::Npc::Caught::Outcome::Arrest)) == "PolicajtZatykajici.I3D");
         CHECK(std::string_view(Shared::Npc::SeizingAnimation(Shared::Npc::Caught::Outcome::Fine)) == "PolicajtPokutujici.I3D");
         CHECK(std::string_view(Shared::Npc::SeizedAnimation(Shared::Npc::Caught::Outcome::Fine)) == "PolicajtPokutovany.I3D");
+        // A half holds its body for the clip's length, bounded; a clip that
+        // did not load holds nothing.
+        CHECK(Shared::Npc::SeizedHold(15300) == std::chrono::milliseconds(15300));
+        CHECK(Shared::Npc::SeizedHold(60000) == Shared::Npc::kSeizedHoldLimit);
+        CHECK(Shared::Npc::SeizedHold(0).count() == 0);
     }
 
     // A wagon frame: yawed by `yaw`, scaled as I3D keeps a scaled model, at

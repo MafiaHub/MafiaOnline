@@ -51,8 +51,8 @@ namespace Mafia1Online::Features::Player {
         }
         // A police arrest or fine animation plays on this replica (on the
         // simulation host natively, elsewhere from Npc::Seized): the pose
-        // stream stays off it until the track ends.
-        void HoldSeized(uint64_t networkId);
+        // stream stays off it for the clip's length (Shared::Npc::SeizedHold).
+        void HoldSeized(uint64_t networkId, std::chrono::milliseconds hold = Shared::Npc::kSeizedHoldLimit);
         // Simulation host: the police arrest walk placed this replica in
         // front of its officer; the pose stream stays off it for `hold`.
         void HoldAligned(uint64_t networkId, std::chrono::milliseconds hold);

@@ -7,6 +7,8 @@
 #include <glm/geometric.hpp>
 #include <glm/vec3.hpp>
 
+#include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 
@@ -84,6 +86,17 @@ namespace Mafia1Online::Shared::Npc {
             return false;
         }
         return glm::distance(current, pose.Position()) <= kSeizedAlignReach;
+    }
+
+    // How long an arrest or fine half holds its body: the clip's length as
+    // Do_PlayAnim returns it (state 11 waits the longer half in state 12,
+    // 0x517231-0x51728b; the arrest ran 15.3 s), bounded. Not the work state: Do_PlayAnim leaves
+    // these clips at work state 1, so a hold ending when the work state
+    // left 4 ended at once, and the arrested player kept the controls and
+    // walked out of the cuffs.
+    inline constexpr std::chrono::milliseconds kSeizedHoldLimit {20000};
+    inline std::chrono::milliseconds SeizedHold(uint32_t clipMs) {
+        return std::min(std::chrono::milliseconds(clipMs), kSeizedHoldLimit);
     }
 
     // The target's animation: PolicajtZatykany for the arrest (0x517215),
