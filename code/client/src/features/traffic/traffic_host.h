@@ -1,5 +1,6 @@
 #pragma once
 
+#include "crew_car_retire.h"
 #include "features/car/car_service.h"
 #include "shared/features/car/car_entity.h"
 
@@ -131,6 +132,16 @@ namespace Mafia1Online::Features::Traffic {
         // Cars reported to the server and still driven here: the server
         // takes at most Shared::Traffic::kMaxHostCars of them.
         [[nodiscard]] size_t DrivenCount() const;
+        // The server's Reset: these pool cars, or all of them, leave the road
+        // through retail's deactivation, which retires and reports each one;
+        // the other cars named (or all of them) wait in _crewCarRetire.
+        void ApplyReset();
+        // Cars retail police or mafia code made, asked to leave by a Reset:
+        // judged (JudgeCrewCar) until they go, are kept, or kCrewCarWait
+        // passes.
+        void UpdateCrewCarRetirement();
+        // What retail keeps of the car and its crew (seat owners, into crew).
+        CrewCarFacts CrewCarFactsOf(SDK::Car::NativeCar *car, std::vector<SDK::Player::NativeActor *> &crew) const;
         // A police car waiting in gSpawnedCars goes back into traffic.
         void ReturnCar(SDK::Traffic::NativeTrafficCar &traffic);
         void SpawnAround(SDK::Traffic::NativeTrafficCar &traffic);
@@ -138,6 +149,9 @@ namespace Mafia1Online::Features::Traffic {
         float NearestObserverSq(const SDK::Player::Vector3 &position) const;
 
         static constexpr std::chrono::seconds kBindingWait {3};
+        // A crew car asked to leave that is still here after this is
+        // dropped from the list (the retirement pass keeps it for its crew).
+        static constexpr std::chrono::seconds kCrewCarWait {30};
 
         World::WorldService *_world = nullptr;
         Car::CarService *_cars = nullptr;
@@ -160,5 +174,15 @@ namespace Mafia1Online::Features::Traffic {
         };
         std::unordered_map<const void *, ReportedBarrier> _barrierKeys;
         uint32_t _nextBarrierKey = 1;
+        // The server's Reset, applied on the next Update rather than inside
+        // the RPC: every pool car, or the cars of these keys.
+        bool _resetAll = false;
+        std::vector<uint32_t> _resetKeys;
+        struct CrewCarRetire {
+            std::chrono::steady_clock::time_point since;
+            // In the retirement list already; the native pass does the rest.
+            bool requested = false;
+        };
+        std::unordered_map<uint32_t, CrewCarRetire> _crewCarRetire;
     };
 } // namespace Mafia1Online::Features::Traffic

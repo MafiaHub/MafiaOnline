@@ -86,3 +86,10 @@ target_include_directories(Mafia1OnlineEmptyCarHandoffTests PRIVATE "${CMAKE_CUR
 
 add_executable(Mafia1OnlinePushToTalkTests push_to_talk_tests.cpp)
 target_include_directories(Mafia1OnlinePushToTalkTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../client/src")
+
+add_executable(Mafia1OnlineTrafficJamTests traffic_jam_tests.cpp)
+target_include_directories(Mafia1OnlineTrafficJamTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+target_link_libraries(Mafia1OnlineTrafficJamTests PRIVATE Framework::Framework)
+
+add_executable(Mafia1OnlineCrewCarRetireTests crew_car_retire_tests.cpp)
+target_include_directories(Mafia1OnlineCrewCarRetireTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../client/src")

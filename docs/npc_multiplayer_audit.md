@@ -487,6 +487,66 @@ it in from `GetPlacementFromTCK` 0x41c550, as `C_traffic_car` does; only the
 driver's door is animated there. Walkers with no pool are reported too
 (generator 0xff).
 
+### Retiring police, mafia and road block cars
+
+`Traffic.resetArea` and `Traffic.restartHost` reach the cars retail police
+and mafia code made, not only the traffic pool's: a road block's police car
+(`GenerateRoadBlock` -> `CreateCar`), a reinforcement's or a chase party's
+police car (`DalsiChalpiDoPartie` 0x49eee0, `VasekSelChlastatNaOslavu`
+0x49f980), a mafia pursuit car (`Krles`), and a police car back in traffic
+(a dynamic traffic element, `NoTakMiTedaDajTuPleckuJaJuOdvezu` 0x4baec0). A
+police one is a slot of the police car pool, never deleted: deleting it
+natively, as the mod's `CarService` removal does for other temporary cars,
+would leave the pool's pointer dangling. So the server only asks
+(`Shared::Traffic::Reset`), and the host takes such a car off the road
+through retail's own retirement or keeps it (`TrafficHost::
+UpdateCrewCarRetirement`, the verdict in `traffic/crew_car_retire.h`).
+
+Every place retail keeps a pointer to such a car or its crew, and how it is
+released:
+
+| Holder | Evidence | Released by |
+| --- | --- | --- |
+| `C_shvestky::m_TempCars` (the police car pool, `+0x4c`, 8-byte slots with the free flag at `+4`) | `FreeTempCar` 0x49e490 `53 56 57 8B F9 8B 47 50 85 C0 74 22 8B 77 54 2B`: finds the slot, sets it free, `C_game_RemoveActorFromAllVectors` 0x5a7d40, `C_car::DeactivateCar` 0x422ad0, frame off, `g_PoliceNastenka.ZinvalidujAktora` 0x53c6f0 (0x49e4c6-0x49e51c). | The retirement pass: `FreeMyTempActor` 0x49e7e0 (`8B 44 24 04 8B 50 10 83 FA 04 74 21 83 FA 1B 74 13 83 FA 1F`) sends a car to `FreeTempCar`, an entity to `FreeTempEnemy`, a barrier to `FreeTempIris`; anything not pooled is removed with `C_game::RemoveTemporaryActor` 0x5a79a0. |
+| `C_shvestky::m_DoRiciActors` (`+0x7c`, `_First +0x80`) | `AddDoRiciActor` 0x49e820 `8B 91 80 00 00 00 83 EC 08 85 D2 56 8D 71 7C 57`; `TickDoRiciActors` 0x49ea80 `A1 8C 78 63 00 83 EC 20 56 8B F1 8B 48 10 57 8B`. | The pass itself. For each actor it retires (0x49ec99 `8B 96 80 00 00 00 8B CE 8B 04 9A 50 E8`): `GlobalDelNasrany` 0x49f540 (every crime record's officer list), and for a car `G_IndicatorsClass::RadarRemoveCar` 0x5fa720, `C_sledovacka::RemoveCar` 0x4a1c30 (car hunts), `C_traffic_car::ChlupatejVystrik` 0x4b9560 for a police car (`C_car +0x2104`); then `C_game::InvalidateActor` 0x5afe40 (every actor's used-actor, attacker and script registers, shots, fires) and `FreeMyTempActor`, else `RemoveTemporaryActor`. A far entity seated in a car is unseated first (`C_car::SetOwner(0, seat)` 0x49ebe2); a far car is kept while a seat has an owner (0x49ec39) or a human (types 2, 0x1b in `g_vActors` 0x63d2bc/0x63d2c0) uses it to enter or leave (0x49ec4a `A1 BC D2 63 00 8B 2D C0 D2 63 00 3B C5`, `+0x98`/`+0x9c`). |
+| `S_shvestky::m_Nasrany` (each crime record's officers, `+0x70`, `_First +0x74`) | Road block, reinforcement and chase officers join it (`MarkActorNasranyInBlock` 0x49f580, `AddNasrany` 0x49f5d0). | `GlobalDelNasrany` in the pass. A record above level 0 that lists a crew member is an open case: the host keeps the car. |
+| `S_shvestky::m_pDrivenCar` `+0x04`, `m_pRecordedVehicle` `+0x54`, `m_pCopHitCar` `+0x60` | `m_pCopHitCar` is stored by `StrcilJsemHoPoldumDoVyfuku` 0x4a00a0 at 0x4a011d (`8B 44 24 14 89 42 60`); the other two are in the SDK already. | Nothing clears them on retirement: the host keeps a car any record names. |
+| `ai_police_nastenka` (`g_PoliceNastenka` 0x646d10) actions: `m_Actions` `_First +0x14`, `_Last +0x18`, 0x6c each; members `+0x1c/+0x20`, car `+0x5c`, offender `+0x60` | `CoVlastneRobimPlukovniku` 0x53bb60 `51 53 55 8B 6C 24 10 33 DB 56 57` walks the members (0x53bb9b, 0x53bbac, stride 108); `ZinvalidujAktora` 0x53c6f0 `8B 44 24 04 53 55 56 8B F1 33 ED 57 3B 46 30 75` compares the offender (`+0x60`, 0x53c749) and the car (`+0x5c`, 0x53c75a). | `ZinvalidujAktora` for a pool car (inside `FreeTempCar`). Nothing for an officer: the host keeps a car whose crew serves an action, or that an action uses as its car. |
+| A recruited officer (behaviour `+0x5fc` = 4) | The pass ignores its distance and retires it only once the police reset bit (`C_entity +0xf48` & 8) is set (0x49eb9c `8B 87 48 0F 00 00 C1 E8 03`). | Its case winding down. The host does not ask before then; the pass would keep it and the car it sits in. |
+| `C_game::m_RoadBlocks` (`_First +0x1b8`, `_Last +0x1bc`, 0x14 each; `m_bActive +0x02`, `m_Members +0x08/+0x0c`) | `GenerateRoadBlock` 0x49d980 indexes it at 0x49e045 (`8B 8D B8 01 00 00`) and appends members at 0x49e05a (`8B 44 0F 0C 8D 4C 0F 04`); `Tick` tests `m_bActive` at 0x49afaf (`8D 44 29 02 8A 4C 29 02 84 C9`), and as a block comes down clears it (0x49afcb `C6 00 00`), sends each officer event 19 and hands every member to the retirement list (`AddDoRiciActor` call at 0x49b010). | The block coming down. An up block's members are in no retirement list; the host keeps a car an up block lists, or whose crew it lists. |
+| `g_TrafficCarPursuitEntries` 0x63d818 (car, driver, passenger) | `C_traffic_car::Update` 0x4b5270 reads it (0x4b52f8-0x4b53b4): when the pursuit ends it has the crew get out and lists crew and car for retirement (`AddDoRiciActor` calls at 0x4b53f0, 0x4b5412, 0x4b5430). | The pursuit ending. The host keeps a pursuit car while its entry lasts: its crew still hunts the player who rammed it. |
+| Traffic elements: `g_TrafficCarElements` 0x63d848 and `gSpawnedCars` 0x63d86c | `ActivateElems` 0x4ab910 takes a waiting `gSpawnedCars` element into a slot (0x4ab980). `DeactivateElem` 0x4ab140 frees a dynamic element's police car with `FreeTempCar` (call at 0x4ab885), or lists it for retirement (`AddDoRiciActor` at 0x4ab8a6), and deletes the element. | `DeactivateElem` on the slot of an active dynamic element (the car is judged again after it). A car a waiting element holds is kept. |
+
+What the host does (`TrafficHost::CrewCarFactsOf` reads every holder above,
+`JudgeCrewCar` decides):
+
+- A pursuit, an up road block, a case (board action, open record listing a
+  crew officer, a record naming the car, an officer on duty) keeps the car.
+  A player's replica or a scripted NPC in a seat keeps it too. Nothing is
+  ended on purpose to free a car: a case on a player runs out its own way
+  (see "Police on foot", "NPC: Wind a police case down around its
+  offender").
+- Otherwise every seat owner (the crew, each a tracked NPC) and the car go
+  into `m_DoRiciActors` (`NpcHost::RequestRetirement`), marked so the hooked
+  pass (`NpcHost::TickRetirement`) retires them whatever the players' distance:
+  it runs the native pass from far away, so crew get unseated and retired
+  first, and the car goes on a later loop or pass once nobody sits in or uses
+  it. Each crew NPC goes as a server `Npc.Remove` makes one go
+  (`removeRequested`): `FreeTempEnemy` or `RemoveTemporaryActor`, then
+  `NpcHost::Retire` reports `Retired`, the server's `NpcService` retires it
+  (`npcRetire`) and `TrafficService::OnNpcGone` frees its seat record.
+- The car's record goes the way any temporary traffic car's does: freed to
+  the pool it leaves `C_game`'s temporary actors (`TrafficHost::Watch`), or
+  removed natively (`OnNativeCarDestroyed`); either reports `Retired`, the
+  server despawns the network car, and the host's `CarService` no longer
+  holds it, so nothing removes it twice.
+- A request still open after 30 s (`kCrewCarWait`) is dropped and logged; the
+  server's `resetKept` keeps the jam watch off that car, and the next script
+  reset or restart asks again.
+
+The jam watch (`Shared::Traffic::JamEligible`, `JamScope::Automatic`) still
+takes only ordinary traffic: no police car, no NPC crew, no car the host kept.
+
 ## Trams and metro trains
 
 Freeride's scene2.bin has 38 type-8 records, each one complete `C_railway`

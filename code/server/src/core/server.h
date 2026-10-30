@@ -57,6 +57,14 @@ namespace Mafia1Online::Core {
         v8::Local<v8::Value> WrapScriptPlayer(v8::Isolate *isolate, uint64_t networkId) override;
 
         bool ChangeMission(std::string_view name);
+        // Players aboard a tram or metro train step off where they boarded
+        // (a new life with the same health and weapons); how many did.
+        size_t EjectRailwayRiders();
+        // Riders step off, then the host clears its whole traffic pool and
+        // refills it; with handover a standby host takes over instead and the
+        // current one is kicked. False without a host, or without a standby
+        // for a handover.
+        bool RestartTrafficHost(bool handover);
         // Colors are packed 0xRRGGBBAA; 0 uses the client's notice color.
         bool SendNotice(uint64_t playerNetworkId, std::string_view message, uint32_t color = 0);
         void BroadcastNotice(std::string_view message, uint32_t color = 0);
@@ -141,6 +149,8 @@ namespace Mafia1Online::Core {
       private:
         // A player, or the simulation host, that has loaded the mission.
         bool CarPeer(MafiaNet::PeerGuid sender) const;
+        // A simulation host joined, or a standby took over (promoted).
+        void OnSimulationHostAttached(MafiaNet::PeerGuid guid, bool promoted);
 
         Features::Mod::ModService _mods;
         std::string _mission;

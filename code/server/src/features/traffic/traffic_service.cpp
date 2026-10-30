@@ -488,6 +488,172 @@ namespace Mafia1Online::Features::Traffic {
         for (const uint64_t networkId : abandoned) {
             DespawnReleased(networkId);
         }
+        if (HostCurrent() && now - _lastJamCheck >= kJamCheckInterval) {
+            _lastJamCheck = now;
+            WatchJams(now);
+        }
+    }
+
+    std::vector<glm::vec3> TrafficService::PlayersOnFoot() const {
+        std::vector<glm::vec3> positions;
+        _players->ForEach([&](Shared::Entities::PlayerEntity *player) {
+            if (player->spawned && player->missionGeneration == _missionGeneration && !_cars->SeatForPlayer(player->GetNetworkID(), player->spawnGeneration)) {
+                positions.push_back(player->position);
+            }
+        });
+        return positions;
+    }
+
+    Shared::Traffic::JamCar TrafficService::ViewOf(const Record &record, const CarEntity &car, std::chrono::steady_clock::time_point now,
+                                                   const std::vector<glm::vec3> &onFoot) const {
+        Shared::Traffic::JamCar view;
+        view.id = record.key;
+        view.position = car.position;
+        view.stuckSeconds = record.stuck.valid ? std::chrono::duration<double>(now.time_since_epoch()).count() - record.stuck.since : 0.0;
+        view.active = car.terminalState == CarEntity::TerminalState::Active && record.despawnAt == std::chrono::steady_clock::time_point {} &&
+                      car.missionGeneration == _missionGeneration;
+        view.police = car.trafficKind == Shared::Traffic::Kind::Police;
+        const auto sort = [&](uint64_t occupant) {
+            if (occupant == 0) {
+                return;
+            }
+            if (_players->FindByNetworkId(occupant)) {
+                view.playerAboard = true;
+            }
+            else if (_events.scriptedNpc && _events.scriptedNpc(occupant)) {
+                view.scriptedCrew = true;
+            }
+            else {
+                view.npcCrew = true;
+            }
+        };
+        for (uint8_t seat = 0; seat < car.seatCount && seat < CarEntity::kMaxSeats; ++seat) {
+            sort(car.occupantIds[seat]);
+        }
+        for (const auto &[npc, seat] : _npcSeats) {
+            if (seat.carId == record.networkId) {
+                sort(npc);
+            }
+        }
+        view.driverAboard = car.driverState == CrewState::Seated || car.driverState == CrewState::Dead;
+        view.resetPending = record.resetAskedAt != std::chrono::steady_clock::time_point {} && now - record.resetAskedAt < kResetWait;
+        view.resetKept = record.resetKept;
+        for (const auto &position : onFoot) {
+            view.nearestPlayer = std::min(view.nearestPlayer, glm::distance(position, car.position));
+        }
+        return view;
+    }
+
+    void TrafficService::WatchJams(std::chrono::steady_clock::time_point now) {
+        const double clock = std::chrono::duration<double>(now.time_since_epoch()).count();
+        std::erase_if(_recentJams, [&](const RecentJam &jam) { return now >= jam.until; });
+        const auto onFoot = PlayersOnFoot();
+        std::vector<Shared::Traffic::JamCar> views;
+        views.reserve(_records.size());
+        for (auto &[key, record] : _records) {
+            auto *car = _cars->Find(record.networkId);
+            if (!car) {
+                continue;
+            }
+            // Asked and still here: the host keeps it (not a pool car).
+            if (!record.resetKept && record.resetAskedAt != std::chrono::steady_clock::time_point {} && now - record.resetAskedAt >= kResetWait) {
+                record.resetKept = true;
+                Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->debug("Simulation host kept traffic car {} it was asked to reset", car->GetNetworkID());
+            }
+            (void)Shared::Traffic::UpdateStuck(record.stuck, car->position, glm::length(car->velocity), clock, _jam);
+            views.push_back(ViewOf(record, *car, now, onFoot));
+        }
+        if (!_jam.enabled) {
+            return;
+        }
+        for (const auto &jam : Shared::Traffic::FindJams(views, _jam)) {
+            const bool cooling = std::any_of(_recentJams.begin(), _recentJams.end(), [&](const RecentJam &recent) { return glm::distance(recent.center, jam.center) <= _jam.radius; });
+            if (cooling) {
+                continue;
+            }
+            _recentJams.push_back({jam.center, now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(_jam.cooldownSeconds))});
+            std::vector<uint32_t> keys;
+            for (const uint64_t id : jam.cars) {
+                const auto key = static_cast<uint32_t>(id);
+                if (auto record = _records.find(key); record != _records.end()) {
+                    record->second.resetAskedAt = now;
+                    keys.push_back(key);
+                }
+            }
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->info(
+                "Traffic jam at ({:.0f}, {:.0f}, {:.0f}): {} cars stopped within {:.0f} m for {:.0f} s or more; asking the simulation host to clear them", jam.center.x,
+                jam.center.y, jam.center.z, keys.size(), _jam.radius, jam.stuckSeconds);
+            if (_events.jamReset) {
+                _events.jamReset({jam.center, keys.size(), jam.stuckSeconds});
+            }
+            SendReset(std::move(keys), false);
+        }
+    }
+
+    void TrafficService::SendReset(std::vector<uint32_t> keys, bool all) {
+        const auto host = _simulation ? _simulation->Host() : std::nullopt;
+        if (!host || (keys.empty() && !all)) {
+            return;
+        }
+        Shared::Traffic::Reset reset;
+        reset.missionGeneration = _missionGeneration;
+        reset.all = all;
+        reset.keys = std::move(keys);
+        Framework::CoreModules::GetNetworkPeer()->SendRPC(reset, MafiaNet::ToGuid(*host), MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
+    }
+
+    bool TrafficService::SetJamSettings(const Shared::Traffic::JamSettings &settings) {
+        if (!Shared::Traffic::ValidJamSettings(settings)) {
+            return false;
+        }
+        _jam = settings;
+        Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->info(
+            "Traffic jam watch {}: {} cars within {:.0f} m below {:.1f} m/s for {:.0f} s, {:.0f} s cooldown, {:.0f} m player clearance", _jam.enabled ? "on" : "off", _jam.minCars,
+            _jam.radius, _jam.maxSpeed, _jam.stuckSeconds, _jam.cooldownSeconds, _jam.playerClearance);
+        return true;
+    }
+
+    bool TrafficService::HostCurrent() const {
+        // The records are the keys of the host they came from; a new host
+        // that attached this tick is told nothing until Update cleared them.
+        return _host && _simulation && _simulation->Host() == _host;
+    }
+
+    size_t TrafficService::ResetArea(const glm::vec3 &center, float radius) {
+        if (!HostCurrent() || !std::isfinite(radius) || radius < 0.0f) {
+            return 0;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        const auto onFoot = PlayersOnFoot();
+        std::vector<uint32_t> keys;
+        for (auto &[key, record] : _records) {
+            const auto *car = _cars->Find(record.networkId);
+            if (!car || !(glm::distance(car->position, center) <= radius) ||
+                !Shared::Traffic::JamEligible(ViewOf(record, *car, now, onFoot), _jam, Shared::Traffic::JamScope::Manual)) {
+                continue;
+            }
+            record.resetAskedAt = now;
+            keys.push_back(key);
+        }
+        const size_t asked = keys.size();
+        Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->info("Traffic reset within {:.0f} m of ({:.0f}, {:.0f}, {:.0f}): asking the simulation host to clear {} cars", radius,
+                                                                   center.x, center.y, center.z, asked);
+        SendReset(std::move(keys), false);
+        return asked;
+    }
+
+    bool TrafficService::ResetAll() {
+        if (!HostCurrent()) {
+            return false;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        for (auto &[key, record] : _records) {
+            record.resetAskedAt = now;
+        }
+        Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->info("Traffic reset: asking the simulation host to clear its traffic pool and refill it ({} cars driven)",
+                                                                   LiveRecords());
+        SendReset({}, true);
+        return true;
     }
 
     void TrafficService::DespawnReleased(uint64_t networkId) {
@@ -516,6 +682,7 @@ namespace Mafia1Online::Features::Traffic {
             Despawn(key);
         }
         _npcSeats.clear();
+        _recentJams.clear();
         if (auto *replication = Framework::CoreModules::GetReplication()) {
             for (const auto &[key, networkId] : _barriers) {
                 if (auto *entity = replication->GetEntity<Shared::Entities::RoadBarrierEntity>(networkId)) {

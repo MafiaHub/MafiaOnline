@@ -41,6 +41,7 @@
       "server/props.js",
       "server/doors.js",
       "server/housing.js",
+      "server/traffic.js",
       "server/dev.js"
     ],
     "clientScripts": [

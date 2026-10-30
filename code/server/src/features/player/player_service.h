@@ -49,6 +49,9 @@ namespace Mafia1Online::Features::Player {
         Shared::Entities::PlayerEntity *FindByGuid(MafiaNet::PeerGuid guid) const;
         MafiaNet::PeerGuid GuidForNetworkId(uint64_t networkId) const;
         bool SuggestedSpawnPosition(uint64_t networkId, glm::vec3 &position) const;
+        // Where the current life last stood on foot (not seated, not aboard a
+        // railway), or its spawn point: for a rider, where it stepped aboard.
+        bool LastGroundPosition(uint64_t networkId, glm::vec3 &position) const;
         bool HasRecentFatalFall(uint64_t networkId) const;
         // Whether a position is aboard-close to a railway the host reported
         // (RailwayService::IsNear): a rider's claim is taken only then.
@@ -85,6 +88,8 @@ namespace Mafia1Online::Features::Player {
             glm::vec3 suggestedPosition  = glm::vec3(0.0f);
             uint64_t suggestedGeneration = 0;
             std::deque<std::pair<std::chrono::steady_clock::time_point, float>> recentHeights;
+            glm::vec3 groundPosition = glm::vec3(0.0f);
+            bool hasGround           = false;
         };
         std::unordered_map<MafiaNet::PeerGuid, Session> _sessions;
         static constexpr auto kPingRefresh = std::chrono::seconds(2);

@@ -2,6 +2,9 @@
 
 #include "shared/features/npc/npc_task_done.h"
 
+#include <glm/vec3.hpp>
+
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -65,6 +68,10 @@ namespace Mafia1Online::Features::Script {
     void EmitTrafficStealRefused(Core::Server &server, uint64_t carId, uint64_t playerId);
     void EmitPlayerThrownOut(Core::Server &server, uint64_t playerId, uint64_t carId, uint8_t seat, uint64_t npcId);
     void EmitRailwayHit(Core::Server &server, uint64_t playerId, uint8_t index, float damage);
+    void EmitPlayerRailwayEject(Core::Server &server, uint64_t playerId, uint8_t index);
+    void EmitTrafficJamReset(Core::Server &server, const glm::vec3 &center, size_t cars, double stuckSeconds);
+    // reason: "restart", "handover" or "attach".
+    void EmitTrafficHostChange(Core::Server &server, const char *reason, size_t ejected);
     void EmitCarHitEvent(Core::Server &server, const Shared::Car::HitReport &hit, float damage);
     void EmitPickupEvent(Core::Server &server, const char *name, uint64_t pickupId, uint64_t playerId);
     void EmitMapObjectEvent(Core::Server &server, const char *name, uint64_t objectId);

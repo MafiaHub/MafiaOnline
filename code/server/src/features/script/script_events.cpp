@@ -18,6 +18,7 @@
 #include "features/pumper/pumper_scripting.h"
 #include "features/railway/railway_scripting.h"
 #include "features/taxi/taxi_scripting.h"
+#include "features/traffic/traffic_scripting.h"
 #include "features/world/world_scripting.h"
 #include "shared/features/car/car_debris_entity.h"
 #include "shared/features/car/car_entity.h"
@@ -86,6 +87,7 @@ namespace Mafia1Online::Features::Script {
         Scripting::Police::Register(isolate, global);
         Scripting::Taxi::Register(isolate, global);
         Scripting::Railway::Register(isolate, global);
+        Scripting::Traffic::Register(isolate, global);
         Scripting::Bridge::Register(isolate, global);
         Scripting::Pumper::Register(isolate, global);
         Scripting::Pickup::Register(isolate, global);
@@ -380,6 +382,35 @@ namespace Mafia1Online::Features::Script {
             SetField(isolate, context, info, "railway", railway ? Scripting::RailwayInfo(isolate, context, *railway) : v8::Null(isolate).As<v8::Value>());
             SetField(isolate, context, info, "damage", Number(isolate, damage));
             arguments.push_back(WrapPlayer(isolate, playerId));
+            arguments.push_back(info);
+        });
+    }
+
+    void EmitPlayerRailwayEject(Core::Server &server, uint64_t playerId, uint8_t index) {
+        EmitEvent("playerRailwayEject", [&](v8::Isolate *isolate, v8::Local<v8::Context> context, EventArguments &arguments) {
+            auto info = v8::Object::New(isolate);
+            const auto *railway = server.Railways().Find(index);
+            SetField(isolate, context, info, "railway", railway ? Scripting::RailwayInfo(isolate, context, *railway) : v8::Null(isolate).As<v8::Value>());
+            arguments.push_back(WrapPlayer(isolate, playerId));
+            arguments.push_back(info);
+        });
+    }
+
+    void EmitTrafficJamReset(Core::Server &, const glm::vec3 &center, size_t cars, double stuckSeconds) {
+        EmitEvent("trafficJamReset", [&](v8::Isolate *isolate, v8::Local<v8::Context> context, EventArguments &arguments) {
+            auto info = v8::Object::New(isolate);
+            SetField(isolate, context, info, "position", PlainVector(isolate, context, center));
+            SetField(isolate, context, info, "vehicles", Number(isolate, static_cast<double>(cars)));
+            SetField(isolate, context, info, "stuckSeconds", Number(isolate, stuckSeconds));
+            arguments.push_back(info);
+        });
+    }
+
+    void EmitTrafficHostChange(Core::Server &, const char *reason, size_t ejected) {
+        EmitEvent("trafficHostChange", [&](v8::Isolate *isolate, v8::Local<v8::Context> context, EventArguments &arguments) {
+            auto info = v8::Object::New(isolate);
+            SetField(isolate, context, info, "reason", v8pp::to_v8(isolate, reason));
+            SetField(isolate, context, info, "ejected", Number(isolate, static_cast<double>(ejected)));
             arguments.push_back(info);
         });
     }

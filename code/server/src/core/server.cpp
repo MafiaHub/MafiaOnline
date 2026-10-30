@@ -36,6 +36,8 @@
 #include "features/script/script_events.h"
 #include "features/taxi/taxi_scripting.h"
 #include "features/script/script_runtime.h"
+#include "shared/features/railway/railway_report.h"
+#include "shared/features/traffic/traffic_jam.h"
 #include "shared/features/traffic/traffic_report.h"
 #include "features/world/world_scripting.h"
 
@@ -45,15 +47,62 @@
 #include <scripting/builtins/builtins.h>
 
 #include <glm/geometric.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include <limits>
 #include <networking/replication/replication_manager.h>
 #include <networking/rpc/chat_message.h>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
+#include <stdexcept>
 
 namespace Mafia1Online::Core {
+    namespace {
+        // server.json "mod": {"trafficJam": {...}}: any of JamSettings' fields;
+        // the rest keep their defaults.
+        Shared::Traffic::JamSettings ReadJamSettings(const nlohmann::json &config) {
+            Shared::Traffic::JamSettings settings;
+            if (config.is_null()) {
+                return settings;
+            }
+            if (!config.is_object()) {
+                throw std::runtime_error("mod.trafficJam must be an object");
+            }
+            const auto number = [&](const char *key, float &out) {
+                if (const auto it = config.find(key); it != config.end()) {
+                    if (!it->is_number()) {
+                        throw std::runtime_error(std::string("mod.trafficJam.") + key + " must be a number");
+                    }
+                    out = it->get<float>();
+                }
+            };
+            if (const auto it = config.find("enabled"); it != config.end()) {
+                if (!it->is_boolean()) {
+                    throw std::runtime_error("mod.trafficJam.enabled must be true or false");
+                }
+                settings.enabled = it->get<bool>();
+            }
+            if (const auto it = config.find("minCars"); it != config.end()) {
+                if (!it->is_number_unsigned()) {
+                    throw std::runtime_error("mod.trafficJam.minCars must be a whole number");
+                }
+                settings.minCars = it->get<uint32_t>();
+            }
+            number("radius", settings.radius);
+            number("maxSpeed", settings.maxSpeed);
+            number("stuckSeconds", settings.stuckSeconds);
+            number("cooldownSeconds", settings.cooldownSeconds);
+            number("playerClearance", settings.playerClearance);
+            if (!Shared::Traffic::ValidJamSettings(settings)) {
+                throw std::runtime_error("mod.trafficJam is out of range (minCars 2-64, radius 1-200, maxSpeed 0-20, stuckSeconds 1-3600, cooldownSeconds 0-3600, "
+                                         "playerClearance 0-200)");
+            }
+            return settings;
+        }
+    } // namespace
+
     void Server::OnAssetStreamerReady() {
         _mods.AddUploads(*GetNetworkingEngine()->GetNetworkServer()->GetAssetStreamer());
     }
@@ -98,6 +147,8 @@ namespace Mafia1Online::Core {
         }
         _mission                               = GetModConfig().Get<std::string>("mission");
         _simulation.Init(GetModConfig().Get<std::string>("simulationToken"));
+        _simulation.SetAttachedCallback([this](MafiaNet::PeerGuid guid, bool promoted) { OnSimulationHostAttached(guid, promoted); });
+        (void)_traffic.SetJamSettings(ReadJamSettings(GetModConfig().Get<nlohmann::json>("trafficJam")));
         _pedestrians.RegisterRPC(_simulation, _players, _cars);
         _pedestrians.SetEvents({
             [this](Shared::Entities::PedestrianEntity &walker) { Features::Script::EmitPedestrianEvent(*this, "pedestrianSpawn", walker); },
@@ -219,6 +270,8 @@ namespace Mafia1Online::Core {
         _traffic.SetEvents({
             [this](uint64_t carId, uint64_t playerId, bool stolen) { Features::Script::EmitTrafficTaken(*this, carId, playerId, stolen); },
             [this](uint64_t carId, uint64_t playerId) { Features::Script::EmitTrafficStealRefused(*this, carId, playerId); },
+            [this](const Features::Traffic::TrafficService::JamReset &jam) { Features::Script::EmitTrafficJamReset(*this, jam.center, jam.cars, jam.stuckSeconds); },
+            [this](uint64_t npcId) { return _npcs.IsScripted(npcId); },
         });
         _railways.RegisterRPC(_simulation, _players, _combat);
         _players.SetRailwayCheck([this](uint8_t index, const glm::vec3 &position) { return _railways.IsNear(index, position); });
@@ -812,9 +865,6 @@ namespace Mafia1Online::Core {
         if (_simulation.TryAttach(info.guid)) {
             // Not a player: no avatar, car control or vote in missionReady.
             _missionReadiness.OnConnect(info.guid, false);
-            if (_simulation.Host() == info.guid) {
-                _pedestrians.OnHostAttached();
-            }
             return;
         }
         _allReadyNotified = false;
@@ -951,6 +1001,83 @@ namespace Mafia1Online::Core {
         Features::Script::EmitMissionEvent(*this, "missionChange");
         Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->info("Requested Mafia 1 mission '{}' (generation {})", _mission, _missionState->generation);
         return true;
+    }
+
+    void Server::OnSimulationHostAttached(MafiaNet::PeerGuid, bool promoted) {
+        _pedestrians.OnHostAttached();
+        // The new host's trams and trains run from where its own world has
+        // them, not where players' copies stand: a rider would be carried
+        // off with the jump.
+        const size_t ejected = EjectRailwayRiders();
+        Features::Script::EmitTrafficHostChange(*this, promoted ? "handover" : "attach", ejected);
+    }
+
+    bool Server::RestartTrafficHost(bool handover) {
+        if (!_simulation.Host() || (handover && _simulation.StandbyCount() == 0)) {
+            return false;
+        }
+        if (handover) {
+            // Riders step off when the standby takes over (OnSimulationHostAttached).
+            return _simulation.HandOver("restart requested");
+        }
+        const size_t ejected = EjectRailwayRiders();
+        if (!_traffic.ResetAll()) {
+            return false;
+        }
+        Features::Script::EmitTrafficHostChange(*this, "restart", ejected);
+        return true;
+    }
+
+    size_t Server::EjectRailwayRiders() {
+        std::vector<uint64_t> riders;
+        _players.ForEach([&](Shared::Entities::PlayerEntity *player) {
+            if (player->spawned && player->alive && player->missionGeneration == MissionGeneration() && player->railway != Shared::Railway::kNoRailway) {
+                riders.push_back(player->GetNetworkID());
+            }
+        });
+        size_t ejected = 0;
+        for (const uint64_t id : riders) {
+            auto *player = _players.FindByNetworkId(id);
+            const auto *combat = _combat.GetState(id);
+            glm::vec3 position;
+            // Where it stepped aboard: solid ground beside the track, a
+            // platform for a metro on its raised track.
+            if (!player || !combat || (!_players.LastGroundPosition(id, position) && !_players.SuggestedSpawnPosition(id, position))) {
+                Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->warn("Could not take player {} off railway {}: no ground position known", id,
+                                                                           player ? player->railway : Shared::Railway::kNoRailway);
+                continue;
+            }
+            // The new life keeps this one's health and weapons.
+            const float health = combat->health;
+            const uint8_t selected = combat->selectedWeapon;
+            std::vector<Features::Combat::CombatService::InventoryEntry> inventory;
+            for (uint8_t weapon = 0; weapon < Shared::Combat::kWeaponSlots; ++weapon) {
+                if (combat->inventoryMask & (1u << weapon)) {
+                    inventory.push_back({weapon, combat->ammo[weapon].loaded, combat->ammo[weapon].reserve});
+                }
+            }
+            const uint8_t index = player->railway;
+            const uint64_t previousGeneration = player->spawnGeneration;
+            const glm::vec3 forward = player->rotation * glm::vec3(0.0f, 0.0f, 1.0f);
+            const float yaw = std::atan2(forward.x, forward.z);
+            if (!_players.Respawn(id, position + glm::vec3(0.0f, 0.2f, 0.0f), std::isfinite(yaw) ? yaw : 0.0f, MissionGeneration())) {
+                Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->warn("Could not take player {} off railway {}: respawn refused", id, index);
+                continue;
+            }
+            _cars.ClearOccupant(id, previousGeneration);
+            _combat.OnPlayerSpawn(id);
+            if (!inventory.empty() && !_combat.ReplaceInventory(id, inventory, selected)) {
+                Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->warn("Player {} lost their weapons stepping off railway {}", id, index);
+            }
+            if (health < 100.0f) {
+                (void)_combat.SetHealth(id, std::max(1.0f, health));
+            }
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->info("Player {} taken off railway {} to ({:.1f}, {:.1f}, {:.1f})", id, index, position.x, position.y,
+                                                                       position.z);
+            Features::Script::EmitPlayerRailwayEject(*this, id, index);
+            ++ejected;
+        }
+        return ejected;
     }
 
     bool Server::CarPeer(MafiaNet::PeerGuid sender) const {

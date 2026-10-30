@@ -30,6 +30,18 @@ namespace Mafia1Online::SDK::Police {
     // after an arrest or fine, a call-off, a case gone).
     inline constexpr uintptr_t kHumanBehaviour        = 0x5FC;
     inline constexpr uint32_t kBehaviourIgnoresWeapons = 4;
+    // C_entity's state priority and its police reset bit, as the pass reads
+    // them (0x49eb9c: 8B 87 48 0F 00 00 C1 E8 03).
+    inline constexpr uintptr_t kEntityStatePriority = 0xF48;
+    inline constexpr uint32_t kPoliceResetBit       = 0x08;
+    // A recruited officer whose case is not over: the retirement pass keeps
+    // it whatever its distance, and with it the car it sits in.
+    inline bool RecruitedOnDuty(const Player::NativeActor *actor) {
+        const auto *bytes = reinterpret_cast<const std::byte *>(actor);
+        return actor->GetType() == Player::NativeActor::Type::Entity && !actor->IsDead() &&
+               *reinterpret_cast<const uint32_t *>(bytes + kHumanBehaviour) == kBehaviourIgnoresWeapons &&
+               (*reinterpret_cast<const uint32_t *>(bytes + kEntityStatePriority) & kPoliceResetBit) == 0;
+    }
     inline bool RetiresByDistance(const Player::NativeActor *actor) {
         if (actor->GetType() != Player::NativeActor::Type::Entity || actor->IsDead() ||
             *reinterpret_cast<const uint32_t *>(reinterpret_cast<const std::byte *>(actor) + kHumanBehaviour) != kBehaviourIgnoresWeapons) {
@@ -167,6 +179,14 @@ namespace Mafia1Online::SDK::Police {
         // m_pDrivenCar: DriveCar (0x49cbb0) sets it when the person takes a
         // driver's seat; CarCollision finds the record by it (0x49cce4).
         [[nodiscard]] Player::NativeActor *DrivenCar() const { return _drivenCar; }
+        [[nodiscard]] bool ListsOfficer(const Player::NativeActor *actor) const {
+            for (auto **entry = _officersBegin; _officersBegin && entry != _officersEnd; ++entry) {
+                if (*entry == actor) {
+                    return true;
+                }
+            }
+            return false;
+        }
 
         Player::NativeActor *_person;
         Player::NativeActor *_drivenCar;
@@ -185,7 +205,10 @@ namespace Mafia1Online::SDK::Police {
         bool _recordedOnFoot;
         std::byte _unused59[0x5c - 0x59];
         int32_t _partyStep;
-        std::byte _unused60[0x64 - 0x60];
+        // m_pCopHitCar: the police car the person rammed
+        // (StrcilJsemHoPoldumDoVyfuku 0x4a00a0 stores it at 0x4a011d,
+        // 8B 44 24 14 89 42 60); VasekSelChlastatNaOslavu takes it once.
+        Player::NativeActor *_copHitCar;
         int32_t _pendingMessage;
         std::byte _unused68[0x74 - 0x68];
         Player::NativeActor **_officersBegin;
@@ -200,6 +223,7 @@ namespace Mafia1Online::SDK::Police {
     static_assert(offsetof(NativeCrimeRecord, _recordedVehicle) == 0x54);
     static_assert(offsetof(NativeCrimeRecord, _recordedOnFoot) == 0x58);
     static_assert(offsetof(NativeCrimeRecord, _partyStep) == 0x5c);
+    static_assert(offsetof(NativeCrimeRecord, _copHitCar) == 0x60);
     static_assert(offsetof(NativeCrimeRecord, _pendingMessage) == 0x64);
 
     // Pool entries of m_TempCars (+0x4c: _First +0x50, _Last +0x54) and
@@ -236,6 +260,8 @@ namespace Mafia1Online::SDK::Police {
     struct NativePoliceManager {
         // m_Persons, std::vector<S_shvestky *> at +0x3c (first +0x40, last
         // +0x44; AddPerson 0x49c7fb, Tick 0x49b295).
+        [[nodiscard]] NativeCrimeRecord *const *RecordsBegin() const { return _personsBegin; }
+        [[nodiscard]] NativeCrimeRecord *const *RecordsEnd() const { return _personsEnd; }
         [[nodiscard]] NativeCrimeRecord *FindRecord(const Player::NativeActor *person) const {
             for (auto **record = _personsBegin; record && record != _personsEnd; ++record) {
                 if ((*record)->Person() == person) {
@@ -366,6 +392,46 @@ namespace Mafia1Online::SDK::Police {
     inline bool BoardSeesOffender(Player::NativeActor *person) {
         using Call = bool(__thiscall *)(uintptr_t, Player::NativeActor *);
         return reinterpret_cast<Call>(kBoardSeesOffender)(0x646D10, person);
+    }
+
+    // C_game::m_RoadBlocks, a VC6 std::vector<S_RoadBlock> (0x14 bytes
+    // each) with _First at C_game +0x1b8 and _Last at +0x1bc: GenerateRoadBlock
+    // 0x49d980 indexes it at 0x49e045 (8B 8D B8 01 00 00). S_RoadBlock's
+    // m_bActive is +0x02 (Tick 0x49afaf: 8D 44 29 02 8A 4C 29 02 84 C9) and
+    // its m_Members vector (cars, barriers, officers) has _First +0x08 and
+    // _Last +0x0c (0x49e05a: 8B 44 0F 0C 8D 4C 0F 04). While a block is up
+    // its members are in no retirement list; Tick hands them to it as the
+    // block comes down (0x49afcb clears it, 0x49b010 lists each member).
+    struct NativeRoadBlock {
+        [[nodiscard]] bool Active() const { return _active; }
+        [[nodiscard]] bool Lists(const Player::NativeActor *actor) const {
+            for (auto **member = _membersBegin; _membersBegin && member != _membersEnd; ++member) {
+                if (*member == actor) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        int16_t _id;
+        bool _active;
+        std::byte _unused03;
+        void *_allocator;
+        Player::NativeActor **_membersBegin;
+        Player::NativeActor **_membersEnd;
+        Player::NativeActor **_membersStorageEnd;
+    };
+    static_assert(sizeof(NativeRoadBlock) == 0x14);
+    static_assert(offsetof(NativeRoadBlock, _active) == 0x02);
+    static_assert(offsetof(NativeRoadBlock, _membersBegin) == 0x08);
+    static_assert(offsetof(NativeRoadBlock, _membersEnd) == 0x0c);
+    inline constexpr uintptr_t kGameRoadBlocksBegin = 0x1B8;
+    inline constexpr uintptr_t kGameRoadBlocksEnd   = 0x1BC;
+    inline NativeRoadBlock *RoadBlocksBegin(Core::Game::NativeGame *game) {
+        return *reinterpret_cast<NativeRoadBlock **>(reinterpret_cast<std::byte *>(game) + kGameRoadBlocksBegin);
+    }
+    inline NativeRoadBlock *RoadBlocksEnd(Core::Game::NativeGame *game) {
+        return *reinterpret_cast<NativeRoadBlock **>(reinterpret_cast<std::byte *>(game) + kGameRoadBlocksEnd);
     }
 
     inline NativePoliceManager *PoliceManager(Core::Game::NativeGame *game) {

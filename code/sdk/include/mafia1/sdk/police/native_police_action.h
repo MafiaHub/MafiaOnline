@@ -106,17 +106,37 @@ namespace Mafia1Online::SDK::Police {
     struct NativeBoardAction {
         [[nodiscard]] Player::NativeActor *Offender() const { return _offender; }
         [[nodiscard]] uint32_t Mode() const { return _mode; }
+        // m_pCar, the car the action's officers use; ZinvalidujAktora drops
+        // it to a foot mode (0x53c75a compares action +0x5c).
+        [[nodiscard]] Player::NativeActor *Car() const { return _car; }
+        // CoVlastneRobimPlukovniku 0x53bb60 (51 53 55 8B 6C 24 10 33 DB 56 57)
+        // finds a member's action through this list (0x53bb9b, 0x53bbac).
+        [[nodiscard]] bool HasMember(const Player::NativeActor *actor) const {
+            for (auto **member = _membersBegin; _membersBegin && member != _membersEnd; ++member) {
+                if (*member == actor) {
+                    return true;
+                }
+            }
+            return false;
+        }
         // An officer on foot chasing, arresting or hunting its offender
         // (kill 1, pursue 3, arrest 5), not a car hunt, road block or wind
         // down.
         [[nodiscard]] bool OnFootCase() const { return _mode == 1 || _mode == 3 || _mode == 5; }
 
-        std::byte _unused00[0x2c];
+        std::byte _unused00[0x1c];
+        Player::NativeActor **_membersBegin;
+        Player::NativeActor **_membersEnd;
+        std::byte _unused24[0x2c - 0x24];
         uint32_t _mode;
-        std::byte _unused30[0x60 - 0x30];
+        std::byte _unused30[0x5c - 0x30];
+        Player::NativeActor *_car;
         Player::NativeActor *_offender;
     };
+    static_assert(offsetof(NativeBoardAction, _membersBegin) == 0x1c);
+    static_assert(offsetof(NativeBoardAction, _membersEnd) == 0x20);
     static_assert(offsetof(NativeBoardAction, _mode) == 0x2c);
+    static_assert(offsetof(NativeBoardAction, _car) == 0x5c);
     static_assert(offsetof(NativeBoardAction, _offender) == 0x60);
 
     // Sends one officer after a new offender, as retail sends one officer
@@ -173,6 +193,17 @@ namespace Mafia1Online::SDK::Police {
                     break;
                 }
             }
+        }
+    }
+
+    // Every action on the board (g_PoliceNastenka m_Actions, _First +0x14,
+    // _Last +0x18, 0x6c bytes each: CoVlastneRobimPlukovniku 0x53bb6f).
+    template <typename Visit>
+    inline void ForEachBoardAction(Visit &&visit) {
+        auto *first = *reinterpret_cast<std::byte **>(kPoliceBoard + 0x14);
+        auto *last = *reinterpret_cast<std::byte **>(kPoliceBoard + 0x18);
+        for (auto *action = first; first && action < last; action += kBoardActionSize) {
+            visit(*reinterpret_cast<NativeBoardAction *>(action));
         }
     }
 

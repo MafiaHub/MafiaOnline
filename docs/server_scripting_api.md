@@ -43,6 +43,7 @@ mission loading, vehicle commands, respawning, and server to client events.
 | NPCs | `Npc.spawn()`, `Npc.getAll()`, `Npc.getInRange()` | Humans the host runs with the retail AI: gangsters, policemen, thrown-out traffic drivers, and scripted NPCs that follow, walk, drive and fight on command. |
 | Police | `Police.getRecord()`, `Police.setWanted()` | Each player's retail crime record, wanted level and the officers it sends. |
 | Taxi | `Taxi.setHailable()`, `Taxi.board()` | Walkers hailing players' cabs the retail way, and the NPC passengers they become. |
+| Traffic | `Traffic.resetArea()`, `Traffic.restartHost()` | The jam watch over the host's car traffic, area resets, and restarting the traffic or handing it to a standby host. |
 | Railways | `Railway.getAll()`, `Railway.getInRange()` | The mission's trams and metro trains, which the host runs and every player sees. |
 | Bridges | `Bridge.getAll()`, `Bridge.get()` | The mission's drawbridges, which the host raises for its steamers and every player sees. |
 | Gas station attendants | `Pumper.getAll()`, `Pumper.setPrice()` | The retail attendants, who fuel players' cars at the pumps for the price the gamemode sets. |
@@ -473,6 +474,75 @@ Events.on("railwayHitPlayer", (player, info) => {
 });
 ```
 
+## Traffic
+
+The city's car traffic, which the simulation host drives around every player
+(`vehicle.traffic`, `vehicle.hostDriven`). Retail traffic waits behind a
+blocked road for good, so players can jam it with a parked car or pushed props,
+and the host never despawns a car its driver holds at a blocked path. The
+server watches the host's cars once a second: when `minCars` of them stand
+within `radius` of one of them, each below `maxSpeed` and within 2 units of
+where it stopped for `stuckSeconds`, it asks the host to take them off the
+road (`trafficJamReset`). The host does that with retail's own pool despawn,
+which retires each car as usual (no `vehicleDestroy`), and refills the road
+out of every player's sight. The jam watch leaves alone a car somebody sits
+in (a player, a police or mafia crew, a scripted NPC), a car with a player on
+foot within `playerClearance`, a police car, a parked car and a car a player
+took. No place is reset twice within `cooldownSeconds`.
+
+`Traffic.resetArea` and `Traffic.restartHost` take more: parked cars, and the
+cars retail police and mafia code made (a road block's or a reinforcement's
+police car, a mafia pursuit car, a police car back in traffic) with their
+crews. Those go through the retail police manager's own retirement
+(`C_shvestky::TickDoRiciActors`), which releases every reference retail keeps
+to them, on its next pass; their crews retire as NPCs (`npcRetire`). The host
+keeps such a car while a police case still runs through it or its crew (a
+board action, an open crime record that lists an officer of it, an officer
+whose case is not over), while its road block is up, while a mafia crew still
+pursues a player in it, and while a player or a scripted NPC sits in it; a
+later reset asks again. A car a player sits in or stands at, and a car a
+player took, always stay. Whatever blocked the road stays, so a
+jam may form there again.
+
+The defaults (6 cars, 35 units, 1 unit/s, 60 s, 30 s cooldown, 8 units
+clearance, the reach of a steal) come from `server.json`'s optional `mod.trafficJam` object, which
+takes any of the same fields:
+
+```json
+"mod": { "mission": "freeride", "simulationToken": "...", "trafficJam": { "minCars": 8, "stuckSeconds": 90 } }
+```
+
+`Traffic.restartHost()` starts the traffic over: players aboard a tram or
+metro train first step off where they boarded (`playerRailwayEject`: a new
+life, `spawnGeneration` rises, with the same health and weapons; no
+`playerSpawn`), then the host takes its whole traffic pool off the road and
+refills it (`trafficHostChange`, reason `restart`). The trams and trains keep
+running.
+
+A second simulation host with the token waits as a standby (up to two): it
+gets no viewer, so nothing replicates to it and it loads no mission. When the
+host leaves, or `Traffic.restartHost(true)` kicks it, the first standby takes
+over one server tick later, once every service has dropped the old host's
+cars, walkers and NPCs. It then loads the mission and spawns its own traffic;
+riders step off first, since its trams run from where its own world has them
+(`trafficHostChange`, reason `handover`). A kicked host does not reconnect on
+its own: start its process again and it joins as a standby.
+
+- `Traffic.getJamSettings(): TrafficJamSettings` — The jam watch's settings.
+- `Traffic.setJamSettings(settings: Partial<TrafficJamSettings>): boolean` — Changes the given fields for the whole server; false, and nothing changes, when one is out of range (`minCars` 2-64, `radius` 1-200, `maxSpeed` 0-20, `stuckSeconds` 1-3600, `cooldownSeconds` 0-3600, `playerClearance` 0-200). `enabled: false` stops the automatic resets.
+- `Traffic.resetArea(position, radius): number` — Asks the host to take its traffic cars within radius (up to 800) off the road at once, parked ones too; returns how many it asked for, 0 without a host.
+- `Traffic.restartHost(handover?: boolean): boolean` — See above. False without a host, or with `handover` and no standby.
+- `Traffic.getHost(): { attached: boolean; standby: number }` — Whether a host runs the traffic, and how many standby hosts wait.
+
+```js
+Events.on("trafficJamReset", ({position, vehicles, stuckSeconds}) => {
+    console.log(`Cleared ${vehicles} jammed cars at ${position.x}, ${position.z} after ${Math.round(stuckSeconds)} s`);
+});
+```
+
+Free Ride gives admins `/traffic [reset [radius] | restart | handover]` and the
+console `traffic status | reset <x> <y> <z> [radius] | restart | handover`.
+
 ## Bridge
 
 The mission's drawbridges and the two steamers they open for. The simulation
@@ -872,6 +942,9 @@ are defined by your resources.
 | `vehicleStealRefused` | `[vehicle: Vehicle, player: Player]` | The server refused a player's steal of a traffic car (out of reach, not standing still, taken first, driver gone); a repeated try within 500 ms is refused without this event. The player's client already played the pull-out; the driver stays in the car. |
 | `playerThrownOut` | `[player: Player, vehicle: Vehicle, info: PlayerThrownOutInfo]` | After `vehiclePlayerExited`, when a simulation host NPC pulled the player out of the seat. |
 | `railwayHitPlayer` | `[player: Player, info: RailwayHitInfo]` | A tram or metro train knocked a player on foot down, after `playerDamage` (cause `railway`). |
+| `playerRailwayEject` | `[player: Player, info: PlayerRailwayEjectInfo]` | A traffic restart or a new simulation host took a rider off a tram or metro train: it stands where it stepped aboard, in a new life with the same health and weapons. `info.railway` is the railway it rode. `playerSpawn` and `playerRespawn` do not fire for it. |
+| `trafficJamReset` | `[info: TrafficJamResetInfo]` | The jam watch asked the simulation host to take a jam's cars off the road. `info` has `position` (the jam's middle), `vehicles` and `stuckSeconds`. |
+| `trafficHostChange` | `[info: TrafficHostChangeInfo]` | The host's traffic starts over: `info.reason` is `restart` (`Traffic.restartHost()`), `handover` (a standby host took over) or `attach` (a host joined while none ran); `info.ejected` counts the riders taken off railways first. |
 | `vehicleRefuel` | `[vehicle: Vehicle, player: Player \| null, info: VehicleRefuelInfo]` | A gas station attendant's fuel animation ended its pumping: the server has set the fuel (`vehicleFuelChange`) and taken the money (`playerMoneyChange`). `info` has `pumper`, `litres` and `cost`. The car stays locked until he is back at his post. |
 | `pumperRefused` | `[player: Player, vehicle: Vehicle, info: PumperRefusedInfo]` | The server refused a driver's "use the pump": `info.reason` is `disabled`, `unavailable` (no simulation host), `busy`, `full` (less than half a litre missing) or `money` (with `info.cost` for the full tank). Nothing is locked. |
 | `pedestrianSpawn` | `[pedestrian: Pedestrian]` | The simulation host started a pedestrian near a player. |

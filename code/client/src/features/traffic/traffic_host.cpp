@@ -15,6 +15,7 @@
 #include <mafia1/sdk/car/native_car.h>
 #include <mafia1/sdk/core/mission.h>
 #include <mafia1/sdk/player/native_human.h>
+#include <mafia1/sdk/police/native_police_action.h>
 #include <mafia1/sdk/police/native_police_manager.h>
 #include <mafia1/sdk/seat/native_seat.h>
 #include <mafia1/sdk/traffic/native_traffic_car.h>
@@ -28,7 +29,9 @@
 #include <cmath>
 #include <initializer_list>
 #include <limits>
+#include <string>
 #include <unordered_set>
+#include <utility>
 
 namespace Mafia1Online::Features::Traffic {
     namespace {
@@ -241,6 +244,60 @@ namespace Mafia1Online::Features::Traffic {
             (void)SDK::Traffic::ReplaceStolen(car);
             Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Traffic car {} {} by player {}", takeover.key, takeover.steal ? "stolen" : "taken", takeover.playerId);
         });
+        Framework::CoreModules::GetNetworkPeer()->RegisterRPC<Shared::Traffic::Reset>([this](const Shared::Traffic::Reset &reset, MafiaNet::Packet *) {
+            if (reset.missionGeneration != _missionGeneration) {
+                return;
+            }
+            _resetAll = _resetAll || reset.all;
+            _resetKeys.insert(_resetKeys.end(), reset.keys.begin(), reset.keys.end());
+        });
+    }
+
+    void TrafficHost::ApplyReset() {
+        if (!_resetAll && _resetKeys.empty()) {
+            return;
+        }
+        const bool all = std::exchange(_resetAll, false);
+        const std::unordered_set<uint32_t> keys(_resetKeys.begin(), _resetKeys.end());
+        _resetKeys.clear();
+        // A car retail police or mafia code made goes its own way: its crew
+        // and the police records, board, road blocks and pursuits that may
+        // still hold it come first (UpdateCrewCarRetirement).
+        const auto now = std::chrono::steady_clock::now();
+        size_t crewCars = 0;
+        for (const auto &[key, record] : _records) {
+            if (!record.released && record.origin == Car::CarService::Origin::Temporary && (all || keys.contains(key)) && _crewCarRetire.emplace(key, CrewCarRetire {now}).second) {
+                ++crewCars;
+            }
+        }
+        if (crewCars) {
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Traffic reset by the server: {} police or mafia cars to retire", crewCars);
+        }
+        if (!_traffic) {
+            return;
+        }
+        // Only what C_traffic_car owns: an NPC crew's car, a road block's or
+        // a returned police car (a dynamic element) is still held by retail
+        // police and mafia code, and a car a player took is theirs.
+        size_t cleared = 0;
+        for (int32_t slot = 0; slot < _traffic->SlotCount(); ++slot) {
+            auto *element = _traffic->Slot(slot);
+            if (!element || !element->_active || !element->_car || element->_dynamicallyAllocated || element->_pendingDeactivation) {
+                continue;
+            }
+            const auto *record = FindByCar(element->_car);
+            if (record && record->released) {
+                continue;
+            }
+            if (!all && (!record || !keys.contains(record->key))) {
+                continue;
+            }
+            // BeforeDeactivate retires the record and reports it (Retired).
+            _traffic->DeactivateElem(slot);
+            ++cleared;
+        }
+        Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Traffic reset by the server: {} pool cars off the road ({} asked)", cleared,
+                                                                    all ? std::string("all") : std::to_string(keys.size()));
     }
 
     void TrafficHost::Reset() {
@@ -251,6 +308,9 @@ namespace Mafia1Online::Features::Traffic {
         _nextObserver = 0;
         _spawnTimerMs = 0;
         _traffic = nullptr;
+        _resetAll = false;
+        _resetKeys.clear();
+        _crewCarRetire.clear();
     }
 
     TrafficHost::Record *TrafficHost::FindByCar(const void *car) {
@@ -275,6 +335,8 @@ namespace Mafia1Online::Features::Traffic {
             return;
         }
         RefreshObservers(world);
+        ApplyReset();
+        UpdateCrewCarRetirement();
         Discover(world);
         Bind(world);
         Watch(world);
@@ -379,6 +441,114 @@ namespace Mafia1Online::Features::Traffic {
 
     size_t TrafficHost::DrivenCount() const {
         return static_cast<size_t>(std::count_if(_records.begin(), _records.end(), [](const auto &entry) { return entry.second.reported && !entry.second.released; }));
+    }
+
+    CrewCarFacts TrafficHost::CrewCarFactsOf(NativeCar *car, std::vector<NativeActor *> &crew) const {
+        CrewCarFacts facts;
+        auto *carActor = static_cast<NativeActor *>(static_cast<void *>(car));
+        auto *seats = static_cast<SDK::Seat::NativeCar *>(car);
+        for (int seat = 0; seat < static_cast<int>(Shared::Entities::CarEntity::kMaxSeats); ++seat) {
+            NativeActor *owner = seats->HasSeat(seat) ? seats->GetOwner(seat) : nullptr;
+            if (!owner) {
+                continue;
+            }
+            crew.push_back(owner);
+            facts.foreignOccupant = facts.foreignOccupant || !_npcs->Owns(owner) || _npcs->IsScripted(owner);
+            facts.recruitedOnDuty = facts.recruitedOnDuty || SDK::Police::RecruitedOnDuty(owner);
+        }
+        const auto involves = [&](const void *actor) {
+            return actor && (actor == carActor || std::find(crew.begin(), crew.end(), actor) != crew.end());
+        };
+        for (auto *entry = SDK::Traffic::PursuitEntriesBegin(); entry && entry != SDK::Traffic::PursuitEntriesEnd(); ++entry) {
+            facts.pursuit = facts.pursuit || involves(entry->car) || involves(entry->driver) || involves(entry->passenger);
+        }
+        auto *game = SDK::Core::Mission::Get()->Game();
+        for (auto *block = SDK::Police::RoadBlocksBegin(game); block && block != SDK::Police::RoadBlocksEnd(game); ++block) {
+            if (block->Active()) {
+                facts.activeRoadBlock = facts.activeRoadBlock || block->Lists(carActor) || std::any_of(crew.begin(), crew.end(), [&](NativeActor *member) { return block->Lists(member); });
+            }
+        }
+        SDK::Police::ForEachBoardAction([&](const SDK::Police::NativeBoardAction &action) {
+            facts.boardCase = facts.boardCase || action.Car() == carActor ||
+                              std::any_of(crew.begin(), crew.end(), [&](NativeActor *member) { return action.HasMember(member); });
+        });
+        auto *police = SDK::Police::PoliceManager(game);
+        for (auto *const *record = police->RecordsBegin(); record && record != police->RecordsEnd(); ++record) {
+            const auto &crime = **record;
+            const bool named = crime.DrivenCar() == carActor || crime._recordedVehicle == carActor || crime._copHitCar == carActor;
+            const bool open = crime.Level() != SDK::Police::NativeCrimeRecord::kLevelNone || crime.PendingLevel() != SDK::Police::NativeCrimeRecord::kLevelNone;
+            const bool officer = crime.ListsOfficer(carActor) || std::any_of(crew.begin(), crew.end(), [&](NativeActor *member) { return crime.ListsOfficer(member); });
+            facts.crimeRecord = facts.crimeRecord || named || (open && officer);
+        }
+        for (auto **element = SDK::Traffic::CarElementsBegin(); element && element != SDK::Traffic::CarElementsEnd(); ++element) {
+            if (!*element || ((*element)->_car != car && (*element)->_savedCar != car)) {
+                continue;
+            }
+            const bool dynamic = (*element)->_active && (*element)->_dynamicallyAllocated && !(*element)->_pendingDeactivation && (*element)->_car == car;
+            facts.dynamicElement = facts.dynamicElement || dynamic;
+            facts.otherElement = facts.otherElement || !dynamic;
+        }
+        auto **waitingFirst = *reinterpret_cast<NativeTrafficCarElement ***>(SDK::Traffic::kSpawnedCarsBegin);
+        auto **waitingLast = *reinterpret_cast<NativeTrafficCarElement ***>(SDK::Traffic::kSpawnedCarsEnd);
+        for (auto **element = waitingFirst; waitingFirst && element != waitingLast; ++element) {
+            facts.otherElement = facts.otherElement || (*element && !(*element)->_active && (*element)->_car == car);
+        }
+        return facts;
+    }
+
+    void TrafficHost::UpdateCrewCarRetirement() {
+        const auto now = std::chrono::steady_clock::now();
+        for (auto it = _crewCarRetire.begin(); it != _crewCarRetire.end();) {
+            const uint32_t key = it->first;
+            auto &pending = it->second;
+            const auto found = _records.find(key);
+            if (found == _records.end() || found->second.released) {
+                // Retired (Watch, OnNativeCarDestroyed) or a player's now.
+                it = _crewCarRetire.erase(it);
+                continue;
+            }
+            auto &record = found->second;
+            if (now - pending.since > kCrewCarWait) {
+                Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Traffic car {} not retired within {} s (its crew still aboard); left on the road", key,
+                                                                            kCrewCarWait.count());
+                it = _crewCarRetire.erase(it);
+                continue;
+            }
+            if (pending.requested) {
+                ++it;
+                continue;
+            }
+            std::vector<NativeActor *> crew;
+            const CrewCarVerdict verdict = JudgeCrewCar(CrewCarFactsOf(record.car, crew));
+            if (verdict == CrewCarVerdict::Deactivate) {
+                for (int32_t slot = 0; _traffic && slot < _traffic->SlotCount(); ++slot) {
+                    if (auto *element = _traffic->Slot(slot); element && element->_active && element->_car == record.car) {
+                        // DeactivateElem frees a pool police car (FreeTempCar)
+                        // or lists any other for retirement (0x4ab885, 0x4ab8a6); a car
+                        // still standing is judged again next update.
+                        _traffic->DeactivateElem(slot);
+                        break;
+                    }
+                }
+                Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Traffic car {}: {}", key, CrewCarVerdictName(verdict));
+                ++it;
+                continue;
+            }
+            if (verdict != CrewCarVerdict::Retire) {
+                Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Traffic car {} {}", key, CrewCarVerdictName(verdict));
+                it = _crewCarRetire.erase(it);
+                continue;
+            }
+            // Crew first: the pass unseats a retiring officer and keeps a car
+            // anyone still sits in (0x49ebe2, 0x49ec39).
+            for (NativeActor *member : crew) {
+                _npcs->RequestRetirement(member);
+            }
+            _npcs->RequestRetirement(static_cast<NativeActor *>(static_cast<void *>(record.car)));
+            pending.requested = true;
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Traffic car {} and {} crew into the police retirement list", key, crew.size());
+            ++it;
+        }
     }
 
     void TrafficHost::ReturnCar(NativeTrafficCar &traffic) {

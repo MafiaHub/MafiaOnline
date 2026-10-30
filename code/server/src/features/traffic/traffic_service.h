@@ -1,9 +1,12 @@
 #pragma once
 
 #include "shared/features/car/car_entity.h"
+#include "shared/features/traffic/traffic_jam.h"
 #include "shared/features/traffic/traffic_report.h"
 
 #include <mafianet/types.h>
+
+#include <glm/vec3.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -60,12 +63,30 @@ namespace Mafia1Online::Features::Traffic {
         static constexpr std::chrono::seconds kAbandonedAfter {120};
         static constexpr float kAbandonedDistance = 400.0f;
 
+        // The jam watch looks at the host's cars this often.
+        static constexpr std::chrono::seconds kJamCheckInterval {1};
+        // The host retires a pool car it was asked to reset within a frame or
+        // two; a police or mafia car goes with the next police retirement
+        // pass, once no case runs through it. One still here after this was
+        // kept, and the jam watch leaves it alone.
+        static constexpr std::chrono::seconds kResetWait {10};
+
         void RegisterRPC(const Simulation::SimulationService &simulation, Player::PlayerService &players, Car::CarService &cars);
+        // A jam the host was asked to clear: where, how many cars and how
+        // long the most recently stopped of them had stood.
+        struct JamReset {
+            glm::vec3 center {0.0f};
+            size_t cars = 0;
+            double stuckSeconds = 0.0;
+        };
         // A player took a car the host drives (stolen: its driver was thrown
-        // out), or the server refused a steal; carId, playerId.
+        // out), or the server refused a steal; carId, playerId. A jam reset.
         struct Events {
             std::function<void(uint64_t, uint64_t, bool)> taken;
             std::function<void(uint64_t, uint64_t)> stealRefused;
+            std::function<void(const JamReset &)> jamReset;
+            // Whether an NPC (network id) is a scripted one (NpcService).
+            std::function<bool(uint64_t)> scriptedNpc;
         };
         void SetEvents(Events events) {
             _events = std::move(events);
@@ -74,6 +95,19 @@ namespace Mafia1Online::Features::Traffic {
         void Update();
         // Host gone or mission changed: every car the host drives goes.
         void Clear();
+
+        // False for settings outside Shared::Traffic::ValidJamSettings.
+        bool SetJamSettings(const Shared::Traffic::JamSettings &settings);
+        [[nodiscard]] const Shared::Traffic::JamSettings &GetJamSettings() const {
+            return _jam;
+        }
+        // Asks the host to take the traffic cars within radius of center off
+        // the road (JamScope::Manual: also parked ones); a car somebody sits
+        // in or stands at stays. Returns how many cars it asked for.
+        size_t ResetArea(const glm::vec3 &center, float radius);
+        // Asks the host to take every car of its traffic pool off the road
+        // and refill it. False without a host.
+        bool ResetAll();
 
         // Server seat rules for a car the host drives. An entry into a seat
         // nobody holds hands the car over once the seat intent is accepted.
@@ -102,9 +136,19 @@ namespace Mafia1Online::Features::Traffic {
             uint64_t networkId = 0;
             // Despawn at this time (exploded wreck); zero for none.
             std::chrono::steady_clock::time_point despawnAt;
+            // Where and since when it stands, for the jam watch.
+            Shared::Traffic::StuckTrack stuck;
+            // When the host was asked to take it off the road; zero for never.
+            std::chrono::steady_clock::time_point resetAskedAt;
+            // Still here kResetWait after that: the host kept it. Only the
+            // jam watch passes it over; a script's reset or a restart asks
+            // again.
+            bool resetKept = false;
         };
 
         bool FromHost(MafiaNet::PeerGuid sender, uint64_t missionGeneration) const;
+        // The attached host is the one the records belong to.
+        bool HostCurrent() const;
         Shared::Entities::CarEntity *HostCar(uint32_t key) const;
         // NPC network ids seated in this car, if any.
         bool HasNpcOccupant(Shared::Entities::CarEntity &car) const;
@@ -115,6 +159,13 @@ namespace Mafia1Online::Features::Traffic {
         void Takeover(Shared::Entities::CarEntity &car, Shared::Entities::PlayerEntity &player, bool steal);
         void Despawn(uint32_t key);
         void DespawnReleased(uint64_t networkId);
+        // The jam watch: stuck tracks, then Shared::Traffic::FindJams.
+        void WatchJams(std::chrono::steady_clock::time_point now);
+        Shared::Traffic::JamCar ViewOf(const Record &record, const Shared::Entities::CarEntity &car, std::chrono::steady_clock::time_point now,
+                                       const std::vector<glm::vec3> &onFoot) const;
+        // Where the spawned players on foot stand.
+        std::vector<glm::vec3> PlayersOnFoot() const;
+        void SendReset(std::vector<uint32_t> keys, bool all);
 
         const Simulation::SimulationService *_simulation = nullptr;
         Player::PlayerService *_players = nullptr;
@@ -139,5 +190,13 @@ namespace Mafia1Online::Features::Traffic {
         std::unordered_map<uint64_t, NpcSeat> _npcSeats;
         // When each player (network id) last sent a steal intent.
         std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> _lastStealIntent;
+        Shared::Traffic::JamSettings _jam;
+        std::chrono::steady_clock::time_point _lastJamCheck;
+        // Recent jam resets: where, and until when no other one goes there.
+        struct RecentJam {
+            glm::vec3 center {0.0f};
+            std::chrono::steady_clock::time_point until;
+        };
+        std::vector<RecentJam> _recentJams;
     };
 } // namespace Mafia1Online::Features::Traffic

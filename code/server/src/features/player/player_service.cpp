@@ -215,7 +215,19 @@ namespace Mafia1Online::Features::Player {
             it->second.lastMovement = {};
             it->second.recentHeights.clear();
             it->second.recentHeights.emplace_back(std::chrono::steady_clock::now(), position.y);
+            it->second.groundPosition = position;
+            it->second.hasGround      = true;
         }
+        return true;
+    }
+
+    bool PlayerService::LastGroundPosition(uint64_t networkId, glm::vec3 &position) const {
+        const auto it = _sessions.find(GuidForNetworkId(networkId));
+        const auto *player = FindByNetworkId(networkId);
+        if (it == _sessions.end() || !player || !player->spawned || player->missionGeneration != _currentMissionGeneration || !it->second.hasGround) {
+            return false;
+        }
+        position = it->second.groundPosition;
         return true;
     }
 
@@ -286,6 +298,7 @@ namespace Mafia1Online::Features::Player {
         for (auto &[guid, session] : _sessions) {
             session.suggestedGeneration = 0;
             session.hasSequence         = false;
+            session.hasGround           = false;
             session.recentHeights.clear();
             auto *player = replication->GetEntity<Shared::Entities::PlayerEntity>(session.networkId);
             if (!player) {
@@ -461,6 +474,10 @@ namespace Mafia1Online::Features::Player {
         player->railwayPart  = riding ? movement.railwayPart : 0;
         player->railwayLocal = riding ? railwayLocal : glm::vec3(0.0f);
         player->railwayYaw   = riding ? movement.railwayYaw : 0.0f;
+        if (!riding && !SeatedCar(*player)) {
+            session.groundPosition = position;
+            session.hasGround      = true;
+        }
         Shared::Net::AdvanceSampleClock(*player, before, movement.clockMs);
         session.lastSequence = movement.sequence;
         session.hasSequence  = true;

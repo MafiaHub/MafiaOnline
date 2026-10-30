@@ -4,8 +4,10 @@
 
 #include <networking/rpc/rpc.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace Mafia1Online::Shared::Traffic {
     // Simulation host <-> server. A key names one host-driven car for the
@@ -217,6 +219,33 @@ namespace Mafia1Online::Shared::Traffic {
             stream->Serialize(write, playerId);
             stream->Serialize(write, playerSpawnGeneration);
             stream->Serialize(write, steal);
+        }
+    };
+
+    // Server -> host: take these cars, or with all every car of the traffic
+    // pool, off the road (C_traffic_car::DeactivateElem, as its own despawn
+    // does). Each goes with the usual Retired, and the host refills the road
+    // out of every player's sight. A car no longer the host's, or not a pool
+    // car (an NPC crew's car, a road block's police car, which retail systems
+    // still hold), stays.
+    struct Reset {
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::TrafficReset");
+
+        uint64_t missionGeneration = 0;
+        bool all = false;
+        std::vector<uint32_t> keys;
+
+        void Serialize(MafiaNet::BitStream *stream, bool write) {
+            stream->Serialize(write, missionGeneration);
+            stream->Serialize(write, all);
+            auto count = static_cast<uint16_t>(std::min(keys.size(), kMaxHostCars));
+            stream->Serialize(write, count);
+            if (!write) {
+                keys.assign(std::min<size_t>(count, kMaxHostCars), 0);
+            }
+            for (size_t i = 0; i < keys.size() && i < count; ++i) {
+                stream->Serialize(write, keys[i]);
+            }
         }
     };
 } // namespace Mafia1Online::Shared::Traffic

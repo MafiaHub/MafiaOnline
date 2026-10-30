@@ -302,6 +302,7 @@ namespace Mafia1Online::Features::Npc {
             }
         }
         _npcs.clear();
+        _forcedRetirement.clear();
         _observers.clear();
         _policePersons.clear();
         _policeOfficers.clear();
@@ -708,7 +709,7 @@ namespace Mafia1Online::Features::Npc {
         for (size_t i = 0; i < count; ++i) {
             NativeActor *actor = begin[i];
             const auto tracked = _npcs.find(actor);
-            const bool removeRequested = tracked != _npcs.end() && tracked->second.removeRequested;
+            const bool removeRequested = (tracked != _npcs.end() && tracked->second.removeRequested) || _forcedRetirement.contains(actor);
             if (!removeRequested && SDK::Police::RetiresByDistance(actor) && NearObserver(actor->Frame()->WorldPosition())) {
                 kept.push_back(actor);
             }
@@ -730,13 +731,28 @@ namespace Mafia1Online::Features::Npc {
         for (auto *actor : kept) {
             police->AddRetirement(actor);
         }
+        // A forced actor the pass kept (its crew still aboard, a case it
+        // waits out) stays forced; one it retired is no longer listed.
+        std::erase_if(_forcedRetirement, [&](void *actor) {
+            auto **first = police->RetirementBegin();
+            return std::find(first, first + police->RetirementCount(), actor) == first + police->RetirementCount();
+        });
         return result;
+    }
+
+    void NpcHost::RequestRetirement(NativeActor *actor) {
+        if (const auto tracked = _npcs.find(actor); tracked != _npcs.end()) {
+            tracked->second.removeRequested = true;
+        }
+        _forcedRetirement.insert(actor);
+        SDK::Police::PoliceManager(SDK::Core::Mission::Get()->Game())->AddRetirement(actor);
     }
 
     void NpcHost::Update(World::WorldService &world) {
         const uint64_t generation = world.LoadedMissionGeneration();
         if (generation != _missionGeneration) {
             _npcs.clear();
+            _forcedRetirement.clear();
             _policePersons.clear();
             _policeOfficers.clear();
             _reportedRecords.clear();

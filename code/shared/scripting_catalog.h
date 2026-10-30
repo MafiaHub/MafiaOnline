@@ -312,6 +312,33 @@ namespace Mafia1Online::Scripting {
         railwayHit.add_property("damage", "number", "Damage applied: retail (|speed| - 2.5) * 4.2.");
         events.add_property("railwayHitPlayer", "[player: Player, info: RailwayHitInfo]",
             "Dispatched after a tram or metro train knocked a player on foot down, following playerDamage (cause railway).");
+        auto &eject = catalog.data_type("PlayerRailwayEjectInfo", "A rider taken off a tram or metro train.");
+        eject.add_property("railway", "RailwayInfo | null", "The railway it rode, as last reported.");
+        events.add_property("playerRailwayEject", "[player: Player, info: PlayerRailwayEjectInfo]",
+            "Dispatched when a traffic restart or a new simulation host took a rider off a tram or metro train: it stands where it stepped aboard, in a new life "
+            "(spawnGeneration rises) with the same health and weapons. playerSpawn and playerRespawn do not fire for it.");
+        auto &jamSettings = catalog.data_type("TrafficJamSettings", "The server's jam watch over the simulation host's traffic.");
+        jamSettings.add_property("enabled", "boolean", "Whether the server resets jams on its own; default true.");
+        jamSettings.add_property("minCars", "number", "Cars a jam takes, each within radius of one of them; default 6.");
+        jamSettings.add_property("radius", "number", "Size of a jam in units; default 35. No second reset within it during cooldownSeconds.");
+        jamSettings.add_property("maxSpeed", "number", "A car counts as standing below this speed in units per second, and while it keeps within 2 units of where it stopped; default 1.");
+        jamSettings.add_property("stuckSeconds", "number", "How long every car of a jam has stood; default 60, longer than a crossing's wait.");
+        jamSettings.add_property("cooldownSeconds", "number", "Seconds before the same place is reset again; default 30.");
+        jamSettings.add_property("playerClearance", "number",
+            "A car with a player on foot this close stays; default 8, the reach of a steal. The jam watch also leaves cars a player or NPC sits in, police cars and parked cars (no driver aboard) alone.");
+        auto &jam = catalog.data_type("TrafficJamResetInfo", "A traffic jam the server cleared.");
+        jam.add_property("position", "{ x: number; y: number; z: number }", "Middle of the jammed cars.");
+        jam.add_property("vehicles", "number", "Cars the simulation host was asked to take off the road.");
+        jam.add_property("stuckSeconds", "number", "How long the most recently stopped of them had stood.");
+        events.add_property("trafficJamReset", "[info: TrafficJamResetInfo]",
+            "Dispatched when the jam watch (Traffic.setJamSettings) found a jam and asked the simulation host to take its cars off the road. Each car goes as the "
+            "host's own despawn does, without vehicleDestroy; the host refills the road out of every player's sight. Something players left on the road may jam it again.");
+        auto &hostChange = catalog.data_type("TrafficHostChangeInfo", "Why the traffic started over.");
+        hostChange.add_property("reason", "\"restart\" | \"handover\" | \"attach\"",
+            "restart: Traffic.restartHost() had the host refill its traffic; handover: a standby simulation host took over (Traffic.restartHost(true), or the host left); "
+            "attach: a simulation host joined while none ran.");
+        hostChange.add_property("ejected", "number", "Riders taken off trams and metro trains first (playerRailwayEject).");
+        events.add_property("trafficHostChange", "[info: TrafficHostChangeInfo]", "Dispatched when the simulation host's traffic starts over.");
         events.add_property("vehicleSpawn", "[vehicle: Vehicle]", "Dispatched after Vehicle.spawn created a vehicle.");
         events.add_property("vehicleDestroy", "[vehicle: Vehicle]", "Dispatched immediately before Vehicle.destroy removes the vehicle. A mission change removes every vehicle without this event.");
         for (const char *name : {"vehicleEngineChange", "vehicleFuelChange", "vehicleLightsChange", "vehicleHornChange", "vehicleSirenChange", "vehicleGearChange", "vehicleDamageState"}) {

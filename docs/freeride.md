@@ -918,6 +918,14 @@ console manages them with `fr admin add|remove|list <player>`. `/car` gives
 an admin the full motor pool, or spawns a model directly with
 `/car <model.i3d>`.
 
+The server clears traffic jams on its own (see `Traffic` in the
+[server scripting API](server_scripting_api.md)). `/traffic` shows the
+simulation host and the jam watch; `/traffic reset [radius]` sends the
+traffic cars within radius (60 m by default) off the road, `/traffic restart`
+has the host refill all of its traffic, after taking players off the trams,
+and `/traffic handover` hands the traffic to a standby simulation host. The
+console has `traffic status | reset <x> <y> <z> [radius] | restart | handover`.
+
 ## The living city
 
 Free Ride plays by day; the night map gives way to the default map. A
@@ -952,7 +960,7 @@ development mode is on.
 | `server/dealership.js`, `economy.js` | The car lot, the garage and car locks; `/pay` and the street wage. |
 | `server/lib/` | Shared rules: the database (`store.js`), commands, profiles and ranks, respawn and activities, invitations, notifications, nametags, the road graph, admins, car prices, and the county jail building and its warden (`prison.js`, `warden.js`). |
 | `server/selector.js`, `lib/accounts.js`, `lib/flyover.js`, `lib/spline.js` | Logging in and registering, the one-time look and entering the city; accounts and remember tokens; the login flight. |
-| `server/ambience.js`, `shops.js`, `police.js`, `props.js`, `doors.js` | Clock and weather, shops and courier, police outcomes, prop repair, the door lab. |
+| `server/ambience.js`, `shops.js`, `police.js`, `props.js`, `doors.js`, `traffic.js` | Clock and weather, shops and courier, police outcomes, prop repair, the door lab, the admins' traffic commands. |
 | `server/races.js`, `combat.js`, `duels.js`, `crews.js`, `world_events.js`, `social.js` | Races, bounties, duels, crews, city events, rides, messages and dice. |
 | `server/export.js`, `police_duty.js`, `police_backup.js`, `taxi.js`, `robbery.js` | The jobs; `police_backup.js` is police duty's call boxes and backup. |
 | `server/firefighters.js`, `ambulance.js`, `lib/stations.js`, `lib/jobkey.js`, `client/rescue.js` | The fire brigade and the ambulance; their stations (sign-on points and parked vehicles); the job key (G) and its prompt. |

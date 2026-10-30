@@ -103,6 +103,13 @@ namespace Mafia1Online::Features::Npc {
             return found != _npcs.end() && Shared::Npc::IsScriptedKey(found->second.key);
         }
         void ForEachTracked(const std::function<void(SDK::Player::NativeActor *, Shared::Entities::NpcKind)> &visit) const;
+        // Retires a retail-made actor (a police or mafia car, or one of its
+        // crew) on the next native retirement pass, wherever the players
+        // are: C_shvestky::TickDoRiciActors then releases it the retail way
+        // (crime records' officer lists, radar, car hunts, actor lists, the
+        // police pool). A tracked NPC goes as a server Remove makes it go.
+        // The caller checked no case runs through it (crew_car_retire.h).
+        void RequestRetirement(SDK::Player::NativeActor *actor);
         // Before the host removes a player's replica: nothing native may keep
         // pointing at it (crime record, police actions, car hunts).
         void ForgetHuman(SDK::Player::NativeActor *human);
@@ -276,6 +283,10 @@ namespace Mafia1Online::Features::Npc {
         uint64_t _missionGeneration = 0;
         uint32_t _nextKey = 1;
         std::unordered_map<void *, Tracked> _npcs;
+        // Retail-made actors RequestRetirement put in the retirement list,
+        // which the next pass retires whatever their distance; compared
+        // only, and dropped once they left the list.
+        std::unordered_set<void *> _forcedRetirement;
         // Player replicas the police manager keeps a crime record for.
         std::unordered_set<void *> _policePersons;
         struct ReportedRecord {
