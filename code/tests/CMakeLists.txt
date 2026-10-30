@@ -80,3 +80,6 @@ target_link_libraries(Mafia1OnlineProcessLogTests PRIVATE Framework::Framework)
 
 add_executable(Mafia1OnlinePoliceCaseTests police_case_tests.cpp)
 target_include_directories(Mafia1OnlinePoliceCaseTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../client/src")
+
+add_executable(Mafia1OnlineEmptyCarHandoffTests empty_car_handoff_tests.cpp)
+target_include_directories(Mafia1OnlineEmptyCarHandoffTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")

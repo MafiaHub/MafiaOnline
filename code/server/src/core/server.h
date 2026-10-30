@@ -177,6 +177,8 @@ namespace Mafia1Online::Core {
         std::chrono::steady_clock::time_point _lastControllerUpdate;
         // Last hand-off of an empty car, which follows the nearest player.
         std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> _emptyCarHandoff;
+        // A human's door, throw-out or pull-out at the car runs until then.
+        std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> _seatAnimationUntil;
         uint64_t _carHitSequence = 0;
         uint64_t _carContactSequence = 0;
         bool _allReadyNotified = false;

@@ -6,6 +6,7 @@
 #include "shared/features/car/car_contact.h"
 #include "shared/features/car/car_debris.h"
 #include "shared/features/car/car_explosion_intent.h"
+#include "shared/features/car/empty_car_handoff.h"
 #include "shared/features/car/car_siren_intent.h"
 #include "shared/features/car/car_terminal_intent.h"
 #include "shared/features/car/car_hit_report.h"
@@ -200,6 +201,7 @@ namespace Mafia1Online::Core {
         // throw, and players replay it as they replay a player's steal.
         _npcs.SetKick([this](uint64_t npcId, const glm::vec3 &position, const Shared::Npc::Kick &kick) {
             if (auto event = _cars.ApplyNpcThrowOut(npcId, position, kick.carId, kick.seat, kick.victimNetworkId, kick.victimSpawnGeneration, MissionGeneration())) {
+                _seatAnimationUntil[kick.carId] = std::chrono::steady_clock::now() + Shared::Car::kThrowHandoffHold;
                 Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(*event);
                 auto exit = *event;
                 exit.playerId = kick.victimNetworkId;
@@ -593,6 +595,10 @@ namespace Mafia1Online::Core {
                 if (npcThrown) {
                     _traffic.OnNpcThrown(intent.carId, intent.seat);
                 }
+                if (event->action == Shared::Car::SeatAction::StealBegin || event->action == Shared::Car::SeatAction::Exit) {
+                    _seatAnimationUntil[intent.carId] = std::chrono::steady_clock::now() +
+                                                        (event->action == Shared::Car::SeatAction::Exit ? Shared::Car::kExitHandoffHold : Shared::Car::kThrowHandoffHold);
+                }
                 // Every client, the host included, replays the throw; the
                 // host's replay throws its own NPC out natively.
                 Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(*event);
@@ -689,11 +695,10 @@ namespace Mafia1Online::Core {
         // The simulation controller is the client whose native physics is
         // authoritative for a car: its driver, otherwise the first occupied
         // passenger seat, otherwise the nearest mission-ready player. An empty
-        // car only moves to another player who is clearly closer, and not more
-        // often than every two seconds, so a hand-off never flaps.
+        // car only moves to another player who is clearly closer, not more
+        // often than every two seconds and not while a human still plays its
+        // door or throw-out at it (Shared::Car::HandEmptyCarToNearest).
         constexpr auto kInterval            = std::chrono::milliseconds(250);
-        constexpr auto kEmptyHandoffHold    = std::chrono::seconds(2);
-        constexpr float kEmptyHysteresis    = 10.0f;
         constexpr int kSimulationPingChange = 5;
         const auto now                      = std::chrono::steady_clock::now();
         if (now - _lastControllerUpdate < kInterval) {
@@ -761,8 +766,17 @@ namespace Mafia1Online::Core {
                 return;
             }
             const auto last = _emptyCarHandoff.find(carId);
-            const bool held = last != _emptyCarHandoff.end() && now - last->second < kEmptyHandoffHold;
-            if (!currentUsable || (!held && currentDistance - nearest > kEmptyHysteresis)) {
+            const auto animation = _seatAnimationUntil.find(carId);
+            Shared::Car::EmptyCarHandoffView view;
+            view.currentUsable    = currentUsable;
+            view.currentDistance  = currentDistance;
+            view.hasNearest       = true;
+            view.nearestDistance  = nearest;
+            view.recentlyHanded   = last != _emptyCarHandoff.end() && now - last->second < Shared::Car::kEmptyHandoffHold;
+            view.seatAnimation    = animation != _seatAnimationUntil.end() && now < animation->second;
+            if (Shared::Car::HandEmptyCarToNearest(view)) {
+                Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->info("Empty car {} handed from {} ({}) to {} ({:.1f} m)", carId, car->simulationControllerGuid,
+                                                                           currentUsable ? fmt::format("{:.1f} m", currentDistance) : std::string("unusable"), nearestGuid, nearest);
                 _cars.SetController(carId, nearestGuid);
                 _emptyCarHandoff[carId] = now;
             }
@@ -774,6 +788,7 @@ namespace Mafia1Online::Core {
         _reportedCarLoadFailures.clear();
         _carLoadFailures.clear();
         _emptyCarHandoff.clear();
+        _seatAnimationUntil.clear();
         _combat.SetTransitionCallback({});
         _combat.SetActionCallback({});
         _missionReadiness.SetResultCallback({});
