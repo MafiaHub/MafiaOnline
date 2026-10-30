@@ -235,6 +235,7 @@ namespace Mafia1Online::Features::Railway {
         nearby.missionGeneration = snapshot.missionGeneration;
         nearby.hostSession = snapshot.hostSession;
         nearby.hostTimeMs = snapshot.hostTimeMs;
+        nearby.hostTimeFraction = snapshot.hostTimeFraction;
         // Far railways go a slice at a time, each in one snapshot of
         // kFarSnapshotDivider as before, so no snapshot carries them all.
         const uint32_t farSlice = _forwarded++ % Shared::Railway::kFarSnapshotDivider;

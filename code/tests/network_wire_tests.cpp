@@ -7,6 +7,7 @@
 #include "client/src/features/player/ride_blend.h"
 #include "client/src/features/player/stalled_gait.h"
 #include "client/src/features/world/fading_copies.h"
+#include "client/src/features/world/remote_clock.h"
 #include "shared/features/car/car_entity.h"
 #include "shared/features/car/car_movement.h"
 #include "shared/features/combat/aim_update.h"
@@ -66,6 +67,38 @@ namespace {
         Framework::Networking::Replication::FieldSerializer reader(&stream, false);
         target.SerializeTransform(reader);
         CHECK(writer.Good() && reader.Good());
+    }
+
+    // World::RemoteClock: the least delayed arrival maps a host's frame
+    // clock onto this one, followed smoothly; a late report never moves
+    // it, and another clock resets it.
+    void RemoteClocks() {
+        Features::World::RemoteClock clock;
+        CHECK(!clock.Valid());
+        // Reports every 133 ms, 20 ms in transit, one of them 80 ms late.
+        double now = 1000.0;
+        CHECK(clock.Observe(500.0, now + 20.0));
+        CHECK(Near(static_cast<float>(clock.Offset()), 520.0f, 1e-3f));
+        for (int i = 1; i <= 30; ++i) {
+            const double late = i == 10 ? 80.0 : 0.0;
+            const double before = clock.Offset();
+            CHECK(!clock.Observe(500.0 + i * 133.0, now + i * 133.0 + 20.0 + late));
+            CHECK(std::abs(clock.Offset() - before) < 0.01);
+        }
+        CHECK(Near(static_cast<float>(clock.Offset()), 520.0f, 1e-3f));
+        // A faster transit is followed over seconds, not taken at once.
+        const double before = clock.Offset();
+        clock.Observe(500.0 + 31 * 133.0, now + 31 * 133.0 + 10.0);
+        CHECK(clock.Offset() < before && clock.Offset() > before - 1.0);
+        for (int i = 32; i < 120; ++i) {
+            clock.Observe(500.0 + i * 133.0, now + i * 133.0 + 10.0);
+        }
+        CHECK(Near(static_cast<float>(clock.Offset()), 510.0f, 0.5f));
+        CHECK(Near(static_cast<float>(clock.RemoteAt(now + 2000.0)), static_cast<float>(now + 2000.0 - clock.Offset()), 1e-3f));
+        // Another host's clock.
+        CHECK(clock.Observe(90000.0, now + 120 * 133.0));
+        clock.Reset();
+        CHECK(!clock.Valid());
     }
 
     void FixedValues() {
@@ -297,6 +330,11 @@ namespace {
         const auto railwayRead   = RoundTrip(railway);
         CHECK(railwayRead.index == 63 && railwayRead.wagonCount == 2 && Near(railwayRead.speed, -12.0f, 0.04f));
         CHECK(Near(railwayRead.wagonPositions[1].z, -330.0f, 0.01f) && Near(railwayRead.wagonPositions[1].y, 20.5f, 0.01f));
+        // A snapshot is dated by the host's step to 1/256 ms.
+        Shared::Railway::Snapshot railways;
+        railways.SetHostTime(4294967295.75);
+        const auto railwaysRead = RoundTrip(railways);
+        CHECK(railwaysRead.hostTimeMs == 0xffffffffu && Near(static_cast<float>(railwaysRead.HostTimeFraction()), 0.75f, 1.0f / 256.0f));
 
         Shared::Combat::AimUpdate aim;
         aim.networkId        = 42;
@@ -935,6 +973,7 @@ namespace {
 
 int main() {
     FixedValues();
+    RemoteClocks();
     Angles();
     Quaternions();
     PlayerTransform();

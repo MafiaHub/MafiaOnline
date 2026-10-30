@@ -4,6 +4,7 @@
 
 #include <networking/rpc/rpc.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -98,8 +99,10 @@ namespace Mafia1Online::Shared::Railway {
     };
 
     // Simulation host -> server at kSnapshotHz with every railway; server ->
-    // each player with those within kStreamRange. hostTimeMs dates the
-    // poses on the host's clock for the players' interpolation.
+    // each player with those within kStreamRange. hostTimeMs and
+    // hostTimeFraction (1/256 ms past it) date the poses by the host's
+    // frame clock (World::FrameClock) at the step that produced them, for
+    // the players' interpolation.
     struct Snapshot {
         static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::RailwaySnapshot");
         static constexpr int kSnapshotHz = 10;
@@ -108,13 +111,25 @@ namespace Mafia1Online::Shared::Railway {
         // The host's process id (Simulation::HostSession) and its clock.
         uint32_t hostSession = 0;
         uint32_t hostTimeMs = 0;
+        uint8_t hostTimeFraction = 0;
         uint8_t count = 0;
         std::array<State, kMaxRailways> railways {};
+
+        // The stamp of a clock in ms, and the clock back from one.
+        void SetHostTime(double milliseconds) {
+            const double whole = std::floor(milliseconds);
+            hostTimeMs = static_cast<uint32_t>(static_cast<int64_t>(whole));
+            hostTimeFraction = static_cast<uint8_t>(std::clamp((milliseconds - whole) * 256.0, 0.0, 255.0));
+        }
+        [[nodiscard]] double HostTimeFraction() const {
+            return static_cast<double>(hostTimeFraction) / 256.0;
+        }
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {
             stream->Serialize(write, missionGeneration);
             stream->Serialize(write, hostSession);
             stream->Serialize(write, hostTimeMs);
+            stream->Serialize(write, hostTimeFraction);
             stream->Serialize(write, count);
             if (count > kMaxRailways) {
                 count = 0;

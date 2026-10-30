@@ -73,14 +73,12 @@ namespace Mafia1Online::Features::Railway {
         constexpr double kRenderDelayMs = 200.0;
         // A lost far report leaves a gap of two far intervals.
         constexpr double kMaximumRenderDelayMs = 2000.0;
-        // Delay change per frame millisecond: a railway runs a tenth slower
-        // or faster for a while rather than jumping.
+        // The delay follows the wanted one with this time constant, and
+        // changes by at most a tenth of the frame time: every change of it
+        // is one of the shown speed, so the mean interval's few ms of
+        // jitter move a railway by a fraction of a percent, never in steps.
+        constexpr double kRenderDelayFollowMs = 2000.0;
         constexpr double kRenderDelayEaseRate = 0.1;
-        // Clock offset change per packet: a late or early packet, or the
-        // least delayed one leaving the window, never steps the railways.
-        constexpr double kClockSlewMs = 1.0;
-        // Beyond this the offset is another clock and is taken at once.
-        constexpr double kClockResetMs = 1000.0;
         // Past the newest report, continue along it for at most this long.
         constexpr double kExtrapolationMs = 300.0;
         // A hit driver stops a railway until Update's out-of-range reset,
@@ -374,28 +372,19 @@ namespace Mafia1Online::Features::Railway {
             if (snapshot.hostSession != _hostSession) {
                 // Another simulation host, with its own clock.
                 _hostSession = snapshot.hostSession;
-                _clockOffsets.clear();
-                _hasClockOffset = false;
+                ResetHostClock();
                 for (auto &entry : _railways) {
                     entry.samples.clear();
                     entry.renderDelayMs = 0.0;
                 }
             }
-            // The least delayed packet dates the host clock here. The offset
-            // only slews toward it: stepped, every railway would jump by
-            // its speed times the step.
-            _clockOffsets.push_back(LocalMs() - static_cast<double>(snapshot.hostTimeMs));
-            while (_clockOffsets.size() > 32) {
-                _clockOffsets.pop_front();
-            }
-            const double floor = *std::min_element(_clockOffsets.begin(), _clockOffsets.end());
-            if (!_hasClockOffset || std::abs(floor - _clockOffset) > kClockResetMs) {
-                _clockOffset = floor;
-            }
-            else {
-                _clockOffset += std::clamp(floor - _clockOffset, -kClockSlewMs, kClockSlewMs);
-            }
-            _hasClockOffset = true;
+            // Dated by the host's frame clock at the step that produced it,
+            // mapped onto this frame clock by the least delayed report
+            // (World::RemoteClock): it follows smoothly, as any step in it
+            // would move every railway on or back by its speed times the step.
+            const double hostTime = UnwrapHostTime(snapshot);
+            const double arrival = World::FrameClock::NowMs();
+            const bool clockReset = _hostClock.Observe(hostTime, arrival);
             for (uint8_t i = 0; i < snapshot.count; ++i) {
                 const auto &state = snapshot.railways[i];
                 if (state.index >= _railways.size() || _railways[state.index].nameHash != state.nameHash) {
@@ -410,19 +399,20 @@ namespace Mafia1Online::Features::Railway {
                     Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Placing {} railways from the simulation host", _railways.size());
                 }
                 auto &samples = _railways[state.index].samples;
-                if (!samples.empty() && static_cast<int32_t>(snapshot.hostTimeMs - samples.back().hostTimeMs) <= 0) {
+                if (!samples.empty() && hostTime <= samples.back().hostTime) {
                     continue;
                 }
-                samples.push_back({snapshot.hostTimeMs, state});
+                samples.push_back({hostTime, state});
                 while (samples.size() > 16) {
                     samples.pop_front();
                 }
                 if (Debug::SyncTrace::Enabled() && Debug::SyncTrace::Near(Vec(state.position))) {
                     Debug::SyncTrace::Received("railway", TraceId(state.index, 0))
-                        .Num("clk", snapshot.hostTimeMs)
-                        .Num("arrival", LocalMs())
-                        .Num("ptime", snapshot.hostTimeMs + _clockOffset)
-                        .Num("offset", _clockOffset);
+                        .Num("clk", hostTime)
+                        .Num("arrival", arrival)
+                        .Num("ptime", hostTime + _hostClock.Offset())
+                        .Num("offset", _hostClock.Offset())
+                        .Bool("reset", clockReset);
                 }
                 _railways[state.index].lastReport = std::chrono::steady_clock::now();
             }
@@ -680,15 +670,29 @@ namespace Mafia1Online::Features::Railway {
         _board = {};
         _reportedPlacement = false;
         _reportedMismatch = false;
-        _clockOffsets.clear();
-        _hasClockOffset = false;
+        ResetHostClock();
         _hostSession = 0;
         _lastHits.clear();
         _lastSnapshot = {};
     }
 
-    double RailwayService::LocalMs() {
-        return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    double RailwayService::UnwrapHostTime(const Shared::Railway::Snapshot &snapshot) {
+        // The 32-bit stamp, unwrapped against the previous one; a reset
+        // clock (ResetHostClock) starts from this one.
+        if (!_hostClock.Valid()) {
+            _hostTime = static_cast<double>(snapshot.hostTimeMs);
+        }
+        else {
+            _hostTime += static_cast<double>(static_cast<int32_t>(snapshot.hostTimeMs - _hostTimeMs));
+        }
+        _hostTimeMs = snapshot.hostTimeMs;
+        return _hostTime + snapshot.HostTimeFraction();
+    }
+
+    void RailwayService::ResetHostClock() {
+        _hostClock.Reset();
+        _hostTime = 0.0;
+        _hostTimeMs = 0;
     }
 
     void RailwayService::OnGameInit(NativeRailway *railway) {
@@ -751,8 +755,7 @@ namespace Mafia1Online::Features::Railway {
         if (_missionGeneration != world.LoadedMissionGeneration()) {
             // A new mission's host clock and reports.
             _missionGeneration = world.LoadedMissionGeneration();
-            _clockOffsets.clear();
-            _hasClockOffset = false;
+            ResetHostClock();
             for (auto &entry : _railways) {
                 entry.samples.clear();
                 entry.renderDelayMs = 0.0;
@@ -823,7 +826,7 @@ namespace Mafia1Online::Features::Railway {
             return;
         }
         UpdateBoarding(world);
-        if (!_hasClockOffset) {
+        if (!_hostClock.Valid()) {
             return;
         }
         auto *localHuman = SDK::Player::CurrentPlayer();
@@ -862,12 +865,15 @@ namespace Mafia1Online::Features::Railway {
     }
 
     void RailwayService::BeforeUpdate(NativeRailway *railway, int frameMs) {
-        if (!_world || !_world->IsReady() || !_hasClockOffset) {
+        if (!_world || !_world->IsReady() || !_hostClock.Valid()) {
             return;
         }
         for (auto &entry : _railways) {
             if (entry.railway == railway && entry.prepared && !entry.samples.empty()) {
-                Place(entry, LocalMs() - _clockOffset, frameMs);
+                // The host clock this frame stands for: by the frame times the
+                // game moves everything else by, not the wall clock read
+                // wherever Update happens to run.
+                Place(entry, _hostClock.RemoteAt(World::FrameClock::NowMs()), frameMs);
                 return;
             }
         }
@@ -1097,7 +1103,9 @@ namespace Mafia1Online::Features::Railway {
         Shared::Railway::Snapshot snapshot;
         snapshot.missionGeneration = world.LoadedMissionGeneration();
         snapshot.hostSession = Simulation::HostSession();
-        snapshot.hostTimeMs = static_cast<uint32_t>(MafiaNet::GetTime());
+        // Dated by the frame clock of the step that produced these states:
+        // the wall clock at sending dated them up to a frame off.
+        snapshot.SetHostTime(World::FrameClock::NowMs());
         for (size_t index = 0; index < _railways.size(); ++index) {
             auto &entry = _railways[index];
             if (!entry.railway) {
@@ -1118,7 +1126,7 @@ namespace Mafia1Online::Features::Railway {
             }
             if (Debug::SyncTrace::Enabled() && Debug::SyncTrace::Near(Vec(state.position))) {
                 Debug::SyncTrace::Truth("railway", TraceId(index, 0))
-                    .Num("clk", snapshot.hostTimeMs)
+                    .Num("clk", static_cast<double>(snapshot.hostTimeMs) + snapshot.HostTimeFraction())
                     .Bool("sent", true)
                     .Vec("p", Vec(state.position))
                     .Quat("q", TraceRotation(Vec(state.direction)))
@@ -1145,7 +1153,7 @@ namespace Mafia1Online::Features::Railway {
         // railway speeding up and slowing down.
         double wantedDelay = kRenderDelayMs;
         if (samples.size() > 1) {
-            const double span = static_cast<double>(static_cast<int32_t>(samples.back().hostTimeMs - samples.front().hostTimeMs));
+            const double span = samples.back().hostTime - samples.front().hostTime;
             wantedDelay = std::clamp(span / static_cast<double>(samples.size() - 1) * 2.0, kRenderDelayMs, kMaximumRenderDelayMs);
         }
         // The first pair of reports shows the rate; ease only from there.
@@ -1156,14 +1164,14 @@ namespace Mafia1Online::Features::Railway {
         }
         else {
             const double step = frameMs * kRenderDelayEaseRate;
-            entry.renderDelayMs = std::clamp(wantedDelay, entry.renderDelayMs - step, entry.renderDelayMs + step);
+            const double follow = (wantedDelay - entry.renderDelayMs) * (1.0 - std::exp(-frameMs / kRenderDelayFollowMs));
+            entry.renderDelayMs += std::clamp(follow, -step, step);
         }
         const double hostTime = hostNow - (entry.renderDelayMs > 0.0 ? entry.renderDelayMs : wantedDelay);
-        // Host times are dated relative to the newest sample, as a 32-bit
-        // millisecond clock wraps.
-        const uint32_t newestTime = samples.back().hostTimeMs;
-        const auto age = [&](const Sample &sample) { return static_cast<double>(static_cast<int32_t>(newestTime - sample.hostTimeMs)); };
-        const double target = static_cast<double>(static_cast<int32_t>(static_cast<uint32_t>(static_cast<int64_t>(hostTime)) - newestTime));
+        // Host times relative to the newest sample.
+        const double newestTime = samples.back().hostTime;
+        const auto age = [&](const Sample &sample) { return newestTime - sample.hostTime; };
+        const double target = hostTime - newestTime;
         Shared::Railway::State placed = samples.back().state;
         glm::vec3 position = Vec(placed.position);
         glm::vec3 direction = Vec(placed.direction);

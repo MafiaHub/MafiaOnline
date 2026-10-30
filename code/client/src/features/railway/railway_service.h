@@ -1,5 +1,6 @@
 #pragma once
 
+#include "features/world/remote_clock.h"
 #include "shared/features/railway/railway_report.h"
 
 #include <chrono>
@@ -92,7 +93,8 @@ namespace Mafia1Online::Features::Railway {
 
       private:
         struct Sample {
-            uint32_t hostTimeMs = 0;
+            // The host's frame clock, unwrapped (UnwrapHostTime).
+            double hostTime = 0.0;
             Shared::Railway::State state;
         };
         // Players: a model standing in for one of the host's passengers,
@@ -169,7 +171,9 @@ namespace Mafia1Online::Features::Railway {
         [[nodiscard]] int IndexOf(const void *railway) const;
         // The human is within kBoardReach of the body or a wagon.
         [[nodiscard]] static bool WithinReach(SDK::Rail::NativeRailway &railway, void *human);
-        [[nodiscard]] static double LocalMs();
+        // Players: a report's stamp on the unwrapped host clock.
+        double UnwrapHostTime(const Shared::Railway::Snapshot &snapshot);
+        void ResetHostClock();
 
         std::vector<Entry> _railways;
         uint64_t _missionGeneration = 0;
@@ -188,12 +192,11 @@ namespace Mafia1Online::Features::Railway {
         // Players: the last puppet tick.
         std::chrono::steady_clock::time_point _lastPuppetTick {};
         std::chrono::steady_clock::time_point _lastSummary {};
-        // Players: local clock minus host clock, slewed toward the least
-        // over recent packets (the least delayed one), to date the samples
-        // here.
-        std::deque<double> _clockOffsets;
-        double _clockOffset = 0.0;
-        bool _hasClockOffset = false;
+        // Players: this frame clock minus the host's, to date the samples
+        // here; and the host's 32-bit stamps unwrapped onto a double.
+        World::RemoteClock _hostClock;
+        double _hostTime = 0.0;
+        uint32_t _hostTimeMs = 0;
         // Players: the reporting host's session (Simulation::HostSession).
         uint32_t _hostSession = 0;
         // Host: when each player was last reported hit, per railway contact.
