@@ -1,6 +1,7 @@
 #include <Windows.h>
 
 #include "patcher.h"
+#include "shared/logging/process_log.h"
 
 #include <launcher/project.h>
 #include <logging/logger.h>
@@ -17,6 +18,38 @@
 #include <utility>
 
 namespace {
+    // Opens this process's own log before Project does: the sinks are made by
+    // the first logger and kept, so Project's SetLogName(config.name) no
+    // longer renames the file. The client DLL names its logger the same way.
+    void OpenProcessLog(const std::filesystem::path &directory) {
+        std::filesystem::path configPath = directory / "config" / "client.json";
+        const DWORD overrideLength = GetEnvironmentVariableW(L"MAFIA1ONLINE_CLIENT_CONFIG", nullptr, 0);
+        if (overrideLength > 1) {
+            std::wstring value(overrideLength, L' ');
+            value.resize(GetEnvironmentVariableW(L"MAFIA1ONLINE_CLIENT_CONFIG", value.data(), overrideLength));
+            configPath = value;
+        }
+        const auto logs = directory / "logs";
+        std::error_code error;
+        std::filesystem::create_directories(logs, error);
+        std::vector<Mafia1Online::Logging::LogFile> files;
+        for (const auto &entry : std::filesystem::directory_iterator(logs, error)) {
+            std::error_code timeError;
+            const auto modified = entry.last_write_time(timeError);
+            if (entry.is_regular_file(timeError) && !timeError) {
+                files.push_back({entry.path().filename().string(), modified.time_since_epoch().count()});
+            }
+        }
+        // A running client holds its file open; that removal fails and waits.
+        for (const auto &name : Mafia1Online::Logging::StaleProcessLogs(std::move(files))) {
+            std::filesystem::remove(logs / name, error);
+        }
+        auto *logging = Framework::Logging::GetInstance();
+        logging->SetLogFolder(logs.string());
+        logging->SetLogName(Mafia1Online::Logging::ProcessLogNameFor(configPath, GetCurrentProcessId()));
+        Framework::Logging::GetLogger(FRAMEWORK_INNER_LAUNCHER, false)->info("Process {} logs to {}.log", GetCurrentProcessId(), logging->GetLogName());
+    }
+
     LONG WINAPI StopAfterCrash(EXCEPTION_POINTERS *exception) {
         const LONG result = Framework::Utils::MiniDump::ExceptionFilter(exception);
         if (result != EXCEPTION_CONTINUE_EXECUTION) {
@@ -68,6 +101,8 @@ int main() {
         MessageBoxW(nullptr, L"Could not use the launcher directory.", L"Mafia1Online", MB_ICONERROR);
         return 1;
     }
+
+    OpenProcessLog(std::filesystem::path(std::wstring(launcherPath, launcherPathLength)).parent_path());
 
     // Patch first: the updater replaces files this process would hold open.
     if (!Mafia1Online::Launcher::RunBuildPatcher(std::filesystem::path(std::wstring(launcherPath, launcherPathLength)))) {

@@ -10,6 +10,7 @@
 #include "features/quick_join/quick_join.h"
 #include "features/simulation/simulation_config.h"
 #include "features/startup_video/startup_video_hooks.h"
+#include "shared/logging/process_log.h"
 #include "shared/version.h"
 
 #include <MinHook.h>
@@ -30,8 +31,10 @@ extern "C" void __declspec(dllexport) InitClient(const wchar_t *projectPath) {
     }
 
     auto *logging = Framework::Logging::GetInstance();
-    logging->SetLogName("Mafia1Online");
-    logging->SetLogFolder(Framework::Utils::StringUtils::WideToNormal(projectPath) + "\\logs");
+    // The launcher's file, which it names before this DLL loads.
+    const auto projectDirectory = Framework::Utils::StringUtils::WideToNormal(projectPath);
+    logging->SetLogName(Mafia1Online::Logging::ProcessLogNameFor(Mafia1Online::Features::QuickJoin::ConfigPath(projectDirectory), GetCurrentProcessId()));
+    logging->SetLogFolder(projectDirectory + "\\logs");
     Framework::Logging::GetLogger("Mafia1Online")->info("Client {} loaded against the supported Mafia 1 image", Mafia1Online::Version::rel);
 
     if (MH_Initialize() != MH_OK) {

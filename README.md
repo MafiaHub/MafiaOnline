@@ -99,7 +99,9 @@ in its Steam library, it asks for `Game.exe` once and keeps that choice in
 `MAFIA1ONLINE_GAME_ROOT` is set. The client places its asset cache next to
 the mod rather than in AppData.
 On an unhandled launcher or game exception, the launcher writes a `.dmp` file
-under its `logs` folder and records the path in `Mafia1Online.log`. Keep the
+under its `logs` folder and records the path in that process's log,
+`logs\Mafia1Online-<role>-<pid>.log` (`host`, the quick-join nickname, or
+`client`; the newest 30 are kept). Keep the
 matching `Mafia1OnlineLauncher.pdb` and `Mafia1OnlineClient.pdb` from the same
 build when analyzing the dump. Dumps include indirectly referenced memory
 and the process memory map.

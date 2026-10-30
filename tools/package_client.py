@@ -101,7 +101,8 @@ port, nickname and profileIndex, then set quickJoin.enabled to true. The
 The multiplayer server is distributed separately.
 
 If the game crashes, look for a .dmp file in this folder's logs directory.
-The dump and Mafia1Online.log from the same run help identify the failing
+The dump and the Mafia1Online-*.log file of the same run (each game
+process writes its own) help identify the failing
 module and stack; the matching developer PDBs are held with the build.
 The web UI runs in a separate 64-bit process (cef64\\cef_host.exe) that the
 game starts and stops itself, so 64-bit Windows, or a 64-bit Wine prefix, is
