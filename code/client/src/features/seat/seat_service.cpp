@@ -723,7 +723,25 @@ namespace Mafia1Online::Features::Seat {
             const auto place = [&](NativeHuman *human, uint8_t seat) {
                 // A replayed door animation holds the vehicle lock; snapping
                 // with Intern_UseCar(car, seat) would leave the car undrivable.
-                const bool linked = human->HasPendingEntry(car) && human->seatId == seat ? human->FinishPendingEntry(car, seat) : human->PlaceInCar(car, seat);
+                // Its end also sets the entry seat's bit (Intern_UseCar(true)),
+                // so it ends in that seat even when the server has this human
+                // in another one.
+                const int entrySeat = human->HasPendingEntry(car) ? human->seatId : -1;
+                bool linked         = false;
+                switch (PlaceStepFor(entrySeat, seat, !car->GetOwner(seat))) {
+                case PlaceStep::Link: linked = human->PlaceInCar(car, seat); break;
+                case PlaceStep::FinishEntry: linked = human->FinishPendingEntry(car, seat); break;
+                case PlaceStep::FinishAndClimb:
+                    linked = human->FinishPendingEntry(car, entrySeat) && human->ClimbToPairedSeat() && human->IsSeatedIn(car, seat) &&
+                             car->GetOwner(seat) == &human->actor;
+                    break;
+                case PlaceStep::FinishAndMove:
+                    if (human->FinishPendingEntry(car, entrySeat)) {
+                        ClearSeatOwner(car, entrySeat);
+                    }
+                    linked = human->PlaceInCar(car, seat);
+                    break;
+                }
                 if (!linked) {
                     return false;
                 }
@@ -789,28 +807,38 @@ namespace Mafia1Online::Features::Seat {
                         // only valid once that seated link exists.
                         auto *nativeOwner = static_cast<NativeHuman *>(static_cast<void *>(owner));
                         if (!nativeOwner->IsSeatedIn(car, seat)) {
-                            continue;
+                            SeatDoorView view;
+                            view.owned       = true;
+                            view.ownerAtDoor = nativeOwner->usedActorLeave == static_cast<NativeActor *>(car) && nativeOwner->seatId == seat;
+                            if (!IsStaleOwner(view)) {
+                                continue;
+                            }
+                            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->warn("Car {} seat {} freed from {}, whose entry ended in seat {} here", state->GetNetworkID(),
+                                                                                       seat, ownerHandle.networkId, nativeOwner->seatId);
+                            ClearSeatOwner(car, seat);
                         }
-                        // Retail HitInCar leaves a killed occupant slumped in
-                        // the seat with an in-car death animation. The server
-                        // frees the seat at death; the body is released when
-                        // the dead human is removed at respawn.
-                        if (const auto *ownerPlayer = replication->GetEntity<Shared::Entities::PlayerEntity>(ownerHandle.networkId);
-                            ownerPlayer && !ownerPlayer->alive) {
-                            continue;
+                        else {
+                            // Retail HitInCar leaves a killed occupant slumped in
+                            // the seat with an in-car death animation. The server
+                            // frees the seat at death; the body is released when
+                            // the dead human is removed at respawn.
+                            if (const auto *ownerPlayer = replication->GetEntity<Shared::Entities::PlayerEntity>(ownerHandle.networkId);
+                                ownerPlayer && !ownerPlayer->alive) {
+                                continue;
+                            }
+                            // The seat clear may replicate before the departing
+                            // player's removal. Keep its collision disabled until
+                            // queued native teardown clears the owner itself.
+                            if (state->seatResult == Shared::Entities::CarEntity::SeatResult::Cleared &&
+                                state->seatActorId == ownerHandle.networkId && state->seatIndex == seat) {
+                                continue;
+                            }
+                            if (replication->GetEntity<Shared::Entities::NpcEntity>(ownerHandle.networkId)) {
+                                Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->warn("NPC {} taken out of car {} seat {} by reconciliation (no animated exit arrived)",
+                                                                                           ownerHandle.networkId, state->GetNetworkID(), seat);
+                            }
+                            nativeOwner->ForceExitCar();
                         }
-                        // The seat clear may replicate before the departing
-                        // player's removal. Keep its collision disabled until
-                        // queued native teardown clears the owner itself.
-                        if (state->seatResult == Shared::Entities::CarEntity::SeatResult::Cleared &&
-                            state->seatActorId == ownerHandle.networkId && state->seatIndex == seat) {
-                            continue;
-                        }
-                        if (replication->GetEntity<Shared::Entities::NpcEntity>(ownerHandle.networkId)) {
-                            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->warn("NPC {} taken out of car {} seat {} by reconciliation (no animated exit arrived)",
-                                                                                       ownerHandle.networkId, state->GetNetworkID(), seat);
-                        }
-                        nativeOwner->ForceExitCar();
                     }
                 }
                 if (expected && !car->GetOwner(seat)) {

@@ -30,4 +30,36 @@ namespace Mafia1Online::Features::Seat {
     constexpr bool RestoresEnterable(const SeatDoorView &seat) {
         return !seat.enterable && !seat.doorBusy && (!seat.owned || seat.ownerSeated);
     }
+
+    // An owner this client must free itself: a human neither linked to the
+    // seat nor at its door. Retail frees a seat only from the human that
+    // holds it (exit, climb, throw), so one whose entry ended in another
+    // seat here holds this one for good: the seat shows taken and promptless.
+    constexpr bool IsStaleOwner(const SeatDoorView &seat) {
+        return seat.owned && !seat.ownerSeated && !seat.ownerAtDoor;
+    }
+
+    // How reconciliation links a human into a seat.
+    enum class PlaceStep {
+        // Intern_UseCar(car, seat): no door entry under way.
+        Link,
+        // Its door entry leads to this seat: end it (Intern_UseCar(true)).
+        FinishEntry,
+        // Its door entry leads to the paired seat: end it there and climb
+        // across as retail's slide does (Do_ClimbInCarLR).
+        FinishAndClimb,
+        // Its door entry leads elsewhere: end it, free that seat and link.
+        FinishAndMove,
+    };
+
+    // `entrySeat`: the seat its pending door entry leads to, or -1.
+    constexpr PlaceStep PlaceStepFor(int entrySeat, int seat, bool seatFree) {
+        if (entrySeat < 0) {
+            return PlaceStep::Link;
+        }
+        if (entrySeat == seat) {
+            return PlaceStep::FinishEntry;
+        }
+        return (entrySeat ^ 1) == seat && seatFree ? PlaceStep::FinishAndClimb : PlaceStep::FinishAndMove;
+    }
 } // namespace Mafia1Online::Features::Seat

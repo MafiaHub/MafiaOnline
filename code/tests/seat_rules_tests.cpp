@@ -54,10 +54,50 @@ namespace {
         stale.owned = true;
         CHECK(!RestoresEnterable(stale));
     }
+
+    void Owners() {
+        CHECK(!IsStaleOwner(SeatDoorView {}));
+
+        SeatDoorView seated;
+        seated.owned       = true;
+        seated.ownerSeated = true;
+        CHECK(!IsStaleOwner(seated));
+
+        // Use_Actor reserves the seat before Intern_UseCar links it.
+        SeatDoorView entering;
+        entering.owned       = true;
+        entering.ownerAtDoor = true;
+        CHECK(!IsStaleOwner(entering));
+
+        // Its entry ended in the paired seat: this one stays taken here.
+        SeatDoorView stale;
+        stale.owned = true;
+        CHECK(IsStaleOwner(stale));
+        // Once freed, nothing keeps its bit clear.
+        stale.owned     = false;
+        stale.enterable = false;
+        CHECK(RestoresEnterable(stale));
+    }
+
+    void Placing() {
+        CHECK(PlaceStepFor(-1, 0, true) == PlaceStep::Link);
+        CHECK(PlaceStepFor(1, 1, false) == PlaceStep::FinishEntry);
+        // A driver who came in by the passenger door slides across.
+        CHECK(PlaceStepFor(1, 0, true) == PlaceStep::FinishAndClimb);
+        CHECK(PlaceStepFor(0, 1, true) == PlaceStep::FinishAndClimb);
+        CHECK(PlaceStepFor(3, 2, true) == PlaceStep::FinishAndClimb);
+        // Do_ClimbInCarLR refuses a taken seat.
+        CHECK(PlaceStepFor(1, 0, false) == PlaceStep::FinishAndMove);
+        // Front to rear is no climb.
+        CHECK(PlaceStepFor(1, 2, true) == PlaceStep::FinishAndMove);
+        CHECK(PlaceStepFor(0, 3, true) == PlaceStep::FinishAndMove);
+    }
 } // namespace
 
 int main() {
     Prompts();
+    Owners();
+    Placing();
     if (failures != 0) {
         std::printf("%d seat rule check(s) failed\n", failures);
         return 1;
