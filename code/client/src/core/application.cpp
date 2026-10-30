@@ -333,7 +333,9 @@ namespace Mafia1Online::Core {
             }
         }
         _webUi.Update(_world);
-        _voiceInput.Update(_chat.IsInputActive() || _webUi.IsCapturingInput());
+        // HidesKeyboard, not IsCapturingInput: a focused resource view owns
+        // the keyboard too.
+        _voiceInput.Update(_chat.IsInputActive() || _webUi.HidesKeyboard());
         _mouths.Update(_world);
         _gameplayMenus.Update();
         while (auto line = _webUi.TakeOutgoing()) {

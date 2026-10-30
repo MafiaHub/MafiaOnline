@@ -54,12 +54,15 @@ namespace Mafia1Online::Features::Voice {
                 voice->SetListenerTransform(listener);
             }
         }
-        auto *graph         = SDK::Graphics::GetGraph();
-        const bool focused  = graph && GetForegroundWindow() == static_cast<HWND>(graph->MainWindow());
+        auto *graph        = SDK::Graphics::GetGraph();
+        const bool focused = graph && GetForegroundWindow() == static_cast<HWND>(graph->MainWindow());
         // The key names a US position, as the settings screen captured it;
         // GetAsyncKeyState wants that position's key in the active layout.
-        const int key = static_cast<int>(Framework::Input::PhysicalKeys::ToLayoutVirtualKey(static_cast<UINT>(voice->GetPushToTalkKey()), GetKeyboardLayout(0)));
-        voice->SetPushToTalk(focused && key != 0 && (GetAsyncKeyState(key) & 0x8000) != 0);
-        voice->SetPushToTalkBlocked(blocked || !focused);
+        const int key   = static_cast<int>(Framework::Input::PhysicalKeys::ToLayoutVirtualKey(static_cast<UINT>(voice->GetPushToTalkKey()), GetKeyboardLayout(0)));
+        const bool down = key != 0 && (GetAsyncKeyState(key) & 0x8000) != 0;
+        // Read while blocked too, so a key held through the block is latched.
+        const bool gated = blocked || !focused;
+        voice->SetPushToTalk(_pushToTalk.Update(key, down, gated));
+        voice->SetPushToTalkBlocked(gated);
     }
 } // namespace Mafia1Online::Features::Voice

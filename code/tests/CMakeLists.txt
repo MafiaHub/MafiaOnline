@@ -83,3 +83,6 @@ target_include_directories(Mafia1OnlinePoliceCaseTests PRIVATE "${CMAKE_CURRENT_
 
 add_executable(Mafia1OnlineEmptyCarHandoffTests empty_car_handoff_tests.cpp)
 target_include_directories(Mafia1OnlineEmptyCarHandoffTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
+add_executable(Mafia1OnlinePushToTalkTests push_to_talk_tests.cpp)
+target_include_directories(Mafia1OnlinePushToTalkTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../client/src")
