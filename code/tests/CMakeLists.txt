@@ -70,3 +70,6 @@ add_executable(Mafia1OnlineSettingsTests
 )
 target_include_directories(Mafia1OnlineSettingsTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../client/src")
 target_link_libraries(Mafia1OnlineSettingsTests PRIVATE Framework::Framework)
+
+add_executable(Mafia1OnlineSeatRulesTests seat_rules_tests.cpp)
+target_include_directories(Mafia1OnlineSeatRulesTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../client/src")

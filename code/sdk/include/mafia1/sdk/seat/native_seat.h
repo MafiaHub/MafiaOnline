@@ -24,6 +24,13 @@ namespace Mafia1Online::SDK::Seat {
     inline constexpr uintptr_t kHumanInternUseRailway = 0x571b90;
     inline constexpr uintptr_t kCarGetOwner = 0x41dec0;
     inline constexpr uintptr_t kCarGetSeatProperty = 0x41dc30;
+    // C_car::SetEnterProtect1, void __thiscall(C_car*, int seat, bool),
+    // ret 8: sets or clears the seat's bit in m_uSeatProtectionMask, then
+    // m_bPhysicsUpdatePending and SetActState(active).
+    inline constexpr uintptr_t kCarSetEnterProtect1 = 0x429770;
+    // C_car::m_uSeatProtectionMask: C_car::Update registers a seat's use
+    // prompt only while its bit is set (0x41ffb0, removed at 0x4200d5).
+    inline constexpr size_t kCarSeatProtectionMask = 0x21c4;
 
     enum class UseAction : int32_t {
         Enter = 1,
@@ -44,8 +51,22 @@ namespace Mafia1Online::SDK::Seat {
             using Call = bool(__thiscall *)(NativeCar *, int, bool *, bool *, bool *, bool *);
             return reinterpret_cast<Call>(kCarGetSeatProperty)(this, seat, &left, &hasDoor, &rear, &open);
         }
+
+        // Use_Actor clears the seat's bit for its door animation and only
+        // Intern_UseCar(bool) sets it again; while clear, the seat offers no
+        // use prompt.
+        [[nodiscard]] bool SeatEnterable(int seat) const {
+            const auto mask = *reinterpret_cast<const uint32_t *>(reinterpret_cast<const std::byte *>(this) + kCarSeatProtectionMask);
+            return ((mask >> seat) & 1u) != 0;
+        }
+
+        void SetSeatEnterable(int seat, bool enterable) {
+            using Call = void(__thiscall *)(NativeCar *, int, bool);
+            reinterpret_cast<Call>(kCarSetEnterProtect1)(this, seat, enterable);
+        }
     };
     static_assert(sizeof(NativeCar) == sizeof(Car::NativeCar));
+    static_assert(sizeof(NativeCar) >= kCarSeatProtectionMask + sizeof(uint32_t));
 
     // The seat state lives in C_human's prefix, shared by C_player and C_entity.
     struct NativeHuman {

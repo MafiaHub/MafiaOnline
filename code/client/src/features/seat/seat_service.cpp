@@ -1,5 +1,6 @@
 #include "seat_service.h"
 #include "seat_hooks.h"
+#include "seat_rules.h"
 
 #include "core/application.h"
 #include "features/simulation/simulation_config.h"
@@ -18,7 +19,9 @@
 
 #include <glm/geometric.hpp>
 
+#include <algorithm>
 #include <cstddef>
+#include <vector>
 
 namespace Mafia1Online::Features::Seat {
     namespace {
@@ -66,7 +69,16 @@ namespace Mafia1Online::Features::Seat {
         }
         auto *car = static_cast<NativeCar *>(static_cast<void *>(used));
         const int seat = human->seatId;
-        if (seat < 0 || seat >= static_cast<int>(Shared::Entities::CarEntity::kMaxSeats) || car->GetOwner(seat) != &human->actor) {
+        if (seat < 0 || seat >= static_cast<int>(Shared::Entities::CarEntity::kMaxSeats)) {
+            return;
+        }
+        if (car->GetOwner(seat) != &human->actor) {
+            // An exit door: Use_Actor freed the seat and cleared its bit, and
+            // only the animation's end (Intern_UseCar(false)) sets it again.
+            // A human removed mid-way never gets there.
+            if (!car->GetOwner(seat) && !human->usedActorEnter && human->usedActorLeave == used) {
+                car->SetSeatEnterable(seat, true);
+            }
             return;
         }
         if (human->HasPendingEntry(car) && seat == human->seatId) {
@@ -135,6 +147,7 @@ namespace Mafia1Online::Features::Seat {
         _events.clear();
         _animations.clear();
         _seatSequences.clear();
+        _doorSeats.clear();
         _pendingSteals.clear();
         _lastServerSequence = 0;
         _localSequence = 0;
@@ -160,6 +173,7 @@ namespace Mafia1Online::Features::Seat {
             _events.clear();
             _animations.clear();
             _seatSequences.clear();
+            _doorSeats.clear();
             _pendingSteals.clear();
             return;
         }
@@ -179,6 +193,7 @@ namespace Mafia1Online::Features::Seat {
         }
         Replay(world);
         Reconcile(world);
+        HealSeatPrompts(world);
     }
 
     void SeatService::Send(uint64_t carId, uint64_t playerId, uint8_t seat, Action action) {
@@ -207,6 +222,13 @@ namespace Mafia1Online::Features::Seat {
     }
 
     void SeatService::OnNativeUse(NativeHuman *human, NativeCar *car, int action, int seat) {
+        // Whoever played it, a door on a network car cleared that seat's bit.
+        if (_world && _world->IsReady() && car && seat >= 0 && seat < static_cast<int>(Shared::Entities::CarEntity::kMaxSeats) &&
+            (action == static_cast<int>(SDK::Seat::UseAction::Enter) || action == static_cast<int>(SDK::Seat::UseAction::Exit))) {
+            if (const auto vehicle = _world->NativeObjects().FindByNative(car); vehicle.networkId) {
+                _doorSeats.emplace(vehicle.networkId, static_cast<uint8_t>(seat));
+            }
+        }
         // Simulation host: its NPCs report their own seat changes.
         if (Simulation::IsHost() && human && car) {
             auto &npcs = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->Npcs();
@@ -612,6 +634,56 @@ namespace Mafia1Online::Features::Seat {
         }
         _animations[npcId] = {now + std::chrono::seconds(2), carId, seat};
         return human->usedActorLeave == static_cast<NativeActor *>(car);
+    }
+
+    void SeatService::HealSeatPrompts(World::WorldService &world) {
+        auto *replication = Framework::CoreModules::GetReplication();
+        if (_doorSeats.empty() || !replication) {
+            return;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        // The doors humans play here: the car in +0x9c, the seat in +0xac.
+        std::vector<std::pair<const NativeActor *, int>> doors;
+        const auto collect = [&](uint64_t networkId) {
+            if (const auto *human = Human(world, networkId); human && human->usedActorLeave) {
+                doors.emplace_back(human->usedActorLeave, human->seatId);
+            }
+        };
+        replication->ForEach<Shared::Entities::PlayerEntity>([&](Shared::Entities::PlayerEntity *player) { collect(player->GetNetworkID()); });
+        replication->ForEach<Shared::Entities::NpcEntity>([&](Shared::Entities::NpcEntity *npc) { collect(npc->GetNetworkID()); });
+        for (auto it = _doorSeats.begin(); it != _doorSeats.end();) {
+            const auto [carId, seat] = *it;
+            auto *car = Car(world, carId);
+            if (!car) {
+                // Streamed out, a new native car starts with every bit set.
+                it = replication->GetEntity<Shared::Entities::CarEntity>(carId) ? std::next(it) : _doorSeats.erase(it);
+                continue;
+            }
+            SeatDoorView view;
+            view.enterable = !car->HasSeat(seat) || car->SeatEnterable(seat);
+            if (view.enterable) {
+                it = _doorSeats.erase(it);
+                continue;
+            }
+            if (auto *owner = car->GetOwner(seat)) {
+                const auto *seated = IsHuman(owner) ? static_cast<const NativeHuman *>(static_cast<const void *>(owner)) : nullptr;
+                view.owned       = true;
+                view.ownerSeated = !seated || seated->IsSeatedIn(car, seat);
+                view.ownerAtDoor = seated && seated->usedActorLeave == static_cast<const NativeActor *>(car) && seated->seatId == seat;
+            }
+            const NativeActor *self = car;
+            view.doorBusy = std::any_of(doors.begin(), doors.end(), [&](const auto &door) { return door.first == self && door.second == seat; }) ||
+                            std::any_of(_animations.begin(), _animations.end(), [&](const auto &entry) {
+                                return entry.second.carId == carId && entry.second.seat == seat && now < entry.second.until;
+                            });
+            if (!RestoresEnterable(view)) {
+                ++it;
+                continue;
+            }
+            car->SetSeatEnterable(seat, true);
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Seat {} of car {} offers its use prompt again (its door never finished here)", seat, carId);
+            it = _doorSeats.erase(it);
+        }
     }
 
     void SeatService::Reconcile(World::WorldService &world) {

@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <set>
+#include <utility>
 #include <unordered_map>
 
 namespace Mafia1Online::SDK::Seat { struct NativeHuman; struct NativeCar; }
@@ -84,6 +86,9 @@ namespace Mafia1Online::Features::Seat {
         void PollLocal(World::WorldService &world);
         void Replay(World::WorldService &world);
         void Reconcile(World::WorldService &world);
+        // Seats a door animation started here (Use_Actor clears their bit)
+        // get their use prompt back once nobody is at that door.
+        void HealSeatPrompts(World::WorldService &world);
 
         World::WorldService *_world = nullptr;
         std::function<bool(const void *)> _useFilter;
@@ -91,6 +96,9 @@ namespace Mafia1Online::Features::Seat {
         std::deque<QueuedEvent> _events;
         std::unordered_map<uint64_t, Animation> _animations;
         std::unordered_map<uint64_t, uint64_t> _seatSequences;
+        // (car, seat) of every Use_Actor door on a network car here, until
+        // that seat's bit is set again.
+        std::set<std::pair<uint64_t, uint8_t>> _doorSeats;
         // Traffic cars this client's player started a steal of, until the
         // server takes it (the car stops being the host's) or refuses it.
         std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> _pendingSteals;
