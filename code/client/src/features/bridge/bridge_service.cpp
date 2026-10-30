@@ -3,6 +3,7 @@
 #include "bridge_service.h"
 
 #include "features/death/death_service.h"
+#include "features/debug/sync_trace.h"
 #include "features/simulation/simulation_config.h"
 #include "features/world/world_service.h"
 
@@ -13,6 +14,8 @@
 #include <mafia1/sdk/world/native_bridge.h>
 #include <mafianet/get_time.h>
 #include <networking/network_peer.h>
+
+#include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -74,6 +77,9 @@ namespace Mafia1Online::Features::Bridge {
                 }
             }
             gUpdateOriginal(bridge, frameTimeMs);
+            if (gService && Debug::SyncTrace::Enabled()) {
+                gService->TraceSteamers(bridge, frameTimeMs);
+            }
         }
 
         // C_bridge::Collision (0x56a7e0, ret 18h): a raised leaf zeroes a
@@ -109,6 +115,19 @@ namespace Mafia1Online::Features::Bridge {
                 distance += NativeBridgeRuntime::SegmentLength(steamer.route, point);
             }
             return distance + steamer.progress * NativeBridgeRuntime::SegmentLength(steamer.route, steamer.point);
+        }
+
+        // Sync trace: a steamer's heading (its model's z row) as a rotation.
+        glm::quat TraceRotation(const float *matrix) {
+            const glm::vec3 forward {matrix[8], matrix[9], matrix[10]};
+            const float length = glm::length(forward);
+            if (!(length > 0.0001f)) {
+                return {1.0f, 0.0f, 0.0f, 0.0f};
+            }
+            const glm::vec3 unit = forward / length;
+            const float yaw = std::atan2(unit.x, unit.z);
+            const float pitch = std::asin(std::clamp(unit.y, -1.0f, 1.0f));
+            return glm::angleAxis(yaw, glm::vec3(0.0f, 1.0f, 0.0f)) * glm::angleAxis(-pitch, glm::vec3(1.0f, 0.0f, 0.0f));
         }
 
         float RouteLength(uint8_t route) {
@@ -203,6 +222,13 @@ namespace Mafia1Online::Features::Bridge {
                 Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Placing {} bridges from the simulation host", _bridges.size());
             }
             _samples.push_back({snapshot.hostTimeMs, snapshot});
+            if (Debug::SyncTrace::Enabled() && snapshot.steamerCount) {
+                Debug::SyncTrace::Received("steamer", 0)
+                    .Num("clk", snapshot.hostTimeMs)
+                    .Num("arrival", LocalMs())
+                    .Num("ptime", snapshot.hostTimeMs + _clockOffset)
+                    .Num("offset", _clockOffset);
+            }
             while (_samples.size() > 16) {
                 _samples.pop_front();
             }
@@ -403,6 +429,48 @@ namespace Mafia1Online::Features::Bridge {
         }
     }
 
+    void BridgeService::TraceSteamers(NativeBridge *bridge, unsigned int frameMs) {
+        // The right bridge's Update moves and draws the steamers.
+        if (!bridge->IsRight() || (!Simulation::IsHost() && !_traceShown)) {
+            return;
+        }
+        auto &runtime = NativeBridgeRuntime::Get();
+        for (uint8_t i = 0; i < Shared::Bridge::kSteamerCount; ++i) {
+            auto *model = runtime.steamers[i].model;
+            if (!model) {
+                continue;
+            }
+            const float *matrix = model->UpdatedWorldMatrix();
+            const glm::vec3 position {matrix[12], matrix[13], matrix[14]};
+            if (!Debug::SyncTrace::Near(position)) {
+                continue;
+            }
+            if (Simulation::IsHost()) {
+                // Dated as SendSnapshot dates this step.
+                Debug::SyncTrace::Truth("steamer", i)
+                    .Num("clk", _hasFrameClock ? std::floor(_frameClockMs) : static_cast<double>(MafiaNet::GetTime()))
+                    .Bool("sent", false)
+                    .Int("fms", frameMs)
+                    .Vec("p", position)
+                    .Quat("q", TraceRotation(matrix))
+                    .Int("route", runtime.steamers[i].route)
+                    .Num("spd", runtime.steamers[i].speed);
+                continue;
+            }
+            Debug::SyncTrace::Observed("steamer", i)
+                .Str("mode", "route")
+                .Str("smp", _traceExtrapolated ? "extrap" : "interp")
+                .Num("oclk", _traceRenderTime)
+                .Int("fms", frameMs)
+                .Num("delay", kRenderDelayMs)
+                .Num("ahead", _traceAhead)
+                .Vec("p", position)
+                .Quat("q", TraceRotation(matrix))
+                .Int("route", runtime.steamers[i].route);
+        }
+        _traceShown = false;
+    }
+
     void BridgeService::BeforeUpdate(NativeBridge *bridge) {
         const int index = IndexOf(bridge);
         if (index < 0 || !_bridges[index].prepared || _samples.empty() || !_hasFrameClock) {
@@ -439,6 +507,10 @@ namespace Mafia1Online::Features::Bridge {
             u = timeB > timeA ? static_cast<float>(std::clamp((target - timeA) / (timeB - timeA), 0.0, 1.0)) : 1.0f;
             steamerU = u;
         }
+        _traceShown = true;
+        _traceRenderTime = hostTime;
+        _traceAhead = target;
+        _traceExtrapolated = target >= 0.0;
         const auto *from = Find(a->snapshot, index);
         const auto *to = Find(b->snapshot, index);
         if (!from || !to) {

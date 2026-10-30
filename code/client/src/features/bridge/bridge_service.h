@@ -43,6 +43,9 @@ namespace Mafia1Online::Features::Bridge {
         void AdvanceClock(const SDK::World::NativeBridge *bridge, unsigned int frameTimeMs);
         // Players: the host's state at the render time, before Update.
         void BeforeUpdate(SDK::World::NativeBridge *bridge);
+        // Sync trace, after Update: the steamers as the host moved them
+        // (truth) or as this player shows them.
+        void TraceSteamers(SDK::World::NativeBridge *bridge, unsigned int frameMs);
         // A raised leaf ran into the local player.
         void OnCrushed(SDK::Player::NativeHuman &human);
 
@@ -84,6 +87,11 @@ namespace Mafia1Online::Features::Bridge {
         uint32_t _hostSession = 0;
         std::chrono::steady_clock::time_point _lastSampleAt {};
         Death::DeathService *_death = nullptr;
+        // Sync trace: BeforeUpdate's render time for TraceSteamers.
+        bool _traceShown = false;
+        bool _traceExtrapolated = false;
+        double _traceRenderTime = 0.0;
+        double _traceAhead = 0.0;
         // Host: the phases last reported, to report a change at once.
         std::array<uint8_t, Shared::Bridge::kMaxBridges> _reportedPhases {};
         std::chrono::steady_clock::time_point _lastSnapshot {};
