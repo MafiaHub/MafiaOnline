@@ -22,6 +22,17 @@ namespace Mafia1Online::Features::World {
         bool RequestEnterGame();
         void RunRequestedMission();
         void ExitGameLoop();
+        // Asked before the main menu closes for a requested mission, so a
+        // loading screen can be on screen first; false waits a tick.
+        void SetMenuCloseGate(std::function<bool()> gate) {
+            _menuCloseGate = std::move(gate);
+        }
+
+        // From Play until the mission's game loop starts, and again from a
+        // server mission change until the next one is ready.
+        bool IsLoading() const {
+            return _enterRequested && _loadedMissionGeneration == 0;
+        }
 
         bool IsReady() const {
             return _loadedMissionGeneration != 0;
@@ -63,5 +74,6 @@ namespace Mafia1Online::Features::World {
         bool _closingMenu = false;
         bool _inGameLoop = false;
         std::function<void()> _missionClosing;
+        std::function<bool()> _menuCloseGate;
     };
 } // namespace Mafia1Online::Features::World

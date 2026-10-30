@@ -1,6 +1,6 @@
 import { computed, signal } from '@preact/signals';
 
-export type Screen = 'hidden' | 'menu' | 'game';
+export type Screen = 'hidden' | 'menu' | 'game' | 'loading';
 export type Phase = 'disconnected' | 'connecting' | 'authenticating' | 'downloading' | 'starting' | 'connected';
 
 export interface CursorState {
@@ -184,6 +184,16 @@ export interface VoiceLevel {
     talking: boolean;
     microphone: boolean;
 }
+
+// A server mission loading (the client's `loading` message). Progress is the
+// retail loader's share of the whole load, or -1 before it reports any.
+export interface LoadingState {
+    mission: string;
+    progress: number;
+    stage: 'preparing' | 'scene' | 'world';
+}
+
+export const loading = signal<LoadingState>({ mission: '', progress: -1, stage: 'preparing' });
 
 export const settingsOpen = signal(false);
 export const gameSettings = signal<GameSettings | null>(null);

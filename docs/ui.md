@@ -1,6 +1,6 @@
 # Web UI (CEF)
 
-Mafia1Online draws its main menu, chat, pause screen, settings, inventory, action chooser, player list and toasts
+Mafia1Online draws its main menu, mission loading screen, chat, pause screen, settings, inventory, action chooser, player list and toasts
 with Chromium (CEF). The mod ships no native menu definition. The page is a
 Preact + StyleX app in `ui/`. The client paints it off screen and composites
 it into the game's Direct3D 8 frame. If CEF, the page or its heartbeat fails,
@@ -81,11 +81,42 @@ weapon cycling/holstering and single interactions remain available.
 
 ### Screens and compositing
 
-`WebUiService` picks the screen live: `menu` while the native main menu is
-active, `game` while a server mission is running, and `hidden` otherwise
-(profile picker, loading). It sends the screen to the page. The page answers
-with `ui:screen` once it has painted that screen. Only then is the view
-composited, so a stale menu is never drawn over the game or a loading screen.
+`WebUiService` picks the screen live: `loading` from Play (or a server
+mission change) until the mission's game loop runs, `menu` while the native
+main menu is active, `game` while a server mission is running, and `hidden`
+otherwise (profile picker, the retail loads of the menu scene). It sends the
+screen to the page. The page answers with `ui:screen` once it has painted that
+screen. Only then is the view composited, so a stale menu is never drawn over
+the game or a loading screen.
+
+### Loading screen
+
+A mission load blocks the main loop: `C_mission::Open` and `C_game::Init`
+run to completion inside one call, so nothing ticks, CEF is not pumped and the
+only frames are the retail loader's own. Each of them is one
+`GM_LoadProgress::Present` (scene and mission data roughly every 2 %, then
+the game's initialisation steps; see `docs/native_contract.md`). The client
+hooks that call and its two progress setters:
+
+* The setters report the bar's share of the whole load to the page (`loading`).
+* `Present` pumps CEF once (`Manager::Update`), which delivers the page's
+  newest paint and its `ui:screen` answer, then presents a cleared black frame
+  instead of the retail menu. The `IGraph::Present` hook composites the page
+  onto it once the page has acknowledged `loading`.
+* The main menu waits up to 1.5 s for that acknowledgement before it closes
+  for the mission, so the first loader frame already shows the page. A
+  mission change starts from the game loop instead and shows black until the
+  page answers, usually within the first few loader frames.
+* If the page has not acknowledged `loading` within 4 s of the load, or the
+  web UI is not active, the retail loading screen draws as before.
+
+The page is opaque, mostly static, and repaints only for the bar and the line
+of tips and period flavour that changes every 9 s. It shows the mission (free
+ride scenes by name, other missions from their directory name), the server's
+name from the favourites or recent list with its address, the nickname, the
+loader's stage and its real progress. Before the first report the bar is a
+static tint, never a sweep. Respawns stay in the running mission and show no
+loading screen.
 
 ### Layout and type
 
@@ -197,7 +228,7 @@ C++ to page, as `window.__m1o({ type, payload })`:
 
 | type | payload |
 | --- | --- |
-| `state` | `{ screen, version, limits: {nickname, message}, connection: {phase, status, active, playAvailable, host, port, downloading, progress}, defaults: {nickname, host, port}, settings: {nickname, recent[], favorites[], preferences} }` |
+| `state` | `{ screen: menu/game/loading/hidden, version, limits: {nickname, message}, connection: {phase, status, active, playAvailable, host, port, downloading, progress}, defaults: {nickname, host, port}, settings: {nickname, recent[], favorites[], preferences} }` |
 | `chat:message` / `chat:history` | `{ author, text, color (0xRRGGBBAA, 0 = default), time (ms) }` / an array of those |
 | `chat:open` | `{ prefill }` |
 | `chat:closed` | `{}`. The client took the keyboard back. |
@@ -208,6 +239,7 @@ C++ to page, as `window.__m1o({ type, payload })`:
 | `gameplay:closed` | `{}`. Discard the current inventory/action panel. |
 | `scoreboard` | `{ visible }` |
 | `players` | `{ mission, players: [{ id, name, health, alive, spawned, local }] }` |
+| `loading` | `{ mission, progress, stage }` while `screen` is `loading`, when it changes: `progress` is the retail loader's share of the whole load rounded to 0.01, or -1 before its first report; `stage` is `preparing`, `scene` (scene and mission data) or `world` (`C_game::Init`) |
 | `toast` | `{ kind: info \| success \| error, text }` |
 | `session:reset` | `{}`. The connection closed. |
 
@@ -218,7 +250,7 @@ own origin:
 | --- | --- | --- |
 | `ui:ready` | none | activates the web UI and sends state and chat history |
 | `ui:alive` | none | heartbeat, once a second |
-| `ui:screen` | `"menu"` \| `"game"` \| `"hidden"` | acknowledges the painted screen |
+| `ui:screen` | `"menu"` \| `"game"` \| `"loading"` \| `"hidden"` | acknowledges the painted screen |
 | `menu:connect` | `{ nickname, host, port, password }` | validated, then queued for the next client tick |
 | `menu:disconnect` | none | disconnect (also works from the pause screen) |
 | `menu:play` | none | enter the server's mission |
@@ -258,7 +290,8 @@ container before the Windows build. If the script fails, the existing
 framework's `CEFCopyDlls`.
 
 To design without the game, run `npm --prefix code/projects/mafia1online/ui run dev`
-and open `/#menu`, `/#menu-connected`, `/#game`, `/#game-chat`, `/#game-pause` or `/#game-score`.
+and open `/#menu`, `/#menu-connected`, `/#game`, `/#game-chat`, `/#game-pause`, `/#game-score`,
+`/#loading` (the bar runs through a load) or `/#loading-start` (before the first report).
 A mock bridge stands in for the client.
 
 ## Switches

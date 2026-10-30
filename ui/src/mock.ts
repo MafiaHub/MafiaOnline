@@ -34,10 +34,10 @@ function mockSettings(): GameSettings {
 }
 
 // Browser preview (npm run dev): stands in for the game so the screens can be
-// designed without launching it. #menu or #game picks the screen.
+// designed without launching it. #menu, #game or #loading picks the screen.
 export function startMock(receive: (message: InboundMessage) => void) {
     const view = location.hash.slice(1);
-    const screen = view.startsWith('game') ? 'game' : 'menu';
+    const screen = view.startsWith('game') ? 'game' : view.startsWith('loading') ? 'loading' : 'menu';
     const base: UiState = {
         screen,
         version: 'dev',
@@ -68,8 +68,11 @@ export function startMock(receive: (message: InboundMessage) => void) {
             preferences: {},
         },
     };
-    if (view === 'menu-connected') {
+    if (view === 'menu-connected' || screen === 'loading') {
         base.connection = { ...base.connection, phase: 'connected', status: 'Mission selected: freeride', active: true, playAvailable: true, host: '127.0.0.1', port: 27015 };
+    }
+    if (screen === 'loading') {
+        base.connection = { ...base.connection, status: 'Loading mission: freeride', playAvailable: false, host: 'salieri.example', port: 27016 };
     }
     let current = base;
     const push = (next: UiState) => {
@@ -77,6 +80,19 @@ export function startMock(receive: (message: InboundMessage) => void) {
         receive({ type: 'state', payload: next });
     };
     setTimeout(() => push(base), 0);
+    // #loading walks the bar through the retail loader's stages the way the
+    // client reports them; #loading-start stays before the first report.
+    if (screen === 'loading') {
+        setTimeout(() => receive({ type: 'loading', payload: { mission: 'freeride', progress: -1, stage: 'preparing' } }), 0);
+        if (view === 'loading') {
+            let progress = 0;
+            const timer = window.setInterval(() => {
+                progress = Math.min(1, progress + 0.03);
+                receive({ type: 'loading', payload: { mission: 'freeride', progress, stage: progress < 0.7 ? 'scene' : 'world' } });
+                if (progress >= 1) window.clearInterval(timer);
+            }, 400);
+        }
+    }
     if (screen === 'game') {
         const lines = [
             { author: '', text: 'Welcome to Lost Heaven. Type /car to call a ride.', color: 0 },

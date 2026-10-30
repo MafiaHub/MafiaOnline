@@ -5,6 +5,7 @@
 
 #include <MinHook.h>
 #include <mafia1/sdk/graphics/native_graph.h>
+#include <mafia1/sdk/menu/native_load_progress.h>
 
 namespace Mafia1Online::Features::WebUi {
     namespace {
@@ -14,6 +15,9 @@ namespace Mafia1Online::Features::WebUi {
         using ReadKeys     = int64_t(__stdcall *)(Graph *);
         using MouseQuery   = int(__stdcall *)(Graph *);
         using MouseButtons = uint32_t(__stdcall *)(Graph *);
+        using LoadProgress = SDK::Menu::NativeLoadProgress;
+        using LoadPresent  = void(__thiscall *)(LoadProgress *);
+        using LoadSet      = void(__thiscall *)(LoadProgress *, float);
 
         Present gPresentOriginal           = nullptr;
         TestKey gTestKeyOriginal           = nullptr;
@@ -22,7 +26,10 @@ namespace Mafia1Online::Features::WebUi {
         MouseQuery gMouseDeltaYOriginal    = nullptr;
         MouseQuery gMouseWheelOriginal     = nullptr;
         MouseButtons gMouseButtonsOriginal = nullptr;
-        void *gTargets[7]                  = {};
+        LoadPresent gLoadPresentOriginal   = nullptr;
+        LoadSet gLoadMissionOpenOriginal   = nullptr;
+        LoadSet gLoadGameInitOriginal      = nullptr;
+        void *gTargets[10]                 = {};
         WNDPROC gWindowProcedure           = nullptr;
         HWND gWindow                       = nullptr;
         WebUiService *gService             = nullptr;
@@ -57,6 +64,27 @@ namespace Mafia1Online::Features::WebUi {
             return gService->HidesMouse() ? 0 : gMouseButtonsOriginal(graph);
         }
 
+        // The progress the retail bar is about to show, as a share of the
+        // whole load (see NativeLoadProgress); the callers present right after.
+        void __fastcall LoadMissionOpenHook(LoadProgress *progress, void *, float value) {
+            gService->OnLoadingProgress(value * progress->MissionOpenWeight(), false);
+            gLoadMissionOpenOriginal(progress, value);
+        }
+
+        void __fastcall LoadGameInitHook(LoadProgress *progress, void *, float value) {
+            const float weight = progress->MissionOpenWeight();
+            gService->OnLoadingProgress(weight + (1.0f - weight) * value, true);
+            gLoadGameInitOriginal(progress, value);
+        }
+
+        // Nothing else draws or ticks while a mission loads: this frame is
+        // the only chance to pump CEF and show the page instead.
+        void __fastcall LoadPresentHook(LoadProgress *progress, void *) {
+            if (!gService->OnLoadingPresent()) {
+                gLoadPresentOriginal(progress);
+            }
+        }
+
         LRESULT CALLBACK WindowProcedureHook(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
             // Null once the service is gone but another subclass kept this one in the chain.
             if (gService && gService->OnWindowMessage(window, message, wParam, lParam)) {
@@ -84,7 +112,10 @@ namespace Mafia1Online::Features::WebUi {
                           && Hook(3, reinterpret_cast<void *>(vtable->mouseDeltaX), reinterpret_cast<void *>(&MouseDeltaXHook), reinterpret_cast<void **>(&gMouseDeltaXOriginal))
                           && Hook(4, reinterpret_cast<void *>(vtable->mouseDeltaY), reinterpret_cast<void *>(&MouseDeltaYHook), reinterpret_cast<void **>(&gMouseDeltaYOriginal))
                           && Hook(5, reinterpret_cast<void *>(vtable->mouseWheel), reinterpret_cast<void *>(&MouseWheelHook), reinterpret_cast<void **>(&gMouseWheelOriginal))
-                          && Hook(6, reinterpret_cast<void *>(vtable->mouseButtons), reinterpret_cast<void *>(&MouseButtonsHook), reinterpret_cast<void **>(&gMouseButtonsOriginal));
+                          && Hook(6, reinterpret_cast<void *>(vtable->mouseButtons), reinterpret_cast<void *>(&MouseButtonsHook), reinterpret_cast<void **>(&gMouseButtonsOriginal))
+                          && Hook(7, reinterpret_cast<void *>(SDK::Menu::kLoadProgressPresent), reinterpret_cast<void *>(&LoadPresentHook), reinterpret_cast<void **>(&gLoadPresentOriginal))
+                          && Hook(8, reinterpret_cast<void *>(SDK::Menu::kLoadProgressSetMissionOpen), reinterpret_cast<void *>(&LoadMissionOpenHook), reinterpret_cast<void **>(&gLoadMissionOpenOriginal))
+                          && Hook(9, reinterpret_cast<void *>(SDK::Menu::kLoadProgressSetGameInit), reinterpret_cast<void *>(&LoadGameInitHook), reinterpret_cast<void **>(&gLoadGameInitOriginal));
         if (!hooked) {
             UninstallWebUiHooks();
             return false;

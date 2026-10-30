@@ -16,6 +16,8 @@ import {
     type CursorState,
     gameplayMenu,
     type GameplayMenu,
+    loading,
+    type LoadingState,
     gameSettings,
     type GameSettings,
     settingsOpen,
@@ -47,6 +49,7 @@ export type InboundMessage =
     | { type: 'gameplay:closed'; payload: Record<string, never> }
     | { type: 'scoreboard'; payload: { visible: boolean } }
     | { type: 'players'; payload: { players: Player[]; mission: string } }
+    | { type: 'loading'; payload: LoadingState }
     | { type: 'toast'; payload: { kind: Toast['kind']; text: string } }
     | { type: 'chat:closed'; payload: Record<string, never> }
     | { type: 'session:reset'; payload: Record<string, never> };
@@ -134,6 +137,9 @@ export function receive(message: InboundMessage) {
             break;
         case 'players':
             roster.value = message.payload;
+            break;
+        case 'loading':
+            loading.value = message.payload;
             break;
         case 'toast':
             pushToast(message.payload.kind, message.payload.text);

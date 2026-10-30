@@ -86,7 +86,7 @@ namespace Mafia1Online::Features::World {
             }
         });
 
-        if (_enterRequested && !_closingMenu && !_inGameLoop) {
+        if (_enterRequested && !_closingMenu && !_inGameLoop && (!_menuCloseGate || _menuCloseGate())) {
             if (void *menu = SDK::Menu::GetActiveMainMenu()) {
                 _closingMenu = true;
                 Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->info("Closing Mafia main menu for mission '{}'", _selectedMission);

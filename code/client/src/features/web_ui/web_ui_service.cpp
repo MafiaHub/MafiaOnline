@@ -59,11 +59,21 @@ namespace Mafia1Online::Features::WebUi {
         constexpr auto kPlayerInterval   = std::chrono::milliseconds(1000);
         // The settings page's microphone meter, only while it asks for one.
         constexpr auto kVoiceLevelInterval = std::chrono::milliseconds(66);
+        // How long the main menu waits for the page to show the loading
+        // screen before it closes for the mission anyway.
+        constexpr auto kLoadingMenuGrace = std::chrono::milliseconds(1500);
+        // How long a load draws black frames while the page has not shown
+        // the loading screen; after that the retail screen comes back.
+        constexpr auto kLoadingPageGrace = std::chrono::seconds(4);
+        // IGraph::Clear's target and depth flags, as GM_LoadProgress::Present
+        // (0x5e3d40) passes them.
+        constexpr uint32_t kClearTargetAndDepth = 3;
 
         const char *ScreenName(WebUiService::Screen screen) {
             switch (screen) {
             case WebUiService::Screen::Menu: return "menu";
             case WebUiService::Screen::Game: return "game";
+            case WebUiService::Screen::Loading: return "loading";
             default: return "hidden";
             }
         }
@@ -239,6 +249,10 @@ namespace Mafia1Online::Features::WebUi {
         }
         Deactivate();
         UninstallWebUiHooks();
+        if (_world) {
+            _world->SetMenuCloseGate({});
+            _world = nullptr;
+        }
         if (_chat) {
             _chat->SetKeyRouter({}, {});
         }
@@ -319,7 +333,7 @@ namespace Mafia1Online::Features::WebUi {
         }
         if (name == "ui:screen") {
             const std::string screen = data.is_string() ? data.get<std::string>() : std::string();
-            _pageScreen              = screen == "menu" ? Screen::Menu : screen == "game" ? Screen::Game : Screen::Hidden;
+            _pageScreen              = screen == "menu" ? Screen::Menu : screen == "game" ? Screen::Game : screen == "loading" ? Screen::Loading : Screen::Hidden;
             return;
         }
         if (name == "menu:connect") {
@@ -495,6 +509,7 @@ namespace Mafia1Online::Features::WebUi {
         _silentTicks         = 0;
         _lastState.clear();
         _lastPlayers.clear();
+        _lastLoading.clear();
         _settingsRevision = 0;
         _mouseX       = -1;
         _mouseY       = -1;
@@ -547,6 +562,12 @@ namespace Mafia1Online::Features::WebUi {
     }
 
     WebUiService::Screen WebUiService::LiveScreen() const {
+        // First: across a mission change the old mission's ready state and
+        // the native mission flag are still set, and the main menu may still
+        // be open while its close waits for this screen.
+        if (_world && _world->IsLoading()) {
+            return Screen::Loading;
+        }
         // The retail main-menu pointer may remain live after its close result
         // has handed control to a loaded mission. The mission is authoritative
         // here; otherwise CEF keeps the connection page over gameplay and
@@ -663,12 +684,87 @@ namespace Mafia1Online::Features::WebUi {
         Send("players", payload);
     }
 
+    // Only while loading, and only when the rounded progress or stage moved.
+    void WebUiService::PushLoading() {
+        const char *stage = _loadingProgress < 0.0f ? "preparing" : _loadingGameInit ? "world" : "scene";
+        const nlohmann::json payload = {
+            {"mission", _world ? _world->SelectedMission() : std::string()},
+            {"progress", _loadingProgress < 0.0f ? -1.0 : std::round(std::clamp(_loadingProgress, 0.0f, 1.0f) * 100.0) / 100.0},
+            {"stage", stage},
+        };
+        std::string encoded = payload.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+        if (encoded == _lastLoading) {
+            return;
+        }
+        _lastLoading = std::move(encoded);
+        Send("loading", payload);
+    }
+
+    bool WebUiService::LoadingScreenShown() {
+        if (!_pageReady || _pageScreen == Screen::Loading) {
+            return true;
+        }
+        const auto now = Clock::now();
+        if (!_loadingSince) {
+            _loadingSince = now;
+        }
+        return now - *_loadingSince > kLoadingMenuGrace;
+    }
+
+    void WebUiService::OnLoadingProgress(float progress, bool gameInit) {
+        if (std::isfinite(progress)) {
+            _loadingProgress = std::max(_loadingProgress, std::clamp(progress, 0.0f, 1.0f));
+            _loadingGameInit = gameInit;
+        }
+    }
+
+    // A mission load blocks the main loop: no client tick, no CEF pump, no
+    // frame but the retail loader's own. Each of its frames pumps CEF once
+    // (the page's paint and its ui:screen answer arrive here) and is
+    // presented black, with the page composited by OnPresent once it shows
+    // the loading screen.
+    bool WebUiService::OnLoadingPresent() {
+        if (!_pageReady) {
+            return false;
+        }
+        _screen = LiveScreen();
+        if (_screen != Screen::Loading) {
+            return false;
+        }
+        const auto now = Clock::now();
+        if (!_loadingSince) {
+            _loadingSince = now;
+        }
+        PushState(false);
+        PushLoading();
+        _instance->GetWebManager()->Update();
+        if (_pageScreen != Screen::Loading && now - *_loadingSince > kLoadingPageGrace) {
+            return false;
+        }
+        auto *graph = SDK::Graphics::GetGraph();
+        graph->Clear(0, 1.0f, kClearTargetAndDepth);
+        graph->Present();
+        return true;
+    }
+
     void WebUiService::Update(World::WorldService &world) {
         if (!_view) {
             return;
         }
+        if (!_world) {
+            _world = &world;
+            world.SetMenuCloseGate([this] {
+                return LoadingScreenShown();
+            });
+        }
         _missionReady = world.IsReady();
         _screen       = LiveScreen();
+        if (_screen != Screen::Loading) {
+            _loadingSince.reset();
+            _loadingProgress = -1.0f;
+            _loadingGameInit = false;
+            _lastLoading.clear();
+        }
         if (!_pageReady) {
             return;
         }
@@ -706,6 +802,9 @@ namespace Mafia1Online::Features::WebUi {
         PushState(false);
         if (_screen == Screen::Game) {
             PushPlayers(world, false);
+        }
+        if (_screen == Screen::Loading) {
+            PushLoading();
         }
         if (_closeRequestedAt && Clock::now() - *_closeRequestedAt > kCloseGrace) {
             CloseInGameScreens();

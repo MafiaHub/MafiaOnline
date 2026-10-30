@@ -37,6 +37,10 @@ namespace Mafia1Online::Features::WebUi {
             Hidden,
             Menu,
             Game,
+            // A server mission loads: from Play (or a server mission change)
+            // until its game loop runs. The page replaces the retail
+            // loading screen.
+            Loading,
         };
 
         // False leaves the native UI in charge; not an error for the caller.
@@ -47,6 +51,12 @@ namespace Mafia1Online::Features::WebUi {
 
         // Called by the IGraph::Present hook, outside any scene.
         void OnPresent();
+        // The retail loading screen's progress, as a share of the whole load.
+        void OnLoadingProgress(float progress, bool gameInit);
+        // Called instead of GM_LoadProgress::Present while a mission loads.
+        // True when the frame was presented with the page; false draws the
+        // retail screen.
+        bool OnLoadingPresent();
         // True swallows the message.
         bool OnWindowMessage(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
         // ReadKey router; true when the key belongs to the web UI.
@@ -96,6 +106,10 @@ namespace Mafia1Online::Features::WebUi {
         void Send(const char *type, const nlohmann::json &payload);
         void PushState(bool force);
         void PushPlayers(World::WorldService &world, bool force);
+        void PushLoading();
+        // The main menu closes for a mission only once the page shows the
+        // loading screen, or after a grace period.
+        bool LoadingScreenShown();
         void UpdateCapture();
         void ForwardMouse(Screen live, Framework::GUI::View *target);
         void UpdateCursor(Framework::GUI::View *target);
@@ -116,6 +130,7 @@ namespace Mafia1Online::Features::WebUi {
         Screen LiveScreen() const;
 
         Framework::Integrations::Client::Instance *_instance = nullptr;
+        World::WorldService *_world                          = nullptr;
         Chat::ChatService *_chat                             = nullptr;
         Settings::SettingsService *_gameSettings             = nullptr;
         Framework::GUI::View *_view                          = nullptr;
@@ -149,6 +164,11 @@ namespace Mafia1Online::Features::WebUi {
 
         std::string _lastState;
         std::string _lastPlayers;
+        std::string _lastLoading;
+        // -1 until the retail loader reports a share of the load.
+        float _loadingProgress = -1.0f;
+        bool _loadingGameInit  = false;
+        std::optional<std::chrono::steady_clock::time_point> _loadingSince;
         std::chrono::steady_clock::time_point _lastHeartbeat;
         uint32_t _silentTicks = 0;
         std::optional<std::chrono::steady_clock::time_point> _closeRequestedAt;
