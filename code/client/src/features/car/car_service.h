@@ -107,14 +107,9 @@ namespace Mafia1Online::Features::Car {
             CarPoseBuffer poses;
             double lastPoseTime = 0.0;
             std::deque<double> offsetWindow;
-            // Controller: the physics time of its car's pose, in ms. It
-            // advances by each physics step and is pulled up to the local
-            // clock whenever the car fell behind it (a step capped at 83 ms,
-            // or frames the retail game left the car inactive), so receivers'
-            // mapping onto their clock never sees it drift.
-            uint32_t simClockMs = 0;
-            int32_t simClockLag = 0;
-            bool simClockStarted = false;
+            // Controller: the frame clock (World::FrameClock) of the physics
+            // step its car's pose comes from.
+            double simClock = 0.0;
             // The update serial of the last actor tick DriveObserver placed.
             uint64_t drivenSerial = 0;
             // Until this local clock time the car runs on corrected native
@@ -135,6 +130,9 @@ namespace Mafia1Online::Features::Car {
             MafiaNet::Time lastPacketTime        = 0;
             uint64_t poseClockSource             = 0;
             uint32_t poseClockMs                 = 0;
+            uint8_t poseClockFraction            = 0;
+            // The frame clock when poseClockOffset last moved.
+            double lastOffsetUpdate              = 0.0;
             double poseClockOffset               = 0.0;
             std::chrono::steady_clock::time_point lastSent;
             // When the next report is due (ReportMovement's 30 Hz schedule).
@@ -296,8 +294,8 @@ namespace Mafia1Online::Features::Car {
             glm::vec3 direction {0.0f, 0.0f, 1.0f};
         };
         std::optional<WaterCamera> _waterCamera;
-        // One render clock per frame for every observer car.
         uint64_t _updateSerial = 0;
+        // This frame's World::FrameClock, read once DriveObserver first runs.
         uint64_t _clockSerial  = ~0ull;
         double _frameClock     = 0.0;
         bool _predictedSync    = false;

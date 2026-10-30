@@ -226,6 +226,7 @@ namespace {
         car.velocity        = {25.0f, -1.0f, 140.0f};
         car.angularVelocity = {0.1f, -2.0f, 0.3f};
         car.poseClockMs     = 0xdeadbeef;
+        car.poseClockFraction = 0x9c;
         car.poseClockSource = 0x1234567890ull;
         car.steeringInput   = -0.5f;
         car.engineRotations = 4321.0f;
@@ -240,7 +241,7 @@ namespace {
         const glm::quat difference = read.rotation * glm::inverse(car.rotation);
         CHECK(2.0f * std::atan2(glm::length(glm::vec3(difference.x, difference.y, difference.z)), std::abs(difference.w)) < glm::radians(0.05f));
         CHECK(Near(read.velocity.x, 25.0f, 1.0f / 256.0f) && read.velocity.z == 140.0f);
-        CHECK(read.poseClockMs == 0xdeadbeef && read.poseClockSource == Shared::Entities::CarEntity::ClockSourceTag(car.poseClockSource) && read.poseClockSource != 0);
+        CHECK(read.poseClockMs == 0xdeadbeef && read.poseClockFraction == 0x9c && read.poseClockSource == Shared::Entities::CarEntity::ClockSourceTag(car.poseClockSource) && read.poseClockSource != 0);
         CHECK(read.gear == 3 && read.skidMask == 0x5 && Near(read.clutchInput, 0.5f, 1.0f / 63.0f) && read.powerInput == 1.0f);
         CHECK(Near(read.steeringInput, -0.5f, 0.001f) && read.engineRotations == 4321.0f);
     }

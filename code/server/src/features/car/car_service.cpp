@@ -198,7 +198,8 @@ namespace Mafia1Online::Features::Car {
             car->hornOn = movement.hornOn;
         }
         if (!Shared::Net::TransformUnchanged(*car, before)) {
-            car->poseClockMs = movement.clockMs;
+            car->poseClockMs       = movement.clockMs;
+            car->poseClockFraction = movement.clockFraction;
         }
         state.lastSequence = movement.sequence;
         state.hasSequence  = true;

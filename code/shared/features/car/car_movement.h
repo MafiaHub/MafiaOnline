@@ -18,9 +18,11 @@ namespace Mafia1Online::Shared::Car {
         uint64_t transformRevision  = 0;
         uint64_t dynamicsCommandRevision = 0;
         uint32_t sequence          = 0;
-        // The controller's MafiaNet::GetTime() when it read this pose. Only
+        // The controller's frame clock (World::FrameClock) at the physics
+        // step that produced this pose, in ms and 1/256 ms past it. Only
         // differences are used, to space the observers' interpolation samples.
         uint32_t clockMs           = 0;
+        uint8_t clockFraction      = 0;
         float x                    = 0.0f;
         float y                    = 0.0f;
         float z                    = 0.0f;
@@ -67,6 +69,7 @@ namespace Mafia1Online::Shared::Car {
             stream->SerializeCompressed(write, dynamicsCommandRevision);
             stream->Serialize(write, sequence);
             stream->Serialize(write, clockMs);
+            stream->Serialize(write, clockFraction);
             glm::vec3 position {x, y, z};
             glm::quat rotation {qw, qx, qy, qz};
             // As fine as CarEntity relays it: coarser here would put the

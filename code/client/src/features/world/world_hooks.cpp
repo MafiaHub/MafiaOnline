@@ -4,6 +4,7 @@
 
 #include "core/application.h"
 #include "features/debug/sync_trace.h"
+#include "features/world/frame_clock.h"
 #include "features/quick_join/quick_join.h"
 #include "features/simulation/simulation_config.h"
 #include "shared/features/world/mission_actors.h"
@@ -202,6 +203,9 @@ namespace Mafia1Online::Features::World {
                     game->KeepPlayerDeathMenuPending();
                 }
             }
+            // Before any actor ticks: the time every pose this frame is
+            // dated by or sampled at.
+            FrameClock::Advance(frameTimeMs);
             gGameTickOriginal(game, frameTimeMs);
             if (Debug::SyncTrace::Enabled()) {
                 // After C_car::Update and G_Camera::Tick, before the frame's

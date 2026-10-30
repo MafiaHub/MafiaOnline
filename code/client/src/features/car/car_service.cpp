@@ -5,6 +5,7 @@
 #include "features/debug/sync_trace.h"
 #include "features/seat/seat_service.h"
 #include "features/simulation/simulation_config.h"
+#include "features/world/frame_clock.h"
 #include "features/world/world_service.h"
 
 #include "shared/features/car/car_engine_state.h"
@@ -48,14 +49,13 @@ namespace Mafia1Online::Features::Car {
         constexpr auto kMovementSendInterval = std::chrono::milliseconds(33);
         // A frame ending this close before a scheduled send sends it.
         constexpr auto kMovementSendSlack = std::chrono::milliseconds(2);
-        // The observers' frame clock (DriveObserver): the share of its gap
-        // to the wall clock closed each frame, and the gap it jumps over.
-        constexpr double kFrameClockPull    = 0.02;
-        constexpr double kFrameClockResetMs = 250.0;
         // A car at rest with nothing changing reports only this often, so
         // its pose stops changing on the server and observers stop being
         // sent it; the slow fields refresh as often.
         constexpr auto kIdleHeartbeat = std::chrono::seconds(1);
+        // How fast an observer's mapping of a controller's pose clock follows
+        // its least-delayed arrivals: the time constant, in ms.
+        constexpr double kClockOffsetFollowMs = 2000.0;
 
         // Nothing an observer could see moved since `last` was sent.
         bool AtRest(const Shared::Car::Movement &now, const Shared::Car::Movement &last) {
@@ -98,9 +98,6 @@ namespace Mafia1Online::Features::Car {
         constexpr float kLeadExitSeconds  = 1.0f;
         constexpr float kLeadEntryRate    = 0.25f;
         constexpr float kLeadExitRate     = 0.075f;
-        // How far a controlled car's physics clock may fall behind the local
-        // clock before it rejoins it: more than a frame's read jitter.
-        constexpr int32_t kSimClockSlackMs = 40;
 
         glm::quat FrameRotation(SDK::Scene::NativeFrame &frame) {
             const auto basis = frame.GetWorldBasis();
@@ -402,19 +399,23 @@ namespace Mafia1Online::Features::Car {
     }
 
     void CarService::ReceivePose(uint64_t networkId, Stream &stream, const Shared::Entities::CarEntity::ReceivedPose &pose) {
-        // Dated by the controller's physics clock, mapped onto the local
-        // clock by the least-delayed arrival of the last two seconds. The
-        // offset only slews, so one early or late packet never moves a
-        // sample's time; a jump resets it.
-        if (stream.poseClockSource == pose.poseClockSource && stream.poseClockMs == pose.poseClockMs) {
+        // Dated by the controller's frame clock at the step that produced
+        // it, mapped onto this one's by the least-delayed arrival of the last
+        // two seconds. Both are frame clocks, so the offset holds steady but
+        // for the network; it follows the window's floor smoothly (over
+        // ~2 s), never in steps, as every change of it is one of the car's
+        // speed. One early or late packet never moves a sample's time; a
+        // jump resets it.
+        if (stream.poseClockSource == pose.poseClockSource && stream.poseClockMs == pose.poseClockMs && stream.poseClockFraction == pose.poseClockFraction) {
             return;
         }
         Framework::Utils::TransformSnapshot snapshot {pose.position, pose.velocity, pose.rotation};
         if (!IsFinite(snapshot) || glm::length(snapshot.rotation) < 0.0001f) {
             return;
         }
-        const double now         = LocalClockMs();
-        const double offset      = now - static_cast<double>(pose.poseClockMs);
+        const double now         = World::FrameClock::NowMs();
+        const double stampMs     = Shared::Entities::CarEntity::ClockMs(pose.poseClockMs, pose.poseClockFraction);
+        const double offset      = now - stampMs;
         const bool sourceChanged = stream.poseClockSource != pose.poseClockSource;
         if (sourceChanged || std::abs(offset - stream.poseClockOffset) > 1000.0) {
             stream.offsetWindow.clear();
@@ -425,10 +426,13 @@ namespace Mafia1Online::Features::Car {
             stream.offsetWindow.pop_front();
         }
         const double floor = *std::min_element(stream.offsetWindow.begin(), stream.offsetWindow.end());
-        stream.poseClockOffset += std::clamp(floor - stream.poseClockOffset, -0.5, 0.5);
-        stream.poseClockSource = pose.poseClockSource;
-        stream.poseClockMs     = pose.poseClockMs;
-        const double poseTime  = static_cast<double>(pose.poseClockMs) + stream.poseClockOffset;
+        const double since = stream.lastOffsetUpdate > 0.0 ? std::clamp(now - stream.lastOffsetUpdate, 0.0, 250.0) : 0.0;
+        stream.poseClockOffset += (floor - stream.poseClockOffset) * (1.0 - std::exp(-since / kClockOffsetFollowMs));
+        stream.lastOffsetUpdate  = now;
+        stream.poseClockSource   = pose.poseClockSource;
+        stream.poseClockMs       = pose.poseClockMs;
+        stream.poseClockFraction = pose.poseClockFraction;
+        const double poseTime    = stampMs + stream.poseClockOffset;
         if (!sourceChanged && poseTime <= stream.lastPoseTime) {
             return;
         }
@@ -436,7 +440,7 @@ namespace Mafia1Online::Features::Car {
         stream.poses.Push({poseTime, snapshot.position, snapshot.velocity, glm::normalize(snapshot.rotation), angular}, now, sourceChanged);
         if (Debug::SyncTrace::Enabled() && Debug::SyncTrace::Near(snapshot.position)) {
             Debug::SyncTrace::Received("car", networkId)
-                .Int("clk", pose.poseClockMs)
+                .Num("clk", stampMs)
                 .Num("arrival", now)
                 .Num("ptime", poseTime)
                 .Num("offset", stream.poseClockOffset)
@@ -1234,7 +1238,9 @@ namespace Mafia1Online::Features::Car {
         movement.sequence          = ++stream.sequence;
         // The physics time this pose was integrated to; wall-clock read
         // times would carry up to a frame of jitter.
-        movement.clockMs           = stream.simClockMs;
+        const double stamp         = std::floor(stream.simClock);
+        movement.clockMs           = static_cast<uint32_t>(static_cast<int64_t>(stamp));
+        movement.clockFraction     = static_cast<uint8_t>(std::clamp((stream.simClock - stamp) * 256.0, 0.0, 255.0));
         movement.x                 = position.x;
         movement.y                 = position.y;
         movement.z                 = position.z;
@@ -1318,7 +1324,7 @@ namespace Mafia1Online::Features::Car {
         Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(movement, MafiaNet::Priority::High, MafiaNet::Reliability::Unreliable);
         if (Debug::SyncTrace::Enabled() && Debug::SyncTrace::Near({movement.x, movement.y, movement.z})) {
             Debug::SyncTrace::Truth("car", networkId)
-                .Int("clk", movement.clockMs)
+                .Num("clk", Shared::Entities::CarEntity::ClockMs(movement.clockMs, movement.clockFraction))
                 .Bool("sent", true)
                 .Int("seq", movement.sequence)
                 .Vec("p", {movement.x, movement.y, movement.z})
@@ -1905,7 +1911,7 @@ namespace Mafia1Online::Features::Car {
     bool CarService::Sample(uint64_t networkId, Framework::Utils::TransformSnapshot &out) const {
         const auto it = _streams.find(networkId);
         Stream::PoseSample pose;
-        if (it == _streams.end() || !it->second.poses.Sample(LocalClockMs() - it->second.poses.DelayMs() + it->second.poses.LeadMs(), pose)) {
+        if (it == _streams.end() || !it->second.poses.Sample(World::FrameClock::NowMs() - it->second.poses.DelayMs() + it->second.poses.LeadMs(), pose)) {
             return false;
         }
         out = {pose.position, pose.velocity, pose.rotation};
@@ -1924,24 +1930,15 @@ namespace Mafia1Online::Features::Car {
             return;
         }
         if (const auto found = _streams.find(id->second); found != _streams.end() && found->second.simulationController) {
-            // C_car::AI steps physics by at most 83 ms per frame, and the
-            // retail game does not tick an inactive car at all. Either puts
-            // the physics clock behind the local one for good, which a
-            // receiver's least-delay mapping would read as every later pose
-            // arriving late (and only slew out at 0.5 ms a pose): rejoin the
-            // local clock once it fell more than a frame behind.
-            auto &stream        = found->second;
-            const auto wall     = static_cast<uint32_t>(MafiaNet::GetTime());
-            stream.simClockMs += std::min(frameMs, 83u);
-            // Wrap-safe: both clocks are 32-bit milliseconds.
-            const auto lag = static_cast<int32_t>(wall - stream.simClockMs);
-            if (!stream.simClockStarted || lag < stream.simClockLag) {
-                stream.simClockStarted = true;
-                stream.simClockLag     = lag;
-            }
-            else if (lag - stream.simClockLag > kSimClockSlackMs) {
-                stream.simClockMs = wall - static_cast<uint32_t>(stream.simClockLag);
-            }
+            // Dated by the frame this step belongs to. The game's frame times
+            // are whole milliseconds and run 2-4% behind the wall clock;
+            // counting them alone drifted, and pulling the count up to the
+            // wall clock once it lagged 40 ms put a 40-110 ms gap between
+            // two poses 33 ms apart every few seconds, which observers played
+            // as the car stalling. The frame clock leans on the wall clock
+            // instead of jumping to it.
+            auto &stream    = found->second;
+            stream.simClock = World::FrameClock::NowMs();
             if (_simulatedSerial != _updateSerial) {
                 _simulatedSerial = _updateSerial;
                 _simulatedCars.clear();
@@ -1970,7 +1967,7 @@ namespace Mafia1Online::Features::Car {
                     }
                     if (Debug::SyncTrace::Near({position.x, position.y, position.z})) {
                         Debug::SyncTrace::Truth("car", id->second)
-                            .Int("clk", stream.simClockMs)
+                            .Num("clk", stream.simClock)
                             .Bool("sent", false)
                             .Int("fms", frameMs)
                             .Vec("p", {position.x, position.y, position.z})
@@ -2018,17 +2015,8 @@ namespace Mafia1Online::Features::Car {
         if (_clockSerial != _updateSerial) {
             _clockSerial = _updateSerial;
             // Remote cars step by the game's frame time, as the local car
-            // and the camera do; reading the wall clock wherever the first
-            // car ticks puts its jitter (3 cm a millisecond at speed) between
-            // them. The wall clock only steers it, or takes over after a stall.
-            const double wall = LocalClockMs();
-            if (_frameClock <= 0.0 || std::abs(wall - _frameClock) > kFrameClockResetMs) {
-                _frameClock = wall;
-            }
-            else {
-                _frameClock += static_cast<double>(frameMs);
-                _frameClock += (wall - _frameClock) * kFrameClockPull;
-            }
+            // and the camera do (World::FrameClock).
+            _frameClock = World::FrameClock::NowMs();
         }
         const float dt = static_cast<float>(std::clamp(frameMs, 1u, 83u)) * 0.001f;
         auto *frame = nativeCar->second.frame;

@@ -139,8 +139,14 @@ namespace Mafia1Online::Shared::Entities {
 
         // The pose's sample clock on the controller that reported it. It rides
         // in the transform channel, so it always matches the pose it dates.
-        uint32_t poseClockMs     = 0;
-        uint64_t poseClockSource = 0;
+        uint32_t poseClockMs       = 0;
+        uint8_t poseClockFraction  = 0;
+        uint64_t poseClockSource   = 0;
+
+        // The pose clock in ms, with its 1/256 ms fraction.
+        static double ClockMs(uint32_t milliseconds, uint8_t fraction) {
+            return static_cast<double>(milliseconds) + static_cast<double>(fraction) / 256.0;
+        }
 
         // Client: every pose the transform channel delivered, oldest first,
         // until CarService takes them. Two often arrive between one frame's
@@ -151,8 +157,9 @@ namespace Mafia1Online::Shared::Entities {
             glm::quat rotation {1.0f, 0.0f, 0.0f, 0.0f};
             glm::vec3 velocity {0.0f};
             glm::vec3 angularVelocity {0.0f};
-            uint32_t poseClockMs     = 0;
-            uint64_t poseClockSource = 0;
+            uint32_t poseClockMs       = 0;
+            uint8_t poseClockFraction  = 0;
+            uint64_t poseClockSource   = 0;
         };
         static constexpr size_t kMaxReceivedPoses = 32;
         std::vector<ReceivedPose> receivedPoses;
@@ -210,7 +217,7 @@ namespace Mafia1Online::Shared::Entities {
                             Net::SerializeFixed(stream, write, angularVelocity.x, -32.0f, 32.0f, 12) &&
                             Net::SerializeFixed(stream, write, angularVelocity.y, -32.0f, 32.0f, 12) &&
                             Net::SerializeFixed(stream, write, angularVelocity.z, -32.0f, 32.0f, 12) && stream->Serialize(write, poseClockMs) &&
-                            stream->Serialize(write, source) && stream->Serialize(write, steering) && stream->Serialize(write, rpm) &&
+                            stream->Serialize(write, poseClockFraction) && stream->Serialize(write, source) && stream->Serialize(write, steering) && stream->Serialize(write, rpm) &&
                             stream->SerializeBitsFromIntegerRange(write, gearValue, int8_t {-1}, int8_t {14}) && stream->Serialize(write, skidMask);
                 for (uint8_t &pedal : pedals) {
                     good = good && stream->SerializeBitsFromIntegerRange(write, pedal, uint8_t {0}, uint8_t {63});
@@ -234,6 +241,7 @@ namespace Mafia1Online::Shared::Entities {
             }
             NetworkEntity::SerializeTransform(fields);
             fields.Field(poseClockMs);
+            fields.Field(poseClockFraction);
             fields.Field(poseClockSource);
             fields.Field(angularVelocity);
             auto steering  = static_cast<int16_t>(std::lround(std::clamp(steeringInput, -2.0f, 2.0f) * 16383.0f));
@@ -267,7 +275,7 @@ namespace Mafia1Online::Shared::Entities {
             if (receivedPoses.size() >= kMaxReceivedPoses) {
                 receivedPoses.erase(receivedPoses.begin());
             }
-            receivedPoses.push_back({position, rotation, velocity, angularVelocity, poseClockMs, poseClockSource});
+            receivedPoses.push_back({position, rotation, velocity, angularVelocity, poseClockMs, poseClockFraction, poseClockSource});
         }
 
         void OnSerializeConstruction(Framework::Networking::Replication::FieldSerializer &fields) override {
