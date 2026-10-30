@@ -38,6 +38,7 @@ namespace Mafia1Online::Features::Npc {
         using CameraArrestView = void(__thiscall *)(void *, NativeActor *, NativeActor *);
         using ManagerTick       = void(__thiscall *)(SDK::Police::NativePoliceManager *, uint32_t);
         using BoardBusy         = char(__thiscall *)(void *, bool);
+        using BoardActionTick   = void(__thiscall *)(SDK::Police::NativeBoardAction *, uint32_t);
 
         RecruitPolice gRecruitPoliceOriginal         = nullptr;
         ActionTick gActionTickOriginal               = nullptr;
@@ -46,6 +47,7 @@ namespace Mafia1Online::Features::Npc {
         CameraArrestView gCameraArrestViewOriginal   = nullptr;
         ManagerTick gPoliceTickOriginal              = nullptr;
         BoardBusy gBoardBusyOriginal                 = nullptr;
+        BoardActionTick gBoardActionTickOriginal     = nullptr;
         NpcHost *gHost                               = nullptr;
 
         // The police action C_entity::actionTick is running, for the hooks
@@ -195,14 +197,38 @@ namespace Mafia1Online::Features::Npc {
             gHost->AfterPoliceTick(*manager, manager->EvaluationTimer() != before + frameMs);
         }
 
+        // A case winding down sends every member farther than 200 from the
+        // active camera off to search on foot (SEARCH_FOOT clears its actions
+        // and the retirement pass then removes it). Retail's camera is on its
+        // one player, the offender; the host's is its debug view, which stays
+        // where the first player spawned. 500 away, the officer grabbing a
+        // thrown-out driver lost its arrest 0.8 s into it and every officer
+        // there was retired, faded out on the players' screens, with no
+        // freeze and no cuffs (arrestdiag repro, 30 Oct session). The case
+        // runs with the camera on its offender when that is a player.
+        void __fastcall BoardActionTickHook(SDK::Police::NativeBoardAction *action, void *, uint32_t frameMs) {
+            NativeActor *offender = action->Mode() == SDK::Police::kBoardModeWindDown ? action->Offender() : nullptr;
+            if (!offender || !gHost->IsPolicePerson(offender)) {
+                gBoardActionTickOriginal(action, frameMs);
+                return;
+            }
+            auto *camera = SDK::Core::Mission::Get()->GetScene()->ActiveCamera();
+            const auto cameraPosition = camera->WorldPosition();
+            camera->SetWorldPosition(offender->Frame()->WorldPosition());
+            camera->Update();
+            gBoardActionTickOriginal(action, frameMs);
+            camera->SetWorldPosition(cameraPosition);
+            camera->Update();
+        }
+
         struct Hook {
             uintptr_t address;
             void *detour;
             void **original;
         };
 
-        const std::array<Hook, 7> &Hooks() {
-            static const std::array<Hook, 7> hooks {{
+        const std::array<Hook, 8> &Hooks() {
+            static const std::array<Hook, 8> hooks {{
                 {SDK::Traffic::kRecruitPolice, reinterpret_cast<void *>(&RecruitPoliceHook), reinterpret_cast<void **>(&gRecruitPoliceOriginal)},
                 {SDK::Police::kEntityActionTick, reinterpret_cast<void *>(&ActionTickHook), reinterpret_cast<void **>(&gActionTickOriginal)},
                 {SDK::Police::kPoliceBoardArrested, reinterpret_cast<void *>(&BoardArrestedHook), reinterpret_cast<void **>(&gBoardArrestedOriginal)},
@@ -210,6 +236,7 @@ namespace Mafia1Online::Features::Npc {
                 {SDK::Police::kCameraArrestView, reinterpret_cast<void *>(&CameraArrestViewHook), reinterpret_cast<void **>(&gCameraArrestViewOriginal)},
                 {SDK::Police::kTick, reinterpret_cast<void *>(&PoliceTickHook), reinterpret_cast<void **>(&gPoliceTickOriginal)},
                 {SDK::Police::kPoliceBoardBusy, reinterpret_cast<void *>(&BoardBusyHook), reinterpret_cast<void **>(&gBoardBusyOriginal)},
+                {SDK::Police::kBoardActionTick, reinterpret_cast<void *>(&BoardActionTickHook), reinterpret_cast<void **>(&gBoardActionTickOriginal)},
             }};
             return hooks;
         }

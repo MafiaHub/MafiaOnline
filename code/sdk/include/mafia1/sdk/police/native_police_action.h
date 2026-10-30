@@ -143,6 +143,13 @@ namespace Mafia1Online::SDK::Police {
         reinterpret_cast<Forget>(kBoardForget)(kPoliceBoard, offender);
     }
 
+    // void __thiscall ai_police_action::Tick(unsigned frameTime), ret 4: one
+    // case's evaluation, run for every case by ai_police_nastenka::Tick from
+    // C_game's tick. A case winding down (mode 7) sends SEARCH_FOOT to each
+    // member farther than 200 from the scene's active camera (reM
+    // POLICE_SWEEP_SQ): retail's camera is its one player.
+    inline constexpr uintptr_t kBoardActionTick = 0x538DF0;
+
     // void __thiscall AkceDokoncenaPlukovniku(ai_police_action *), ret 4:
     // closes the action and erases it from the board (m_Actions, 0x6c bytes
     // each, _First +0x14, _Last +0x18).

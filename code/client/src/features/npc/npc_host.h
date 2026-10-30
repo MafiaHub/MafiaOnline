@@ -90,6 +90,10 @@ namespace Mafia1Online::Features::Npc {
         // (a mafia car's crew, a police car's crew, a thrown traffic driver):
         // tracked with the model its frame was opened from.
         void TrackIfNew(SDK::Player::NativeActor *actor, Shared::Entities::NpcKind kind, uint64_t carId = 0);
+        // A player's replica the police keep a crime record of.
+        [[nodiscard]] bool IsPolicePerson(const void *actor) const {
+            return _policePersons.contains(const_cast<void *>(actor));
+        }
         [[nodiscard]] bool Owns(const void *actor) const {
             return _npcs.contains(const_cast<void *>(actor));
         }
