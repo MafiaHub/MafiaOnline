@@ -19,20 +19,25 @@ namespace Mafia1Online::Features::Voice {
         using SDK::Player::NativeHuman;
         using SDK::Scene::NativeMorphWeights;
 
-        // The level is full-scale RMS, floored at 0.02 (-34 dB) by the voice
-        // client; normal speech peaks around -12 dB.
-        constexpr float kQuietDb = -34.0f;
-        constexpr float kLoudDb  = -12.0f;
+        // The level is one 20 ms frame's full-scale RMS, floored at 0.02
+        // (-34 dB) by the voice client; normal speech peaks around -12 dB.
+        // The mouth opens over the top kRangeDb below the talker's own recent
+        // peak, so a quiet microphone moves it as much as a loud one, and the
+        // dips between syllables close it.
+        constexpr float kQuietDb      = -34.0f;
+        constexpr float kRangeDb      = 18.0f;
+        constexpr float kPeakFloorDb  = -24.0f;
+        constexpr float kPeakFallDbPS = 4.0f; // per second, toward a quieter talker
 
         // Retail lip files (tables\dat) put loudness in FIRST_BLEND alone: it
         // tracks per-40 ms RMS at r 0.51, from 0.035 in silence to 0.43 in the
         // loudest 5% (p95 0.64). The other channels choose the mouth shape.
         constexpr float kMaxOpen = 0.65f;
 
-        // Seconds. On top of the voice client's own envelope, so a frame
-        // that drains no audio does not snap the jaw.
-        constexpr float kOpenAttack      = 0.04f;
-        constexpr float kOpenRelease     = 0.09f;
+        // Seconds. The frames are unsmoothed 20 ms steps: short enough that
+        // the jaw shuts between syllables, long enough not to stutter.
+        constexpr float kOpenAttack      = 0.02f;
+        constexpr float kOpenRelease     = 0.045f;
         constexpr float kPresenceAttack  = 0.08f;
         constexpr float kPresenceRelease = 0.25f;
         constexpr float kRested          = 0.01f;
@@ -46,10 +51,13 @@ namespace Mafia1Online::Features::Voice {
         constexpr float kSecondSplit      = 0.11f;
         constexpr float kThirdSplit       = 0.6f;
         // FIRST_SPLIT picks between the two open shapes (retail p5 0.04,
-        // p95 0.89); swinging it while the mouth moves keeps it from
-        // flapping in one shape.
-        constexpr float kSplitSwing = 0.3f;
-        constexpr float kSplitRate  = 7.0f; // radians per second of open mouth
+        // p95 0.89). The voice's brightness swings it: rounded vowels to one
+        // side, "ee" and hissed consonants to the other. The sign is chosen
+        // by eye; the lip files do not say which shape is which.
+        constexpr float kSplitSwing = 0.35f;
+        constexpr float kSplitTau   = 0.05f;
+        // Bright sounds ("s", "ee") are made with a nearly closed jaw.
+        constexpr float kBrightClose = 0.4f;
 
         constexpr int kGroups     = 3;
         constexpr int kMaxTargets = 5;
@@ -60,12 +68,18 @@ namespace Mafia1Online::Features::Voice {
             return current + (target - current) * (1.0f - std::exp(-dt / tau));
         }
 
-        float Openness(float level) {
-            if (level <= 0.0f) {
+        float Decibels(float level) {
+            return level > 0.0f ? 20.0f * std::log10(level) : kQuietDb;
+        }
+
+        // Smoothstep, so a frame near the bottom of the range barely parts
+        // the lips and one near the peak opens them fully.
+        float Openness(float db, float peakDb) {
+            if (db <= kQuietDb) {
                 return 0.0f;
             }
-            const float db = 20.0f * std::log10(level);
-            return std::clamp((db - kQuietDb) / (kLoudDb - kQuietDb), 0.0f, 1.0f);
+            const float x = std::clamp((db - (peakDb - kRangeDb)) / kRangeDb, 0.0f, 1.0f);
+            return x * x * (3.0f - 2.0f * x);
         }
 
         // reM DabingApplyMorphWeights: group 0 opens into targets 1 and 2
@@ -102,7 +116,8 @@ namespace Mafia1Online::Features::Voice {
 
     void MouthService::Reset() {
         _mouths.clear();
-        _last = {};
+        _last             = {};
+        _localVoicedUntil = {};
     }
 
     void MouthService::Update(World::WorldService &world) {
@@ -118,6 +133,14 @@ namespace Mafia1Online::Features::Voice {
 
         auto *voice         = Framework::CoreModules::GetVoiceClient();
         const uint64_t mine = static_cast<uint64_t>(replication->GetMyGUID());
+        // IsLocalTalking is true for as long as the key is held, silence
+        // included, but Opus DTX keeps silence off the wire: the others see a
+        // remote mouth only while audio arrives (IsSpeakerTalking). Gate the
+        // local mouth on the level the same way, so it moves when theirs does.
+        if (voice && voice->GetLocalLevel() > 0.0f) {
+            _localVoicedUntil = now + std::chrono::milliseconds(Framework::Voice::kSpeakerTalkingHoldMs);
+        }
+        const bool localVoiced = now < _localVoicedUntil;
         replication->ForEach<Shared::Entities::PlayerEntity>([&](Shared::Entities::PlayerEntity *player) {
             if (player->missionGeneration != world.LoadedMissionGeneration()) {
                 return;
@@ -125,45 +148,61 @@ namespace Mafia1Online::Features::Voice {
             const bool speaking = player->spawned && player->alive;
             NativeActor *actor  = nullptr;
             bool talking        = false;
-            float level         = 0.0f;
+            Framework::Voice::SpeechFrame speech {};
             if (player->controllerGuid == mine) {
                 actor   = SDK::Player::CurrentPlayer();
-                talking = speaking && voice && voice->IsLocalTalking();
-                level   = voice ? voice->GetLocalLevel() : 0.0f;
+                talking = speaking && localVoiced && voice && voice->IsLocalTalking();
+                speech  = voice ? voice->GetLocalSpeech() : Framework::Voice::SpeechFrame {};
             }
             else {
                 actor   = static_cast<NativeActor *>(world.NativeObjects().Resolve(world.NativeObjects().FindByNetwork(player->GetNetworkID())));
                 talking = speaking && voice && voice->IsSpeakerTalking(player->controllerGuid);
-                level   = voice ? voice->GetSpeakerLevel(player->controllerGuid) : 0.0f;
+                speech  = voice ? voice->GetSpeakerSpeech(player->controllerGuid) : Framework::Voice::SpeechFrame {};
             }
             if (!actor || !actor->Frame() || (actor->GetType() != NativeActor::Type::Player && actor->GetType() != NativeActor::Type::Entity)) {
                 return;
             }
-            Drive(*static_cast<NativeHuman *>(static_cast<void *>(actor)), talking, level, dt);
+            Drive(*static_cast<NativeHuman *>(static_cast<void *>(actor)), talking, speech, dt);
         });
         std::erase_if(_mouths, [this](const auto &entry) { return entry.second.seen != _frame; });
     }
 
-    void MouthService::Drive(NativeHuman &human, bool talking, float level, float dt) {
+    void MouthService::Drive(NativeHuman &human, bool talking, const Framework::Voice::SpeechFrame &speech, float dt) {
         auto *visual  = human.BaseMesh();
         auto *weights = SDK::Scene::SingleMorphWeights(visual);
         if (!weights) {
             return;
         }
-        auto &mouth = _mouths[visual];
-        mouth.seen  = _frame;
+        auto [entry, inserted] = _mouths.try_emplace(visual);
+        auto &mouth            = entry->second;
+        mouth.seen             = _frame;
+        if (inserted) {
+            // A face first seen here is not known to be at rest: one this
+            // service lost for a frame (the human did not resolve) may have
+            // been left mid-word. One rest write below settles it.
+            mouth.rested = false;
+        }
+        if (!talking && mouth.rested) {
+            return;
+        }
         if (SDK::Scene::DabingAnimates(visual)) {
             // A retail line or cutscene owns the face, and leaves it as it ends.
             mouth      = {};
             mouth.seen = _frame;
             return;
         }
-        if (!talking && mouth.rested) {
-            return;
+        // Silence between words keeps the face in speech (presence) with the
+        // jaw shut, and leaves the shape where it was.
+        const bool sounding = talking && speech.level > 0.0f;
+        const float db      = Decibels(speech.level);
+        if (sounding) {
+            mouth.peakDb = std::max({db, mouth.peakDb - kPeakFallDbPS * dt, kPeakFloorDb});
         }
-        mouth.open     = Follow(mouth.open, talking ? Openness(level) : 0.0f, dt, kOpenAttack, kOpenRelease);
-        mouth.presence = Follow(mouth.presence, talking ? 1.0f : 0.0f, dt, kPresenceAttack, kPresenceRelease);
-        mouth.phase    = std::fmod(mouth.phase + dt * kSplitRate * mouth.open, 6.2831853f);
+        const float open  = sounding ? Openness(db, mouth.peakDb) * (1.0f - kBrightClose * speech.brightness) : 0.0f;
+        const float split = sounding ? kFirstSplit + kSplitSwing * (2.0f * speech.brightness - 1.0f) : mouth.split;
+        mouth.open        = Follow(mouth.open, open, dt, kOpenAttack, kOpenRelease);
+        mouth.split       = Follow(mouth.split, split, dt, kSplitTau, kSplitTau);
+        mouth.presence    = Follow(mouth.presence, talking ? 1.0f : 0.0f, dt, kPresenceAttack, kPresenceRelease);
         if (!talking && mouth.presence < kRested) {
             Write(*weights, SpeechPose(0.0f, kFirstSplit, 0.0f));
             mouth      = {};
@@ -171,6 +210,6 @@ namespace Mafia1Online::Features::Voice {
             return;
         }
         mouth.rested = false;
-        Write(*weights, SpeechPose(mouth.open * kMaxOpen, std::clamp(kFirstSplit + kSplitSwing * std::sin(mouth.phase), 0.0f, 1.0f), mouth.presence));
+        Write(*weights, SpeechPose(mouth.open * kMaxOpen, std::clamp(mouth.split, 0.0f, 1.0f), mouth.presence));
     }
 } // namespace Mafia1Online::Features::Voice
