@@ -103,6 +103,7 @@ namespace Mafia1Online::Features::Settings {
         void ApplyAudio();
         void ApplyVoice();
         void ApplyScriptKeys();
+        void ApplyDisplay();
         NativeControls LiveControls() const;
         NativeAudio LiveAudio() const;
         NativeBinding LiveBinding(int slot) const;
@@ -119,6 +120,7 @@ namespace Mafia1Online::Features::Settings {
         bool _mediaChanged  = false;
         bool _openRequested = false;
         uint64_t _revision  = 1;
+        uint64_t _displayRevision = 0;
         std::optional<std::chrono::steady_clock::time_point> _dirtySince;
     };
 } // namespace Mafia1Online::Features::Settings

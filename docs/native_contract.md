@@ -91,6 +91,47 @@ the same descriptor lets a second client continue ticking while its window
 lacks focus. All of it remains session local because the original setup fields
 are restored after IGraph initialization.
 
+### Live display changes
+
+Settings → Display's Apply moves the running game to any mode and size
+(`features/display/live_display.cpp`). The request is queued and applied on the
+game thread right after `IGraph::Present` returns, outside any scene, the one
+point the engine itself Resets after a lost device. Read in IDA (LS3DF unless
+noted):
+
+- The engine keeps its only screen setup in the `IGRAPH_INIT_DESC` copy at
+  `0x101c55bc`. `Scrn_sx`/`Scrn_sy` (`0x100704e0`/`0x10070500`) return
+  `fullWidth`/`fullHeight` (`+0x20`/`+0x24`) when flag `0x80` at `+0x2c` is
+  set, else `width`/`height`. The device is created and Reset with the
+  `D3DPRESENT_PARAMETERS` at `0x101c52c0`.
+- `ResetDevice` (`0x1006e1a0`, `__fastcall`, bool in `CL`) frees the pooled
+  video-memory vertex and index buffers and its state block, calls
+  `IDirect3DDevice8::Reset` (`+0x38`) with those parameters, recreates its
+  shaders, state block and global buffers and re-pushes its render-state cache.
+  Nothing else in Game.exe or LS3DF holds a default-pool resource across frames;
+  the Framework's web view textures are managed.
+- For each mode the mod rewrites the windows, the descriptor and the
+  parameters as `IGraph::Init` (`0x1006e790`) writes them. A window or
+  borderless is flag `0x80`: a `WS_CHILD` window of the main window's class
+  (`g_childHWND` at `0x101c5408`, read live by `GetChildHWND` `0x1006c810`, the
+  mouse code and `IShow::SetRect` `0x100745a0`) is the device window, the back
+  buffer is the desktop's format and the full rectangle is the client size.
+  Exclusive fullscreen is flag `0x2`: no child, a topmost `WS_VISIBLE` main
+  window at the monitor's origin, the adapter mode's format and refresh, and
+  the present interval ONE with flag `0x100` else IMMEDIATE, as Init sets it.
+  The back buffer size is always stated, so a later lost-device Reset keeps it.
+  Init's frame arithmetic (`SM_CXFIXEDFRAME`) leaves out the wider DWM frame,
+  which clips 10 pixels of a window at start; a live change measures the client
+  area and grows the window by what is missing.
+- After the Reset, `IGraph::SetViewPort` (`0x1006e740`) refreshes the cached
+  viewport `I3D_driver::Render` compares against, Game.exe's
+  `G_IndicatorsClass::ResolutionChanged` (`0x601520`, arithmetic only) lays the
+  HUD out again, and `ParheliaApplyViewport` (`0x604a80`) with the current
+  single-screen flag (`+0x46f4`) resizes the mission scene's viewport and the
+  active camera's aspect. Menus compute their zoom when they open.
+- A refused Reset rebuilds what ran before; if that fails too the device stays
+  lost and `IGraph::Present` retries the Reset as after Alt-Tab.
+
 ### Window close during a multiplayer session
 
 IDA of the installed `LS3DF.dll` confirms its window procedure handles

@@ -132,8 +132,8 @@ namespace Mafia1Online::Features::Settings {
         bool operator==(const HudSettings &) const = default;
     };
 
-    // How the game window is made, applied by Display's InitSystem hook at the
-    // next start: InitSystem builds the window and the D3D8 device once.
+    // How the game window is made: by Display's InitSystem hook at start, and
+    // by Display::RequestLive when the settings page applies a change.
     enum class DisplayMode : uint8_t {
         // A captioned window of width x height.
         Windowed,

@@ -456,37 +456,40 @@ function describeDisplay(display: DisplaySettings, monitor: [number, number]): s
     return `${modeNames[display.mode]} ${width} × ${height}`;
 }
 
-// The game makes its window and Direct3D device once, at start (InitSystem),
-// so a change here is saved for the next start.
+// Choices wait for Apply, which saves them and moves the running game: the
+// client rebuilds the window and Resets the Direct3D device for any mode.
 function DisplayPage(props: { settings: GameSettings }) {
     const { display, displayActive, displayModes, monitor } = props.settings;
-    const setDisplay = (values: Partial<DisplaySettings>) => send('settings:set', { display: values });
-    const size = display.width === 0 ? '0x0' : `${display.width}x${display.height}`;
-    const pending = describeDisplay(display, monitor) !== describeDisplay(displayActive, monitor);
+    const [draft, setDraft] = useState<DisplaySettings>(display);
+    // A saved choice that changed under the page (Reset page) replaces the draft.
+    useEffect(() => setDraft(display), [display.mode, display.width, display.height]);
+    const edit = (values: Partial<DisplaySettings>) => setDraft({ ...draft, ...values });
+    const size = draft.width === 0 ? '0x0' : `${draft.width}x${draft.height}`;
+    const changed = describeDisplay(draft, monitor) !== describeDisplay(displayActive, monitor);
     const [monitorWidth, monitorHeight] = monitor;
     // A window must fit on the monitor beside its caption; fullscreen takes what the card offers.
-    const sizes = displayModes.filter(([width, height]) => display.mode === 'fullscreen' || (width <= monitorWidth && height <= monitorHeight));
-    if (display.width !== 0 && !sizes.some(([width, height]) => width === display.width && height === display.height)) {
-        sizes.unshift([display.width, display.height]);
+    const sizes = displayModes.filter(([width, height]) => draft.mode === 'fullscreen' || (width <= monitorWidth && height <= monitorHeight));
+    if (draft.width !== 0 && !sizes.some(([width, height]) => width === draft.width && height === draft.height)) {
+        sizes.unshift([draft.width, draft.height]);
     }
     return (
         <>
             <p {...stylex.props(styles.note)}>
                 Running now: <b>{describeDisplay(displayActive, monitor)}</b>.{' '}
-                {pending ? <b>Restart Mafia Online to switch to {describeDisplay(display, monitor)}.</b> : 'Changes apply the next time you start Mafia Online.'}
+                {changed ? <b>Apply to switch to {describeDisplay(draft, monitor)}.</b> : 'Pick a mode and resolution, then Apply; no restart needed.'}
             </p>
             <Section title="Window">
                 <Segmented<DisplayMode>
                     label="Mode"
-                    value={display.mode}
+                    value={draft.mode}
                     options={[
                         { value: 'borderless', label: 'Borderless' },
                         { value: 'fullscreen', label: 'Fullscreen' },
                         { value: 'windowed', label: 'Windowed' },
                     ]}
-                    onChange={(mode) => setDisplay({ mode })}
+                    onChange={(mode) => edit({ mode })}
                 />
-                {display.mode !== 'borderless' && (
+                {draft.mode !== 'borderless' && (
                     <div {...stylex.props(styles.field, styles.fieldWide)}>
                         <span>Resolution</span>
                         <span {...stylex.props(styles.segmented)}>
@@ -495,11 +498,11 @@ function DisplayPage(props: { settings: GameSettings }) {
                                 value={size}
                                 onChange={(event) => {
                                     const [width, height] = (event.currentTarget as HTMLSelectElement).value.split('x').map(Number);
-                                    setDisplay({ width, height });
+                                    edit({ width, height });
                                 }}
                             >
                                 <option value="0x0">
-                                    {display.mode === 'windowed' ? 'Default (1024 × 768)' : `Monitor (${monitorWidth} × ${monitorHeight})`}
+                                    {draft.mode === 'windowed' ? 'Default (1024 × 768)' : `Monitor (${monitorWidth} × ${monitorHeight})`}
                                 </option>
                                 {sizes.map(([width, height]) => (
                                     <option key={`${width}x${height}`} value={`${width}x${height}`}>
@@ -511,12 +514,18 @@ function DisplayPage(props: { settings: GameSettings }) {
                     </div>
                 )}
                 <p {...stylex.props(styles.note)}>
-                    {display.mode === 'borderless'
+                    {draft.mode === 'borderless'
                         ? 'Covers the whole monitor at its own resolution. Alt-Tab switches away at once.'
-                        : display.mode === 'fullscreen'
+                        : draft.mode === 'fullscreen'
                           ? 'Takes over the monitor, usually the fastest. Alt-Tab pauses the game until you come back, so other players see you stand still. A resolution the graphics card does not offer falls back to borderless.'
                           : 'A movable window with a title bar.'}
                 </p>
+                <div {...stylex.props(styles.field)}>
+                    <span />
+                    <Button variant="primary" disabled={!changed} onClick={() => send('settings:set', { display: draft })}>
+                        Apply
+                    </Button>
+                </div>
             </Section>
         </>
     );

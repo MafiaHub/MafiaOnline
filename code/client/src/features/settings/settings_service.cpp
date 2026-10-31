@@ -2,6 +2,7 @@
 
 #include "remapped_input.h"
 
+#include "features/display/live_display.h"
 #include "features/display/system_init_hooks.h"
 #include "features/script/script_runtime.h"
 #include "shared/features/chat/text_policy.h"
@@ -180,6 +181,11 @@ namespace Mafia1Online::Features::Settings {
         if (_dirtySince && Clock::now() - *_dirtySince >= kSaveDelay) {
             Save();
         }
+        // A window change lands after a Present; the page's "running now" follows.
+        if (const uint64_t display = Display::ActiveRevision(); display != _displayRevision) {
+            _displayRevision = display;
+            ++_revision;
+        }
         // Script events are raised here, on the client tick, rather than from
         // inside the page's CEF callback.
         if (_mediaChanged) {
@@ -237,6 +243,14 @@ namespace Mafia1Online::Features::Settings {
         std::filesystem::rename(temporary, _path, error);
         if (error) {
             logger->error("Could not replace {}: {}", _path.string(), error.message());
+        }
+    }
+
+    void SettingsService::ApplyDisplay() {
+        // No choice in the file is borderless at the next start (Display::Resolve).
+        const DisplaySettings wanted = _settings.display.value_or(DisplaySettings {});
+        if (Display::AppliesLive(wanted)) {
+            Display::RequestLive(wanted);
         }
     }
 
@@ -577,10 +591,14 @@ namespace Mafia1Online::Features::Settings {
             _settings.hud = parsed.hud;
             changed       = true;
         }
-        // Kept for the next start: InitSystem makes the window and device once.
-        if (patch.contains("display") && parsed.display != _settings.display) {
-            _settings.display = parsed.display;
-            changed           = true;
+        // The page's Apply: saved for the next start and moved to now
+        // (Display::RequestLive), also when it only retries what is saved.
+        if (patch.contains("display")) {
+            if (parsed.display != _settings.display) {
+                _settings.display = parsed.display;
+                changed           = true;
+            }
+            ApplyDisplay();
         }
         if (changed) {
             Changed();
@@ -673,7 +691,7 @@ namespace Mafia1Online::Features::Settings {
             break;
         case Section::Voice: ApplyVoice(); break;
         case Section::Hud: break;
-        case Section::Display: break;
+        case Section::Display: ApplyDisplay(); break;
         }
         Changed();
         return std::nullopt;

@@ -100,9 +100,18 @@ namespace Mafia1Online::Features::Display {
             uint32_t width;
             uint32_t height;
             uint32_t refreshRate;
+            uint32_t format;
         };
 
-        // The adapter's 32-bit modes, as IGraph::Init will list them.
+        // The adapter's 32-bit modes and the desktop's format, read before
+        // InitSystem creates the device (an exclusive device changes both).
+        std::vector<AdapterMode> gModes;
+        uint32_t gDesktopFormat = 0;
+        // D3DFMT_X8R8G8B8: the desktop format of every 32-bit Windows desktop.
+        constexpr uint32_t kFormatX8R8G8B8 = 22;
+
+        // The adapter's 32-bit modes, as IGraph::Init will list them, and
+        // IDirect3D8::GetAdapterDisplayMode (+0x20) into gDesktopFormat.
         std::vector<AdapterMode> EnumerateModes(uint8_t adapter) {
             std::vector<AdapterMode> modes;
             const HMODULE library = LoadLibraryW(L"d3d8.dll");
@@ -116,7 +125,12 @@ namespace Mafia1Online::Features::Display {
                 void **table          = *static_cast<void ***>(d3d);
                 using ModeCount       = UINT(__stdcall *)(void *, UINT);
                 using EnumModes       = HRESULT(__stdcall *)(void *, UINT, UINT, D3DDisplayMode *);
+                using DisplayMode     = HRESULT(__stdcall *)(void *, UINT, D3DDisplayMode *);
                 using Release         = ULONG(__stdcall *)(void *);
+                D3DDisplayMode desktop {};
+                if (SUCCEEDED(reinterpret_cast<DisplayMode>(table[8])(d3d, adapter, &desktop))) {
+                    gDesktopFormat = desktop.format;
+                }
                 const UINT count      = reinterpret_cast<ModeCount>(table[6])(d3d, adapter);
                 for (UINT index = 0; index < count; ++index) {
                     D3DDisplayMode mode {};
@@ -124,7 +138,7 @@ namespace Mafia1Online::Features::Display {
                         continue;
                     }
                     if (std::find(std::begin(kFormats32), std::end(kFormats32), mode.format) != std::end(kFormats32)) {
-                        modes.push_back({mode.width, mode.height, mode.refreshRate});
+                        modes.push_back({mode.width, mode.height, mode.refreshRate, mode.format});
                     }
                 }
                 reinterpret_cast<Release>(table[2])(d3d);
@@ -151,21 +165,24 @@ namespace Mafia1Online::Features::Display {
 
         // The highest refresh the adapter offers at that size; nullopt when
         // IGraph::Init would find no back buffer format for it and fail.
-        std::optional<uint32_t> FullscreenRefresh(const std::vector<AdapterMode> &modes, int32_t width, int32_t height) {
-            std::optional<uint32_t> best;
+        std::optional<FullscreenMode> FindMode(const std::vector<AdapterMode> &modes, int32_t width, int32_t height) {
+            std::optional<FullscreenMode> best;
             for (const auto &mode : modes) {
                 if (static_cast<int32_t>(mode.width) != width || static_cast<int32_t>(mode.height) != height) {
                     continue;
                 }
                 const uint32_t refresh = mode.refreshRate <= kMaxRefreshByte ? mode.refreshRate : 0;
-                best                   = (std::max)(best.value_or(0), refresh);
+                if (!best || refresh > best->refreshRate) {
+                    best = FullscreenMode {refresh, mode.format};
+                }
             }
             return best;
         }
 
         ActiveDisplay Resolve(uint8_t adapter) {
             const auto [monitorWidth, monitorHeight] = MonitorSize();
-            const auto modes                          = EnumerateModes(adapter);
+            gModes                                    = EnumerateModes(adapter);
+            const auto &modes                         = gModes;
             RecordFullscreenModes(modes);
 
             if (Simulation::IsHost()) {
@@ -189,8 +206,8 @@ namespace Mafia1Online::Features::Display {
             case DisplayMode::Fullscreen: {
                 const int32_t fullWidth  = sized ? width : monitorWidth;
                 const int32_t fullHeight = sized ? height : monitorHeight;
-                if (const auto refresh = FullscreenRefresh(modes, fullWidth, fullHeight)) {
-                    return {DisplayMode::Fullscreen, fullWidth, fullHeight, *refresh};
+                if (const auto mode = FindMode(modes, fullWidth, fullHeight)) {
+                    return {DisplayMode::Fullscreen, fullWidth, fullHeight, mode->refreshRate};
                 }
                 Log()->warn("Display: the adapter has no 32-bit {}x{} mode for fullscreen; using borderless", fullWidth, fullHeight);
                 break;
@@ -304,8 +321,20 @@ namespace Mafia1Online::Features::Display {
         return gActive;
     }
 
+    void SetActive(const ActiveDisplay &active) {
+        gActive = active;
+    }
+
     const std::vector<std::pair<uint32_t, uint32_t>> &FullscreenModes() {
         return gFullscreenModes;
+    }
+
+    std::optional<FullscreenMode> FindFullscreenMode(int32_t width, int32_t height) {
+        return FindMode(gModes, width, height);
+    }
+
+    uint32_t DesktopFormat() {
+        return gDesktopFormat ? gDesktopFormat : kFormatX8R8G8B8;
     }
 
     std::pair<int32_t, int32_t> MonitorSize() {

@@ -2,6 +2,8 @@
 
 #include "web_ui_service.h"
 
+#include "features/display/live_display.h"
+
 #include <MinHook.h>
 #include <mafia1/sdk/graphics/native_graph.h>
 #include <mafia1/sdk/menu/native_load_progress.h>
@@ -36,6 +38,8 @@ namespace Mafia1Online::Features::WebUi {
         void __stdcall PresentHook(Graph *graph) {
             gService->OnPresent();
             gPresentOriginal(graph);
+            // Between frames: the one point a window change may Reset the device.
+            Display::ApplyPending();
         }
 
         bool __stdcall TestKeyHook(Graph *graph, uint8_t scanCode) {
