@@ -208,7 +208,7 @@ mission unload do so automatically. Up to eight previews may exist per client.
 `Scene.getCarCatalog()` returns `{ id, name, model }` entries from the loaded
 game's patched stock car database. `name` is the retail display name and
 `model` is its default-color `.i3d` file. It returns an empty list before the
-native database initializes. The [Free Ride car picker](../resources/freeride/client/car_picker.js)
+native database initializes. The [Free Ride car picker](../gamemodes/freeride/src/client/car_picker.ts)
 uses these entries for `/car`; its server validates the chosen stock ID before
 spawning. A web view's DOM rectangle must be converted from CSS pixels to
 backbuffer pixels, using `Web.getScreenSize()` and the page's dimensions.
@@ -226,9 +226,9 @@ Events.on("render", () => {
 });
 ```
 
-The [Free Ride marker script](../resources/freeride/client/markers.js)
+The [Free Ride marker script](../gamemodes/freeride/src/client/markers.ts)
 uses this API to bob and rotate a crate model, draw beacons and label
-checkpoints. Its [server events](../resources/freeride/server/world_events.js)
+checkpoints. Its [server events](../gamemodes/freeride/src/server/world_events.ts)
 own each marker, validate the player's mission, life, and distance, then
 grant the reward.
 
@@ -380,7 +380,7 @@ reads the keyboard, so it applies to the key itself: another resource
 binding the same key follows it too. Descriptions, switches and moves stop
 applying when the resource stops.
 
-The [Free Ride car radio](../resources/freeride/client/radio.js) uses a
+The [Free Ride car radio](../gamemodes/freeride/src/client/radio.ts) uses a
 resource-owned `Web` audio view for a live internet stream. The stream starts
 when this client enters a car and stops on exit. The HTML page handles a lost
 connection by retrying the same station. The directory page is not an audio

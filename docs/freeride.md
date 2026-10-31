@@ -1,6 +1,7 @@
 # Free Ride gamemode
 
-`resources/freeride` is the default Mafia1Online gamemode. It is built to show
+Free Ride is the default Mafia1Online gamemode (`resources/freeride`, built from
+the TypeScript in `gamemodes/freeride`). It is built to show
 what the multiplayer does: players race each other through the city's real
 streets, put prices on each other's heads, settle scores in private duels,
 run crews and fight over their street corners, work jobs on both sides of
@@ -29,7 +30,7 @@ python3 tools/package_mod.py "<extracted mod folder>" mods/freeride-extended.zip
 ```
 
 Clients download it when they join. Each map's districts, landmarks and
-routes are in `server/lib/maps.js`; its road graph is `server/data/roads_<map>.js`,
+routes are in `server/lib/maps.ts`; its road graph is `server/data/roads_<map>.js`,
 exported by [`tools/export_road_graph.py`](../tools/export_road_graph.py) from
 the stock `a1.dta` (`--mission FREEKRAJINA`) or from the mod's loose
 `missions/FREERIDE/road.bin`. The Extended map's city districts use its own
@@ -41,7 +42,7 @@ name, and the container docks the crossing among its new container frames.
 Run the server with this project directory as its working directory. It
 discovers the resource and keeps everything it saves in one SQLite database,
 `data/freeride/freeride.db` (the server's built-in `node:sqlite`; see
-`server/lib/store.js`), which is not tracked. Player records are rows of the
+`server/lib/store.ts`), which is not tracked. Player records are rows of the
 `players` table, with name, money, experience, kills, deaths and last-seen
 time as columns for queries; crews, races, turf, speed traps, interiors, the
 championship and the admin list are documents in `documents`. Changes are
@@ -72,7 +73,7 @@ car radio switch (the same choice as F9 and `/radio`), and the Audio page
 the radio's volume.
 
 Every button in the city menu sends the same command a player could type, so
-chat and menu share one set of server checks (`server/lib/commands.js`).
+chat and menu share one set of server checks (`server/lib/commands.ts`).
 
 ## Entering Lost Heaven
 
@@ -80,8 +81,8 @@ A joining player sees the city from the air: a camera flies a loop over the
 map behind a Lost Heaven ticket with two tabs, Log in and Register. Tab moves
 between the fields, Enter sends, and a wrong name, a short password or a
 taken name is marked on its own field. The flight is built by the server
-(`server/lib/flyover.js`, `server/lib/spline.js`) and played back by the
-client (`client/selector.js`); see "The login flight" below.
+(`server/lib/flyover.ts`, `server/lib/spline.ts`) and played back by the
+client (`client/selector.ts`); see "The login flight" below.
 
 - **Log in** with a name and password puts a returning player straight on
   the street, with no character choice: where they left off, or else at their
@@ -111,7 +112,7 @@ cannot show any look starts as the first one.
 
 ### Accounts
 
-`server/lib/accounts.js` keeps the accounts in the database document
+`server/lib/accounts.ts` keeps the accounts in the database document
 `accounts`. Names are 3 to 24 letters, digits, spaces, dots, dashes or
 underscores and are unique regardless of case; passwords are 6 to 128
 characters and may not be the name. A password is stored only as an scrypt
@@ -173,7 +174,7 @@ Extended), else at their usual district, never at the saved spot.
 
 ### The login flight
 
-Each map has its own loop of ground-track points in `server/lib/flyover.js`:
+Each map has its own loop of ground-track points in `server/lib/flyover.ts`:
 Lost Heaven circles the city from Little Italy over the north of the
 island, Downtown and Hoboken to the villas on the eastern hill, then back
 along the south shore (7.8 km, under eight minutes a lap); Lost Heaven
@@ -192,7 +193,7 @@ quoted elsewhere in this guide come out where `cache.bin` puts them.
 At start the server lifts each point 28 m above the highest cell within
 48 m of it and of the stretches to its neighbours, smooths the heights
 upwards only, resamples the centripetal Catmull-Rom curve (alpha 0.5,
-`server/lib/spline.js`) every 8 m of arc length, and raises points until
+`server/lib/spline.ts`) every 8 m of arc length, and raises points until
 every sample clears the cells within 48 m of it by 28 m; a track that cannot
 clear its skyline is refused and logged, and the client then holds a still
 view. The camera looks at a second loop 150 m ahead and 14° down, flies
@@ -204,11 +205,11 @@ stop and mission unload (which a disconnect also brings). The flights run
 85 to 175 m high, 29 m or more above anything below them.
 
 Regenerate a skyline with, for example,
-`python tools/export_skyline.py freeride resources/freeride/server/data/skyline_freeride.js --game <Mafia folder> --roads resources/freeride/server/data/roads_freeride.js --report`;
+`python tools/export_skyline.py freeride gamemodes/freeride/src/server/data/skyline_freeride.js --game <Mafia folder> --roads gamemodes/freeride/src/server/data/roads_freeride.js --report`;
 for Extended add `--mod-dir <mod mission folder> --mod-zip mods/freeride-extended.zip`.
 
 Each life starts with a baseball bat; guns are bought at Yellow Pete's. Dead players come back after five
-seconds (`server/lib/life.js`): at the map's hospital where it has one, else
+seconds (`server/lib/life.ts`): at the map's hospital where it has one, else
 at their usual district.
 
 ## Career
@@ -502,7 +503,7 @@ The Jobs tab of the city menu shows every one of these with its live state.
     $530 to $700 for one medic). With the fire brigade on duty one
     wreck burns beside them, a fire call of its own ($260): it does not
     explode, and the wrecks are towed once it is out.
-- **Tobacco farm** (Lost Heaven Extended and The Countryside, `server/farm.js`).
+- **Tobacco farm** (Lost Heaven Extended and The Countryside, `server/farm/`).
   Each map has its own farm. On Lost Heaven Extended it is the mod's
   farmstead in the north of the countryside, north-west of the hills
   (`models/prejimka.4ds`, its rebuild of the stock countryside farm): leave
@@ -558,8 +559,8 @@ The Jobs tab of the city menu shows every one of these with its live state.
   tipped off), then reach Salieri's bar within ten minutes in the same car:
   $700. A one-off delivery for Salieri; the rum distillery below is a
   business of your own.
-- **Rum distillery** (`/rum`, Lost Heaven Extended, `server/distillery.js`
-  and `client/distillery.js`). A hidden still that no map shows until a
+- **Rum distillery** (`/rum`, Lost Heaven Extended, `server/distillery/`
+  and `client/distillery.ts`). A hidden still that no map shows until a
   player learns of it, run by old Hank (a scripted NPC, voice 27) at the
   woodcutters' clearing in the lowland woods: the sheds (`@bouda06`) and log
   piles (`klady`) both countryside scenes place around (-1736, 15.2, 1260),
@@ -570,7 +571,7 @@ The Jobs tab of the city menu shows every one of these with its live state.
   sacks (`xpytel2`), casks (`sud01`) and crates (`bedna01`).
 
   The way in is a five-step quest. *A sailor's tale*: the F2 Jobs tab and
-  `/rum` point to Salieri's, where Ernesto, bars.js's sailor in the billiard
+  `/rum` point to Salieri's, where Ernesto, the bars' sailor in the billiard
   room, gives directions (G next to him). *The woodcutters' clearing*: the
   compass leads to the camp; arriving on foot or in a stopped car plays a
   short locked camera shot of the still and Hank asks for copper. *Copper*: a hardware dealer's truck
@@ -683,7 +684,7 @@ windows, so it has no rooms to walk into.
 An arrest is a jail sentence: 45 seconds, plus 30 for each wanted level above
 minor that the case reached. The police keep the prisoner's weapons, the
 screen fades, and the prisoner wakes in a locked cell of the county jail
-(`server/lib/prison.js`). The jail is built from stock map objects 150 m under
+(`server/lib/prison.ts`). The jail is built from stock map objects 150 m under
 the empty fields north of the city, at (−400, −150, 1500), more than 500 m from
 the nearest road on every map, and only exists in its own virtual world
 (`0x50000000`), so nobody on the street receives it. Its hall is 24 by 8.1 m
@@ -704,7 +705,7 @@ cell.
 The client shows the countdown. A prisoner who gets out of the cell is walked
 back within a quarter second, `/kill` is refused, and `/bail` pays $5 per
 second left. The warden, a policeman the simulation host runs
-(`server/lib/warden.js`, `Npc.spawn`), stands at his desk while anyone is in
+(`server/lib/warden.ts`, `Npc.spawn`), stands at his desk while anyone is in
 the jail, and leaves 15 seconds after the last person does. The jail has no
 pedestrian paths, so he walks in straight lines (`npc.walkTo` with `direct`).
 When the time is up or bail is paid he walks to the latch of the cell door,
@@ -722,7 +723,7 @@ him off the round at once. A lost warden is sent again after 10 seconds.
 Without a simulation host the door opens on its own after the same 4 second
 pause. The
 prisoner then walks down the corridor to the EXIT arrow; the screen fades and
-they stand at the map's release point (`jail.release` in `lib/maps.js`) with
+they stand at the map's release point (`jail.release` in `lib/maps.ts`) with
 the starting kit. In the city that is the street outside the gate of the stock
 prison building (`vezeni.4ds`, placed by `cache.bin` at (−1105.68, −6.12,
 311.77); its gate spans x −1102.31 to −1094.44 at z 296.14, facing the road),
@@ -733,7 +734,7 @@ survives a reconnect, a map change and a restart of the resource. While the jail
 objects), an arrest costs $250 bail and a fresh start instead. A fine still
 costs $100.
 
-Visiting hours (`server/jail_visits.js`): in the city, an arrow outside that
+Visiting hours (`server/jail/visits.ts`): in the city, an arrow outside that
 gate (−1098.4, −6.0, 294.6) leads into the visiting area, on the corridor side
 of the bars, where visitors see and talk to the prisoners. The guard holds a
 visitor's weapons at the door and hands them back at the EXIT arrow, which
@@ -764,7 +765,7 @@ the database and work at once.
 ## Homes
 
 Homes are for sale all over every map, in its real residential buildings
-(`server/housing.js`, `server/data/houses.js`): 82 in Lost Heaven (on both
+(`server/housing/`, `server/data/houses.js`): 82 in Lost Heaven (on both
 city maps), 84 in Lost Heaven Extended (the city and two in its village) and
 six in the countryside (its village and two log cabins). The building
 outside says what is inside:
@@ -785,7 +786,7 @@ to two homes. Selling one back (F2 → Homes, press **Sell** twice) returns
 60% of what it cost and the full price of its furnishings; there is no rent.
 
 At your door G lets you in. Each home is its own virtual world, so the
-rooms (`server/lib/house_rooms.js`) are built once, 150 m under the fields
+rooms (`server/lib/house_rooms.ts`) are built once, 150 m under the fields
 north of the city, and every home of a kind shares them; only its owner's
 furnishings differ. A villa's salon has arrows at its north and west doors
 into the dining room and the bedroom. Locked (the default) only you, your
@@ -798,7 +799,7 @@ one, and a crew's welcome lapses once the owner leaves that crew.
 shut to anyone the police are after, and during races and duels.
 
 Furnishing: inside your home, F2 → Homes has a catalogue of stock pieces
-(`server/lib/house_decor.js`), from a $25 bottle and a $60 chair to a $1,400
+(`server/lib/house_decor.ts`), from a $25 bottle and a $60 chair to a $1,400
 piano, and for villas the story missions' villa set (chesterfields, a china
 cabinet, a marble fireplace, a crystal chandelier, oil paintings, a palm).
 A piece you pick is carried in front of you and paid for when you put it
@@ -848,7 +849,7 @@ through the front door or the side door off the alley. Morello's bar
 (`morellobar.4ds`, the bar of the mission Molotov Party) has a fixed door, so
 an arrow on the pavement in front of its windows leads in. Stock Lost Heaven
 has no rooms behind Salieri's door; its arrow leads to a back room built
-from stock models (`server/lib/bar_room.js`) 150 m under the fields beside
+from stock models (`server/lib/bar_room.ts`) 150 m under the fields beside
 the county jail, in its own virtual world: brick walls, board floor, a
 counter with five bar stools, cupboards of bottles, a radio, tables and
 chairs from Salieri's bar.
@@ -893,7 +894,7 @@ landmark (the pump on Lost Heaven, Bertone's garage on Lost Heaven Extended,
 the lowlands in The Countryside): `/dealer` points the compass there
 and, on the lot, opens the catalog with native model previews and prices,
 from $450 for a Model T to $9,000 for the racing cars. Police cars are not for
-sale. A garage holds three cars (`server/lib/cars.js` has the prices).
+sale. A garage holds three cars (`server/lib/cars.ts` has the prices).
 
 One owned car is out at a time, marked on the radar in your crew colour and
 locked: `/lock` toggles it, and anyone outside your crew is pulled out of the
@@ -954,28 +955,36 @@ development mode is on.
 
 ## How it is put together
 
+Free Ride is written in TypeScript under
+[`gamemodes/freeride`](../gamemodes/freeride/README.md), which builds it into
+`resources/freeride` (`npm run build`; the built files are committed, so the
+server needs no Node toolchain). Paths in this document are relative to
+`gamemodes/freeride/src`. The README there lists the shared library under
+`server/lib/` (lifecycle and timers, per-player state, job shifts, stations,
+vehicles, notifications) and the conventions.
+
 | File | Role |
 | --- | --- |
-| `server/main.js` | Player lifecycle, profiles on join, the admin motor pool, `/repair`, `/help`, menu requests, console commands. |
-| `server/dealership.js`, `economy.js` | The car lot, the garage and car locks; `/pay` and the street wage. |
-| `server/lib/` | Shared rules: the database (`store.js`), commands, profiles and ranks, respawn and activities, invitations, notifications, nametags, the road graph, admins, car prices, and the county jail building and its warden (`prison.js`, `warden.js`). |
-| `server/selector.js`, `lib/accounts.js`, `lib/flyover.js`, `lib/spline.js` | Logging in and registering, the one-time look and entering the city; accounts and remember tokens; the login flight. |
-| `server/ambience.js`, `shops.js`, `police.js`, `props.js`, `doors.js`, `traffic.js` | Clock and weather, shops and courier, police outcomes, prop repair, the door lab, the admins' traffic commands. |
-| `server/races.js`, `combat.js`, `duels.js`, `crews.js`, `world_events.js`, `social.js` | Races, bounties, duels, crews, city events, rides, messages and dice. |
-| `server/export.js`, `police_duty.js`, `police_backup.js`, `taxi.js`, `robbery.js` | The jobs; `police_backup.js` is police duty's call boxes and backup. |
-| `server/firefighters.js`, `ambulance.js`, `lib/stations.js`, `lib/jobkey.js`, `client/rescue.js` | The fire brigade and the ambulance; their stations (sign-on points and parked vehicles); the job key (G) and its prompt. |
-| `server/farm.js` | The tobacco farm: its plots, plants (map objects), curing, loads and buyers. |
-| `server/distillery.js`, `client/distillery.js` | The hidden rum distillery: its quest, still minigame, casks, loads and buyers, heat, raids and characters; the reveal shot and blast flash. |
-| `server/turf.js`, `stashes.js`, `speed_traps.js`, `interiors.js` | Turf, cash stashes, speed traps and building entrances, each per map. |
-| `server/bars.js`, `drunk.js`, `lib/bar_room.js` | Bars, their staff and drink counters; drunkenness, blackouts and drunk driving; the stock map's back-room bar. |
-| `server/housing.js`, `lib/house_rooms.js`, `lib/house_decor.js`, `data/houses.js`, `client/housing.js` | Homes: the houses of every map, buying and selling, keys and visitors, the shared rooms under the fields, the furnishing catalogue and its editor keys, parking at the kerb. |
-| `server/map_vote.js`, `bootleg.js`, `lib/maps.js` | The default map, map votes, the bootleg run and the map registry. |
-| `server/championship.js`, `jail.js`, `jail_visits.js`, `hospital.js` | The Autodrom championship, jail sentences, jail visits and hospital respawns. |
-| `client/hud.js`, `client/hud.html` | One transparent web view for toasts, feed, activity cards, race panel, level strip and the city menu; it also arbitrates the single native compass by priority. |
-| `client/markers.js` | Beacons, checkpoint and crate markers, door arrows, turf rings, station arrows, bounty labels, and the city map blips (`CityMap`). World labels show only near and in sight. |
-| `client/selector.js`, `client/selector.html` | The login flight, the login and register ticket and the one-time look. |
-| `client/shops.js`, `car_picker.js`, `radio.js`, `police.js`, `jail.js`, `main.js` | Shop staff, the car lot, garage and motor pool, radio, police HUD, the jail countdown, fades and race countdown. |
-| `client/bars.js`, `client/drunk.js` | The drink menu at a bar counter; the sway, view wobble, haze and blackout of a drunk player. |
+| `server/main/` | Player lifecycle, profiles on join, the admin motor pool, `/repair`, `/help`, menu requests, console commands. |
+| `server/dealership.ts`, `economy.ts` | The car lot, the garage and car locks; `/pay` and the street wage. |
+| `server/lib/` | Shared rules: the database (`store.ts`), commands, profiles and ranks, respawn and activities, invitations, notifications, nametags, the road graph, admins, car prices, and the county jail building and its warden (`prison.js`, `warden.js`). |
+| `server/selector/`, `lib/accounts.ts`, `lib/flyover.ts`, `lib/spline.ts` | Logging in and registering, the one-time look and entering the city; accounts and remember tokens; the login flight. |
+| `server/ambience.ts`, `shops.ts`, `police.ts`, `props.ts`, `doors.ts`, `traffic.ts` | Clock and weather, shops and courier, police outcomes, prop repair, the door lab, the admins' traffic commands. |
+| `server/races/`, `combat.ts`, `duels.ts`, `crews.ts`, `world_events.ts`, `social/` | Races, bounties, duels, crews, city events, rides, messages and dice. |
+| `server/export.ts`, `police_duty/`, `police_duty/backup.ts`, `taxi.ts`, `robbery.ts` | The jobs; `police_duty/backup.ts` is police duty's call boxes and backup. |
+| `server/firefighters/`, `ambulance/`, `lib/stations.ts`, `lib/jobkey.ts`, `client/rescue.ts` | The fire brigade and the ambulance; their stations (sign-on points and parked vehicles); the job key (G) and its prompt. |
+| `server/farm/` | The tobacco farm: its plots, plants (map objects), curing, loads and buyers. |
+| `server/distillery/`, `client/distillery.ts` | The hidden rum distillery: its quest, still minigame, casks, loads and buyers, heat, raids and characters; the reveal shot and blast flash. |
+| `server/turf.ts`, `stashes.ts`, `speed_traps.ts`, `interiors.ts` | Turf, cash stashes, speed traps and building entrances, each per map. |
+| `server/bars/`, `drunk.ts`, `lib/bar_room.ts` | Bars, their staff and drink counters; drunkenness, blackouts and drunk driving; the stock map's back-room bar. |
+| `server/housing/`, `lib/house_rooms.ts`, `lib/house_decor.ts`, `data/houses.js`, `client/housing.ts` | Homes: the houses of every map, buying and selling, keys and visitors, the shared rooms under the fields, the furnishing catalogue and its editor keys, parking at the kerb. |
+| `server/map_vote.ts`, `bootleg.ts`, `lib/maps.ts` | The default map, map votes, the bootleg run and the map registry. |
+| `server/championship.ts`, `jail/`, `jail/visits.ts`, `hospital.ts` | The Autodrom championship, jail sentences, jail visits and hospital respawns. |
+| `client/hud.ts`, `client/hud.html` | One transparent web view for toasts, feed, activity cards, race panel, level strip and the city menu; it also arbitrates the single native compass by priority. |
+| `client/markers.ts` | Beacons, checkpoint and crate markers, door arrows, turf rings, station arrows, bounty labels, and the city map blips (`CityMap`). World labels show only near and in sight. |
+| `client/selector.ts`, `client/selector.html` | The login flight, the login and register ticket and the one-time look. |
+| `client/shops.ts`, `car_picker.ts`, `radio.ts`, `police.ts`, `jail.ts`, `main.ts` | Shop staff, the car lot, garage and motor pool, radio, police HUD, the jail countdown, fades and race countdown. |
+| `client/bars.ts`, `client/drunk.ts` | The drink menu at a bar counter; the sway, view wobble, haze and blackout of a drunk player. |
 
 Gameplay requests use `Events.emitServer` and are checked again on the
 server; the server answers with `player.emit` or `Events.emitAllClients` and

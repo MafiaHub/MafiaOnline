@@ -30,7 +30,7 @@ Events.on("playerCommand", (player, command) => {
 });
 ```
 
-See [the Free Ride gamemode](../resources/freeride/server/main.js) for
+See [the Free Ride gamemode](../gamemodes/freeride/src/server/main/) for
 mission loading, vehicle commands, respawning, and server to client events.
 
 ## API map
@@ -882,12 +882,12 @@ Use `Events.emitAllClients("shop:stock", { itemId: 6, remaining: 3 })`
 when every client should receive an update. Client requests are untrusted;
 the server handler must validate the sender and payload before changing state.
 The Free Ride gamemode demonstrates both directions throughout, for example
-in [`server/races.js`](../resources/freeride/server/races.js) and
-[`client/hud.js`](../resources/freeride/client/hud.js).
+in [`server/races/`](../gamemodes/freeride/src/server/races/) and
+[`client/hud.ts`](../gamemodes/freeride/src/client/hud.ts).
 
-Its [world events](../resources/freeride/server/world_events.js) show a
+Its [world events](../gamemodes/freeride/src/server/world_events.ts) show a
 server-owned objective drawn entirely by
-[client script](../resources/freeride/client/markers.js): the server
+[client script](../gamemodes/freeride/src/client/markers.ts): the server
 publishes the supply crate's position and checks each player's distance
 itself before it creates native `Pickup.create` weapons and pays the finder.
 Client-local models and labels cannot grant a reward on their own.
