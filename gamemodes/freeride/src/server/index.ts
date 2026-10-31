@@ -1,0 +1,40 @@
+// The server entry: every module, in the order its event handlers register.
+// Order matters where a handler must run after the others: main's disconnect
+// handler saves the player's record after every module has updated it.
+import './main';
+import './dealership';
+import './selector';
+import './ambience';
+import './map_vote';
+import './shops';
+import './races';
+import './championship';
+import './combat';
+import './duels';
+import './crews';
+import './world_events';
+import './social';
+import './economy';
+import './interiors';
+import './drunk';
+import './bars';
+import './export';
+import './police_duty';
+import './taxi';
+import './firefighters';
+import './ambulance';
+import './farm';
+import './turf';
+import './stashes';
+import './speed_traps';
+import './robbery';
+import './bootleg';
+import './distillery';
+import './jail';
+import './police';
+import './hospital';
+import './props';
+import './doors';
+import './housing';
+import './traffic';
+import './dev';

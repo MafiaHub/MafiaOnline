@@ -392,7 +392,7 @@
         (data.places ?? []).length ? panel("Around town", data.places.map((place) => line(place.name, place.offers.join(" · ")))) : null);
     }
 
-    // The hidden rum distillery (server/distillery.js): a rumour until the
+    // The hidden rum distillery (server/distillery/): a rumour until the
     // player has talked to the sailor, then the quest and the operation.
     function rumPanel(rum) {
       if (!rum?.available) return null;
@@ -418,7 +418,7 @@
           !rum.hidden ? button("Put it aside", "/rum hide") : null));
     }
 
-    // Homes (server/housing.js): the home you stand in and its furnishings,
+    // Homes (server/housing/): the home you stand in and its furnishings,
     // your homes and their keys, homes you may visit, and what is for sale.
     function homesPage(data) {
       const homes = data.homes ?? {};
@@ -684,7 +684,7 @@
     });
     document.addEventListener("keydown", (event) => {
       if (!state.menuOpen) return;
-      // F2 belongs to hud.js's Key.bind, which sees it focused or not; also
+      // F2 belongs to hud.ts's Key.bind, which sees it focused or not; also
       // closing here raced it and reopened the menu.
       if (event.key === "F2") { event.preventDefault(); return; }
       if (event.key === "Escape") { event.preventDefault(); send("hud:close"); return; }

@@ -1,0 +1,26 @@
+{
+  "name": "freeride-source",
+  "version": "1.9.0",
+  "private": true,
+  "type": "module",
+  "description": "TypeScript source of the Free Ride gamemode; builds into resources/freeride.",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.server.json && tsc -p tsconfig.client.json",
+    "lint": "eslint src tests",
+    "format": "eslint src tests --fix && prettier --write .",
+    "format:check": "eslint src tests && prettier --check .",
+    "build": "npm run typecheck && node scripts/build.mjs",
+    "build:only": "node scripts/build.mjs",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "devDependencies": {
+    "@stylistic/eslint-plugin": "^5.10.0",
+    "@types/node": "^25.0.0",
+    "esbuild": "^0.27.0",
+    "eslint": "^10.11.0",
+    "prettier": "^3.9.9",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.70.1"
+  }
+}

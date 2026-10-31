@@ -1,0 +1,12 @@
+{
+  "name": "freeride",
+  "version": "1.9.0",
+  "author": "Mafia1Online",
+  "description": "Free Ride, the default Mafia1Online gamemode: street races, bounties, duels, crews, turf wars, jobs, hold-ups, interiors, homes, city events and a persistent career",
+  "pages": [
+    "client/hud.html",
+    "client/selector.html",
+    "client/radio.html",
+    "client/car_picker.html"
+  ]
+}
