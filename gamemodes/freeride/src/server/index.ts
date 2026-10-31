@@ -35,6 +35,7 @@ import './police';
 import './hospital';
 import './props';
 import './doors';
+import './medkits';
 import './housing';
 import './traffic';
 import './dev';
