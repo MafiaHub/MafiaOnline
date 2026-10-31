@@ -510,6 +510,9 @@
   var MODEL_RETRY_MS = 2e3;
   var BLIP_SYNC_MS = 500;
   var RING_SEGMENTS = 32;
+  var TILE_NEAR = 45;
+  var TILE_BRACKET = 0.28;
+  var TILE_LIFT = 0.08;
   var FAR_RING_SEGMENTS = 12;
   var FAR_RING_DISTANCE = 50;
   var LABEL_SIGHT_MS = 150;
@@ -589,6 +592,45 @@
       distance2 - radius > FAR_RING_DISTANCE ? FAR_RING_SEGMENTS : RING_SEGMENTS
     );
   }
+  function segment(from, to, thickness, color) {
+    const a = screenPoint(from);
+    const b = screenPoint(to);
+    if (a && b) {
+      Draw.line(a.x, a.y, b.x, b.y, thickness, color);
+    }
+  }
+  function inside(tile, center, eye) {
+    return Math.abs(eye.x - center.x) <= tile.w / 2 && Math.abs(eye.z - center.z) <= tile.d / 2;
+  }
+  function drawTile(center, tile, color, eye) {
+    const distance2 = flatDistance(eye, center);
+    if (distance2 > TILE_NEAR) {
+      return;
+    }
+    const hot = tile.glow !== void 0 && inside(tile, center, eye);
+    const fade = Math.min(1, (TILE_NEAR - distance2) / (TILE_NEAR / 3));
+    const tint = argb(hot ? tile.glow : color, (hot ? 0.95 : 0.6) * fade);
+    const thickness = hot ? 3 : distance2 < 12 ? 2 : 1;
+    const y = center.y + TILE_LIFT;
+    const corners = [
+      { x: center.x - tile.w / 2, y, z: center.z - tile.d / 2 },
+      { x: center.x + tile.w / 2, y, z: center.z - tile.d / 2 },
+      { x: center.x + tile.w / 2, y, z: center.z + tile.d / 2 },
+      { x: center.x - tile.w / 2, y, z: center.z + tile.d / 2 }
+    ];
+    for (let index = 0; index < corners.length; index++) {
+      const from = corners[index];
+      const to = corners[(index + 1) % corners.length];
+      if (hot || tile.solid) {
+        segment(from, to, thickness, tint);
+        continue;
+      }
+      const dx = (to.x - from.x) * TILE_BRACKET;
+      const dz = (to.z - from.z) * TILE_BRACKET;
+      segment(from, { x: from.x + dx, y, z: from.z + dz }, thickness, tint);
+      segment(to, { x: to.x - dx, y, z: to.z - dz }, thickness, tint);
+    }
+  }
   function drawPlate(x, y, title, subtitle, color, alpha, size) {
     const width = Math.max(title.length * size * 0.56, subtitle ? subtitle.length * 12 * 0.56 : 0) + 28;
     const height = size + 14 + (subtitle ? 16 : 0);
@@ -648,6 +690,9 @@
         const key = itemKey(group, item);
         if (item.model) {
           drawModel(key, item.model, position, now);
+        }
+        if (item.tile) {
+          drawTile(position, item.tile, item.color, eye);
         }
         if (item.ring && distance2 < item.ring * 6) {
           drawRing(position, item.ring, item.color, distance2);
@@ -1460,19 +1505,6 @@
     lastMoney = null;
     Hud.hideScore();
   }
-  function shopFacing(shop) {
-    if (shop.facing) {
-      return shop.facing;
-    }
-    const doorHinge = shop.entranceFrame ? World.findWorldFrame(shop.entranceFrame)?.getWorldPosition() ?? shop.entrance : null;
-    if (!doorHinge) {
-      return { x: 0, y: 0, z: 1 };
-    }
-    const x = shop.position.x - doorHinge.x;
-    const z = shop.position.z - doorHinge.z;
-    const length = Math.hypot(x, z);
-    return length > 1e-3 ? { x: x / length, y: 0, z: z / length } : { x: 0, y: 0, z: 1 };
-  }
   function placeActors() {
     if (!World.isReady() || generation !== World.getMissionGeneration()) {
       return;
@@ -1481,7 +1513,12 @@
       if (!shop.model || actors.has(shop.id) || !Scene.canUseHumanModel(shop.model)) {
         continue;
       }
-      const handle = Scene.createHuman(shop.model, shop.position, shopFacing(shop), true);
+      const handle = Scene.createHuman(
+        shop.model,
+        shop.position,
+        shop.facing ?? { x: 0, y: 0, z: 1 },
+        true
+      );
       if (handle === null) {
         continue;
       }
@@ -1514,6 +1551,9 @@
     Sound.play("00_kompas.wav", { volume: 0.45 });
   }
   function priceOf(offer) {
+    if (offer.sell) {
+      return offer.price ? `+$${offer.price}` : "NO DEAL";
+    }
     if (offer.price === null) {
       return "PRICE AT PUMP";
     }
@@ -1532,10 +1572,10 @@
         name: entry.name,
         price: priceOf(entry),
         note: entry.note,
-        affordable: entry.price === null || entry.price <= player.money
+        affordable: entry.sell ? Boolean(entry.price) : entry.price === null || entry.price <= player.money
       })),
       index: (selected.get(shop.id) ?? 0) % shop.offers.length,
-      action: offer.price === 0 ? "ACCEPT" : "BUY",
+      action: offer.sell ? "SELL" : offer.price === 0 ? "ACCEPT" : "BUY",
       money: player.money
     });
   }
@@ -1577,11 +1617,14 @@
       placeActors();
     }
     for (const shop2 of shops) {
-      if (distance(player.position, shop2.position) > LABEL_DISTANCE) {
-        continue;
+      const label = shop2.sign ?? {
+        x: shop2.position.x,
+        y: shop2.position.y + 2.15,
+        z: shop2.position.z
+      };
+      if (distance(player.position, label) <= LABEL_DISTANCE) {
+        Draw.worldText(shop2.name.toUpperCase(), label, 16, COLORS.gold, 3, true);
       }
-      const top = { x: shop2.position.x, y: shop2.position.y + 2.15, z: shop2.position.z };
-      Draw.worldText(shop2.name.toUpperCase(), top, 16, COLORS.gold, 3, true);
     }
     const shop = nearestShop(player);
     showShopCard(shop, player);
@@ -2370,11 +2413,14 @@
   onStop(() => endReveal(0));
 
   // src/client/housing.ts
+  var HOLD_MS = 300;
+  var TURN_KEYS = [
+    ["end", 1, "Decorating: turn right (hold to keep turning)"],
+    ["home", -1, "Decorating: turn left (hold to keep turning)"],
+    ["numpad6", 1, "Decorating: turn right (2nd)"],
+    ["numpad4", -1, "Decorating: turn left (2nd)"]
+  ];
   var DECOR_KEYS = [
-    ["end", { turn: 1 }, "Decorating: turn right"],
-    ["home", { turn: -1 }, "Decorating: turn left"],
-    ["numpad6", { turn: 1 }, "Decorating: turn right (2nd)"],
-    ["numpad4", { turn: -1 }, "Decorating: turn left (2nd)"],
     ["pageup", { lift: 1 }, "Decorating: raise"],
     ["pagedown", { lift: -1 }, "Decorating: lower"],
     ["numpad8", { lift: 1 }, "Decorating: raise (2nd)"],
@@ -2383,18 +2429,61 @@
     ["numpad0", { cancel: true }, "Decorating: put back or finish"]
   ];
   var decorating = false;
+  var held = null;
+  function send(request) {
+    events.emitServer("fr:home:edit", request);
+  }
+  function release() {
+    if (held?.spinning) {
+      send({ spin: 0 });
+    }
+    held = null;
+  }
   onServer("fr:home:edit", (data) => {
     decorating = Boolean(data.on);
+    if (!decorating) {
+      held = null;
+    }
   });
+  for (const [key, turn, label] of TURN_KEYS) {
+    Settings.describeKey(key, label);
+    Key.bind(key, "down", () => {
+      if (!decorating) {
+        return;
+      }
+      release();
+      send({ turn });
+      held = { key, turn, since: Date.now(), spinning: false };
+    });
+    Key.bind(key, "up", () => {
+      if (held?.key === key) {
+        release();
+      }
+    });
+  }
   for (const [key, request, label] of DECOR_KEYS) {
     Settings.describeKey(key, label);
     Key.bind(key, () => {
       if (decorating) {
-        events.emitServer("fr:home:edit", request);
+        send(request);
       }
     });
   }
+  events.on("render", () => {
+    if (!held) {
+      return;
+    }
+    if (!decorating || !Key.isDown(held.key)) {
+      release();
+      return;
+    }
+    if (!held.spinning && Date.now() - held.since >= HOLD_MS) {
+      held.spinning = true;
+      send({ spin: held.turn });
+    }
+  });
   events.on("missionUnload", () => {
     decorating = false;
+    held = null;
   });
 })();

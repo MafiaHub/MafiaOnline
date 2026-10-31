@@ -240,8 +240,8 @@ function onStop(handler) {
     }
   });
 }
-function every(ms, tick16) {
-  const timer2 = setInterval(tick16, ms);
+function every(ms, tick17) {
+  const timer2 = setInterval(tick17, ms);
   onStop(() => clearInterval(timer2));
 }
 function afterHandlers(handler) {
@@ -296,6 +296,75 @@ function standing(model, position, yaw, {
   passable = false
 } = {}) {
   return { model, position, rotation: { x: flat ? QUARTER : 0, y: yaw, z: 0 }, scale, passable };
+}
+var HANG = 5e-3;
+var STEEL_DOOR = Object.freeze({
+  model: "plotdrev7",
+  x0: -1.397,
+  x1: 3e-3,
+  y0: -1.165,
+  y1: 1.235,
+  depth: 0.1
+});
+var DOOR_RECESS = 0.02;
+var DOOR_LAP = 0.01;
+var DOOR_SINK = 0.01;
+function steelDoor(alongX, face, side, mid, { floor = 0, mirror: mirror2 = false } = {}) {
+  const { model, x0, x1, y0, y1, depth } = STEEL_DOOR;
+  const yaw = (alongX ? 0 : QUARTER) + (mirror2 ? Math.PI : 0);
+  const cx = (x0 + x1) / 2;
+  const cz = depth / 2;
+  const wx = cx * Math.cos(yaw) + cz * Math.sin(yaw);
+  const wz = -cx * Math.sin(yaw) + cz * Math.cos(yaw);
+  const across = face - side * (DOOR_RECESS + depth / 2);
+  const centre = alongX ? { x: mid, z: across } : { x: across, z: mid };
+  const half = (x1 - x0) / 2;
+  const bottom = floor - DOOR_SINK;
+  return {
+    door: {
+      model,
+      position: { x: centre.x - wx, y: bottom - y0, z: centre.z - wz },
+      rotation: { x: 0, y: yaw, z: 0 },
+      scale: null,
+      passable: false
+    },
+    cut: {
+      from: mid - half + DOOR_LAP,
+      to: mid + half - DOOR_LAP,
+      top: bottom + (y1 - y0) - DOOR_LAP
+    }
+  };
+}
+var FACING_WIDTH = 12;
+var FACING_HEIGHT = 2.7;
+function facing(model, alongX, line, from, to, cut, sx = 1) {
+  const width = FACING_WIDTH * sx;
+  const list4 = [];
+  const plane = (mid, y) => {
+    list4.push({
+      model,
+      position: alongX ? { x: mid, y, z: line } : { x: line, y, z: mid },
+      rotation: { x: 0, y: alongX ? 0 : QUARTER, z: 0 },
+      scale: sx === 1 ? null : { x: sx, y: 1, z: 1 },
+      passable: false
+    });
+  };
+  const below = cut.top - FACING_HEIGHT / 2;
+  const above = cut.top + FACING_HEIGHT / 2;
+  for (let edge = cut.from; edge > from; edge -= width) {
+    plane(edge - width / 2, below);
+    plane(edge - width / 2, above);
+  }
+  for (let edge = cut.to; edge < to; edge += width) {
+    plane(edge + width / 2, below);
+  }
+  for (let edge = cut.from; edge < to; edge += width) {
+    plane(edge + width / 2, above);
+  }
+  return list4;
+}
+function named(pieces4) {
+  return pieces4.map((piece2) => ({ ...piece2, model: `${piece2.model}.i3d` }));
 }
 function optionsFor(piece2, virtualWorld) {
   const options = { virtualWorld, collision: !piece2.passable };
@@ -394,7 +463,10 @@ var WORLD = 1358954496;
 var HEIGHT = 2.5;
 var ROOM_X = 9;
 var ROOM_Z = 4.05;
+var ROOM = Object.freeze({ x: ROOM_X, z: ROOM_Z, height: HEIGHT });
 var COUNTER = Object.freeze({ x: 1, z: 1.95, length: 6.6, height: 1.05 });
+var BRICK_Z = ROOM_Z - 0.05;
+var DOOR_X = 6.6;
 var STAFF = Object.freeze({
   bartender: { position: { x: 1, y: 0.02, z: 3.05 }, heading: Math.PI },
   patrons: [
@@ -421,6 +493,7 @@ function table(list4, x, z, seated2 = false) {
 }
 function pieces() {
   const list4 = [];
+  const { door, cut } = steelDoor(true, -BRICK_Z, 1, DOOR_X);
   for (const z of [-ROOM_Z - 0.12, ROOM_Z + 0.12]) {
     for (const x of [-6, 0, 6]) {
       list4.push(standing("xzed.i3d", { x, y: 0, z }, 0));
@@ -437,21 +510,20 @@ function pieces() {
       list4.push(standing("plotcihly3.i3d", { x, y: HEIGHT, z }, 0, { flat: true }));
     }
   }
-  for (const z of [-ROOM_Z + 0.05, ROOM_Z - 0.05]) {
-    for (const x of [-6, 6]) {
-      list4.push(standing("plotcihly1.i3d", { x, y: 1.35, z }, 0));
-    }
+  for (const x of [-6, 6]) {
+    list4.push(standing("plotcihly1.i3d", { x, y: 1.35, z: BRICK_Z }, 0));
   }
+  list4.push(...named(facing("plotcihly1", true, -BRICK_Z, -ROOM_X, ROOM_X, cut)));
   for (const x of [-ROOM_X + 0.05, ROOM_X - 0.05]) {
     list4.push(standing("plotcihly1.i3d", { x, y: 1.35, z: 0 }, QUARTER));
   }
   list4.push(
     standing("xzed.i3d", { x: COUNTER.x, y: 0, z: COUNTER.z }, 0, {
-      scale: { x: COUNTER.length / 6, y: COUNTER.height / 2.5, z: 2.5 }
+      scale: { x: COUNTER.length / 6, y: (COUNTER.height - 0.02) / 2.5, z: 2.5 }
     })
   );
   list4.push(
-    standing("plotdrev.i3d", { x: COUNTER.x, y: COUNTER.height + 0.01, z: COUNTER.z }, 0, {
+    standing("plotdrev.i3d", { x: COUNTER.x, y: COUNTER.height, z: COUNTER.z }, 0, {
       flat: true,
       scale: { x: (COUNTER.length + 0.1) / 12, y: 0.8 / 2.7, z: 1 }
     })
@@ -459,7 +531,7 @@ function pieces() {
   for (const x of [-1.2, 0, 1.2, 2.4, 3.6]) {
     list4.push(standing("xzidle 04.i3d", { x, y: 0.21, z: 1.2 }, 0));
   }
-  const top = COUNTER.height + 0.02;
+  const top = COUNTER.height + 5e-3;
   list4.push(standing("xflaska 1.i3d", { x: -1.6, y: top, z: 2.05 }, 0));
   list4.push(standing("xflaska 1.i3d", { x: -1.45, y: top, z: 1.9 }, 0));
   list4.push(standing("Sklenice.i3d", { x: 0.4, y: top, z: 1.8 }, 0));
@@ -468,7 +540,7 @@ function pieces() {
   list4.push(standing("xradio 1.i3d", { x: 4, y: top, z: 2.05 }, 0));
   list4.push(standing("xpopelnik.i3d", { x: -0.6, y: top, z: 1.8 }, 0));
   for (const x of [-0.6, 2.6]) {
-    list4.push(standing("xskrin 01.i3d", { x, y: 1.21, z: ROOM_Z - 0.4 }, 0));
+    list4.push(standing("xskrin 01.i3d", { x, y: 1.21, z: BRICK_Z - 0.37 }, 0));
     list4.push(standing("2flask.i3d", { x: x - 0.3, y: 2.35, z: ROOM_Z - 0.45 }, 0));
     list4.push(standing("xflaska 1.i3d", { x: x + 0.3, y: 2.35, z: ROOM_Z - 0.45 }, 0));
   }
@@ -478,7 +550,7 @@ function pieces() {
   for (const x of [-5, 0, 5]) {
     list4.push(standing("xsvetlo 10 on.i3d", { x, y: HEIGHT, z: 0.4 }, 0));
   }
-  list4.push(standing("plotdrev7.i3d", { x: 7.3, y: 1.16, z: -ROOM_Z }, 0));
+  list4.push(...named([door]));
   return list4;
 }
 function toWorld(local) {
@@ -568,9 +640,9 @@ var HEIGHT2 = 3.2;
 var HALL_HEIGHT = 4.5;
 var LINTEL = 2.3;
 var OPENING_TOP = 3;
-var WALL = 0.24;
+var WALL = 0.25;
 var BOXES = {
-  "plotdrev7": [-1.4, 0, -1.16, 1.24, 0, 0.1],
+  "plotdrev7": [-1.397, 3e-3, -1.165, 1.235, 0, 0.1],
   "9kober4": [-2.24, 2.24, -0.02, -0.02, -1.44, 1.44],
   "xvesak": [-0.39, 0.25, -0.01, 1.8, -0.4, 0.24],
   "9pstul2": [-1.3, 1.4, -0.61, 0.31, -0.52, 0.53],
@@ -583,23 +655,23 @@ var BOXES = {
   "xskrin 11": [-0.45, 0.65, -0.07, 2.1, -0.24, 0.24],
   "xskrin 10": [-0.4, 0.4, -0.45, 0.45, -0.25, 0.25],
   "xskrin 08": [-0.4, 0.4, 0, 1, -0.49, 0.45],
-  "xhodiny 2": [-0.25, 0.25, -0.8, 0, -0.04, 0],
-  "xobraz03": [-0.23, 0.23, -0.22, 0.38, -0.02, 0],
-  "xobraz09": [-0.23, 0.23, 0, 0.45, -0.01, 0.01],
-  "xobraz10": [-0.04, 0.34, 0, 0.58, 0, 0.03],
-  "9tabul": [-0.28, 0.26, -0.44, 0.41, -0.01, 0.02],
+  "xhodiny 2": [-0.25, 0.253, -0.8, 0, -0.04, 5e-3],
+  "xobraz03": [-0.225, 0.225, -0.225, 0.375, -0.02, 0],
+  "xobraz09": [-0.225, 0.225, 0, 0.45, -0.01, 0.01],
+  "xobraz10": [-0.038, 0.337, 0, 0.585, 3e-3, 0.029],
+  "9tabul": [-0.282, 0.26, -0.442, 0.412, -0.011, 0.016],
   "xzidle 03": [-0.22, 0.3, -0.52, 0.58, -0.25, 0.25],
   "xkvet01": [-0.2, 0.2, 0, 0.65, -0.23, 0.23],
   "fikus": [-0.53, 0.49, -0.16, 1.82, -0.46, 0.63],
   "xsvetlo 10 on": [-0.27, 0.27, -0.24, 0, -0.27, 0.27],
   "xsvetlo 09 on": [-0.3, 0.3, -0.37, 1.29, -0.3, 0.3],
   "xpostel 2": [-0.64, 0.66, -0.41, 0.7, -0.38, 2.04],
-  "okno3": [-0.68, 0.64, -0.79, 0.66, 0, 0],
+  "okno3": [-0.684, 0.642, -0.794, 0.663, 1e-3, 1e-3],
   "9vozik": [-0.66, 0.99, -0.28, 0.48, -0.4, 0.41],
   "xstul16": [-1, 1, -0.39, 0.39, -0.38, 0.38],
   "xstul19": [-0.75, 0.75, -0.44, 0.41, -0.75, 0.75],
   "umyvadlo": [-0.38, 0.38, -0.54, 0.54, -0.33, 0.33],
-  "9lekarna": [-0.15, 0.17, -0.26, 0.24, -0.1, 0.11],
+  "9lekarna": [-0.151, 0.167, -0.261, 0.239, -0.101, 0.115],
   "xkybl 1": [-0.19, 0.19, 0, 0.4, -0.18, 0.18],
   "xkoste 1": [-0.23, 0.24, -0.04, 1.82, -0.07, 0.06],
   "xlavicka": [-0.85, 0.85, 0, 0.82, -0.22, 0.39]
@@ -616,10 +688,14 @@ var N = 0;
 var E = QUARTER;
 var S = Math.PI;
 var W = -QUARTER;
-function put(model, x, y, z, facing = N, { top = false, scale = 1, passable = false } = {}) {
+function standoff(model, scale = 1) {
+  const [, , , , z0, z1] = BOXES[model];
+  return HANG + (z1 - z0) * scale / 2;
+}
+function put(model, x, y, z, facing2 = N, { top = false, scale = 1, passable = false } = {}) {
   const [x0, x1, y0, y1, z0, z1] = BOXES[model];
   const s = typeof scale === "number" ? { x: scale, y: scale, z: scale } : scale;
-  const yaw = facing - (FRONTS[model] ?? Math.PI);
+  const yaw = facing2 - (FRONTS[model] ?? Math.PI);
   const cx = (x0 + x1) / 2 * s.x;
   const cz = (z0 + z1) / 2 * s.z;
   const wx = cx * Math.cos(yaw) + cz * Math.sin(yaw);
@@ -632,6 +708,7 @@ function put(model, x, y, z, facing = N, { top = false, scale = 1, passable = fa
     passable
   };
 }
+var CABINET = { scale: 1.6 };
 function raw(model, position, rotation, scale = null, passable = false) {
   return { model: `${model}.i3d`, position, rotation, scale, passable };
 }
@@ -645,18 +722,30 @@ function wallPiece(list4, alongX, line, mid, length, y0, y1) {
     )
   );
 }
+function soffit(list4, alongX, line, cut, y) {
+  list4.push(
+    raw(
+      "plotcihly3",
+      alongX ? { x: cut.at, y, z: line } : { x: line, y, z: cut.at },
+      { x: QUARTER, y: alongX ? 0 : QUARTER, z: 0 },
+      { x: cut.width / 12, y: WALL / 2.7, z: 1 }
+    )
+  );
+}
 function wall(list4, alongX, line, from, to, height, openings = []) {
-  let start4 = from - WALL / 2;
+  let start4 = from;
   const cuts = [...openings].sort((a, b) => a.at - b.at);
   for (const cut of [...cuts, null]) {
-    const end4 = cut ? cut.at - cut.width / 2 : to + WALL / 2;
+    const end4 = cut ? cut.at - cut.width / 2 : to;
     const pieces4 = Math.ceil((end4 - start4) / 6);
     const length = (end4 - start4) / pieces4;
     for (let i = 0; i < pieces4; i++) {
       wallPiece(list4, alongX, line, start4 + length * (i + 0.5), length, 0, height);
     }
     if (cut) {
-      wallPiece(list4, alongX, line, cut.at, cut.width, cut.top ?? LINTEL, height);
+      const top = cut.top ?? LINTEL;
+      wallPiece(list4, alongX, line, cut.at, cut.width, top, height);
+      soffit(list4, alongX, line, cut, top);
       start4 = cut.at + cut.width / 2;
     }
   }
@@ -692,8 +781,18 @@ var CONSULTING_DOOR = -10.5;
 var LOBBY_DOOR = 10.5;
 var HALL_OPENING = 5;
 var WARD_DOOR = 13;
+var STREET_DOORS = [-0.7, 0.7];
+var LIFTS = [-2.2, -4.8];
+function opening(cut) {
+  return { at: (cut.from + cut.to) / 2, width: cut.to - cut.from, top: cut.top };
+}
 function shell(list4) {
   const { hall: hall2, corridor: corridor2, consulting: consulting2, lobby: lobby2, men, theatre: theatre2, women } = ROOMS;
+  const street2 = STREET_DOORS.map(
+    (x, i) => steelDoor(true, hall2.z0 + WALL / 2, 1, x, { mirror: i > 0 })
+  );
+  const lifts = LIFTS.map((z) => steelDoor(false, lobby2.x1 - WALL / 2, -1, z));
+  list4.push(...named([...street2, ...lifts].map(({ door }) => door)));
   wall(list4, true, 0, corridor2.x0, consulting2.x0, HEIGHT2);
   wall(list4, true, 0, consulting2.x0, hall2.x0, HEIGHT2, [{ at: CONSULTING_DOOR, width: 1.4 }]);
   wall(list4, true, 0, hall2.x0, hall2.x1, HALL_HEIGHT, [
@@ -710,13 +809,27 @@ function shell(list4) {
   wall(list4, false, corridor2.x1, corridor2.z0, women.z1, HEIGHT2);
   wall(list4, false, men.x1, men.z0, men.z1, HEIGHT2);
   wall(list4, false, women.x0, women.z0, women.z1, HEIGHT2);
-  wall(list4, true, hall2.z0, hall2.x0, hall2.x1, HALL_HEIGHT);
+  wall(list4, true, hall2.z0, hall2.x0, hall2.x1, HALL_HEIGHT, [
+    opening({
+      from: Math.min(...street2.map(({ cut }) => cut.from)),
+      to: Math.max(...street2.map(({ cut }) => cut.to)),
+      top: street2[0].cut.top
+    })
+  ]);
   wall(list4, false, hall2.x0, hall2.z0, hall2.z1, HALL_HEIGHT);
   wall(list4, false, hall2.x1, hall2.z0, hall2.z1, HALL_HEIGHT);
   wall(list4, true, consulting2.z0, consulting2.x0, consulting2.x1, HEIGHT2);
   wall(list4, false, consulting2.x0, consulting2.z0, consulting2.z1, HEIGHT2);
   wall(list4, true, lobby2.z0, lobby2.x0, lobby2.x1, HEIGHT2);
-  wall(list4, false, lobby2.x1, lobby2.z0, lobby2.z1, HEIGHT2);
+  wall(
+    list4,
+    false,
+    lobby2.x1,
+    lobby2.z0,
+    lobby2.z1,
+    HEIGHT2,
+    lifts.map(({ cut }) => opening(cut))
+  );
   for (const [key2, room2] of Object.entries(ROOMS)) {
     slab(
       list4,
@@ -743,11 +856,11 @@ function seated(list4, x, z) {
 }
 function hall(list4) {
   const { z0, x0, x1 } = ROOMS.hall;
-  for (const x of [-0.7, 0.7]) {
-    list4.push(put("plotdrev7", x, 0, z0 + WALL / 2 + 0.06, N));
-  }
+  const south = z0 + WALL / 2;
+  const west = x0 + WALL / 2;
+  const east = x1 - WALL / 2;
   list4.push(put("xvesak", -2.3, 0, z0 + 0.45, N));
-  list4.push(put("xobraz10", 2.6, 1.45, z0 + WALL / 2 + 0.02, N, { passable: true }));
+  list4.push(put("xobraz10", 2.6, 1.45, south + standoff("xobraz10"), N, { passable: true }));
   list4.push(put("9kober4", -0.6, 0.01, -6, E, { passable: true }));
   list4.push(put("9pstul2", DESK.x, 0, DESK.z, E));
   list4.push(put("telefon", DESK.x + 0.1, DESK.top, DESK.z - 0.9, W));
@@ -755,19 +868,22 @@ function hall(list4) {
   list4.push(put("xkniha 1", DESK.x - 0.1, DESK.top, DESK.z - 0.2, W));
   list4.push(put("9notes", DESK.x, DESK.top, DESK.z + 0.35, W));
   list4.push(put("xstroj01", DESK.x + 0.15, DESK.top, DESK.z + 0.25, W));
-  list4.push(put("9skrinsk", x1 - WALL / 2 - 0.2, 0, DESK.z - 2, W));
-  list4.push(put("xskrin 11", x1 - WALL / 2 - 0.26, 0, DESK.z, W));
-  list4.push(put("9skrinsk", x1 - WALL / 2 - 0.2, 0, DESK.z + 2, W));
+  list4.push(put("9skrinsk", east - 0.2, 0, DESK.z - 2, W));
+  list4.push(put("xskrin 11", east - 0.26, 0, DESK.z, W));
+  list4.push(put("9skrinsk", east - 0.2, 0, DESK.z + 2, W));
   list4.push(
-    put("xhodiny 2", x1 - WALL / 2 - 0.02, 3.4, DESK.z, W, { top: true, passable: true })
+    put("xhodiny 2", east - standoff("xhodiny 2"), 3.4, DESK.z, W, {
+      top: true,
+      passable: true
+    })
   );
   for (const x of WAITING_ROWS) {
     for (const z of WAITING_Z) {
       list4.push(put("xzidle 03", x, 0, z, E, { passable: seated(WAITING_SEATS, x, z) }));
     }
   }
-  list4.push(put("xobraz03", x0 + WALL / 2 + 0.01, 1.7, -7.2, E, { passable: true }));
-  list4.push(put("xobraz09", x0 + WALL / 2 + 0.02, 1.7, -4.4, E, { passable: true }));
+  list4.push(put("xobraz03", west + standoff("xobraz03"), 1.7, -7.2, E, { passable: true }));
+  list4.push(put("xobraz09", west + standoff("xobraz09"), 1.7, -4.4, E, { passable: true }));
   for (const [x, z] of [
     [6.5, -10.5],
     [-6.5, -1.6]
@@ -775,12 +891,12 @@ function hall(list4) {
     list4.push(put("xkvet01", x, 0, z));
   }
   list4.push(put("fikus", -6.3, 0, -10.3));
-  list4.push(put("9tabul", -2.6, 1.5, z0 + WALL / 2 + 0.02, N, { passable: true }));
+  list4.push(put("9tabul", -2.6, 1.5, south + standoff("9tabul"), N, { passable: true }));
   for (const x of [-5.3, -4.6, -3.9]) {
-    list4.push(put("xzidle 03", x, 0, z0 + WALL / 2 + 0.3, N));
+    list4.push(put("xzidle 03", x, 0, south + 0.3, N));
   }
   for (const x of [-3.2, 3.2]) {
-    list4.push(put("fikus", x, 0, -0.6));
+    list4.push(put("fikus", x, 0, -0.7));
   }
   for (const [x, z] of [
     [-3.5, -7.5],
@@ -801,8 +917,14 @@ function corridor(list4) {
   }
   list4.push(put("xkvet01", -20.6, 0, 0.4));
   list4.push(put("xkvet01", 20.6, 0, 0.4));
-  list4.push(put("xhodiny 2", -3.5, 2.6, 3 - WALL / 2 - 0.02, S, { top: true, passable: true }));
-  list4.push(put("9tabul", 3.5, 1.2, 3 - WALL / 2 - 0.02, S, { passable: true }));
+  const north = ROOMS.corridor.z1 - WALL / 2;
+  list4.push(
+    put("xhodiny 2", -3.5, 2.6, north - standoff("xhodiny 2"), S, {
+      top: true,
+      passable: true
+    })
+  );
+  list4.push(put("9tabul", 3.5, 1.2, north - standoff("9tabul"), S, { passable: true }));
 }
 function consulting(list4) {
   const { x0, x1, z0 } = ROOMS.consulting;
@@ -813,21 +935,18 @@ function consulting(list4) {
   list4.push(put("xsvetlo 08 on", x - 0.7, 0.78, z - 0.1, N));
   list4.push(put("xkniha 1", x + 0.5, 0.78, z, N));
   list4.push(put("9notes", x + 0.1, 0.78, z - 0.05, N));
-  list4.push(put("xobraz10", x, 1.6, z0 + WALL / 2 + 0.01, N, { passable: true }));
+  list4.push(put("xobraz10", x, 1.6, z0 + WALL / 2 + standoff("xobraz10"), N, { passable: true }));
   list4.push(put("xpostel 2", x0 + 0.8, 0, -2.6, N));
   list4.push(put("9skrinsk", x1 - 0.32, 0, -2, W));
   list4.push(put("xskrin 11", x1 - 0.38, 0, -4.4, W));
   list4.push(put("umyvadlo", x0 + 0.5, 0, -5.6, E));
-  list4.push(put("9lekarna", x0 + WALL / 2 + 0.17, 1.35, -5.6, E, { scale: 1.6 }));
+  list4.push(put("9lekarna", x0 + WALL / 2 + standoff("9lekarna", 1.6), 1.35, -5.6, E, CABINET));
   list4.push(put("xkvet01", x1 - 0.5, 0, z0 + 0.5));
   list4.push(put("xsvetlo 10 on", x, HEIGHT2, -3.5, N, { top: true, passable: true }));
 }
 function lobby(list4) {
   const { x1, z0 } = ROOMS.lobby;
-  for (const z of [-2.2, -4.8]) {
-    list4.push(put("plotdrev7", x1 - WALL / 2 - 0.06, 0, z, W));
-  }
-  list4.push(put("9tabul", x1 - WALL / 2 - 0.02, 1.5, -3.5, W, { passable: true }));
+  list4.push(put("9tabul", x1 - WALL / 2 - standoff("9tabul"), 1.5, -3.5, W, { passable: true }));
   list4.push(put("xlavicka", 10.5, 0, z0 + WALL / 2 + 0.35, N));
   list4.push(put("xkvet01", 8, 0, z0 + 0.5));
   list4.push(put("xsvetlo 10 on", 10.5, HEIGHT2, -3.5, N, { top: true, passable: true }));
@@ -845,7 +964,10 @@ function ward(list4, women) {
   for (const x of NORTH_BEDS) {
     list4.push(put("xpostel 2", m(x), 0, z1 - BED_Z, N));
     list4.push(
-      put("okno3", m(x), 1.78, z1 - WALL / 2 - 0.01, S, { scale: 0.8, passable: true })
+      put("okno3", m(x), 1.78, z1 - WALL / 2 - standoff("okno3", 0.8), S, {
+        scale: 0.8,
+        passable: true
+      })
     );
   }
   for (const x of SOUTH_BEDS) {
@@ -864,7 +986,16 @@ function ward(list4, women) {
   }
   list4.push(put("9vozik", m(TROLLEY.x), 0, TROLLEY.z, N));
   list4.push(put("umyvadlo", m(x0 + 0.5), 0, 8, women ? W : E));
-  list4.push(put("9lekarna", m(x0 + WALL / 2 + 0.17), 1.35, 8, women ? W : E, { scale: 1.6 }));
+  list4.push(
+    put(
+      "9lekarna",
+      m(x0 + WALL / 2 + standoff("9lekarna", 1.6)),
+      1.35,
+      8,
+      women ? W : E,
+      CABINET
+    )
+  );
   list4.push(put("xskrin 11", m(-5 - WALL / 2 - 0.26), 0, 7.2, women ? E : W));
   list4.push(put("xzidle 03", m(-13.45), 0, 10.4, women ? E : W, { passable: true }));
   for (const x of [-17.5, -13, -8.5]) {
@@ -885,7 +1016,7 @@ function theatre(list4) {
   for (const z of [5.4, 8.6]) {
     list4.push(put("umyvadlo", x0 + WALL / 2 + 0.36, 0, z, E));
   }
-  list4.push(put("9lekarna", x0 + WALL / 2 + 0.17, 1.35, 7, E, { scale: 1.6 }));
+  list4.push(put("9lekarna", x0 + WALL / 2 + standoff("9lekarna", 1.6), 1.35, 7, E, CABINET));
   for (const z of [5, 10]) {
     list4.push(put("xsvetlo 10 on", 0, HEIGHT2, z, N, { top: true, passable: true }));
   }
@@ -1283,18 +1414,12 @@ var MAPS = {
         outside: { position: { x: -1770.6, y: -5.2, z: 171.5 }, heading: -1.54 },
         inside: { position: { x: -1759.4, y: -3.3, z: 171.8 }, heading: 1.6 }
       },
-      // Morello's bar, models/morellobar.4ds: its room ("Sect podl", floor
-      // y 17.31) behind the shop windows on the south front (z 451.5),
-      // whose bins stand on the pavement at z 450. Its door off the yard
-      // is a fixed mesh, so the arrow on the pavement leads in. Salieri's
-      // bar (models/salierybar.4ds) has working doors and needs no arrow.
-      {
-        id: "b:morello",
-        name: "Morello's Bar",
-        kind: "public",
-        outside: { position: { x: -411.5, y: 17.45, z: 449.9 }, heading: Math.PI },
-        inside: { position: { x: -414.7, y: 17.36, z: 454.2 }, heading: Math.PI / 2 }
-      },
+      // Morello's bar (models/morellobar.4ds) and Salieri's
+      // (models/salierybar.4ds) have working doors and need no arrow:
+      // Morello's are the mission doors "morellobar.Object18cc" (hinge
+      // (-418.5, 18.5, 455.3), west of its room) and
+      // "morellobar.Object01cc" (hinge (-406.9, 18.5, 456.6), its east
+      // wall), from the frames of the model in the mod's archive.
       // The hospital (lib/hospital_room.ts). models/9medic.4ds has three
       // door bays (3DVERE4, z 763.51) between four pillars whose fronts
       // stand at z 762.59 (x -765.97..-764.51, -762.05..-760.6,
@@ -1579,21 +1704,21 @@ function build3(data) {
     const done = new Array(crossings.length).fill(false);
     distance2[from] = 0;
     for (; ; ) {
-      let current5 = -1;
+      let current6 = -1;
       for (let index = 0; index < crossings.length; index++) {
-        if (!done[index] && distance2[index] < Infinity && (current5 < 0 || distance2[index] < distance2[current5])) {
-          current5 = index;
+        if (!done[index] && distance2[index] < Infinity && (current6 < 0 || distance2[index] < distance2[current6])) {
+          current6 = index;
         }
       }
-      if (current5 < 0 || current5 === to) {
+      if (current6 < 0 || current6 === to) {
         break;
       }
-      done[current5] = true;
-      for (const road of adjacency[current5]) {
-        const next2 = distance2[current5] + road.length;
+      done[current6] = true;
+      for (const road of adjacency[current6]) {
+        const next2 = distance2[current6] + road.length;
         if (next2 < distance2[road.to]) {
           distance2[road.to] = next2;
-          previous[road.to] = current5;
+          previous[road.to] = current6;
         }
       }
     }
@@ -2271,11 +2396,11 @@ function bump(player, field2, amount = 1) {
   if (!record) {
     return;
   }
-  const current5 = record[field2];
-  if (current5 !== void 0 && typeof current5 !== "number") {
+  const current6 = record[field2];
+  if (current6 !== void 0 && typeof current6 !== "number") {
     return;
   }
-  record[field2] = (current5 ?? 0) + amount;
+  record[field2] = (current6 ?? 0) + amount;
   changed(player);
 }
 function setField(player, field2, value) {
@@ -2377,8 +2502,8 @@ var holds = new PlayerMap({ clearOnMissionChange: true });
 var provider = () => null;
 var hospital = () => null;
 function begin(player, kind, label2) {
-  const current5 = activities.get(player.id);
-  if (current5 && current5.kind !== kind) {
+  const current6 = activities.get(player.id);
+  if (current6 && current6.kind !== kind) {
     return false;
   }
   activities.set(player.id, { kind, label: label2 });
@@ -2386,8 +2511,8 @@ function begin(player, kind, label2) {
   return true;
 }
 function end(player, kind) {
-  const current5 = activities.get(player.id);
-  if (!current5 || kind && current5.kind !== kind) {
+  const current6 = activities.get(player.id);
+  if (!current6 || kind && current6.kind !== kind) {
     return;
   }
   activities.delete(player.id);
@@ -2397,8 +2522,8 @@ function activity(player) {
   return activities.get(player.id) ?? null;
 }
 function busyMessage(player) {
-  const current5 = activities.get(player.id);
-  return current5 ? `Finish your ${current5.label.toLowerCase()} first.` : null;
+  const current6 = activities.get(player.id);
+  return current6 ? `Finish your ${current6.label.toLowerCase()} first.` : null;
 }
 function setRespawnProvider(handler) {
   provider = handler;
@@ -2482,9 +2607,9 @@ events.on("playerDeath", (player, _killer, { missionGeneration, spawnGeneration 
   };
   setTimeout(tryRespawn, delay);
 });
-function holdRespawn(player, until) {
-  if (until) {
-    holds.set(player.id, until);
+function holdRespawn(player, until2) {
+  if (until2) {
+    holds.set(player.id, until2);
   } else {
     holds.delete(player.id);
   }
@@ -2716,8 +2841,8 @@ function nearLot(player) {
   return Boolean(place3 && flatDistance(player.position, place3.position) <= LOT_REACH);
 }
 function busy(player) {
-  const current5 = activity(player);
-  return current5 && BLOCKED.has(current5.kind) ? busyMessage(player) : null;
+  const current6 = activity(player);
+  return current6 && BLOCKED.has(current6.kind) ? busyMessage(player) : null;
 }
 function recoverCost(model) {
   return Math.round((byModel(model)?.price ?? UNPRICED) * RECOVER_FRACTION);
@@ -3511,9 +3636,9 @@ events.on("vehicleTerminal", (vehicle, state2) => {
     if (World.getMissionGeneration() !== missionGeneration) {
       return;
     }
-    const current5 = vehicleById(id);
-    if (current5 && current5.terminalState === state2) {
-      current5.destroy();
+    const current6 = vehicleById(id);
+    if (current6 && current6.terminalState === state2) {
+      current6.destroy();
     }
   }, WRECK_CLEAR_MS);
 });
@@ -3930,7 +4055,7 @@ function loopAt(points, s) {
 function wrapAngle(angle) {
   return Math.atan2(Math.sin(angle), Math.cos(angle));
 }
-function resample(points, targets, step, perSegment = 96) {
+function resample(points, targets, step2, perSegment = 96) {
   const n = points.length;
   const fine = [];
   let length = 0;
@@ -3946,7 +4071,7 @@ function resample(points, targets, step, perSegment = 96) {
     fine.push({ s, distance: length });
     previous = position;
   }
-  const count = Math.max(8, Math.round(length / step));
+  const count = Math.max(8, Math.round(length / step2));
   const samples = [];
   let j = 0;
   for (let k = 0; k < count; k++) {
@@ -3963,7 +4088,7 @@ function resample(points, targets, step, perSegment = 96) {
   return { length, step: length / count, samples };
 }
 function bank(path2, { speed, gain, maxRoll, smoothMetres }) {
-  const { samples, step } = path2;
+  const { samples, step: step2 } = path2;
   const n = samples.length;
   const heading = samples.map((_, i) => {
     const a = samples[(i - 1 + n) % n].position;
@@ -3971,11 +4096,11 @@ function bank(path2, { speed, gain, maxRoll, smoothMetres }) {
     return Math.atan2(b.x - a.x, b.z - a.z);
   });
   const raw3 = heading.map((_, i) => {
-    const turn = wrapAngle(heading[(i + 1) % n] - heading[(i - 1 + n) % n]) / (2 * step);
+    const turn = wrapAngle(heading[(i + 1) % n] - heading[(i - 1 + n) % n]) / (2 * step2);
     const lean = -Math.atan(speed * speed * turn / GRAVITY) * gain;
     return Math.max(-maxRoll, Math.min(maxRoll, lean));
   });
-  const sigma = Math.max(1, smoothMetres / step);
+  const sigma = Math.max(1, smoothMetres / step2);
   const reach = Math.ceil(sigma * 3);
   const weights = Array.from(
     { length: 2 * reach + 1 },
@@ -5030,8 +5155,8 @@ function enter(player) {
       Police.setWanted(player, resume.wanted);
     }
   }
-  const near2 = resume && nearestDistrict(selection, resume.position);
-  const where3 = resume ? `where they left off${near2 ? ` near ${near2.name}` : ""}` : home?.name ?? "";
+  const near3 = resume && nearestDistrict(selection, resume.position);
+  const where3 = resume ? `where they left off${near3 ? ` near ${near3.name}` : ""}` : home?.name ?? "";
   emit(player, "fr:login:accepted", { where: where3 });
   info(`${player.nickname} entered ${where3}`);
   return true;
@@ -5440,9 +5565,9 @@ function consider() {
   if (pending2.pending) {
     return;
   }
-  const current5 = current()?.id;
+  const current6 = current()?.id;
   for (const [id, count] of tally()) {
-    if (id === current5 || count < needed()) {
+    if (id === current6 || count < needed()) {
       continue;
     }
     const { title: title2 } = MAPS[id];
@@ -5527,8 +5652,502 @@ provide("maps", (player) => {
 onStart(() => settle(true));
 every(CHECK_MS, () => settle(false));
 
+// src/server/lib/npcs.ts
+function npcsAvailable() {
+  return typeof Npc !== "undefined" && typeof Npc.spawn === "function";
+}
+var cast = /* @__PURE__ */ new Map();
+var Character = class {
+  constructor(hooks = {}) {
+    this.hooks = hooks;
+  }
+  hooks;
+  npc = null;
+  /** The host has placed it. */
+  ready = false;
+  /** A Date.now() time before which the module spawns no new one. */
+  respawnAt = 0;
+  /** Spawns the NPC, replacing nothing: call it on an empty character. Null when refused. */
+  spawn(model, position, heading, options) {
+    this.npc = Npc.spawn(model, position, heading, options) ?? null;
+    this.ready = false;
+    if (this.npc) {
+      cast.set(this.npc.id, this);
+    }
+    return this.npc;
+  }
+  /** The NPC once the host has placed it. */
+  placed() {
+    return this.ready ? this.npc : null;
+  }
+  /** The NPC once placed and while alive: one that can talk and move. */
+  present() {
+    const npc = this.placed();
+    return npc?.alive ? npc : null;
+  }
+  /** A retail voice line (Npc.say), if it stands there to say it. */
+  say(line) {
+    this.present()?.say(line);
+  }
+  remove() {
+    this.npc?.remove();
+    this.forget();
+  }
+  /** Lets go of the NPC without removing it (the mission change already did). */
+  forget() {
+    if (this.npc) {
+      cast.delete(this.npc.id);
+    }
+    this.npc = null;
+    this.ready = false;
+  }
+  /**
+   * Sends the NPC walking straight to `point` and removes it after
+   * `removeAfterMs` if it is still alive then: a character leaving the
+   * scene. The character is empty at once; what happens to the NPC on its
+   * way out is nobody's business, and the resource's stop leaves it to the
+   * mission (walkOff's aliveOnly and keepOnStop).
+   */
+  walkOff(point2, removeAfterMs) {
+    const npc = this.npc;
+    this.forget();
+    if (npc) {
+      walkOff(npc, removeAfterMs, {
+        to: point2,
+        direct: true,
+        aliveOnly: true,
+        keepOnStop: true
+      });
+    }
+  }
+  /** @internal */
+  placedByHost(npc) {
+    this.ready = true;
+    this.hooks.onReady?.(npc);
+  }
+  /** @internal */
+  lostByHost(npc, loss) {
+    this.forget();
+    this.hooks.onLost?.(npc, loss);
+  }
+};
+events.on("npcSpawn", (npc) => cast.get(npc.id)?.placedByHost(npc));
+events.on("npcDeath", (npc, killer) => cast.get(npc.id)?.lostByHost(npc, { died: true, killer }));
+events.on("npcRetire", (npc) => cast.get(npc.id)?.lostByHost(npc, { died: false }));
+events.on("missionChange", () => {
+  for (const character of [...cast.values()]) {
+    character.forget();
+  }
+});
+var strays = /* @__PURE__ */ new Set();
+function walkOff(npc, ms, { to = null, direct = false, gone, aliveOnly = false, keepOnStop = false } = {}) {
+  if (aliveOnly && !npc.alive) {
+    return;
+  }
+  if (to) {
+    if (direct) {
+      npc.walkTo(to, { direct: true });
+    } else {
+      npc.walkTo(to);
+    }
+  }
+  if (!keepOnStop) {
+    strays.add(npc);
+  }
+  setTimeout(() => {
+    strays.delete(npc);
+    gone?.();
+    if (!aliveOnly || npc.alive) {
+      npc.remove();
+    }
+  }, ms);
+}
+events.on("npcRetire", (npc) => {
+  for (const stray of strays) {
+    if (stray.id === npc.id) {
+      strays.delete(stray);
+    }
+  }
+});
+onMissionChange(() => strays.clear());
+onStop(() => {
+  for (const npc of strays) {
+    npc.remove();
+  }
+  strays.clear();
+});
+function speak(player, who, line, { npc = null, voice, seconds = 8 } = {}) {
+  toast(player, `"${line}"`, { title: who, tone: "gold", seconds });
+  if (npc?.alive && voice !== void 0) {
+    npc.say(voice);
+  }
+}
+
+// src/server/gunshop.ts
+var WEB_POINT_9 = { x: 71.495, y: 2.01, z: 133.527 };
+var WEB_POINT_10 = { x: 71.587, y: 2.01, z: 127.915 };
+var SPOT = {
+  position: WEB_POINT_9,
+  heading: Math.atan2(WEB_POINT_10.x - WEB_POINT_9.x, WEB_POINT_10.z - WEB_POINT_9.z)
+};
+var SIGN = { x: 61.13, y: 7.7, z: 113.4 };
+var BUYBACK_SHARE = 0.4;
+var GUNS = [
+  {
+    id: "knife",
+    weaponId: 3,
+    name: "Knife",
+    kind: "melee",
+    price: 30,
+    loaded: 1,
+    reserve: 0,
+    note: "Quiet, and it never jams"
+  },
+  {
+    id: "colt-ds",
+    weaponId: 6,
+    name: "Colt Detective Special",
+    kind: "firearm",
+    price: 90,
+    loaded: 6,
+    reserve: 18,
+    ammo: { rounds: 18, price: 25 },
+    note: "Snub-nosed .38 · six in the chamber, eighteen spare"
+  },
+  {
+    id: "sw-mp",
+    weaponId: 8,
+    name: "S&W Model 10 M&P",
+    kind: "firearm",
+    price: 110,
+    loaded: 6,
+    reserve: 18,
+    ammo: { rounds: 18, price: 30 },
+    note: "A policeman's revolver, longer barrel"
+  },
+  {
+    id: "colt-1911",
+    weaponId: 9,
+    name: "Colt 1911",
+    kind: "firearm",
+    price: 140,
+    loaded: 7,
+    reserve: 21,
+    ammo: { rounds: 21, price: 35 },
+    note: "Army .45 · seven in the clip, twenty-one spare"
+  },
+  {
+    id: "magnum",
+    weaponId: 7,
+    name: "S&W Model 27 Magnum",
+    kind: "firearm",
+    price: 180,
+    loaded: 6,
+    reserve: 18,
+    ammo: { rounds: 18, price: 45 },
+    note: "Hits like a truck"
+  },
+  {
+    id: "sawed-off",
+    weaponId: 12,
+    name: "Sawed-off shotgun",
+    kind: "firearm",
+    price: 190,
+    loaded: 2,
+    reserve: 22,
+    ammo: { rounds: 20, price: 45 },
+    note: "Two barrels, fits under a coat"
+  },
+  {
+    id: "shotgun",
+    weaponId: 11,
+    name: "Pump-action shotgun",
+    kind: "firearm",
+    price: 210,
+    loaded: 8,
+    reserve: 24,
+    ammo: { rounds: 24, price: 55 },
+    note: "For when a quiet word will not do"
+  },
+  {
+    id: "thompson",
+    weaponId: 10,
+    name: "Thompson 1928",
+    kind: "firearm",
+    price: 320,
+    loaded: 50,
+    reserve: 100,
+    ammo: { rounds: 100, price: 90 },
+    note: "A loud answer to a bad question"
+  },
+  {
+    id: "mosin",
+    weaponId: 14,
+    name: "Mosin-Nagant 1891/30",
+    kind: "firearm",
+    price: 380,
+    loaded: 5,
+    reserve: 10,
+    ammo: { rounds: 10, price: 60 },
+    note: "Russian, bolt-action, settles it at a distance"
+  },
+  {
+    id: "springfield",
+    weaponId: 13,
+    name: "US Rifle M1903 Springfield",
+    kind: "firearm",
+    price: 380,
+    loaded: 5,
+    reserve: 15,
+    ammo: { rounds: 15, price: 70 },
+    note: "Army rifle, five in the magazine"
+  },
+  {
+    id: "molotovs",
+    weaponId: 5,
+    name: "Three Molotov cocktails",
+    kind: "throwable",
+    price: 95,
+    loaded: 3,
+    reserve: 0,
+    note: "Light the rag, then throw"
+  },
+  {
+    id: "grenades",
+    weaponId: 15,
+    name: "Three grenades",
+    kind: "throwable",
+    price: 95,
+    loaded: 3,
+    reserve: 0,
+    note: "Keep them out of the glovebox"
+  }
+];
+function buyback(gun) {
+  return gun.kind === "firearm" ? Math.floor(gun.price * BUYBACK_SHARE) : 0;
+}
+function receiptsFor(receipts2, weaponId) {
+  return Math.max(0, Math.floor(receipts2?.[String(weaponId)] ?? 0));
+}
+function withReceipt(receipts2, weaponId, delta) {
+  const next2 = { ...receipts2 };
+  const count = receiptsFor(receipts2, weaponId) + delta;
+  if (count > 0) {
+    next2[String(weaponId)] = count;
+  } else {
+    delete next2[String(weaponId)];
+  }
+  return next2;
+}
+var NO_DEAL = {
+  duty: "Not to a man in a police uniform. Come back in your own clothes.",
+  fire: "Not in the fire brigade's coat. Come back off duty.",
+  duel: "Settle your duel first. Then we talk.",
+  jail: "Not now.",
+  visit: "Not now.",
+  robbery: "You hold up my counter and want to shop? Get out."
+};
+function refusal(activity2) {
+  return (activity2 && NO_DEAL[activity2]) ?? null;
+}
+function counterLines(held2, selected, receipts2) {
+  const carries = new Set(held2);
+  const lines = GUNS.map(
+    (gun) => gun.kind === "firearm" && gun.ammo && carries.has(gun.weaponId) ? {
+      id: `${gun.id}:ammo`,
+      name: `${gun.name} rounds`,
+      price: gun.ammo.price,
+      note: `${gun.ammo.rounds} more for the one you carry`
+    } : { id: gun.id, name: gun.name, price: gun.price, note: gun.note }
+  );
+  const forSale2 = GUNS.filter((gun) => gun.kind === "firearm" && carries.has(gun.weaponId)).sort(
+    (a, b) => Number(b.weaponId === selected) - Number(a.weaponId === selected)
+  );
+  for (const gun of forSale2) {
+    const his = receiptsFor(receipts2, gun.weaponId) > 0;
+    lines.push({
+      id: `${gun.id}:sell`,
+      name: `Sell your ${gun.name}`,
+      price: his ? buyback(gun) : 0,
+      note: his ? `Pete takes back his own at ${Math.round(BUYBACK_SHARE * 100)}% · the rounds in it go with it` : "Not from his wall: Pete will not touch it",
+      sell: true
+    });
+  }
+  return lines;
+}
+function dealFor(offerId) {
+  const [id, part] = offerId.split(":");
+  const gun = GUNS.find((entry2) => entry2.id === id);
+  if (!gun) {
+    return null;
+  }
+  if (part === void 0) {
+    return { kind: "gun", gun };
+  }
+  if (part === "ammo" && gun.ammo) {
+    return { kind: "ammo", gun };
+  }
+  return part === "sell" && gun.kind === "firearm" ? { kind: "sell", gun } : null;
+}
+
+// src/server/pete.ts
+var MODEL = "ProdZ1.i3d";
+var VOICE = 27;
+var NAME = "Yellow Pete";
+var PRESENT_RANGE = 40;
+var STAND_DOWN_MS = 3e4;
+var RESPAWN_MS = 6e4;
+var TICK_MS = 1e3;
+var STRAY = 1;
+var GREET_RANGE = 4.5;
+var GREET_EVERY_MS = 3 * 6e4;
+var ANSWER_MS = 5e3;
+var ROUTINE = [
+  ["BorecStat.i3d", 9e3, true],
+  ["GestikulaceNew03.i3d", 7e3, false],
+  ["BorecStat.i3d", 12e3, true]
+];
+var BECKON = "GestoPojdSem01.i3d";
+var TALK = "GestikulaceNew01.i3d";
+var HELLO_VOICES = [6, 8];
+var DEAL_VOICE = 7;
+var GREETINGS = [
+  "Come down, come down. Mind the last step.",
+  "What will it be? Everything on the wall is for sale.",
+  "Close the door behind you. The damp gets in the barrels.",
+  "Business or pleasure? Down here it is the same thing."
+];
+var current3 = null;
+var step = 0;
+var until = 0;
+var answeringUntil = 0;
+var emptySince = 0;
+var greeted = new PlayerMap({ clearOnMissionChange: true });
+var pete = new Character({
+  onReady: (npc) => {
+    npc.face(SPOT.heading);
+    current3 = null;
+    step = 0;
+    until = 0;
+    answeringUntil = 0;
+  },
+  // Killed, he is gone a while; retired by the host, he can come back at once.
+  onLost: (_npc, loss) => {
+    pete.respawnAt = loss.died ? Date.now() + RESPAWN_MS : 0;
+  }
+});
+function open() {
+  return Boolean(current()?.shops) && World.isReady();
+}
+function near(player, range) {
+  return onStreet(player) && distance(player.position, SPOT.position) <= range;
+}
+function serving() {
+  const npc = pete.present();
+  return npcsAvailable() ? Boolean(npc && flatDistance(npc.position, SPOT.position) <= STRAY + 0.5) : true;
+}
+function play(npc, clip, loop) {
+  npc.playAnimation(clip, { loop });
+}
+function animate(npc, now) {
+  if (now < answeringUntil) {
+    return;
+  }
+  if (answeringUntil) {
+    answeringUntil = 0;
+    until = 0;
+    npc.face(SPOT.heading);
+  }
+  if (now >= until) {
+    current3 = ROUTINE[step++ % ROUTINE.length];
+    play(npc, current3[0], current3[2]);
+    until = now + current3[1];
+  } else if (current3?.[2] && npc.animation.toLowerCase() !== current3[0].toLowerCase()) {
+    play(npc, current3[0], true);
+  }
+}
+function keepPost(npc, now) {
+  if (flatDistance(npc.position, SPOT.position) > STRAY) {
+    if (!npc.getTask()) {
+      npc.walkTo(SPOT.position, { direct: true, radius: 0.4 });
+      until = 0;
+      answeringUntil = 0;
+    }
+    return false;
+  }
+  animate(npc, now);
+  return true;
+}
+function turnTo(npc, player, clip, now) {
+  npc.face(player.position);
+  play(npc, clip, false);
+  answeringUntil = now + ANSWER_MS;
+}
+function greet(npc, now) {
+  for (const player of World.getPlayers()) {
+    if (!near(player, GREET_RANGE) || now - (greeted.get(player.id) ?? 0) < GREET_EVERY_MS) {
+      continue;
+    }
+    greeted.set(player.id, now);
+    turnTo(npc, player, BECKON, now);
+    speak(player, NAME, pick(GREETINGS), { npc, voice: pick(HELLO_VOICES), seconds: 6 });
+    return;
+  }
+}
+function tick() {
+  if (!npcsAvailable()) {
+    return;
+  }
+  const now = Date.now();
+  if (!open()) {
+    pete.remove();
+    return;
+  }
+  if (World.getPlayers().some((player) => near(player, PRESENT_RANGE))) {
+    emptySince = 0;
+    if (!pete.npc && now >= pete.respawnAt) {
+      const npc2 = pete.spawn(MODEL, SPOT.position, SPOT.heading, {
+        behaviour: "neutral",
+        voice: VOICE,
+        virtualWorld: MAIN_WORLD
+      });
+      if (!npc2) {
+        pete.respawnAt = now + RESPAWN_MS;
+      }
+    }
+  } else if (pete.npc) {
+    emptySince ||= now;
+    if (now - emptySince >= STAND_DOWN_MS) {
+      pete.remove();
+      emptySince = 0;
+    }
+  }
+  const npc = pete.present();
+  if (npc && keepPost(npc, now) && now >= answeringUntil) {
+    greet(npc, now);
+  }
+}
+function says(player, line, { voice = false, deal = false } = {}) {
+  const npc = pete.present();
+  const now = Date.now();
+  greeted.set(player.id, now);
+  if (npc && deal) {
+    turnTo(npc, player, TALK, now);
+  } else if (npc) {
+    npc.face(player.position);
+    answeringUntil = now + ANSWER_MS;
+  }
+  speak(player, NAME, line, { npc, voice: voice ? DEAL_VOICE : void 0, seconds: 6 });
+}
+every(TICK_MS, tick);
+events.on("missionChange", () => {
+  pete.respawnAt = 0;
+  emptySince = 0;
+  answeringUntil = 0;
+});
+onStop(() => pete.remove());
+
 // src/server/shops.ts
-var WEAPON = Object.freeze({ BAT: 4, COLT: 6, THOMPSON: 10, SHOTGUN: 11, GRENADE: 15 });
 var START_FUEL_FRACTION = 0.12;
 var FUEL_PRICE_PER_LITRE = 3;
 var SHOP_REACH = 3.5;
@@ -5540,39 +6159,21 @@ var COURIER_TICK_MS = 5e3;
 var COURIER_COMPASS_PRIORITY = 60;
 var LOW_FUEL_RETRY_MS = 500;
 var LOW_FUEL_RETRY_COUNT = 30;
+var PETE_CARD_RANGE = 12;
+var PETE_CARD_MS = 1e3;
 var SHOPS = [
+  // Pete is server/pete.ts's NPC down in his cellar; his card is each
+  // customer's own (peteLines): rounds for what they carry, and what he
+  // buys back.
   {
     id: "pete",
     name: "Yellow Pete's",
-    tagline: "No questions after dark",
-    position: { x: 61.13562, y: 6.12056, z: 113.52177 },
-    // Box24 is the shop door hinge in both Free Ride scenes. Pete faces
-    // away from the hinge toward players approaching the doorway.
-    entranceFrame: "Box24",
-    entrance: { x: 60.58458, y: 6.09017, z: 113.82933 },
-    model: "ProdZ1.i3d",
-    animation: "BorecStat.i3d",
-    offers: [
-      { id: "colt", name: "Colt .45", price: 90, note: "Six in the chamber, eighteen spare" },
-      {
-        id: "shells",
-        name: "Shotgun & shells",
-        price: 210,
-        note: "For when a quiet word will not do"
-      },
-      {
-        id: "thompson",
-        name: "Thompson & drums",
-        price: 320,
-        note: "A loud answer to a bad question"
-      },
-      {
-        id: "grenades",
-        name: "Three grenades",
-        price: 95,
-        note: "Keep them out of the glovebox"
-      }
-    ]
+    tagline: "Down the stairs. No questions after dark",
+    position: SPOT.position,
+    sign: SIGN,
+    model: null,
+    animation: null,
+    offers: GUNS.map(({ id, name: name2, price, note }) => ({ id, name: name2, price, note }))
   },
   // The stock attendants serve the cars here; no scripted one stands in.
   {
@@ -5631,6 +6232,20 @@ var SHOPS = [
   }
 ];
 var PETE = SHOPS[0];
+var SOLD_LINES = [
+  "Clean, oiled, never been to court.",
+  "Good choice. You did not get it here.",
+  "Treat it gentle and it treats you the same."
+];
+var ROUNDS_LINES = [
+  "Fresh from the crate.",
+  "That should keep it talking a while."
+];
+var BOUGHT_BACK_LINES = [
+  "I will take it back. Not for what you paid, of course.",
+  "A little worn, but it will sell again.",
+  "Wiped clean? Good. It never left my wall."
+];
 var HEALING = { bandage: 45, coffee: 18 };
 var PUMPER_REFUSALS = {
   disabled: "The pumps are closed.",
@@ -5639,6 +6254,7 @@ var PUMPER_REFUSALS = {
   full: "Your tank is full already."
 };
 var purchases = new Cooldown(PURCHASE_COOLDOWN_MS);
+var peteCards = new SentCache();
 var courier = new PlayerMap();
 var lowFuelPending = /* @__PURE__ */ new Map();
 function shopsOpen() {
@@ -5665,17 +6281,33 @@ function shopsHere() {
 function shopWorld(shop) {
   return shop.id === "pharmacy" && current()?.hospital?.wards ? WORLD2 : MAIN_WORLD;
 }
+function receipts(player) {
+  return get2(player)?.gunReceipts;
+}
+function receipt(player, gun, delta) {
+  setField(player, "gunReceipts", withReceipt(receipts(player), gun.weaponId, delta));
+}
+function peteLines(player) {
+  const inventory = player.getInventory();
+  return counterLines(
+    (inventory?.weapons ?? []).map((weapon) => weapon.weaponId),
+    inventory?.selected ?? 0,
+    receipts(player)
+  );
+}
 function shopState(player) {
   if (!shopsOpen()) {
     return;
   }
+  const lines = peteLines(player);
+  peteCards.set(player.id, JSON.stringify(lines));
   emit(player, "fr:shops:state", {
     generation: World.getMissionGeneration(),
-    shops: shopsHere(),
+    shops: shopsHere().map((shop) => shop.id === PETE.id ? { ...shop, offers: lines } : shop),
     courier: courier.has(player.id)
   });
 }
-function chargeAndApply(player, cost, apply2) {
+function chargeAndApply(player, cost, apply2, failed = "The deal fell through; your money was returned.") {
   if (!player.trySpendMoney(cost)) {
     toast(player, `You need ${formatMoney(cost)}; you have ${formatMoney(player.money)}.`, {
       tone: "bad"
@@ -5686,23 +6318,82 @@ function chargeAndApply(player, cost, apply2) {
     return true;
   }
   player.giveMoney(cost);
-  toast(player, "The deal fell through; your money was returned.", { tone: "bad" });
+  toast(player, failed, { tone: "bad" });
   return false;
 }
-function buyWeapon(player, offer2) {
-  switch (offer2.id) {
-    case "colt":
-      return player.hasWeapon(WEAPON.COLT) ? player.giveAmmo(WEAPON.COLT, 18) : player.giveWeapon(WEAPON.COLT, 6, 18, true);
-    case "shells":
-      return player.hasWeapon(WEAPON.SHOTGUN) ? player.giveAmmo(WEAPON.SHOTGUN, 24) : player.giveWeapon(WEAPON.SHOTGUN, 8, 24, true);
-    case "thompson":
-      return player.hasWeapon(WEAPON.THOMPSON) ? player.giveAmmo(WEAPON.THOMPSON, 100) : player.giveWeapon(WEAPON.THOMPSON, 50, 100, true);
-    // A throwable's count is its loaded value; addItem adds to it.
-    case "grenades":
-      return player.hasWeapon(WEAPON.GRENADE) ? player.addItem(WEAPON.GRENADE, 3) : player.giveWeapon(WEAPON.GRENADE, 3, 0, true);
-    default:
-      return false;
+function buyGun(player, gun) {
+  const carried = player.hasWeapon(gun.weaponId);
+  if (carried && gun.kind !== "throwable") {
+    toast(player, `You carry a ${gun.name} already.`);
+    return;
   }
+  const handed = chargeAndApply(
+    player,
+    gun.price,
+    () => carried ? player.addItem(gun.weaponId, gun.loaded) : player.giveWeapon(gun.weaponId, gun.loaded, gun.reserve, true),
+    "You have no room to carry it. Your money was returned."
+  );
+  if (!handed) {
+    return;
+  }
+  if (gun.kind === "firearm") {
+    receipt(player, gun, 1);
+  }
+  toast(player, `${gun.name} for ${formatMoney(gun.price)}.`, { tone: "good" });
+  says(player, pick(SOLD_LINES), { voice: true, deal: true });
+}
+function buyRounds(player, gun) {
+  if (!gun.ammo || !player.hasWeapon(gun.weaponId)) {
+    return;
+  }
+  const { rounds: rounds3, price } = gun.ammo;
+  if (chargeAndApply(player, price, () => player.giveAmmo(gun.weaponId, rounds3))) {
+    toast(player, `${rounds3} rounds for your ${gun.name}: ${formatMoney(price)}.`, {
+      tone: "good"
+    });
+    says(player, pick(ROUNDS_LINES), { voice: true, deal: true });
+  }
+}
+function sellGun(player, gun) {
+  if (!player.hasWeapon(gun.weaponId)) {
+    return;
+  }
+  if (receiptsFor(receipts(player), gun.weaponId) <= 0) {
+    says(player, "That piece never hung on my wall. Take it somewhere else.");
+    return;
+  }
+  const value = buyback(gun);
+  if (value <= 0 || !player.removeWeapon(gun.weaponId)) {
+    return;
+  }
+  receipt(player, gun, -1);
+  player.giveMoney(value);
+  toast(player, `Sold your ${gun.name} for ${formatMoney(value)}.`, { tone: "good" });
+  says(player, pick(BOUGHT_BACK_LINES), { voice: true, deal: true });
+}
+function atPete(player, offerId) {
+  const deal = typeof offerId === "string" ? dealFor(offerId) : null;
+  if (!deal || !peteLines(player).some((line) => line.id === offerId)) {
+    shopState(player);
+    return;
+  }
+  if (!serving()) {
+    toast(player, "Pete is not at his counter right now.", { tone: "bad" });
+    return;
+  }
+  const refused2 = refusal(activity(player)?.kind);
+  if (refused2) {
+    says(player, refused2);
+    return;
+  }
+  if (deal.kind === "gun") {
+    buyGun(player, deal.gun);
+  } else if (deal.kind === "ammo") {
+    buyRounds(player, deal.gun);
+  } else {
+    sellGun(player, deal.gun);
+  }
+  shopState(player);
 }
 function buyFuel(player) {
   toast(
@@ -5774,11 +6465,18 @@ function buy2(player, request) {
     return;
   }
   const shop = shopsHere().find((entry2) => entry2.id === shopId);
-  const offer2 = shop?.offers.find((entry2) => entry2.id === offerId);
-  if (!shop || !offer2 || distance(player.position, shop.position) > SHOP_REACH || shopWorld(shop) !== MAIN_WORLD && player.virtualWorld !== shopWorld(shop)) {
+  if (!shop || distance(player.position, shop.position) > SHOP_REACH || shopWorld(shop) !== MAIN_WORLD && player.virtualWorld !== shopWorld(shop)) {
     return;
   }
   if (purchases.take(player) > 0) {
+    return;
+  }
+  if (shop.id === PETE.id) {
+    atPete(player, offerId);
+    return;
+  }
+  const offer2 = shop.offers.find((entry2) => entry2.id === offerId);
+  if (!offer2) {
     return;
   }
   if (offer2.id === "petrol") {
@@ -5794,16 +6492,6 @@ function buy2(player, request) {
   }
   if (offer2.id === "bandage" || offer2.id === "coffee") {
     buyHealth(player, offer2, offer2.price);
-    return;
-  }
-  if (chargeAndApply(player, offer2.price, () => buyWeapon(player, offer2))) {
-    toast(
-      player,
-      `${offer2.name} for ${formatMoney(offer2.price)}. Pete counts the bills twice.`,
-      {
-        tone: "good"
-      }
-    );
   }
 }
 function deliver2(player) {
@@ -5834,6 +6522,16 @@ every(COURIER_TICK_MS, () => {
       endCourier(player, "The courier run expired. Salieri will not be pleased.");
     } else {
       courierCard(player);
+    }
+  }
+});
+every(PETE_CARD_MS, () => {
+  if (!shopsOpen()) {
+    return;
+  }
+  for (const player of World.getPlayers()) {
+    if (onStreet(player) && distance(player.position, PETE.position) <= PETE_CARD_RANGE && peteCards.changed(player, JSON.stringify(peteLines(player)))) {
+      shopState(player);
     }
   }
 });
@@ -6847,7 +7545,7 @@ onMissionChange(() => {
 });
 
 // src/server/races/index.ts
-var TICK_MS = 200;
+var TICK_MS2 = 200;
 function routeSummary(route, index) {
   const record = recordOf(route.id);
   return `${index + 1}. ${route.name} · ${lengthText(route)}` + (record ? ` · record ${formatDuration(record.ms)} by ${record.name}` : "");
@@ -6942,7 +7640,7 @@ provide("races", (player) => {
     recording: recording2 ? { name: recording2.name, checkpoints: recording2.checkpoints.length } : null
   };
 });
-function tick() {
+function tick2() {
   const now = Date.now();
   for (const race of [...races.values()]) {
     if (race.generation !== World.getMissionGeneration()) {
@@ -6973,7 +7671,7 @@ function closeAll() {
   }
 }
 onStart(load4);
-every(TICK_MS, tick);
+every(TICK_MS2, tick2);
 onStop(closeAll);
 onMissionChange(closeAll);
 events.on("playerDeath", (player) => {
@@ -7012,8 +7710,8 @@ function save4() {
 function standings() {
   return [...(season?.points ?? /* @__PURE__ */ new Map()).entries()].map(([player, entry2]) => ({ name: player, ...entry2 })).sort((a, b) => b.points - a.points || b.wins - a.wins);
 }
-function roundName(current5) {
-  return ROUNDS[Math.min(current5.round, ROUNDS.length - 1)].name;
+function roundName(current6) {
+  return ROUNDS[Math.min(current6.round, ROUNDS.length - 1)].name;
 }
 function openRound() {
   const map = current();
@@ -7050,19 +7748,19 @@ function openRound() {
   );
 }
 function scoreRound(finishers) {
-  const current5 = season;
-  if (!current5) {
+  const current6 = season;
+  if (!current6) {
     return;
   }
-  const round2 = ROUNDS[current5.round];
+  const round2 = ROUNDS[current6.round];
   finishers.forEach(({ player, ms }, index) => {
-    const entry2 = current5.points.get(player.nickname) ?? { points: 0, wins: 0, best: null };
+    const entry2 = current6.points.get(player.nickname) ?? { points: 0, wins: 0, best: null };
     entry2.points += POINTS[index] ?? 0;
     if (index === 0) {
       entry2.wins++;
     }
     entry2.best = entry2.best === null ? ms : Math.min(entry2.best, ms);
-    current5.points.set(player.nickname, entry2);
+    current6.points.set(player.nickname, entry2);
   });
   if (finishers.length) {
     feed("race", [
@@ -7072,18 +7770,18 @@ function scoreRound(finishers) {
       text(` · ${formatDuration(finishers[0].ms)}`)
     ]);
   }
-  current5.round++;
+  current6.round++;
   const table2 = standings();
   const lines = table2.slice(0, 3).map((entry2, index) => `${index + 1}. ${entry2.name} ${entry2.points}`).join(" · ");
-  if (current5.round < ROUNDS.length) {
+  if (current6.round < ROUNDS.length) {
     toastAll(
-      `Standings: ${lines || "nobody has scored yet"}. ${ROUNDS[current5.round].name} opens in ${BREAK_MS / 1e3} seconds.`,
+      `Standings: ${lines || "nobody has scored yet"}. ${ROUNDS[current6.round].name} opens in ${BREAK_MS / 1e3} seconds.`,
       { title: "Autodrom Championship" }
     );
     nextRound.start(BREAK_MS, openRound);
     return;
   }
-  finishSeason(current5, table2);
+  finishSeason(current6, table2);
 }
 function finishSeason(ended, table2) {
   season = null;
@@ -7236,9 +7934,9 @@ function stopHunting(targetId) {
   }
 }
 function setBounty(player, amount, reason) {
-  const current5 = bounties.get(player.id);
+  const current6 = bounties.get(player.id);
   const value = Math.min(MAX_BOUNTY, amount);
-  bounties.set(player.id, { amount: value, reason, since: current5?.since ?? Date.now() });
+  bounties.set(player.id, { amount: value, reason, since: current6?.since ?? Date.now() });
   setPublic(player, "fr.bounty", value);
   refresh(player);
 }
@@ -8060,9 +8758,9 @@ var subcommands2 = {
         summary: `Join [${crew.tag}] ${crew.name}`,
         text: `${player.nickname} invites you to join [${crew.tag}] ${crew.name}.`,
         accept: (accepter) => {
-          const current5 = crews.find((entry2) => entry2.tag === crew.tag);
-          if (current5) {
-            join3(accepter, current5);
+          const current6 = crews.find((entry2) => entry2.tag === crew.tag);
+          if (current6) {
+            join3(accepter, current6);
           }
         }
       },
@@ -8158,7 +8856,7 @@ onStart(() => {
 // src/server/world_events.ts
 var FIRST_EVENT_MS = 3 * 6e4;
 var EVENT_EVERY_MS = 9 * 6e4;
-var TICK_MS2 = 500;
+var TICK_MS3 = 500;
 var CARD_EVERY_MS = 2e3;
 var DROP_LIFETIME_MS = 6 * 6e4;
 var DROP_REACH = 3.5;
@@ -8184,7 +8882,7 @@ var DROP_LOOT = [
   { weaponId: 15, loaded: 3, reserve: 0 },
   { weaponId: 6, loaded: 6, reserve: 30 }
 ];
-var current3 = null;
+var current4 = null;
 var nextEventAt = 0;
 var lastCardAt = 0;
 var following = new PlayerSet({ clearOnMissionChange: true });
@@ -8244,11 +8942,11 @@ function clearPresentation() {
   following.clear();
 }
 function endEvent(message, tone = "info") {
-  if (!current3) {
+  if (!current4) {
     return;
   }
-  const ended = current3;
-  current3 = null;
+  const ended = current4;
+  current4 = null;
   nextEventAt = Date.now() + EVENT_EVERY_MS;
   clearPresentation();
   if (ended.kind === "hotcar") {
@@ -8276,7 +8974,7 @@ function startSupplyDrop() {
     expiresAt: Date.now() + DROP_LIFETIME_MS,
     generation: World.getMissionGeneration()
   };
-  current3 = drop2;
+  current4 = drop2;
   markersAll("event", eventMarkers(drop2));
   toastAll(
     "A crate of guns fell off a truck. First one to it keeps the lot. It is on the city map (TAB); /event points your compass at it.",
@@ -8318,7 +9016,7 @@ function startHotCar() {
     expiresAt: Date.now() + HOT_CAR_LIFETIME_MS,
     generation: World.getMissionGeneration()
   };
-  current3 = hotCar;
+  current4 = hotCar;
   markersAll("event", eventMarkers(hotCar));
   toastAll(
     `A ${choice.name} needs to reach ${dropOff.name}, no questions asked. ${formatMoney(HOT_CAR_PRIZE)} for the driver. It is on the city map (TAB); /event points your compass at it.`,
@@ -8331,7 +9029,7 @@ function startHotCar() {
   return true;
 }
 function startEvent(kind) {
-  if (current3 || !inFreeRide() || !World.isReady() || !streetPlayers().length) {
+  if (current4 || !inFreeRide() || !World.isReady() || !streetPlayers().length) {
     return false;
   }
   const started = (kind ?? pick(["supply", "hotcar"])) === "supply" ? startSupplyDrop() : startHotCar();
@@ -8488,25 +9186,25 @@ function sendCards(event, now) {
     });
   }
 }
-function tick2() {
+function tick3() {
   const now = Date.now();
-  if (!current3) {
+  if (!current4) {
     if (nextEventAt && now >= nextEventAt) {
       startEvent();
     }
     return;
   }
-  if (current3.generation !== World.getMissionGeneration()) {
-    current3 = null;
+  if (current4.generation !== World.getMissionGeneration()) {
+    current4 = null;
     return;
   }
-  if (current3.kind === "supply") {
-    tickSupply(current3, now);
+  if (current4.kind === "supply") {
+    tickSupply(current4, now);
   } else {
-    tickHotCar(current3, now);
+    tickHotCar(current4, now);
   }
-  if (current3) {
-    sendCards(current3, now);
+  if (current4) {
+    sendCards(current4, now);
   }
 }
 function followTarget(event) {
@@ -8516,36 +9214,36 @@ function followTarget(event) {
   return vehicleById(event.vehicleId) ? { vehicleId: event.vehicleId } : null;
 }
 function catchUp(player) {
-  if (!current3) {
+  if (!current4) {
     return;
   }
-  markers(player, "event", eventMarkers(current3));
+  markers(player, "event", eventMarkers(current4));
   if (following.has(player.id)) {
-    compass(player, "event", 40, followTarget(current3));
+    compass(player, "event", 40, followTarget(current4));
   }
 }
 onStart(() => {
   nextEventAt = Date.now() + FIRST_EVENT_MS;
 });
-every(TICK_MS2, tick2);
+every(TICK_MS3, tick3);
 onStop(() => endEvent(null));
 onMissionChange(() => {
-  current3 = null;
+  current4 = null;
   nextEventAt = Date.now() + FIRST_EVENT_MS;
 });
 events.on("playerSpawn", catchUp);
 events.on("vehicleDestroy", (vehicle) => {
-  if (current3?.kind === "hotcar" && current3.vehicleId === vehicle.id) {
+  if (current4?.kind === "hotcar" && current4.vehicleId === vehicle.id) {
     endEvent("The hot car is gone.", "bad");
   }
 });
 action("fr", "event", ([kind]) => {
-  if (current3) {
+  if (current4) {
     endEvent("City Hall called off the event.");
   }
   const started = startEvent(kind === "hotcar" || kind === "supply" ? kind : void 0);
   info(
-    started && current3 ? `Started ${current3.kind}` : "No event could start (needs a player on the street)"
+    started && current4 ? `Started ${current4.kind}` : "No event could start (needs a player on the street)"
   );
 });
 register(
@@ -8556,7 +9254,7 @@ register(
     category: "City"
   },
   (player) => {
-    if (!current3) {
+    if (!current4) {
       toast(
         player,
         `No event right now. The next one comes in about ${formatMinutes(Math.max(0, nextEventAt - Date.now()))}.`
@@ -8567,7 +9265,7 @@ register(
       compass(player, "event", 40, null);
       card(player, "event", null);
       toast(player, "You stopped following the event.", {
-        title: current3.title,
+        title: current4.title,
         seconds: 3
       });
       return;
@@ -8576,30 +9274,75 @@ register(
     catchUp(player);
     toast(
       player,
-      current3.kind === "supply" ? "A supply drop is out there. Your compass points at it. /event again to stop." : `A hot ${current3.carName} is waiting. Your compass points at it. /event again to stop.`,
-      { title: current3.title, tone: "gold" }
+      current4.kind === "supply" ? "A supply drop is out there. Your compass points at it. /event again to stop." : `A hot ${current4.carName} is waiting. Your compass points at it. /event again to stop.`,
+      { title: current4.title, tone: "gold" }
     );
   }
 );
 provide(
   "event",
-  (player) => current3 ? {
-    kind: current3.kind,
-    title: current3.title,
+  (player) => current4 ? {
+    kind: current4.kind,
+    title: current4.title,
     following: following.has(player.id),
-    detail: current3.kind === "supply" ? "First to the crate keeps it" : `${current3.carName} to ${current3.dropOff}`,
-    secondsLeft: Math.max(0, Math.ceil((current3.expiresAt - Date.now()) / 1e3))
+    detail: current4.kind === "supply" ? "First to the crate keeps it" : `${current4.carName} to ${current4.dropOff}`,
+    secondsLeft: Math.max(0, Math.ceil((current4.expiresAt - Date.now()) / 1e3))
   } : {
     kind: null,
     nextInSeconds: Math.max(0, Math.ceil((nextEventAt - Date.now()) / 1e3))
   }
 );
 
+// src/server/lib/transfer.ts
+var FADE_MS = 400;
+var ARRIVE_FADE_SECONDS = 0.6;
+var Transfers = class {
+  /** `refusedFadeSeconds`: how long the screen takes to come back after a refused move. */
+  constructor(refusedFadeSeconds = 0.3) {
+    this.refusedFadeSeconds = refusedFadeSeconds;
+  }
+  refusedFadeSeconds;
+  moving = new PlayerSet();
+  isMoving(player) {
+    return this.moving.has(player.id);
+  }
+  /** No longer counts the player as moving; a move under way still happens if their life goes on. */
+  forget(player) {
+    this.moving.delete(player.id);
+  }
+  clear() {
+    this.moving.clear();
+  }
+  move(player, pose5, world, options = {}) {
+    const { spawnGeneration } = player;
+    this.moving.add(player.id);
+    emit(player, "fr:fade", { out: true, seconds: FADE_MS / 1e3 });
+    setTimeout(() => {
+      this.moving.delete(player.id);
+      if (!connected(player) || !player.alive || player.spawnGeneration !== spawnGeneration) {
+        return;
+      }
+      const previous = player.virtualWorld;
+      player.setVirtualWorld(world);
+      const moved = teleport(player, pose5.position, pose5.heading, options.loadout);
+      if (!moved) {
+        player.setVirtualWorld(previous);
+      }
+      emit(player, "fr:fade", {
+        out: false,
+        seconds: moved ? ARRIVE_FADE_SECONDS : this.refusedFadeSeconds
+      });
+      options.then?.(moved);
+    }, FADE_MS);
+  }
+};
+
 // src/server/social/goto.ts
 var GOTO_COOLDOWN_MS = 6e4;
 var RECENT_DAMAGE_MS = 15e3;
 var lastDamage = new PlayerMap();
 var rides = new Cooldown(GOTO_COOLDOWN_MS);
+var adminMoves = new Transfers();
 function blocked(player) {
   if (!playable(player) || player.virtualWorld !== MAIN_WORLD) {
     return "You need to be out on the street.";
@@ -8640,17 +9383,42 @@ function bring(traveller, host) {
   toast(traveller, `You caught up with ${host.nickname}.`, { tone: "good" });
   toast(host, `${traveller.nickname} is here.`, { tone: "good" });
 }
+function adminGoto(player, target2) {
+  if (!playable(player) || !playable(target2)) {
+    toast(player, `${playable(player) ? target2.nickname : "You"} must be alive and spawned.`, {
+      tone: "bad"
+    });
+    return;
+  }
+  const car = target2.getVehicle();
+  const heading = headingOf(target2.rotation);
+  const position = ahead((car ?? target2).position, heading, car ? -4 : -1.6, 0.2);
+  if (player.getVehicle()) {
+    player.removeFromVehicle();
+  }
+  adminMoves.move(player, { position, heading }, target2.virtualWorld, {
+    then: (moved) => toast(
+      player,
+      moved ? `Teleported to ${target2.nickname}.` : "The teleport was refused.",
+      { tone: moved ? "good" : "bad" }
+    )
+  });
+}
 register(
   {
     name: "goto",
     aliases: ["tp"],
     usage: "/goto <player>",
-    help: "Ask a player to bring you to them.",
+    help: "Ask a player to bring you to them (admins go straight there).",
     category: "Social"
   },
   (player, args) => {
     const target2 = opponent(player, args.join(" "));
     if (!target2) {
+      return;
+    }
+    if (isAdmin(player)) {
+      adminGoto(player, target2);
       return;
     }
     const problem = blocked(player);
@@ -8693,8 +9461,8 @@ function roll() {
   return 2 + Math.floor(Math.random() * 6) + Math.floor(Math.random() * 6);
 }
 function playDice(challenger, opponent2, bet) {
-  const near2 = playable(challenger) && playable(opponent2) && distance(challenger.position, opponent2.position) <= DICE_REACH;
-  if (!near2) {
+  const near3 = playable(challenger) && playable(opponent2) && distance(challenger.position, opponent2.position) <= DICE_REACH;
+  if (!near3) {
     toast(challenger, "You need to be at the same table.", { tone: "bad" });
     toast(opponent2, "You need to be at the same table.", { tone: "bad" });
     return;
@@ -9036,52 +9804,8 @@ var WalkIn = class {
   }
 };
 
-// src/server/lib/transfer.ts
-var FADE_MS = 400;
-var ARRIVE_FADE_SECONDS = 0.6;
-var Transfers = class {
-  /** `refusedFadeSeconds`: how long the screen takes to come back after a refused move. */
-  constructor(refusedFadeSeconds = 0.3) {
-    this.refusedFadeSeconds = refusedFadeSeconds;
-  }
-  refusedFadeSeconds;
-  moving = new PlayerSet();
-  isMoving(player) {
-    return this.moving.has(player.id);
-  }
-  /** No longer counts the player as moving; a move under way still happens if their life goes on. */
-  forget(player) {
-    this.moving.delete(player.id);
-  }
-  clear() {
-    this.moving.clear();
-  }
-  move(player, pose5, world, options = {}) {
-    const { spawnGeneration } = player;
-    this.moving.add(player.id);
-    emit(player, "fr:fade", { out: true, seconds: FADE_MS / 1e3 });
-    setTimeout(() => {
-      this.moving.delete(player.id);
-      if (!connected(player) || !player.alive || player.spawnGeneration !== spawnGeneration) {
-        return;
-      }
-      const previous = player.virtualWorld;
-      player.setVirtualWorld(world);
-      const moved = teleport(player, pose5.position, pose5.heading, options.loadout);
-      if (!moved) {
-        player.setVirtualWorld(previous);
-      }
-      emit(player, "fr:fade", {
-        out: false,
-        seconds: moved ? ARRIVE_FADE_SECONDS : this.refusedFadeSeconds
-      });
-      options.then?.(moved);
-    }, FADE_MS);
-  }
-};
-
 // src/server/interiors.ts
-var TICK_MS3 = 250;
+var TICK_MS4 = 250;
 var TRIGGER_RADIUS = 1.4;
 var REARM_DISTANCE = 3;
 var MARKER_RANGE = 60;
@@ -9143,8 +9867,8 @@ function safehouseWorld(player) {
   return FIRST_SAFEHOUSE_WORLD + 134217728 + hash % 117440512;
 }
 function blocked2(player) {
-  const current5 = activity(player);
-  if (current5 && BLOCKING_ACTIVITIES.has(current5.kind)) {
+  const current6 = activity(player);
+  if (current6 && BLOCKING_ACTIVITIES.has(current6.kind)) {
     return busyMessage(player);
   }
   if ((Police.getRecord(player)?.level ?? 0) > 0) {
@@ -9162,8 +9886,8 @@ function move(player, pose5, world, then) {
   });
 }
 function enter2(player, interior) {
-  const open2 = "open" in interior ? interior.open : void 0;
-  const problem = open2 && !open2() ? "The door is locked." : blocked2(player);
+  const open3 = "open" in interior ? interior.open : void 0;
+  const problem = open3 && !open3() ? "The door is locked." : blocked2(player);
   if (problem) {
     toast(player, problem, { tone: "bad", seconds: 3 });
     arrows.disarm(player, `${interior.id}:outside`);
@@ -9199,13 +9923,13 @@ function leave2(player, interior) {
     markers(player, "exit", []);
   });
 }
-function tick3() {
+function tick4() {
   for (const player of World.getPlayers()) {
     if (!playable(player) || player.getVehicle() || transfers.isMoving(player)) {
       continue;
     }
-    const current5 = insideOf(player);
-    const checks = current5 ? [[current5, "inside"]] : player.virtualWorld === MAIN_WORLD ? here().map((interior) => [interior, "outside"]) : [];
+    const current6 = insideOf(player);
+    const checks = current6 ? [[current6, "inside"]] : player.virtualWorld === MAIN_WORLD ? here().map((interior) => [interior, "outside"]) : [];
     for (const [interior, side] of checks) {
       if (arrows.reached(player, interior[side].position, `${interior.id}:${side}`)) {
         if (side === "outside") {
@@ -9352,7 +10076,7 @@ provide(
 onStart(() => {
   load7();
   publishEntrances();
-  every(TICK_MS3, tick3);
+  every(TICK_MS4, tick4);
 });
 onStop(() => {
   for (const player of World.getPlayers()) {
@@ -9410,7 +10134,7 @@ function release(player) {
 var MAX_LEVEL = 100;
 var DECAY_PER_SECOND = 0.25;
 var PUBLISH_STEP = 5;
-var TICK_MS4 = 1e3;
+var TICK_MS5 = 1e3;
 var STAGES = [
   { from: 70, name: "Wasted" },
   { from: 45, name: "Drunk" },
@@ -9483,8 +10207,8 @@ function add(player, amount, cap = MAX_LEVEL) {
   if (blackouts.has(player.id)) {
     return level(player);
   }
-  const current5 = level(player);
-  set3(player, amount > 0 ? Math.max(current5, Math.min(cap, current5 + amount)) : current5 + amount);
+  const current6 = level(player);
+  set3(player, amount > 0 ? Math.max(current6, Math.min(cap, current6 + amount)) : current6 + amount);
   if (level(player) >= MAX_LEVEL) {
     blackout(player);
   }
@@ -9628,8 +10352,8 @@ function watchDriver(player, vehicle, value) {
     });
   }
 }
-function tick4() {
-  const seconds = TICK_MS4 / 1e3;
+function tick5() {
+  const seconds = TICK_MS5 / 1e3;
   for (const player of World.getPlayers()) {
     const value = level(player);
     if (value <= 0 || blackouts.has(player.id)) {
@@ -9690,7 +10414,7 @@ register(
   }
 );
 onStart(() => {
-  every(TICK_MS4, tick4);
+  every(TICK_MS5, tick5);
   for (const player of World.getPlayers()) {
     restore(player);
   }
@@ -9716,137 +10440,6 @@ function isBlackedOut(player) {
 }
 function setWakeProvider(provider2) {
   wakeProvider = provider2;
-}
-
-// src/server/lib/npcs.ts
-function npcsAvailable() {
-  return typeof Npc !== "undefined" && typeof Npc.spawn === "function";
-}
-var cast = /* @__PURE__ */ new Map();
-var Character = class {
-  constructor(hooks = {}) {
-    this.hooks = hooks;
-  }
-  hooks;
-  npc = null;
-  /** The host has placed it. */
-  ready = false;
-  /** A Date.now() time before which the module spawns no new one. */
-  respawnAt = 0;
-  /** Spawns the NPC, replacing nothing: call it on an empty character. Null when refused. */
-  spawn(model, position, heading, options) {
-    this.npc = Npc.spawn(model, position, heading, options) ?? null;
-    this.ready = false;
-    if (this.npc) {
-      cast.set(this.npc.id, this);
-    }
-    return this.npc;
-  }
-  /** The NPC once the host has placed it. */
-  placed() {
-    return this.ready ? this.npc : null;
-  }
-  /** The NPC once placed and while alive: one that can talk and move. */
-  present() {
-    const npc = this.placed();
-    return npc?.alive ? npc : null;
-  }
-  /** A retail voice line (Npc.say), if it stands there to say it. */
-  say(line) {
-    this.present()?.say(line);
-  }
-  remove() {
-    this.npc?.remove();
-    this.forget();
-  }
-  /** Lets go of the NPC without removing it (the mission change already did). */
-  forget() {
-    if (this.npc) {
-      cast.delete(this.npc.id);
-    }
-    this.npc = null;
-    this.ready = false;
-  }
-  /**
-   * Sends the NPC walking straight to `point` and removes it after
-   * `removeAfterMs` if it is still alive then: a character leaving the
-   * scene. The character is empty at once; what happens to the NPC on its
-   * way out is nobody's business, and the resource's stop leaves it to the
-   * mission (walkOff's aliveOnly and keepOnStop).
-   */
-  walkOff(point2, removeAfterMs) {
-    const npc = this.npc;
-    this.forget();
-    if (npc) {
-      walkOff(npc, removeAfterMs, {
-        to: point2,
-        direct: true,
-        aliveOnly: true,
-        keepOnStop: true
-      });
-    }
-  }
-  /** @internal */
-  placedByHost(npc) {
-    this.ready = true;
-    this.hooks.onReady?.(npc);
-  }
-  /** @internal */
-  lostByHost(npc, loss) {
-    this.forget();
-    this.hooks.onLost?.(npc, loss);
-  }
-};
-events.on("npcSpawn", (npc) => cast.get(npc.id)?.placedByHost(npc));
-events.on("npcDeath", (npc, killer) => cast.get(npc.id)?.lostByHost(npc, { died: true, killer }));
-events.on("npcRetire", (npc) => cast.get(npc.id)?.lostByHost(npc, { died: false }));
-events.on("missionChange", () => {
-  for (const character of [...cast.values()]) {
-    character.forget();
-  }
-});
-var strays = /* @__PURE__ */ new Set();
-function walkOff(npc, ms, { to = null, direct = false, gone, aliveOnly = false, keepOnStop = false } = {}) {
-  if (aliveOnly && !npc.alive) {
-    return;
-  }
-  if (to) {
-    if (direct) {
-      npc.walkTo(to, { direct: true });
-    } else {
-      npc.walkTo(to);
-    }
-  }
-  if (!keepOnStop) {
-    strays.add(npc);
-  }
-  setTimeout(() => {
-    strays.delete(npc);
-    gone?.();
-    if (!aliveOnly || npc.alive) {
-      npc.remove();
-    }
-  }, ms);
-}
-events.on("npcRetire", (npc) => {
-  for (const stray of strays) {
-    if (stray.id === npc.id) {
-      strays.delete(stray);
-    }
-  }
-});
-onMissionChange(() => strays.clear());
-onStop(() => {
-  for (const npc of strays) {
-    npc.remove();
-  }
-  strays.clear();
-});
-function speak(player, who, line, { npc = null, voice, seconds = 8 } = {}) {
-  toast(player, `"${line}"`, { title: who, tone: "gold", seconds });
-  if (npc?.alive && voice !== void 0) {
-    npc.say(voice);
-  }
 }
 
 // src/server/bars/venues.ts
@@ -9934,6 +10527,19 @@ function inBoxes(boxes, position) {
 function contains(bar, position) {
   return bar.rooms ? inBoxes(bar.rooms, position) : inRoom(position, 0.5);
 }
+function gapFromRooms(bar, position) {
+  if (!bar.rooms) {
+    return contains(bar, position) ? 0 : Infinity;
+  }
+  return Math.min(
+    ...bar.rooms.map(
+      (b) => Math.hypot(
+        Math.max(b.x0 - position.x, 0, position.x - b.x1),
+        Math.max(b.z0 - position.z, 0, position.z - b.z1)
+      )
+    )
+  );
+}
 var SALIERI = {
   id: "salieri",
   name: "Salieri's Bar",
@@ -10002,7 +10608,9 @@ var MORELLO = {
   rooms: [box(-415.7, -406, 451.6, 461.2, 16, 20.5)],
   // The four stools in front of the counter (z 458.1).
   counter: { position: { x: -412.6, y: 17.35, z: 457.6 }, reach: 1.9 },
-  door: null,
+  // Its name hangs over the shop windows of the south front; the way in is
+  // by its working doors at the sides (lib/maps.ts).
+  door: { x: -411.5, y: 19.6, z: 450.9 },
   wake: { position: { x: -411.5, y: 17.45, z: 449.6 }, heading: Math.PI },
   bartender: {
     model: "civil33.i3d",
@@ -10076,8 +10684,8 @@ function barsHere() {
 }
 
 // src/server/bars/staff.ts
-var STAND_DOWN_MS = 2e4;
-var RESPAWN_MS = 6e4;
+var STAND_DOWN_MS2 = 2e4;
+var RESPAWN_MS2 = 6e4;
 var SERVE_MS = 3e3;
 var CHEERS_MS = 4e3;
 var REFRESH_MS = 3e4;
@@ -10089,10 +10697,10 @@ function member(spec) {
       onReady: (npc) => {
         npc.face(spec.heading);
         entry2.until = 0;
-        animate(entry2, Date.now());
+        animate2(entry2, Date.now());
       },
       onLost: () => {
-        entry2.character.respawnAt = Date.now() + RESPAWN_MS;
+        entry2.character.respawnAt = Date.now() + RESPAWN_MS2;
       }
     }),
     step: 0,
@@ -10121,20 +10729,20 @@ function spawnMember(bar, entry2) {
   entry2.step = 0;
   entry2.until = 0;
   if (!npc) {
-    entry2.character.respawnAt = Date.now() + RESPAWN_MS;
+    entry2.character.respawnAt = Date.now() + RESPAWN_MS2;
   }
 }
-function play(entry2, clip) {
+function play2(entry2, clip) {
   entry2.character.placed()?.playAnimation(clip, { loop: true });
 }
-function animate(entry2, now) {
+function animate2(entry2, now) {
   if (!entry2.character.ready || now < entry2.until || now < entry2.servingUntil) {
     return;
   }
   const routine = entry2.spec.routine;
   const [clip, ms] = routine[entry2.step % routine.length];
   entry2.step++;
-  play(entry2, clip);
+  play2(entry2, clip);
   entry2.until = now + (routine.length > 1 ? ms : REFRESH_MS);
 }
 function staffUp(bar) {
@@ -10166,12 +10774,12 @@ function tickStaff(bar, wanted4, now) {
   } else if (place3.staff.some((entry2) => entry2.character.npc)) {
     if (!place3.emptySince) {
       place3.emptySince = now;
-    } else if (now - place3.emptySince >= STAND_DOWN_MS) {
+    } else if (now - place3.emptySince >= STAND_DOWN_MS2) {
       standDown(bar);
     }
   }
   for (const entry2 of place3.staff) {
-    animate(entry2, now);
+    animate2(entry2, now);
   }
 }
 function barmanIn(bar) {
@@ -10184,7 +10792,7 @@ function serve(bar, player, clip = SERVING) {
     return;
   }
   npc.face(player.position);
-  play(barman, clip);
+  play2(barman, clip);
   barman.servingUntil = Date.now() + SERVE_MS;
   barman.until = 0;
   setTimeout(() => barman.character.placed()?.face(barman.spec.heading), SERVE_MS);
@@ -10195,39 +10803,39 @@ function cheers(bar) {
     if (!entry2.spec.glass || !entry2.character.placed()) {
       continue;
     }
-    play(entry2, CHEERS);
+    play2(entry2, CHEERS);
     entry2.servingUntil = now + CHEERS_MS;
     entry2.until = 0;
   }
 }
 
 // src/server/bars/index.ts
-var TICK_MS5 = 500;
+var TICK_MS6 = 500;
 var PURCHASE_COOLDOWN_MS2 = 2500;
 var LABEL_RANGE = 40;
 var COMPASS_PRIORITY2 = 45;
-var current4 = [];
+var current5 = [];
 var lastPurchase = new PlayerMap();
 var lastBar = new PlayerMap();
 var pointed = new PlayerSet();
 var closed = /* @__PURE__ */ new Set();
 function bars() {
-  return current4;
+  return current5;
 }
 function barOf(player) {
   if (!player?.spawned || !player.alive || player.missionGeneration !== World.getMissionGeneration()) {
     return null;
   }
-  return current4.find(
+  return current5.find(
     (bar) => player.virtualWorld === bar.world && contains(bar, player.position)
   ) ?? null;
 }
 function guests(bar) {
   return World.getPlayers().filter((player) => barOf(player) === bar);
 }
-function tick5() {
+function tick6() {
   const now = Date.now();
-  for (const bar of current4) {
+  for (const bar of current5) {
     tickStaff(bar, guests(bar).length > 0 && !closed.has(bar.id), now);
   }
   for (const player of World.getPlayers()) {
@@ -10254,11 +10862,11 @@ function publicBar(bar) {
 function sendState2(player) {
   emit(player, "fr:bars:state", {
     generation: World.getMissionGeneration(),
-    bars: current4.map(publicBar)
+    bars: current5.map(publicBar)
   });
 }
 function publishDoors(player = null) {
-  const items3 = current4.flatMap(
+  const items3 = current5.flatMap(
     (bar) => bar.door ? [
       {
         id: `bar-${bar.id}`,
@@ -10333,7 +10941,7 @@ function buy3(player, request) {
   );
 }
 setWakeProvider((player) => {
-  const bar = barOf(player) ?? current4.find((candidate) => candidate.id === lastBar.get(player.id));
+  const bar = barOf(player) ?? current5.find((candidate) => candidate.id === lastBar.get(player.id));
   if (!bar) {
     return null;
   }
@@ -10342,7 +10950,7 @@ setWakeProvider((player) => {
 });
 function nearestDoor(player) {
   let best = null;
-  for (const bar of current4) {
+  for (const bar of current5) {
     const interior = current()?.interiors?.find((entry2) => entry2.id === interiorId(bar));
     const position = bar.door ?? interior?.outside.position;
     if (!position) {
@@ -10372,7 +10980,7 @@ register(
   }
 );
 function reset2() {
-  current4 = barsHere();
+  current5 = barsHere();
   forgetVenues();
   lastBar.clear();
   pointed.clear();
@@ -10384,24 +10992,24 @@ function setClosed(barId, shut) {
     return;
   }
   closed.add(barId);
-  const bar = current4.find((candidate) => candidate.id === barId);
+  const bar = current5.find((candidate) => candidate.id === barId);
   if (bar) {
     standDown(bar);
   }
 }
 onStart(() => {
   reset2();
-  if (current4.some((bar) => bar.built)) {
+  if (current5.some((bar) => bar.built)) {
     build();
   }
   publishDoors();
   for (const player of World.getPlayers()) {
     sendState2(player);
   }
-  every(TICK_MS5, tick5);
+  every(TICK_MS6, tick6);
 });
 onStop(() => {
-  for (const bar of current4) {
+  for (const bar of current5) {
     standDown(bar);
   }
   teardown();
@@ -10410,7 +11018,7 @@ onStop(() => {
 events.on("missionChange", () => {
   forget();
   reset2();
-  if (current4.some((bar) => bar.built)) {
+  if (current5.some((bar) => bar.built)) {
     build();
   }
   publishDoors();
@@ -10463,10 +11071,10 @@ var Countdown = class {
   }
 };
 function spawnBeside(player, model, options = {}) {
-  const current5 = player.getVehicle();
-  const heading = headingOf(current5?.rotation ?? player.rotation);
-  const position = ahead(current5?.position ?? player.position, heading + Math.PI / 2, 3.5, 0.3);
-  if (current5) {
+  const current6 = player.getVehicle();
+  const heading = headingOf(current6?.rotation ?? player.rotation);
+  const position = ahead(current6?.position ?? player.position, heading + Math.PI / 2, 3.5, 0.3);
+  if (current6) {
     player.removeFromVehicle();
   }
   const vehicle = spawnVehicle(model, position, heading, { controller: player, ...options });
@@ -10487,7 +11095,7 @@ var LIST_LIFETIME_MS = 60 * 6e4;
 var PAY = 400;
 var COMPLETE_BONUS = 600;
 var XP = 80;
-var TICK_MS6 = 1e3;
+var TICK_MS7 = 1e3;
 var FALLBACK = [
   "fordtto00.i3d",
   "forvtud00.i3d",
@@ -10566,7 +11174,7 @@ function deliver3(player, vehicle, entry2, target2) {
     newList();
   }
 }
-function tick6() {
+function tick7() {
   for (const vehicle of World.getVehicles()) {
     if (vehicle.traffic && vehicle.trafficKind === "civil") {
       seen.add(vehicle.model.toLowerCase());
@@ -10623,11 +11231,11 @@ register(
     category: "City"
   },
   (player) => {
-    const current5 = currentList();
-    const open2 = current5.models.filter((entry2) => !entry2.deliveredBy).map((entry2) => shortName(entry2.model));
+    const current6 = currentList();
+    const open3 = current6.models.filter((entry2) => !entry2.deliveredBy).map((entry2) => shortName(entry2.model));
     toast(
       player,
-      `Lucas wants: ${open2.join(", ")}. Take them from traffic; your own car does not count. New list in ${formatMinutes(current5.expiresAt - Date.now())}.`,
+      `Lucas wants: ${open3.join(", ")}. Take them from traffic; your own car does not count. New list in ${formatMinutes(current6.expiresAt - Date.now())}.`,
       { title: "Export list", seconds: 9 }
     );
   }
@@ -10642,7 +11250,7 @@ provide(
   }
 );
 onStart(newList);
-every(TICK_MS6, tick6);
+every(TICK_MS7, tick7);
 
 // src/server/police_duty/booths.ts
 var import_phone_booths = __toESM(require_phone_booths(), 1);
@@ -10739,7 +11347,7 @@ var LEAVE_TIMEOUT_MS = 4e4;
 var LEAVE_DISTANCE = 350;
 var ALERT_RANGE = 800;
 var ALERT_MS = 6e4;
-var TICK_MS7 = 1e3;
+var TICK_MS8 = 1e3;
 var COMPASS_PRIORITY4 = 50;
 var STATUS = {
   calling: "Calling",
@@ -10836,10 +11444,10 @@ function call(caller) {
   const seated2 = car !== null && caller.getVehicle()?.id === car.id;
   const booth = seated2 ? null : boothAt(caller.position);
   if (!seated2 && !booth) {
-    const near2 = nearestBooth(caller.position);
+    const near3 = nearestBooth(caller.position);
     toast(
       caller,
-      near2 ? `No telephone here. The nearest call box is ${Math.round(near2.gap)} m away; sit in your squad car to use its radio.` : "No telephone on this map. Sit in your squad car to use its radio.",
+      near3 ? `No telephone here. The nearest call box is ${Math.round(near3.gap)} m away; sit in your squad car to use its radio.` : "No telephone on this map. Sit in your squad car to use its radio.",
       { tone: "bad" }
     );
     return false;
@@ -11224,7 +11832,7 @@ function tickCall(entry2, now) {
     pointCompass(entry2, caller, { vehicleId: car.id });
   }
 }
-function tick7() {
+function tick8() {
   const now = Date.now();
   for (const entry2 of [...calls.values()]) {
     tickCall(entry2, now);
@@ -11385,7 +11993,7 @@ register(
   (player) => call(player)
 );
 onClient("fr:backup:call", (player) => call(player));
-every(TICK_MS7, tick7);
+every(TICK_MS8, tick8);
 onStop(() => {
   for (const entry2 of [...calls.values()]) {
     end2(entry2, null);
@@ -11611,7 +12219,7 @@ var ROBBERS = [
 ];
 var HOOD_VOICE = 13;
 var roster = null;
-var open = null;
+var open2 = null;
 var lastKind = null;
 var clock = new CallClock(FIRST_CALL_MS);
 var prompts2 = new PlayerMap({ clearOnMissionChange: true });
@@ -11711,7 +12319,7 @@ function startCall(kind, origin) {
     call2.victim?.remove();
     return false;
   }
-  open = call2;
+  open2 = call2;
   lastKind = kind;
   radio2(
     call2,
@@ -11797,7 +12405,7 @@ function arrest(call2, suspect2, officer) {
   });
 }
 function endCall(call2, message) {
-  open = null;
+  open2 = null;
   for (const suspect2 of call2.suspects) {
     if (suspect2.state === "loose" || suspect2.state === "spawning") {
       suspect2.state = "gone";
@@ -11817,7 +12425,7 @@ function endCall(call2, message) {
   present();
 }
 function snatcherNear(player) {
-  const call2 = open;
+  const call2 = open2;
   if (!call2 || call2.kind !== "snatcher") {
     return null;
   }
@@ -11853,7 +12461,7 @@ function work(call2, cops) {
   }
 }
 function present() {
-  const call2 = open;
+  const call2 = open2;
   const items3 = [];
   if (call2) {
     for (const [index, suspect2] of call2.suspects.entries()) {
@@ -11884,7 +12492,7 @@ function update(now) {
     return;
   }
   const cops = officers();
-  const call2 = open;
+  const call2 = open2;
   if (call2) {
     work(call2, cops);
     if (!loose(call2).length) {
@@ -11908,7 +12516,7 @@ function update(now) {
   startCall(pick(fresh2.length ? fresh2 : kinds), anchor?.position ?? null);
 }
 function callFor(player) {
-  const call2 = open;
+  const call2 = open2;
   if (!call2) {
     return null;
   }
@@ -11940,32 +12548,32 @@ register2({
     if (!roster?.onDuty(player) || !playable(player) || player.getVehicle()) {
       return false;
     }
-    const near2 = snatcherNear(player);
-    if (!near2) {
+    const near3 = snatcherNear(player);
+    if (!near3) {
       return false;
     }
-    arrest(near2.call, near2.suspect, player);
+    arrest(near3.call, near3.suspect, player);
     return true;
   }
 });
 action("fr", "police", ([kind]) => {
   const chosen = kind === "robbery" ? "robbery" : "snatcher";
-  if (open) {
-    endCall(open, "the precinct called off the last call");
+  if (open2) {
+    endCall(open2, "the precinct called off the last call");
   }
   const anchor = officers()[0] ?? World.getPlayers()[0];
   info(
-    startCall(chosen, anchor?.position ?? null) ? `Started a ${chosen} call ${open?.where ?? ""}` : "No police call could start (no NPCs on this server yet)"
+    startCall(chosen, anchor?.position ?? null) ? `Started a ${chosen} call ${open2?.where ?? ""}` : "No police call could start (no NPCs on this server yet)"
   );
 });
 events.on("npcTaskComplete", (npc, info3) => {
-  const suspect2 = open?.suspects.find((entry2) => entry2.character.npc?.id === npc.id);
+  const suspect2 = open2?.suspects.find((entry2) => entry2.character.npc?.id === npc.id);
   if (suspect2 && !suspect2.armed && suspect2.fleeing && info3.id === suspect2.task && info3.result !== "cancelled") {
     flee(suspect2);
   }
 });
 events.on("npcDamage", (npc, info3) => {
-  const call2 = open;
+  const call2 = open2;
   if (!call2 || call2.kind !== "snatcher" || info3.healthAfter <= 0) {
     return;
   }
@@ -11976,17 +12584,17 @@ events.on("npcDamage", (npc, info3) => {
   }
 });
 onMissionChange(() => {
-  open = null;
+  open2 = null;
   clock.after(FIRST_CALL_MS);
 });
 onStop(() => {
-  const call2 = open;
+  const call2 = open2;
   if (call2) {
     for (const suspect2 of call2.suspects) {
       suspect2.character.remove();
     }
     call2.victim?.remove();
-    open = null;
+    open2 = null;
   }
   for (const [id, hint3] of prompts2) {
     const player = World.getPlayers().find((entry2) => entry2.id === id);
@@ -11999,9 +12607,9 @@ onStop(() => {
 
 // src/server/lib/stations.ts
 var SIGN_ON_RADIUS = 2.2;
-var TICK_MS8 = 250;
+var TICK_MS9 = 250;
 var UPKEEP_MS = 5e3;
-var RESPAWN_MS2 = 2e4;
+var RESPAWN_MS3 = 2e4;
 var ABANDON_MS = 3 * 6e4;
 var ABANDON_REACH = 30;
 var CREW_NEARBY = 80;
@@ -12090,8 +12698,8 @@ function presentPoints() {
 }
 function roughPosition(vehicle) {
   const { x, y, z } = vehicle.position;
-  const step = (value) => Math.round(value / FLEET_POSITION_STEP) * FLEET_POSITION_STEP;
-  return { x: step(x), y, z: step(z) };
+  const step2 = (value) => Math.round(value / FLEET_POSITION_STEP) * FLEET_POSITION_STEP;
+  return { x: step2(x), y, z: step2(z) };
 }
 function presentFleet(station5) {
   const fleet = stateOf(station5);
@@ -12156,15 +12764,15 @@ function retire(slot, evict2 = false) {
 }
 function upkeepSlot(station5, slot, spot, now, anyone) {
   const vehicle = vehicleById(slot.vehicleId);
-  if (vehicle && slot.wreckedAt !== null && now - slot.wreckedAt >= RESPAWN_MS2 && !occupied(vehicle)) {
+  if (vehicle && slot.wreckedAt !== null && now - slot.wreckedAt >= RESPAWN_MS3 && !occupied(vehicle)) {
     retire(slot);
-    slot.missingSince = now - RESPAWN_MS2;
+    slot.missingSince = now - RESPAWN_MS3;
     return;
   }
   if (!vehicle) {
     slot.vehicleId = null;
     slot.missingSince ??= now;
-    if (anyone && now - slot.missingSince >= RESPAWN_MS2 && spotClear(spot)) {
+    if (anyone && now - slot.missingSince >= RESPAWN_MS3 && spotClear(spot)) {
       spawnAt(station5, slot, spot);
     }
     return;
@@ -12180,7 +12788,7 @@ function upkeepSlot(station5, slot, spot, now, anyone) {
   slot.awaySince ??= now;
   if (now - slot.awaySince >= ABANDON_MS) {
     retire(slot);
-    slot.missingSince = now - RESPAWN_MS2;
+    slot.missingSince = now - RESPAWN_MS3;
   }
 }
 function upkeep() {
@@ -12227,7 +12835,7 @@ function stationAt(player) {
   }
   return null;
 }
-function tick8() {
+function tick9() {
   const now = Date.now();
   for (const player of World.getPlayers()) {
     const station5 = stationAt(player);
@@ -12368,7 +12976,7 @@ events.on("missionChange", () => {
   lastDrivers.clear();
   lastPoints = "";
 });
-every(TICK_MS8, tick8);
+every(TICK_MS9, tick9);
 every(UPKEEP_MS, upkeep);
 onStop(() => {
   for (const station5 of stations) {
@@ -12543,7 +13151,7 @@ var KIT = Object.freeze({
 var PAY_PER_LEVEL = 150;
 var CITIZEN_FINE = 250;
 var XP3 = 60;
-var TICK_MS9 = 2e3;
+var TICK_MS10 = 2e3;
 var HUD2 = "duty";
 var COMPASS_PRIORITY6 = 45;
 function bountyOf(player) {
@@ -12581,7 +13189,7 @@ var duty2 = defineShift({
   // backup go back.
   interrupted: "Your shift is over.",
   missionChange: "Your shift ended with the city reloading.",
-  tickMs: TICK_MS9,
+  tickMs: TICK_MS10,
   begin(player) {
     if ((Police.getRecord(player)?.level ?? 0) > 0 || bountyOf(player)) {
       return "The precinct will not swear in a wanted man.";
@@ -12606,21 +13214,21 @@ var duty2 = defineShift({
     if (!officer.spawned) {
       return;
     }
-    const near2 = suspectsAt(now).map((entry2) => ({ ...entry2, gap: distance(officer.position, entry2.player.position) })).sort((a, b) => a.gap - b.gap);
+    const near3 = suspectsAt(now).map((entry2) => ({ ...entry2, gap: distance(officer.position, entry2.player.position) })).sort((a, b) => a.gap - b.gap);
     const call2 = callFor(officer);
     promptOfficer(officer);
     compass(
       officer,
       HUD2,
       COMPASS_PRIORITY6,
-      near2[0] ? { playerId: near2[0].player.id } : call2 ? { position: call2.position } : null
+      near3[0] ? { playerId: near3[0].player.id } : call2 ? { position: call2.position } : null
     );
     card(officer, HUD2, {
       title: "Police duty",
-      subtitle: near2.length ? "Nearest suspect on your compass" : call2 ? `${call2.label}: on your compass` : "Quiet streets. Patrol.",
+      subtitle: near3.length ? "Nearest suspect on your compass" : call2 ? `${call2.label}: on your compass` : "Quiet streets. Patrol.",
       rows: [
         ...call2 ? [[call2.label, `${Math.round(call2.gap)} m`]] : [],
-        ...near2.slice(0, 3).map((entry2) => [
+        ...near3.slice(0, 3).map((entry2) => [
           entry2.player.nickname,
           `${entry2.level ? `wanted ${entry2.level}` : formatMoney(entry2.bounty)} · ${Math.round(entry2.gap)} m`
         ]),
@@ -12726,7 +13334,7 @@ var COMPASS_PRIORITY7 = 70;
 var STOP_RADIUS = 15;
 var STOP_SPEED2 = 3;
 var OUT_OF_CAB_MS = 2e4;
-var TICK_MS10 = 500;
+var TICK_MS11 = 500;
 var CARD_MS = 1e3;
 var XP4 = 25;
 var FLAG_DROP = 8;
@@ -12848,7 +13456,7 @@ function returnCab(player, delayMs = 3e3) {
     send();
   }
 }
-every(TICK_MS10, () => {
+every(TICK_MS11, () => {
   const api = taxiApi();
   if (!api) {
     return;
@@ -12881,7 +13489,7 @@ var shifts = defineShift({
   interrupted: "Shift over.",
   // The old map's fare and cab are gone; nothing to tell.
   missionChange: "",
-  tickMs: TICK_MS10,
+  tickMs: TICK_MS11,
   begin: () => ({
     phase: "cruise",
     fares: 0,
@@ -13225,21 +13833,21 @@ function tickShift(player, shift, now) {
   }
 }
 function showCard2(player, shift, cab, now) {
-  const current5 = shift.ride;
+  const current6 = shift.ride;
   const rows = [];
   let subtitle = "Cruise for a fare";
   if (shift.phase === "boarding") {
     subtitle = "Your fare is getting in";
-  } else if (current5) {
-    subtitle = `${MOODS[current5.mood].label}: to the drop-off`;
+  } else if (current6) {
+    subtitle = `${MOODS[current6.mood].label}: to the drop-off`;
     rows.push(
-      ["Meter", formatMoney(meterOf(current5))],
-      ["Drop-off", `${Math.round(flatDistance(cab.position, current5.target))} m`],
+      ["Meter", formatMoney(meterOf(current6))],
+      ["Drop-off", `${Math.round(flatDistance(cab.position, current6.target))} m`],
       [
         "Tip window",
-        current5.tipWindow.over(now) ? "missed" : formatMinutes(current5.tipWindow.left(now))
+        current6.tipWindow.over(now) ? "missed" : formatMinutes(current6.tipWindow.left(now))
       ],
-      ["Ride", current5.crashes ? plural(current5.crashes, "crash", "crashes") : "smooth"]
+      ["Ride", current6.crashes ? plural(current6.crashes, "crash", "crashes") : "smooth"]
     );
   } else if (shift.corner) {
     subtitle = "Pick up the fare at the corner";
@@ -13274,12 +13882,12 @@ provide("taxi", (player) => ({
 // src/server/lib/house_rooms.ts
 var ALL_WORLDS = -1;
 var BOXES2 = {
-  "xzed": [-3, 3, 0, 2.5, -0.12, 0.12],
+  "xzed": [-3, 3, 0, 2.5, -0.125, 0.125],
   "plotcihly3": [-6, 6, -1.35, 1.35, 0, 0],
   "plotcihly4": [-6, 6, -1.35, 1.35, 0, 0],
   "plotdrev": [-6, 6, -1.35, 1.35, 0, 0],
-  "plotdrev7": [-1.4, 0, -1.16, 1.24, 0, 0.1],
-  "2zarc": [-0.02, 0.02, 0.09, 0.41, -0.02, 0.02],
+  "plotdrev7": [-1.397, 3e-3, -1.165, 1.235, 0, 0.1],
+  "2zarc": [-0.04, 0.04, 0, 0.41, -0.03, 0.03],
   "piica": [-15.08, 7.4, 3.52, 16.61, -7.5, 5.26],
   "myhouse": [-29.58, 7.4, 3.51, 16.61, -7.5, 13.65],
   "xpostel 1": [-1.46, 0.54, -0.7, 0.66, -0.4, 2.02],
@@ -13293,10 +13901,10 @@ var BOXES2 = {
   "xpopelnik": [-0.04, 0.08, 0, 0.04, -0.07, 0.05],
   "9KAMN": [-0.54, 0.25, -0.6, 1.71, -0.25, 0.24],
   "xkybl 1": [-0.19, 0.19, 0, 0.4, -0.18, 0.18],
-  "xumyvadlo": [0, 0.5, -1.04, 0.03, -0.34, 0.36],
+  "xumyvadlo": [0, 0.503, -1.04, 0.03, -0.34, 0.36],
   "xskrin 05": [-0.63, 0.67, -0.96, 0.03, -0.3, 0.19],
   "xradio 1": [-0.09, 0.09, 0, 0.45, -0.14, 0.14],
-  "xobraz13": [-0.25, 0.25, 0, 0.35, -0.01, 0.01],
+  "xobraz13": [-0.25, 0.25, 0, 0.35, -0.015, 0.015],
   "xrohozka": [-0.21, 0.59, 0, 0.02, -0.41, 0.14],
   "xkoberec": [-1.4, 2.5, 0, 0, -1.4, 2.5],
   "xgauc 01": [-1.2, 1.19, 0, 1.02, -1.06, -0.06],
@@ -13308,9 +13916,9 @@ var BOXES2 = {
   "xskrin 21": [-0.63, 0.63, -0.08, 2, -0.36, 0.32],
   "xskrin 12": [-0.37, 0.37, 0, 0.72, -0.26, 0.24],
   "9lampic2": [-0.21, 0.21, 0, 0.73, -0.18, 0.18],
-  "xobraz01": [-0.23, 0.23, -0.23, 0.23, -0.02, 0],
-  "xobraz02": [-0.23, 0.23, -0.22, 0.22, -0.02, 0],
-  "xobraz05": [-0.23, 0.23, -0.22, 0.22, -0.02, 0],
+  "xobraz01": [-0.225, 0.225, -0.225, 0.225, -0.02, 0],
+  "xobraz02": [-0.225, 0.225, -0.225, 0.225, -0.02, 0],
+  "xobraz05": [-0.225, 0.225, -0.225, 0.225, -0.02, 0],
   "xsvetlo 10 on": [-0.27, 0.27, -0.24, 0, -0.27, 0.27],
   "9lampa1": [-0.2, 0.22, -0.72, 0.92, -0.24, 0.25],
   "xsporak": [-0.42, 0.42, 0, 1.93, -0.4, 0.45],
@@ -13318,8 +13926,8 @@ var BOXES2 = {
   "9kober1": [-2.24, 2.24, -0.02, -0.02, -1.44, 1.44],
   "xpiano": [-0.95, 0.91, -0.04, 1.59, -0.31, 0.33],
   "fikus": [-0.53, 0.49, -0.16, 1.82, -0.46, 0.63],
-  "9hodin1": [-0.25, 0.27, -1.05, 1.06, -0.21, 0.18],
-  "9obr8": [-0.51, 0.52, -0.54, 0.54, -0.03, 0.02],
+  "9hodin1": [-0.25, 0.27, -1.05, 1.06, -0.205, 0.181],
+  "9obr8": [-0.507, 0.523, -0.541, 0.538, -0.025, 0.025],
   "9stulbig": [-3.14, 3.12, -0.41, 0.53, -1.04, 1.13],
   "9zidle2": [-0.39, 0.27, -0.53, 1.03, -0.28, 0.44],
   "9skrn3b": [-0.68, 0.68, -1.25, 1.01, -0.35, 0.34],
@@ -13330,19 +13938,19 @@ var BOXES2 = {
   "9palma": [-0.93, 0.79, -0.16, 1.6, -0.82, 0.89],
   "9lustr1": [-0.37, 0.3, -0.11, 0.67, -0.33, 0.33],
   "9kober3": [-5.1, 5.1, 0, 0, -2.07, 2.07],
-  "9obr3": [-0.29, 0.29, -0.33, 0.33, -0.03, 0.02],
-  "9srnec": [-0.8, 0.78, -0.32, 0.92, -0.34, 0.26],
+  "9obr3": [-0.291, 0.285, -0.329, 0.328, -0.025, 0.025],
+  "9srnec": [-0.8, 0.78, -0.32, 0.92, -0.339, 0.264],
   "9postel2": [-1.25, 1.22, 0, 1.66, -1.53, 1.79],
   "9stolek2": [-0.42, 0.43, -0.52, 0.36, -0.41, 0.45],
   "9skrink5": [-0.51, 0.52, -0.43, 2, -0.26, 0.25],
   "9skrink1": [-0.62, 0.62, 0, 1.07, -0.31, 0.29],
-  "9zrcadlo": [-0.28, 0.28, -0.28, 0.28, 0.02, 0.05],
+  "9zrcadlo": [-0.283, 0.283, -0.276, 0.276, 0.016, 0.049],
   "9kresl1": [-0.75, 0.75, -0.15, 1.07, -0.51, 0.66],
   "9otoman": [-1.5, 1.51, -0.15, 1.05, -0.51, 0.68],
   "9stolkul": [-0.37, 0.38, -0.38, 0.5, -0.37, 0.38],
   "9kober4": [-2.24, 2.24, -0.02, -0.02, -1.44, 1.44],
   "9lustr4 on": [-0.48, 0.48, -0.02, 0.84, -0.48, 0.48],
-  "9obr5": [-0.45, 0.43, -0.22, 0.38, -0.02, 0],
+  "9obr5": [-0.449, 0.432, -0.225, 0.375, -0.02, 0],
   "9truhla": [-0.54, 0.53, -0.3, 0.29, -0.31, 0.29],
   "9vesak3": [-0.18, 0.32, -1.33, 1.05, -0.3, 0.27]
 };
@@ -13376,12 +13984,12 @@ var N2 = 0;
 var E2 = QUARTER;
 var S2 = Math.PI;
 var W2 = -QUARTER;
-function put2(model, x, y, z, facing = 0, { top = false, scale = null } = {}) {
+function put2(model, x, y, z, facing2 = 0, { top = false, scale = null } = {}) {
   const [x0, x1, y0, y1, z0, z1] = BOXES2[model];
   const sx = scale?.x ?? 1;
   const sy = scale?.y ?? 1;
   const sz = scale?.z ?? 1;
-  const yaw = facing - (FRONTS2[model] ?? Math.PI);
+  const yaw = facing2 - (FRONTS2[model] ?? Math.PI);
   const cx = (x0 + x1) / 2 * sx;
   const cz = (z0 + z1) / 2 * sz;
   const wx = cx * Math.cos(yaw) + cz * Math.sin(yaw);
@@ -13395,14 +14003,22 @@ function put2(model, x, y, z, facing = 0, { top = false, scale = null } = {}) {
     passable: PASSABLE.has(model)
   };
 }
+function hung(model, gap = HANG) {
+  const [, , , , z0, z1] = BOXES2[model];
+  return gap + (z1 - z0) / 2;
+}
 function raw2(model, position, rotation, scale = null) {
   return { model, position, rotation, scale, passable: PASSABLE.has(model) };
 }
 var ROOM_X2 = 3;
 var ROOM_Z2 = 2.25;
 var ROOM_H = 2.5;
+var PLASTER_X = ROOM_X2 - 0.05;
+var PLASTER_Z = ROOM_Z2 - 0.05;
+var ROOM_DOOR_X = -0.7;
 function roomPieces() {
   const list4 = [];
+  const { door, cut } = steelDoor(true, -PLASTER_Z, 1, ROOM_DOOR_X);
   for (const z of [-ROOM_Z2 - 0.12, ROOM_Z2 + 0.12]) {
     list4.push(raw2("xzed", { x: 0, y: 0, z }, { x: 0, y: 0, z: 0 }));
   }
@@ -13416,12 +14032,16 @@ function roomPieces() {
       )
     );
   }
-  for (const z of [-ROOM_Z2 + 0.05, ROOM_Z2 - 0.05]) {
-    list4.push(
-      raw2("plotcihly4", { x: 0, y: 1.35, z }, { x: 0, y: 0, z: 0 }, { x: 0.5, y: 1, z: 1 })
-    );
-  }
-  for (const x of [-ROOM_X2 + 0.05, ROOM_X2 - 0.05]) {
+  list4.push(
+    raw2(
+      "plotcihly4",
+      { x: 0, y: 1.35, z: PLASTER_Z },
+      { x: 0, y: 0, z: 0 },
+      { x: 0.5, y: 1, z: 1 }
+    )
+  );
+  list4.push(...facing("plotcihly4", true, -PLASTER_Z, -ROOM_X2, ROOM_X2, cut, 0.5));
+  for (const x of [-PLASTER_X, PLASTER_X]) {
     list4.push(
       raw2(
         "plotcihly4",
@@ -13447,8 +14067,8 @@ function roomPieces() {
       { x: 0.5, y: 2 * ROOM_Z2 / 2.7, z: 1 }
     )
   );
-  list4.push(raw2("plotdrev7", { x: 0, y: 1.16, z: -ROOM_Z2 + 0.06 }, { x: 0, y: 0, z: 0 }));
-  list4.push(put2("xpostel 2", 2.3, 0, 0.95, S2));
+  list4.push(door);
+  list4.push(put2("xpostel 2", PLASTER_X - 0.02 - 0.65, 0, 0.95, S2));
   list4.push(put2("xtaska 1", 2.35, 0, -0.75, N2));
   list4.push(put2("xstul10", -1.5, 0, 1.4, S2));
   list4.push(put2("xzidle 01", -0.72, 0, 1.4, W2));
@@ -13456,10 +14076,10 @@ function roomPieces() {
   list4.push(put2("xpopelnik", -1.3, 0.85, 1.1));
   list4.push(put2("9KAMN", -2.55, 0, 1.95, S2));
   list4.push(put2("xkybl 1", -2.6, 0, 1.15));
-  list4.push(put2("xumyvadlo", -ROOM_X2 + 0.05 + 0.25, 0, -0.6, E2));
-  list4.push(put2("xskrin 05", 1.6, 0, -ROOM_Z2 + 0.05 + 0.25, N2));
+  list4.push(put2("xumyvadlo", -PLASTER_X + HANG + BOXES2.xumyvadlo[1] / 2, 0, -0.6, E2));
+  list4.push(put2("xskrin 05", 1.6, 0, -PLASTER_Z + 0.25, N2));
   list4.push(put2("xradio 1", 1.3, 0.99, -ROOM_Z2 + 0.3, N2));
-  list4.push(put2("xobraz13", -1, 1.4, ROOM_Z2 - 0.06, S2));
+  list4.push(put2("xobraz13", -1, 1.4, PLASTER_Z - hung("xobraz13"), S2));
   list4.push(put2("xrohozka", -0.7, 5e-3, -1.75));
   list4.push(put2("2zarc", 0, ROOM_H, 0.2, N2, { top: true }));
   return list4;
@@ -13467,11 +14087,11 @@ function roomPieces() {
 var PIICA = Object.freeze({
   x0: -0.9,
   x1: 6.04,
-  z0: -4,
+  z0: -3.65,
   z1: 3.85,
   floor: 5.19,
   ceiling: 8.69,
-  door: { x: 1.12, z: -3.95 }
+  door: { x: 1.12, z: -3.945 }
 });
 function flatPieces() {
   const f = PIICA.floor;
@@ -13483,34 +14103,34 @@ function flatPieces() {
     put2("xkreslo 2", 4.5, f, -2.6, N2),
     put2("xstul01", 3.6, f, -1.6),
     put2("9lampa1", 5.2, f, -0.4, S2),
-    put2("xskrin 06", 5.4, f, PIICA.z0 + 0.42, N2),
-    put2("xradio 1", 5.4, f + 0.97, PIICA.z0 + 0.42, N2),
+    put2("xskrin 06", 5.4, f, PIICA.z0 + hung("xskrin 06", 0.02), N2),
+    put2("xradio 1", 5.4, f + 0.97, PIICA.z0 + hung("xskrin 06", 0.02), N2),
     put2("xkvet02", PIICA.x1 - 0.55, f, -2.1),
-    put2("xobraz05", 3.6, f + 1.75, PIICA.z0 + 0.03, N2),
+    put2("xobraz05", 3.6, f + 1.75, PIICA.z0 + hung("xobraz05"), N2),
     put2("xsporak", -0.45, f, -2, E2),
-    put2("xumyvadlo", PIICA.x0 + 0.25, f, -1, E2),
-    put2("xvesak", -0.4, f, -3.55, N2),
+    put2("xumyvadlo", PIICA.x0 + HANG + BOXES2.xumyvadlo[1] / 2, f, -1, E2),
+    put2("xvesak", -0.4, f, PIICA.z0 + 0.37, N2),
     put2("xstul05", 0.7, f, 0.9),
     put2("xzidle 01", 0.15, f, 1.85, S2),
     put2("xzidle 01", 1.25, f, 1.85, S2),
     put2("xzidle 01", 0.15, f, -0.05, N2),
     put2("xzidle 01", 1.25, f, -0.05, N2),
-    put2("xobraz02", PIICA.x0 + 0.03, f + 1.6, 0.9, E2),
+    put2("xobraz02", PIICA.x0 + hung("xobraz02"), f + 1.6, 0.9, E2),
     put2("xkvet01", 5.75, f, 0.55),
     put2("xskrin 21", 0, f, PIICA.z1 - 0.37, S2),
     put2("xpostel 1", 4.4, f, 2.6, S2),
     put2("xskrin 12", 2.95, f, PIICA.z1 - 0.3, S2),
     put2("9lampic2", 2.95, f + 0.72, PIICA.z1 - 0.3, S2),
-    put2("xobraz01", 4.4, f + 1.75, PIICA.z1 - 0.03, S2),
+    put2("xobraz01", 4.4, f + 1.75, PIICA.z1 - hung("xobraz01"), S2),
     put2("xsvetlo 10 on", 3.4, PIICA.ceiling, -1.4, N2, { top: true }),
     put2("xsvetlo 10 on", 2.6, PIICA.ceiling, 2, N2, { top: true })
   ];
 }
 var SALON = Object.freeze({
-  x0: -0.16,
-  x1: 6.98,
-  z0: -4.01,
-  z1: 4.39,
+  x0: 0.2,
+  x1: 6.47,
+  z0: -3.55,
+  z1: 4.14,
   floor: 5.17,
   ceiling: 8.35,
   south: { x: 1.13, z: -3.96 },
@@ -13523,9 +14143,9 @@ function salonPieces() {
     raw2("myhouse", { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }),
     put2("9kober1", 4, f + 0.01, -0.3),
     put2("9lustr2", 3.4, SALON.ceiling, 0.2, 0, { top: true }),
-    put2("xpiano", SALON.x0 + 0.34, f, -2, E2),
-    put2("fikus", 0.45, f, 2.2),
-    put2("9hodin1", 3.25, f, SALON.z1 - 0.21, S2),
+    put2("xpiano", SALON.x0 + hung("xpiano", 0.02), f, -2, E2),
+    put2("fikus", SALON.x0 + 0.53, f, 2.2),
+    put2("9hodin1", 3.25, f, SALON.z1 - hung("9hodin1", 0.02), S2),
     put2("9lampa1", 3, f, -2.6, 0)
   ];
 }
@@ -13537,15 +14157,15 @@ function diningPieces() {
     put2("9stulbig", 3.1, f, 0.6, E2, { scale: { x: 0.75, y: 1, z: 1 } }),
     put2("9skrn3b", 1, f, PIICA.z1 - 0.36, S2),
     put2("9skrinhod", 5.2, f, PIICA.z1 - 0.23, S2),
-    put2("9obr3", 3.1, f + 1.9, PIICA.z1 - 0.03, S2),
+    put2("9obr3", 3.1, f + 1.9, PIICA.z1 - hung("9obr3"), S2),
     put2("9krb", PIICA.x0 + 0.36, f, 0.6, E2),
     put2("9srnec", PIICA.x0 + 0.32, f + 2.25, 0.6, E2),
     put2("9stolov", PIICA.x1 - 0.4, f, 0, W2),
     put2("9vaza2", PIICA.x1 - 0.4, f + 0.81, -0.55),
     put2("9vaza2", PIICA.x1 - 0.4, f + 0.81, 0.55),
-    put2("9obr8", PIICA.x1 - 0.03, f + 1.85, 0, W2),
-    put2("9palma", 5, f, -3.1),
-    put2("fikus", -0.35, f, -3.35),
+    put2("9obr8", PIICA.x1 - hung("9obr8"), f + 1.85, 0, W2),
+    put2("9palma", 5, f, PIICA.z0 + hung("9palma", 0.02)),
+    put2("fikus", -0.35, f, PIICA.z0 + 0.57),
     put2("9lustr1", 3.1, PIICA.ceiling, -0.3, N2, { top: true }),
     put2("9lustr1", 3.1, PIICA.ceiling, 1.7, N2, { top: true })
   ];
@@ -13565,15 +14185,15 @@ function bedroomPieces() {
     put2("9stolek2", 5.25, f, PIICA.z1 - 0.45, S2),
     put2("9lampic2", 1.75, f + 0.88, PIICA.z1 - 0.45, S2),
     put2("9lampic2", 5.25, f + 0.88, PIICA.z1 - 0.45, S2),
-    put2("9obr5", 3.5, f + 2.1, PIICA.z1 - 0.03, S2),
+    put2("9obr5", 3.5, f + 2.1, PIICA.z1 - hung("9obr5"), S2),
     put2("9truhla", 3.5, f, 0.05, S2),
-    put2("9skrink5", PIICA.x0 + 0.26, f, 1.8, E2),
-    put2("9skrink1", PIICA.x0 + 0.31, f, -0.6, E2),
-    put2("9zrcadlo", PIICA.x0 + 0.03, f + 1.55, -0.6, E2),
+    put2("9skrink5", PIICA.x0 + hung("9skrink5", 0.01), f, 1.8, E2),
+    put2("9skrink1", PIICA.x0 + hung("9skrink1", 0.01), f, -0.6, E2),
+    put2("9zrcadlo", PIICA.x0 + hung("9zrcadlo"), f + 1.55, -0.6, E2),
     put2("9kresl1", PIICA.x1 - 0.6, f, -1.8, W2),
     put2("9stolkul", 4.3, f, -1.8),
-    put2("9otoman", 3.6, f, PIICA.z0 + 0.6, N2),
-    put2("9vesak3", -0.45, f, -3.55, N2),
+    put2("9otoman", 3.6, f, PIICA.z0 + hung("9otoman", 0.02), N2),
+    put2("9vesak3", -0.45, f, PIICA.z0 + 0.3, N2),
     put2("9lustr4 on", 2.57, PIICA.ceiling, 0, N2, { top: true })
   ];
 }
@@ -13590,7 +14210,7 @@ var ROOMS2 = {
       floor: 0,
       ceiling: ROOM_H
     },
-    walls: { x0: -ROOM_X2 + 0.05, x1: ROOM_X2 - 0.05, z0: -ROOM_Z2 + 0.05, z1: ROOM_Z2 - 0.05 },
+    walls: { x0: -PLASTER_X, x1: PLASTER_X, z0: -PLASTER_Z, z1: PLASTER_Z },
     arrive: { position: { x: -0.7, y: 0.05, z: -1.4 }, heading: 0 },
     doors: [{ at: { x: -0.7, y: 0, z: -1.85 }, to: "street", label: "EXIT" }]
   },
@@ -13614,14 +14234,13 @@ var ROOMS2 = {
     pieces: salonPieces,
     bounds: {
       x0: SALON.x0 + 0.15,
-      x1: SALON.x1 - 0.25,
+      x1: SALON.x1 - 0.15,
       z0: SALON.z0 + 0.15,
       z1: SALON.z1 - 0.15,
       floor: SALON.floor,
       ceiling: SALON.ceiling
     },
-    // The east wall's curtains stand 0.18 m into the room.
-    walls: { x0: SALON.x0, x1: SALON.x1 - 0.18, z0: SALON.z0, z1: SALON.z1 },
+    walls: { x0: SALON.x0, x1: SALON.x1, z0: SALON.z0, z1: SALON.z1 },
     arrive: { position: { x: SALON.south.x, y: SALON.floor + 0.05, z: -3.2 }, heading: 0 },
     doors: [
       { at: { x: SALON.south.x, y: SALON.floor, z: -3.5 }, to: "street", label: "EXIT" },
@@ -14023,8 +14642,8 @@ function occupants(house) {
   return World.getPlayers().filter((player) => inside2.get(player.id)?.houseId === house.id);
 }
 function blocked3(player) {
-  const current5 = activity(player);
-  if (current5 && BLOCKING_ACTIVITIES2.has(current5.kind)) {
+  const current6 = activity(player);
+  if (current6 && BLOCKING_ACTIVITIES2.has(current6.kind)) {
     return busyMessage(player);
   }
   if ((Police.getRecord(player)?.level ?? 0) > 0) {
@@ -14131,11 +14750,10 @@ function burningInterior(player) {
   if (spot) {
     return incidents.get(spot.incidentId) ?? null;
   }
-  const interior = insideOf(player);
-  if (!interior) {
-    return null;
-  }
-  return [...incidents.values()].find((incident) => incident.bar?.interior.id === interior.id) ?? null;
+  return [...incidents.values()].find((incident) => incident.bar && inBar(incident.bar, player)) ?? null;
+}
+function inBar(bar, player) {
+  return bar.entry.kind === "arrow" ? insideOf(player)?.id === bar.entry.interior.id : player.virtualWorld === bar.world && bar.entry.inside(player.position);
 }
 function incidentNear(player) {
   const inside5 = burningInterior(player);
@@ -14189,7 +14807,7 @@ function targetOf(incident, player) {
     const inside5 = incident.civilians.filter((civilian) => civilian.state === "trapped").flatMap((civilian) => civilian.npc ? [civilian.npc] : []).sort(
       (a, b) => distance(a.position, player.position) - distance(b.position, player.position)
     )[0];
-    return inside5?.position ?? incident.bar.interior.inside.position;
+    return inside5?.position ?? incident.bar.hall;
   }
   return incident.position;
 }
@@ -14292,8 +14910,8 @@ var PLANS = {
     label: "the salon",
     fires: [
       { x: 3, z: -2.6, radius: 0.7, height: 1.8, what: "the standard lamp" },
-      { x: 6.5, z: -1.5, radius: 0.9, height: 2.6, what: "the curtains" },
-      { x: 6.5, z: 2.2, radius: 0.9, height: 2.6, what: "the curtains" },
+      { x: 6.3, z: -1.5, radius: 0.9, height: 2.6, what: "the curtains" },
+      { x: 6.3, z: 2.2, radius: 0.9, height: 2.6, what: "the curtains" },
       { x: 3.25, z: 3.9, radius: 0.7, height: 2, what: "the clock" },
       { x: 4, z: -0.3, radius: 1.3, height: 1, what: "the rug" }
     ],
@@ -14305,7 +14923,7 @@ var PLANS = {
     fires: [
       { x: 3.1, z: 0.6, radius: 1.3, height: 1.2, what: "the dining table" },
       { x: 1, z: 3.4, radius: 0.8, height: 1.8, what: "the cabinet" },
-      { x: 5, z: -3.1, radius: 0.8, height: 1.6, what: "the palm" }
+      { x: 5, z: -2.78, radius: 0.8, height: 1.6, what: "the palm" }
     ],
     people: [
       { x: 5.5, z: 1.9 },
@@ -14317,7 +14935,7 @@ var PLANS = {
     label: "the bedroom",
     fires: [
       { x: 3.5, z: 2.1, radius: 1.3, height: 1.2, what: "the bed" },
-      { x: 3.6, z: -3.4, radius: 0.9, height: 1, what: "the ottoman" },
+      { x: 3.6, z: -3.04, radius: 0.9, height: 1, what: "the ottoman" },
       { x: -0.64, z: 1.8, radius: 0.7, height: 2, what: "the wardrobe" },
       { x: 5.44, z: -1.8, radius: 0.8, height: 1.2, what: "the armchair" }
     ],
@@ -14398,7 +15016,7 @@ function leadOut(player, incident, civilian) {
   civilian.npc?.follow(player, 1.6);
   toast(
     player,
-    incident.bar || incident.building ? "They are on their feet. Lead them to the exit arrow; they come out with you." : "They are on their feet. Lead them well clear of the fire.",
+    incident.bar?.entry.kind === "doors" ? "They are on their feet. Lead them out through a door, clear of the building." : incident.bar || incident.building ? "They are on their feet. Lead them to the exit arrow; they come out with you." : "They are on their feet. Lead them well clear of the fire.",
     { title: "Rescue", tone: "gold" }
   );
   presentIncidents();
@@ -14520,8 +15138,16 @@ function follow(incident, civilian, npc) {
   }
   const leader = playerById(civilian.leaderId);
   const bar = incident.bar;
-  const behind = bar && leader && insideOf(leader)?.id !== bar.interior.id;
-  const exit2 = bar?.interior.inside.position;
+  if (bar?.entry.kind === "doors") {
+    if (bar.entry.clear(npc.position)) {
+      rescued(incident, civilian);
+    } else if (!leader || !leader.alive) {
+      leftBehind(civilian, npc, null, "");
+    }
+    return;
+  }
+  const behind = bar && leader && !inBar(bar, leader);
+  const exit2 = bar?.entry.interior.inside.position;
   if (bar && exit2 && flatDistance(npc.position, exit2) <= EXIT_REACH && Math.abs(npc.position.y - exit2.y) < 3) {
     bringOut(incident, bar.street, civilian);
   } else if (!leader || !leader.alive || behind) {
@@ -14943,8 +15569,8 @@ function spread(incident, building, now) {
     return;
   }
   const burningRooms = new Set(alight.map((fire) => building.roomOf.get(fire.id)));
-  const near2 = building.spare.filter((spot2) => burningRooms.has(spot2.room));
-  const spot = pick(near2.length ? near2 : building.spare);
+  const near3 = building.spare.filter((spot2) => burningRooms.has(spot2.room));
+  const spot = pick(near3.length ? near3 : building.spare);
   if (!spot) {
     return;
   }
@@ -15018,9 +15644,9 @@ function buildingRows(player, incident, now) {
 }
 
 // src/server/firefighters/bar.ts
+var CLEAR_OF_BAR = 4.5;
 var BAR_FIRES = {
   morello: {
-    interior: "b:morello",
     front: { x: -408, y: 17.45, z: 450.6 },
     people: [0, 3, 4],
     rooms: () => [
@@ -15048,15 +15674,36 @@ var BAR_FIRES = {
     ]
   }
 };
+function entryOf(bar, layout) {
+  if (layout.interior) {
+    const interior = current()?.interiors?.find((entry2) => entry2.id === layout.interior);
+    return interior ? {
+      entry: { kind: "arrow", interior },
+      door: interior.outside.position,
+      hall: interior.inside.position
+    } : null;
+  }
+  if (!bar.rooms) {
+    return null;
+  }
+  return {
+    entry: {
+      kind: "doors",
+      inside: (position) => contains(bar, position),
+      clear: (position) => gapFromRooms(bar, position) >= CLEAR_OF_BAR
+    },
+    door: bar.door ?? layout.front,
+    hall: bar.counter.position
+  };
+}
 function barVenue() {
-  const map = current();
   for (const bar of bars()) {
     const layout = BAR_FIRES[bar.id];
-    const interior = layout && map?.interiors?.find((entry2) => entry2.id === layout.interior);
-    if (!layout || !interior || bar.built && !isBuilt()) {
+    const way = layout ? entryOf(bar, layout) : null;
+    if (!layout || !way || bar.built && !isBuilt()) {
       continue;
     }
-    return { bar, layout, interior };
+    return { bar, layout, way };
   }
   return null;
 }
@@ -15068,7 +15715,7 @@ function startBarFire() {
   if ([...incidents.values()].some((incident2) => incident2.kind === "bar")) {
     return null;
   }
-  const { bar, layout, interior } = venue2;
+  const { bar, layout, way } = venue2;
   const front = Fire.create(layout.front, {
     radius: 2,
     height: 4,
@@ -15095,12 +15742,12 @@ function startBarFire() {
   ).filter((fire) => fire !== null);
   const incident = newIncident(
     "bar",
-    plain(interior.outside.position),
+    plain(way.door),
     `FIRE AT ${bar.name.toUpperCase()}`,
     front,
     {
       extra: inside5,
-      bar: { id: bar.id, name: bar.name, interior, world, street: layout.street }
+      bar: { id: bar.id, name: bar.name, ...way, world, street: layout.street }
     }
   );
   incidents.set(incident.id, incident);
@@ -15597,7 +16244,7 @@ var EXTINGUISHER_DOUSE = 0.035;
 var REFILL_REACH = 8;
 function nearestTruck(player) {
   const indoors2 = burningInterior(player);
-  const door = indoors2?.bar?.interior.outside.position ?? indoors2?.building?.door;
+  const door = indoors2?.bar?.door ?? indoors2?.building?.door;
   return station.nearestVehicle(door ?? player.position);
 }
 function indoorsNow(player) {
@@ -15737,9 +16384,9 @@ var crewKey = {
       return true;
     }
     const hose = hoseFor(player, crew);
-    const near2 = fireNear(player, incidentNear(player), hose);
+    const near3 = fireNear(player, incidentNear(player), hose);
     if (!hose) {
-      if (!near2) {
+      if (!near3) {
         return false;
       }
       toast(
@@ -15749,7 +16396,7 @@ var crewKey = {
       );
       return true;
     }
-    if (hose.onFoot && !near2) {
+    if (hose.onFoot && !near3) {
       return false;
     }
     crew.spraying = true;
@@ -15782,7 +16429,7 @@ var STATIONS = {
   freeride_extended: CITY_STATION,
   freeridenoc: CITY_STATION
 };
-var TICK_MS11 = 250;
+var TICK_MS12 = 250;
 var CARD_MS2 = 1e3;
 var COMPASS_PRIORITY8 = 44;
 function available2() {
@@ -15820,7 +16467,7 @@ var crews2 = defineShift({
     directions: () => "Sign on at the fire station in the Works Quarter: follow the compass to the arrow by the garage doors and press G."
   },
   interrupted: "Your shift is over.",
-  tickMs: TICK_MS11,
+  tickMs: TICK_MS12,
   begin(player) {
     const hose = WaterJet.create(player);
     if (!hose) {
@@ -15867,7 +16514,8 @@ var crews2 = defineShift({
       release3(player);
     }
   },
-  summary: (crew) => `You earned ${formatMoney(crew.earned)} this shift.`
+  // Each fire pays the moment it is out; clocking off pays nothing more.
+  summary: (crew) => crew.earned > 0 ? `This shift's pay, ${formatMoney(crew.earned)}, is already in your pocket.` : ""
 });
 function takeWheel2(player, truck2) {
   const crew = crews2.get(player);
@@ -15912,7 +16560,7 @@ function rounds(player, crew) {
   if (isHeld(player) && crew.spraying) {
     spray(player, crew);
   }
-  tendExtinguisher(player, crew, TICK_MS11);
+  tendExtinguisher(player, crew, TICK_MS12);
   const nearest3 = incidentNear(player);
   compass(
     player,
@@ -15922,7 +16570,7 @@ function rounds(player, crew) {
   );
   const rescue = rescueNear(player);
   const hose = hoseFor(player, crew);
-  const near2 = nearest3 && hose && (nearest3.gap < hose.reach + 10 || burningInterior(player) === nearest3.incident);
+  const near3 = nearest3 && hose && (nearest3.gap < hose.reach + 10 || burningInterior(player) === nearest3.incident);
   let hint3 = null;
   const door = rescue ? null : doorHint(player);
   const indoors2 = indoorsNow(player);
@@ -15935,7 +16583,7 @@ function rounds(player, crew) {
     hint3 = indoors2 ? `EXTINGUISHER ${charge} · RELEASE G TO STOP` : "SPRAYING · RELEASE G TO STOP";
   } else if (indoors2 && crew.charge <= 0) {
     hint3 = "EXTINGUISHER EMPTY · REFILL AT A TRUCK";
-  } else if (near2 && burning(nearest3.incident)) {
+  } else if (near3 && burning(nearest3.incident)) {
     hint3 = indoors2 ? `[G] HOLD FOR THE EXTINGUISHER · ${charge}` : "[G] HOLD TO SPRAY";
   }
   hint3 = arsonistHint(player) ?? hint3;
@@ -16000,7 +16648,7 @@ function cardOf(player, crew, now) {
     if (building) {
       subtitle = building.subtitle;
     } else if (incident.bar) {
-      subtitle = burningInterior(player) === incident ? "Put the room out, lead them to the exit arrow" : `People inside ${incident.bar.name}: in through the door`;
+      subtitle = burningInterior(player) === incident ? incident.bar.entry.kind === "doors" ? "Put the room out, lead them out through a door" : "Put the room out, lead them to the exit arrow" : `People inside ${incident.bar.name}: in through the door`;
     } else if (fuseAt) {
       subtitle = "Knock the flames down before the pumps go up";
     } else if (!burning(incident) && arsonist?.state === "fleeing") {
@@ -16389,7 +17037,7 @@ function hospital2() {
 var PICKUP_REACH = 20;
 var CRASH_COOLDOWN_MS2 = 3e3;
 var arrivals = /* @__PURE__ */ new Map();
-function toHospital(player, medic, call2, opening) {
+function toHospital(player, medic, call2, opening2) {
   const ambulance2 = ambulanceOf(medic);
   const home = hospital2();
   if (!ambulance2 || !home) {
@@ -16409,7 +17057,7 @@ function toHospital(player, medic, call2, opening) {
   presentCalls();
   toast(
     player,
-    `${opening}Bring the ambulance up and stop beside them, then get them to ${home.name}; ${formatMinutes(deadline - Date.now())} for a tip${call2.kind === "labour" ? ", and drive smoothly" : ""}.`,
+    `${opening2}Bring the ambulance up and stop beside them, then get them to ${home.name}; ${formatMinutes(deadline - Date.now())} for a tip${call2.kind === "labour" ? ", and drive smoothly" : ""}.`,
     { title: "Ambulance", tone: "gold" }
   );
 }
@@ -16842,14 +17490,14 @@ function forget6() {
 function teardown4() {
   jail.teardown();
 }
-function setDoor(cell, open2) {
+function setDoor(cell, open3) {
   const door = doors.get(cell.index);
-  if (!door || door.open === open2) {
+  if (!door || door.open === open3) {
     return false;
   }
-  door.open = open2;
+  door.open = open3;
   door.since = Date.now();
-  door.object.moveTo(toWorld4(open2 ? cell.door.open : cell.door.closed), DOOR_SPEED);
+  door.object.moveTo(toWorld4(open3 ? cell.door.open : cell.door.closed), DOOR_SPEED);
   return true;
 }
 function openDoor(cell) {
@@ -17090,7 +17738,7 @@ var TREAT_MS = 5e3;
 var REVIVE_MS = 4e3;
 var BAY_RADIUS = 22;
 var BAY_SPEED = 3;
-var TICK_MS12 = 250;
+var TICK_MS13 = 250;
 var CARD_MS3 = 1e3;
 var COMPASS_PRIORITY10 = 43;
 var CRASH_SPEED_DROP2 = 9;
@@ -17130,7 +17778,7 @@ var medics = defineShift({
     directions: () => `Sign on at ${hospital2()?.name ?? "the hospital"}: follow the compass to the arrow at the foot of the steps and press G.`
   },
   interrupted: "Your shift is over.",
-  tickMs: TICK_MS12,
+  tickMs: TICK_MS13,
   begin: () => ({
     ambulanceId: null,
     earned: 0,
@@ -17197,13 +17845,13 @@ function rounds2(player, medic, now) {
     return;
   }
   medic.cprAt = 0;
-  const near2 = player.getVehicle() ? null : callNear(player);
+  const near3 = player.getVehicle() ? null : callNear(player);
   let hint3 = null;
-  if (near2?.kind === "downed") {
+  if (near3?.kind === "downed") {
     hint3 = "[G] HOLD TO REVIVE";
-  } else if (near2?.kind === "cardiac") {
+  } else if (near3?.kind === "cardiac") {
     hint3 = "[G] TAP STEADILY FOR CPR";
-  } else if (near2) {
+  } else if (near3) {
     hint3 = "[G] HOLD TO TREAT";
   }
   if (hint3 !== medic.hint) {
@@ -17330,19 +17978,19 @@ function cardOf2(player, medic, now) {
       rows.push(["Hospital", `${Math.round(flatDistance(player.position, home.bay))} m`]);
     }
   } else if (nearest3) {
-    const open2 = nearest3.call;
+    const open3 = nearest3.call;
     rows.push([
-      open2.triage ? `Pile-up · ${TRIAGE[open2.triage].label.toLowerCase()}` : KIND_ROWS[open2.kind],
+      open3.triage ? `Pile-up · ${TRIAGE[open3.triage].label.toLowerCase()}` : KIND_ROWS[open3.kind],
       `${Math.round(nearest3.gap)} m`
     ]);
-    if (open2.expires) {
+    if (open3.expires) {
       rows.push([
-        open2.kind === "cardiac" ? "His time" : "Bleeding out in",
-        formatMinutes(Math.max(0, open2.expires - now))
+        open3.kind === "cardiac" ? "His time" : "Bleeding out in",
+        formatMinutes(Math.max(0, open3.expires - now))
       ]);
     }
-    if (open2.cpr?.count) {
-      rows.push(["CPR", `${open2.cpr.count}/${CPR_NEEDED}`]);
+    if (open3.cpr?.count) {
+      rows.push(["CPR", `${open3.cpr.count}/${CPR_NEEDED}`]);
     }
   }
   rows.push([
@@ -17401,15 +18049,15 @@ function triageOrder(call2) {
   return call2.triage ? TRIAGE[call2.triage].order : 0;
 }
 function presentCalls() {
-  const open2 = [...calls2.values()].filter((call2) => call2.state === "waiting");
+  const open3 = [...calls2.values()].filter((call2) => call2.state === "waiting");
   const leads = /* @__PURE__ */ new Set();
   for (const group of pileups.values()) {
-    const lead2 = open2.filter((call2) => call2.pileupId === group.id).sort((a, b) => triageOrder(a) - triageOrder(b))[0];
+    const lead2 = open3.filter((call2) => call2.pileupId === group.id).sort((a, b) => triageOrder(a) - triageOrder(b))[0];
     if (lead2) {
       leads.add(lead2.id);
     }
   }
-  const items3 = open2.map((call2) => {
+  const items3 = open3.map((call2) => {
     const grouped = call2.pileupId !== null;
     const lead2 = leads.has(call2.id);
     let map;
@@ -17629,14 +18277,14 @@ function releaseMedic(player, patient) {
   if (call2) {
     closeCall(call2);
   }
-  for (const open2 of calls2.values()) {
-    if (open2.medicId === player.id && open2.state === "waiting") {
-      open2.medicId = null;
+  for (const open3 of calls2.values()) {
+    if (open3.medicId === player.id && open3.state === "waiting") {
+      open3.medicId = null;
     }
   }
-  for (const open2 of [...calls2.values()]) {
-    if (open2.kind === "downed" && !otherMedic(open2.playerId)) {
-      closeCall(open2);
+  for (const open3 of [...calls2.values()]) {
+    if (open3.kind === "downed" && !otherMedic(open3.playerId)) {
+      closeCall(open3);
     }
   }
 }
@@ -17945,11 +18593,11 @@ function buyers() {
   return farm()?.buyers ?? [];
 }
 function siteNow() {
-  const current5 = site();
-  if (!current5) {
+  const current6 = site();
+  if (!current6) {
     throw new Error("farm: no farm on this map");
   }
-  return current5;
+  return current6;
 }
 
 // src/server/farm/state.ts
@@ -18319,6 +18967,40 @@ function grade(entry2) {
 var HUD4 = "farm";
 var COMPASS_PRIORITY11 = 45;
 var LABEL_RANGE2 = 25;
+var GRID_RANGE = 60;
+var TILE = { w: 2.4, d: 4.2 };
+function plotLook(player, plant) {
+  if (!plant) {
+    return { color: COLORS.muted, solid: false };
+  }
+  if (!mine2(player, plant)) {
+    return { color: COLORS.muted, solid: true };
+  }
+  if (plant.pest) {
+    return { color: COLORS.red, solid: true };
+  }
+  if (ripe(plant)) {
+    return { color: COLORS.gold, solid: true };
+  }
+  return plant.dry ? { color: COLORS.blue, solid: true } : { color: LEAF, solid: true };
+}
+function plotTiles(player, canPlant) {
+  const site2 = siteNow();
+  if (flatDistance(player.position, site2.field.center) > GRID_RANGE) {
+    return [];
+  }
+  return site2.plots.map((plot) => {
+    const plant = field.get(plot.id);
+    const { color, solid } = plotLook(player, plant);
+    return {
+      id: `t${plot.id}`,
+      position: { x: plot.x, y: plot.y, z: plot.z },
+      color,
+      tile: { ...TILE, solid, glow: !plant && canPlant ? LEAF : void 0 },
+      map: false
+    };
+  });
+}
 function nextStep(farmhand, stock, plants) {
   if (plants.some(ripe)) {
     return "Hold G at the ripe plants to pick the leaves";
@@ -18427,6 +19109,7 @@ function markerItems(player, farmhand, stock, entry2) {
     near: 45,
     map: { icon: "square", label: "Tobacco field", size: 5 }
   });
+  items3.push(...plotTiles(player, ownPlants(keyOf(player)).length < MAX_PLANTS));
   for (const { plant } of plantsNear(player.position, LABEL_RANGE2)) {
     if (!wilting(plant)) {
       continue;
@@ -18511,7 +19194,7 @@ function present4(player, farmhand) {
 // src/server/farm/duty.ts
 var TRUCK2 = "trucka00.i3d";
 var HOSE_TO_TRUCK2 = 30;
-var TICK_MS13 = 250;
+var TICK_MS14 = 250;
 var CLOCK_OFF = "Off duty. Your plants keep growing.";
 var station3 = define({
   id: "farm",
@@ -18524,8 +19207,8 @@ var station3 = define({
   vehicleLabel: "FARM TRUCK",
   pitch: "Grow tobacco: plant seedlings in the field beside the barn, water them with a farm truck's hose as they grow, pick the leaves and cure them here, then drive the tobacco to a buyer. Press G here to sign on.",
   place: () => {
-    const current5 = site();
-    return current5 ? { signOn: current5.signOn, spots: current5.spots } : null;
+    const current6 = site();
+    return current6 ? { signOn: current6.signOn, spots: current6.spots } : null;
   },
   available: available3,
   onDuty: (player) => farmers.has(player),
@@ -18551,7 +19234,7 @@ var farmers = defineShift({
   // Another module took the player off the job: an arrest and the jail.
   interrupted: "Your shift is over.",
   missionChange: "Your shift ended with the map change. Your plants wait for you.",
-  tickMs: TICK_MS13,
+  tickMs: TICK_MS14,
   begin: (player) => keyOf(player) ? { earned: 0, jet: null, action: null, hint: void 0 } : "Log in first.",
   started(player) {
     feed("farm", [name(player, LEAF), text(" went to work on the tobacco farm")]);
@@ -18568,7 +19251,8 @@ var farmers = defineShift({
       show(player);
     }
   },
-  summary: (farmer) => `You earned ${formatMoney(farmer.earned)} this shift.`
+  // Sales and tips are paid the moment they happen; clocking off pays nothing more.
+  summary: (farmer) => farmer.earned > 0 ? `This shift's sales and tips, ${formatMoney(farmer.earned)}, are already in your pocket.` : "Nothing sold this shift."
 });
 function clockOff(player) {
   farmers.stop(player, CLOCK_OFF);
@@ -19084,7 +19768,7 @@ register2({
 });
 
 // src/server/farm/index.ts
-var TICK_MS14 = 250;
+var TICK_MS15 = 250;
 var CARD_MS4 = 1e3;
 var MAX_STEP_MS = 2e3;
 var lastTick = Date.now();
@@ -19095,7 +19779,7 @@ function returnCargo() {
   }
   cargo.clear();
 }
-function tick9() {
+function tick10() {
   const now = Date.now();
   const dt = Math.min(MAX_STEP_MS, Math.max(0, now - lastTick));
   lastTick = now;
@@ -19156,7 +19840,7 @@ provide("farm", (player) => {
 load9();
 onStart(() => {
   lastTick = Date.now();
-  every(TICK_MS14, tick9);
+  every(TICK_MS15, tick10);
 });
 onStop(() => {
   returnCargo();
@@ -19179,7 +19863,7 @@ onMissionChange(() => {
 var TURF_COUNT = 8;
 var RADIUS = 45;
 var CAPTURE_MS = 6e4;
-var TICK_MS15 = 2e3;
+var TICK_MS16 = 2e3;
 var INCOME_EVERY_MS = 3 * 6e4;
 var INCOME = 40;
 var CAPTURE_XP = 60;
@@ -19281,7 +19965,7 @@ function tickTurf(turf, street2, onTurf) {
       turf.by = taker.tag;
       turf.progress = 0;
     }
-    turf.progress += TICK_MS15;
+    turf.progress += TICK_MS16;
     if (turf.progress >= CAPTURE_MS) {
       const previous = turf.owner;
       turf.owner = { tag: taker.tag, name: taker.name, color: taker.color };
@@ -19334,7 +20018,7 @@ function payIncome() {
     });
   }
 }
-function tick10() {
+function tick11() {
   const now = Date.now();
   const street2 = World.getPlayers().filter(
     (player) => playable(player) && player.virtualWorld === MAIN_WORLD
@@ -19377,7 +20061,7 @@ onStart(() => {
   lastIncome = Date.now();
   publish3();
 });
-every(TICK_MS15, tick10);
+every(TICK_MS16, tick11);
 events.on("playerSpawn", (player) => publish3(player));
 onMissionChange(useMap);
 
@@ -19389,7 +20073,7 @@ var PRIZE = 100;
 var FULL_SET_BONUS = 2500;
 var XP8 = 20;
 var SHOW_WITHIN = 45;
-var TICK_MS16 = 500;
+var TICK_MS17 = 500;
 var SEED = 6449;
 var MAX_ATTEMPTS = 5e3;
 var KERB_OFFSET = 3.5;
@@ -19467,7 +20151,7 @@ function collect2(player, spot, done) {
     });
   }
 }
-every(TICK_MS16, () => {
+every(TICK_MS17, () => {
   for (const player of World.getPlayers()) {
     if (!playable(player) || player.virtualWorld !== MAIN_WORLD) {
       continue;
@@ -19504,7 +20188,7 @@ var RADIUS2 = 14;
 var REPEAT_MS = 1e4;
 var MIN_KMH = 40;
 var RECORD_PRIZE = 150;
-var TICK_MS17 = 150;
+var TICK_MS18 = 150;
 var MARKER_RANGE3 = 250;
 var currentTraps = perMap(
   (map) => forMap(map).lines.slice().sort((a, b) => b.length - a.length).slice(0, TRAP_COUNT).map((road, index) => ({
@@ -19583,7 +20267,7 @@ function clock4(player, trap2, kmh) {
     { title: `Speed trap ${trap2.id}`, seconds: 3 }
   );
 }
-every(TICK_MS17, () => {
+every(TICK_MS18, () => {
   const now = Date.now();
   for (const player of World.getPlayers()) {
     const car = playable(player) && player.virtualWorld === MAIN_WORLD && player.getSeat() === 0 ? player.getVehicle() : null;
@@ -19646,7 +20330,7 @@ var RESTOCK_MS = 10 * 6e4;
 var MIN_TAKE = 250;
 var MAX_TAKE = 450;
 var XP9 = 60;
-var TICK_MS18 = 500;
+var TICK_MS19 = 500;
 var restockedAt = /* @__PURE__ */ new Map();
 var holdups = new PlayerMap();
 function armed(player) {
@@ -19665,7 +20349,7 @@ function stop2(player, message) {
     toast(player, message, { title: holdup.shop.name, tone: "bad" });
   }
 }
-function tick11() {
+function tick12() {
   const now = Date.now();
   for (const [id, holdup] of holdups) {
     const player = playerById(id);
@@ -19764,7 +20448,7 @@ provide(
     )
   }))
 );
-every(TICK_MS18, tick11);
+every(TICK_MS19, tick12);
 events.on("playerDeath", (player) => stop2(player, "The hold-up ended with you on the floor."));
 
 // src/server/bootleg.ts
@@ -19778,7 +20462,7 @@ var LOAD_MS2 = 8e3;
 var DELIVERY_MS = 10 * 6e4;
 var PAY4 = 700;
 var XP10 = 120;
-var TICK_MS19 = 500;
+var TICK_MS20 = 500;
 var runs = new PlayerMap();
 function available4() {
   const places2 = current()?.places ?? [];
@@ -19880,7 +20564,7 @@ function advance(player, run2, goal, now) {
   }
   return true;
 }
-function tick12() {
+function tick13() {
   const now = Date.now();
   for (const [id, previous] of runs) {
     const player = playerById(id);
@@ -19953,7 +20637,7 @@ provide("bootleg", (player) => ({
   active: runs.has(player.id),
   pay: PAY4
 }));
-every(TICK_MS19, tick12);
+every(TICK_MS20, tick13);
 onMissionChange(() => {
   for (const player of World.getPlayers()) {
     end3(player, null);
@@ -19998,23 +20682,23 @@ var Interactions = class {
   }
   /** Fills the holds; a hold whose key went up or whose action is gone ends unfinished. */
   tickHolds(now) {
-    for (const [id, current5] of [...this.holding]) {
+    for (const [id, current6] of [...this.holding]) {
       const player = playerById(id);
-      if (!player || !isHeld(player) || this.spec.choose(player)?.kind !== current5.action.kind) {
+      if (!player || !isHeld(player) || this.spec.choose(player)?.kind !== current6.action.kind) {
         this.holding.delete(id);
         if (player) {
           this.prompt(player, null);
         }
         continue;
       }
-      const progress2 = Math.min(1, (now - current5.startedAt) / current5.hold.ms);
-      this.prompt(player, current5.hold.text, progress2);
+      const progress2 = Math.min(1, (now - current6.startedAt) / current6.hold.ms);
+      this.prompt(player, current6.hold.text, progress2);
       if (progress2 < 1) {
         continue;
       }
       this.holding.delete(id);
       this.prompt(player, null);
-      this.spec.finish(player, current5.action);
+      this.spec.finish(player, current6.action);
     }
   }
   /** Shows every player not busy the hint for where they stand. */
@@ -20143,7 +20827,7 @@ var CAMP_RADIUS = 60;
 var NEAR_CAMP = 300;
 var HANK_RANGE = 150;
 var RUMOUR_RADIUS2 = 900;
-function near(player, point2, reach, level2 = 3) {
+function near2(player, point2, reach, level2 = 3) {
   return flatDistance(player.position, point2) <= reach && Math.abs(player.position.y - point2.y) <= level2;
 }
 function camp(player) {
@@ -20341,27 +21025,27 @@ function startRaid(kind, opKey) {
   return true;
 }
 function endRaid(outcome) {
-  const current5 = raid;
-  if (!current5) {
+  const current6 = raid;
+  if (!current6) {
     return;
   }
   raid = null;
-  for (const entry2 of current5.npcs) {
+  for (const entry2 of current6.npcs) {
     if (entry2.state === "alive") {
       entry2.character.remove();
     }
   }
-  const op = ops.get(current5.opKey);
+  const op = ops.get(current6.opKey);
   if (!op) {
     return;
   }
-  const revenue = current5.kind === "revenue";
+  const revenue = current6.kind === "revenue";
   if (outcome === "won") {
     if (revenue) {
       op.heat = 60;
     }
     changed3();
-    for (const player of defendersOf(current5.opKey, RAID_DEFEND)) {
+    for (const player of defendersOf(current6.opKey, RAID_DEFEND)) {
       const reward2 = revenue ? 100 : 150;
       player.giveMoney(reward2);
       addXp(player, XP11.defend, "Defended the still");
@@ -20386,7 +21070,7 @@ function endRaid(outcome) {
       op.molasses = 0;
       op.heat = 30;
       tellOp(
-        current5.opKey,
+        current6.opKey,
         "The revenue men smashed the casks and took every case and sack. The heat is off for now.",
         "bad",
         9
@@ -20395,7 +21079,7 @@ function endRaid(outcome) {
     } else {
       const taken = takeCases(op.cases, Math.min(RIVAL_STEAL, op.cases.n));
       tellOp(
-        current5.opKey,
+        current6.opKey,
         `Morello's boys carried off ${plural(taken.n, "case")} of your rum.`,
         "bad"
       );
@@ -20407,7 +21091,7 @@ function endRaid(outcome) {
     op.heat = Math.max(op.heat - 30, 70);
   }
   tellOp(
-    current5.opKey,
+    current6.opKey,
     revenue ? "The revenue men gave up for today." : "Morello's boys gave up and left."
   );
 }
@@ -20576,13 +21260,13 @@ function startDoyle(opKey, op, target2) {
   );
 }
 function endDoyle(paid) {
-  const current5 = doyle;
-  if (!current5) {
+  const current6 = doyle;
+  if (!current6) {
     return;
   }
   doyle = null;
-  const op = ops.get(current5.opKey);
-  const npc = current5.character.npc;
+  const op = ops.get(current6.opKey);
+  const npc = current6.character.npc;
   if (paid) {
     if (op) {
       op.heat = Math.max(0, op.heat - 50);
@@ -20592,8 +21276,8 @@ function endDoyle(paid) {
       npc.say(LINE.shrug);
     }
   } else if (op) {
-    addHeat(current5.opKey, HEAT_REFUSED);
-    const target2 = playerById(current5.targetId);
+    addHeat(current6.opKey, HEAT_REFUSED);
+    const target2 = playerById(current6.targetId);
     if (target2 && onStreet(target2)) {
       setWanted(target2, 1);
       toast(
@@ -20606,7 +21290,7 @@ function endDoyle(paid) {
       );
     }
   }
-  current5.character.walkOff(RAID_POINTS[0], DOYLE_LEAVE_MS);
+  current6.character.walkOff(RAID_POINTS[0], DOYLE_LEAVE_MS);
 }
 function tickDoyle(now) {
   if (!doyle) {
@@ -21341,7 +22025,7 @@ function tickStill(dt, now) {
     return;
   }
   const operator = playerById(batch.operatorId);
-  if (!operator || !onStreet(operator) || operator.getVehicle() || !near(operator, POT, STILL_LEAVE)) {
+  if (!operator || !onStreet(operator) || operator.getVehicle() || !near2(operator, POT, STILL_LEAVE)) {
     bankFire(batch);
     return;
   }
@@ -22874,10 +23558,10 @@ function choose3(player) {
   if (player.getVehicle()) {
     return null;
   }
-  if (batchOf(player) && near(player, POT, STILL_LEAVE)) {
+  if (batchOf(player) && near2(player, POT, STILL_LEAVE)) {
     return { kind: "vent" };
   }
-  if (near(player, SAILOR, SAILOR_REACH, 1.5)) {
+  if (near2(player, SAILOR, SAILOR_REACH, 1.5)) {
     return { kind: "sailor" };
   }
   const truckCar = truckVehicle();
@@ -22894,13 +23578,13 @@ function choose3(player) {
   if (stage === QUEST.COPPER && carrying(player) && flatDistance(player.position, POT) <= DELIVER_COIL) {
     return { kind: "deliver" };
   }
-  if (near(player, POT, TOUCH2)) {
+  if (near2(player, POT, TOUCH2)) {
     return wrecked() ? { kind: "repair" } : { kind: "still" };
   }
-  if (stage >= QUEST.FIRST_FIRE && near(player, CASKS, TOUCH2)) {
+  if (stage >= QUEST.FIRST_FIRE && near2(player, CASKS, TOUCH2)) {
     return { kind: "casks" };
   }
-  if (knows(player) && near(player, CRATES, TOUCH2)) {
+  if (knows(player) && near2(player, CRATES, TOUCH2)) {
     const target2 = theftTarget(player);
     if (target2) {
       return { kind: "steal", target: target2 };
@@ -23149,7 +23833,7 @@ provide("rum", (player) => {
 });
 
 // src/server/distillery/index.ts
-var TICK_MS20 = 250;
+var TICK_MS21 = 250;
 var PRESENT_MS = 1e3;
 var MAX_STEP_MS2 = 2e3;
 var EVENT_ROLL_MS = 6e4;
@@ -23168,7 +23852,7 @@ function rollEvents(now) {
   expireWeddings(now);
   rollParty(now);
 }
-function tick13() {
+function tick14() {
   const now = Date.now();
   const dt = Math.min(MAX_STEP_MS2, Math.max(0, now - lastTick2));
   lastTick2 = now;
@@ -23211,7 +23895,7 @@ load12();
 onStart(() => {
   lastTick2 = Date.now();
   scheduleParty(Date.now());
-  every(TICK_MS20, tick13);
+  every(TICK_MS21, tick14);
 });
 onStop(() => {
   for (const player of World.getPlayers()) {
@@ -23279,7 +23963,7 @@ events.on("missionChange", () => {
 });
 
 // src/server/lib/warden.ts
-var MODEL = "Pol01.i3d";
+var MODEL2 = "Pol01.i3d";
 var LOCK_RADIUS = 0.3;
 var ROUND_RADIUS = 0.4;
 var HOME_RADIUS = 0.5;
@@ -23296,16 +23980,16 @@ var GUARD = Object.freeze([
 ]);
 var FIRST_ROUND_MS = 2e4;
 var ROUND_EVERY_MS = 45e3;
-var STAND_DOWN_MS2 = 15e3;
-var RESPAWN_MS3 = 1e4;
-var TICK_MS21 = 1e3;
+var STAND_DOWN_MS3 = 15e3;
+var RESPAWN_MS4 = 1e4;
+var TICK_MS22 = 1e3;
 var demand = /* @__PURE__ */ new Map();
 var queue = [];
 var warden = null;
 var ready = false;
 var errand = null;
 var nextRoundAt = 0;
-var emptySince = 0;
+var emptySince2 = 0;
 var nextSpawnAt = 0;
 var timer = null;
 function canSound() {
@@ -23324,13 +24008,13 @@ function endErrand() {
   }
   errand = null;
 }
-function schedule(current5, ms, action2) {
-  if (current5.timer) {
-    clearTimeout(current5.timer);
+function schedule(current6, ms, action2) {
+  if (current6.timer) {
+    clearTimeout(current6.timer);
   }
-  current5.timer = setTimeout(() => {
-    current5.timer = null;
-    if (errand === current5) {
+  current6.timer = setTimeout(() => {
+    current6.timer = null;
+    if (errand === current6) {
       action2();
     }
   }, ms);
@@ -23343,13 +24027,13 @@ function station4() {
     return;
   }
   const { position, heading } = post2();
-  warden = Npc.spawn(MODEL, position, heading, {
+  warden = Npc.spawn(MODEL2, position, heading, {
     behaviour: "neutral",
     virtualWorld: WORLD3
   });
   ready = false;
   if (!warden) {
-    nextSpawnAt = Date.now() + RESPAWN_MS3;
+    nextSpawnAt = Date.now() + RESPAWN_MS4;
   }
 }
 function standDown3() {
@@ -23468,24 +24152,24 @@ function toStop(round2) {
   }
   schedule(round2, WALK_TIMEOUT_MS, goHome);
 }
-function guard(round2, step) {
+function guard(round2, step2) {
   const npc = present6();
   if (!npc) {
     endErrand();
     return;
   }
-  if (step === 0) {
+  if (step2 === 0) {
     round2.stage = "guarding";
     npc.face(roundOf(CELLS[round2.stop]).look);
   }
-  if (step >= GUARD.length) {
+  if (step2 >= GUARD.length) {
     round2.stop++;
     toStop(round2);
     return;
   }
-  const [clip, loop, ms] = GUARD[step];
+  const [clip, loop, ms] = GUARD[step2];
   npc.playAnimation(clip, { loop });
-  schedule(round2, ms, () => guard(round2, step + 1));
+  schedule(round2, ms, () => guard(round2, step2 + 1));
 }
 function unlock(cell, opened2) {
   const waiting2 = queue.find((entry2) => entry2.cell === cell);
@@ -23501,18 +24185,18 @@ function unlock(cell, opened2) {
 function need(source, wanted4) {
   demand.set(source, wanted4);
 }
-function tick14() {
+function tick15() {
   const wanted4 = [...demand.values()].some(Boolean) || errand?.kind === "unlock" || queue.length > 0;
   if (wanted4) {
-    emptySince = 0;
+    emptySince2 = 0;
     station4();
     if (present6() && !errand && Date.now() >= nextRoundAt) {
       startRound();
     }
   } else if (warden) {
-    if (!emptySince) {
-      emptySince = Date.now();
-    } else if (Date.now() - emptySince >= STAND_DOWN_MS2) {
+    if (!emptySince2) {
+      emptySince2 = Date.now();
+    } else if (Date.now() - emptySince2 >= STAND_DOWN_MS3) {
       standDown3();
     }
   }
@@ -23551,7 +24235,7 @@ function lost2(npc) {
   }
   warden = null;
   ready = false;
-  nextSpawnAt = Date.now() + RESPAWN_MS3;
+  nextSpawnAt = Date.now() + RESPAWN_MS4;
   if (errand?.kind === "unlock") {
     atDoor(errand);
   } else {
@@ -23569,13 +24253,13 @@ function reset3(remove2) {
   endErrand();
   queue.length = 0;
   demand.clear();
-  emptySince = 0;
+  emptySince2 = 0;
   nextSpawnAt = 0;
   nextRoundAt = 0;
 }
 function start3() {
   if (timer === null) {
-    timer = setInterval(tick14, TICK_MS21);
+    timer = setInterval(tick15, TICK_MS22);
   }
 }
 function stop4() {
@@ -23605,7 +24289,7 @@ function unarmed(player) {
 var BASE_SENTENCE_MS = 45e3;
 var PER_LEVEL_MS = 3e4;
 var BAIL_PER_SECOND = 5;
-var TICK_MS22 = 1e3;
+var TICK_MS23 = 1e3;
 var GUARD_MS = 250;
 var CELL_MARGIN = 0.4;
 var OUT_OF_CELL = 0.9;
@@ -23632,7 +24316,7 @@ function assignCell() {
     CELLS[0]
   );
 }
-function lockUp(player, until) {
+function lockUp(player, until2) {
   if (!isBuilt4()) {
     return false;
   }
@@ -23643,8 +24327,8 @@ function lockUp(player, until) {
   begin(player, "jail", "In jail");
   release(player);
   const cell = prisoners.get(player.id)?.cell ?? assignCell();
-  prisoners.set(player.id, { until, cell, stage: "locked", freedAt: 0 });
-  setField(player, "jailUntil", until);
+  prisoners.set(player.id, { until: until2, cell, stage: "locked", freedAt: 0 });
+  setField(player, "jailUntil", until2);
   const resume = get2(player)?.resume;
   if (resume) {
     setField(player, "resume", { ...resume, weapons: [], selected: 0, wanted: 0 });
@@ -23652,14 +24336,14 @@ function lockUp(player, until) {
   markers(player, "jail", []);
   const spawn = spawnOf(cell);
   info(
-    `${player.nickname} locked in cell ${cell.index + 1} at ${where2(spawn.position)} for ${Math.round((until - Date.now()) / 1e3)} s`
+    `${player.nickname} locked in cell ${cell.index + 1} at ${where2(spawn.position)} for ${Math.round((until2 - Date.now()) / 1e3)} s`
   );
   moves3.move(player, spawn, WORLD3, {
     loadout: unarmed(player),
     // The game's own countdown watch runs on the prisoner's client.
     then: () => emit(player, "fr:jail", {
       active: true,
-      seconds: Math.ceil((until - Date.now()) / 1e3)
+      seconds: Math.ceil((until2 - Date.now()) / 1e3)
     })
   });
   return true;
@@ -23742,7 +24426,7 @@ function cardRows2(prisoner, now) {
       return [["Cell", "Open: walk out"]];
   }
 }
-every(TICK_MS22, () => {
+every(TICK_MS23, () => {
   const now = Date.now();
   need("prisoners", prisoners.size > 0);
   for (const [id, prisoner] of prisoners) {
@@ -23852,8 +24536,8 @@ function resumeSentence(player) {
   if (prisoners.has(player.id)) {
     return;
   }
-  const until = get2(player)?.jailUntil ?? 0;
-  if (until <= Date.now()) {
+  const until2 = get2(player)?.jailUntil ?? 0;
+  if (until2 <= Date.now()) {
     return;
   }
   const { spawnGeneration } = player;
@@ -23861,7 +24545,7 @@ function resumeSentence(player) {
     if (!connected(player) || !player.alive || player.spawnGeneration !== spawnGeneration || prisoners.has(player.id)) {
       return;
     }
-    if (!lockUp(player, until) && available()) {
+    if (!lockUp(player, until2) && available()) {
       setTimeout(tryLockUp, SPAWN_RETRY_MS);
     }
   };
@@ -23938,7 +24622,7 @@ onStop(() => {
 });
 
 // src/server/jail/visits.ts
-var TICK_MS23 = 250;
+var TICK_MS24 = 250;
 var TRIGGER_RADIUS2 = 1.4;
 var REARM_DISTANCE2 = 3;
 var MARKER_RANGE4 = 60;
@@ -23964,8 +24648,8 @@ function refused(player) {
   if ((Police.getRecord(player)?.level ?? 0) > 0) {
     return "The guard will not let a wanted man in.";
   }
-  const current5 = activity(player);
-  return current5 && current5.kind !== "duty" ? busyMessage(player) : null;
+  const current6 = activity(player);
+  return current6 && current6.kind !== "duty" ? busyMessage(player) : null;
 }
 function enter4(player) {
   const problem = refused(player);
@@ -24033,7 +24717,7 @@ function watchVisitor(player, visit2) {
     leave3(player, visit2);
   }
 }
-every(TICK_MS23, () => {
+every(TICK_MS24, () => {
   need("visitors", visitors.size > 0);
   const spot = entrance();
   for (const player of World.getPlayers()) {
@@ -24198,10 +24882,10 @@ register(
 );
 
 // src/server/hospital/staff.ts
-var STAND_DOWN_MS3 = 2e4;
-var RESPAWN_MS4 = 6e4;
+var STAND_DOWN_MS4 = 2e4;
+var RESPAWN_MS5 = 6e4;
 var TALK_REACH = 2.4;
-var ANSWER_MS = 5e3;
+var ANSWER_MS2 = 5e3;
 var DOCTOR_FEE = 75;
 var GROANS = [85, 86, 87, 88, 89];
 var LYING2 = [["SamZrLehS.i3d", 0]];
@@ -24340,7 +25024,7 @@ var ROLES = [
   }))
 ];
 var members2 = [];
-var emptySince2 = 0;
+var emptySince3 = 0;
 function member2(role) {
   const entry2 = {
     role,
@@ -24349,10 +25033,10 @@ function member2(role) {
       onReady: (npc) => {
         npc.face(entry2.place.heading);
         entry2.until = 0;
-        animate2(entry2, Date.now());
+        animate3(entry2, Date.now());
       },
       onLost: () => {
-        entry2.character.respawnAt = Date.now() + RESPAWN_MS4;
+        entry2.character.respawnAt = Date.now() + RESPAWN_MS5;
       }
     }),
     step: 0,
@@ -24367,7 +25051,7 @@ function cast2() {
   }
   return members2;
 }
-function animate2(entry2, now) {
+function animate3(entry2, now) {
   const npc = entry2.character.placed();
   if (!npc || now < entry2.answeringUntil) {
     return;
@@ -24409,7 +25093,7 @@ function staffUp2(now) {
       behaviour: "neutral",
       virtualWorld: WORLD2
     })) {
-      entry2.character.respawnAt = now + RESPAWN_MS4;
+      entry2.character.respawnAt = now + RESPAWN_MS5;
     }
   }
 }
@@ -24418,11 +25102,11 @@ function standDown4() {
     entry2.character.remove();
     entry2.character.respawnAt = 0;
   }
-  emptySince2 = 0;
+  emptySince3 = 0;
 }
 function forget10() {
   members2 = [];
-  emptySince2 = 0;
+  emptySince3 = 0;
 }
 function inside4(player) {
   return player.virtualWorld === WORLD2 && inRoom2(player.position, 1);
@@ -24430,17 +25114,17 @@ function inside4(player) {
 function tickStaff2(now) {
   const visitors2 = World.getPlayers().filter(inside4);
   if (visitors2.length) {
-    emptySince2 = 0;
+    emptySince3 = 0;
     staffUp2(now);
   } else if (members2.some((entry2) => entry2.character.npc)) {
-    if (!emptySince2) {
-      emptySince2 = now;
-    } else if (now - emptySince2 >= STAND_DOWN_MS3) {
+    if (!emptySince3) {
+      emptySince3 = now;
+    } else if (now - emptySince3 >= STAND_DOWN_MS4) {
       standDown4();
     }
   }
   for (const entry2 of members2) {
-    animate2(entry2, now);
+    animate3(entry2, now);
   }
 }
 function nearest2(player) {
@@ -24460,16 +25144,16 @@ function hurt(player) {
 function pick2(list4) {
   return list4[Math.floor(Math.random() * list4.length)];
 }
-function turnTo(entry2, player) {
+function turnTo2(entry2, player) {
   const npc = entry2.character.present();
   if (npc) {
     npc.face(player.position);
-    entry2.answeringUntil = Date.now() + ANSWER_MS;
+    entry2.answeringUntil = Date.now() + ANSWER_MS2;
   }
   return npc;
 }
 function talk(player, entry2) {
-  const npc = turnTo(entry2, player);
+  const npc = turnTo2(entry2, player);
   const voices = entry2.role.voices;
   speak(player, entry2.role.name, pick2(entry2.role.lines), {
     npc,
@@ -24477,7 +25161,7 @@ function talk(player, entry2) {
   });
 }
 function heal(player, entry2) {
-  const npc = turnTo(entry2, player);
+  const npc = turnTo2(entry2, player);
   if (!hurt(player)) {
     talk(player, entry2);
     return;
@@ -24545,7 +25229,7 @@ function forgetHint(player) {
 
 // src/server/hospital/index.ts
 var BILL = 50;
-var TICK_MS24 = 1e3;
+var TICK_MS25 = 1e3;
 var HINT_MS = 250;
 function hospital3() {
   return current()?.hospital ?? null;
@@ -24556,14 +25240,14 @@ function buildWards() {
     build2();
   }
 }
-function tick15() {
+function tick16() {
   if (hospital3()?.wards) {
     tickStaff2(Date.now());
   }
 }
 onStart(() => {
   buildWards();
-  every(TICK_MS24, tick15);
+  every(TICK_MS25, tick16);
   every(HINT_MS, showHints);
 });
 events.on("playerSpawn", forgetHint);
@@ -24799,6 +25483,79 @@ events.on("doorStateChange", (door, player) => {
   }
 });
 
+// src/server/medkits.ts
+var CABINETS = {
+  "blekarna.Box02": { heal: 50, restockMs: 24e4 },
+  "9lekarna.Box02": { heal: 30, restockMs: 3e5 },
+  "lekarna_hom.Box02": { heal: 30, restockMs: 24e4 },
+  "lekarn_aut.Box02": { heal: 30, restockMs: 24e4 },
+  "air_9lekarna.Box02": { heal: 40, restockMs: 24e4 },
+  "air_9lekarna2.Box02": { heal: 40, restockMs: 24e4 },
+  "pr_9lekarna.Box02": { heal: 50, restockMs: 24e4 },
+  "plh_9lekarna4.Box02": { heal: 30, restockMs: 24e4 },
+  "plh_9lekarna.Box02": { heal: 50, restockMs: 24e4 }
+};
+var TITLE3 = "First aid";
+var MAX_HEALTH = 100;
+var CLOSE_AFTER_MS = 1500;
+var restocked = new PlayerMap();
+var closing = /* @__PURE__ */ new Map();
+function shutLater(door) {
+  const name2 = door.frameName;
+  clearTimeout(closing.get(name2));
+  closing.set(
+    name2,
+    setTimeout(() => {
+      closing.delete(name2);
+      if (door.open) {
+        door.closeDoor();
+      }
+    }, CLOSE_AFTER_MS)
+  );
+}
+function use(player, door, cabinet) {
+  const now = Date.now();
+  const waits = restocked.get(player.id) ?? /* @__PURE__ */ new Map();
+  const readyAt = waits.get(door.frameName) ?? 0;
+  if (player.health >= MAX_HEALTH) {
+    toast(player, "You are not hurt.", { title: TITLE3, seconds: 3 });
+    return;
+  }
+  if (now < readyAt) {
+    toast(player, `The cabinet is empty. Restocked in ${formatMinutes(readyAt - now)}.`, {
+      title: TITLE3,
+      tone: "bad",
+      seconds: 4
+    });
+    return;
+  }
+  const before = player.health;
+  player.setHealth(Math.min(MAX_HEALTH, before + cabinet.heal));
+  waits.set(door.frameName, now + cabinet.restockMs);
+  restocked.set(player.id, waits);
+  toast(player, `You patch yourself up: +${Math.round(player.health - before)} health.`, {
+    title: TITLE3,
+    tone: "good",
+    seconds: 3
+  });
+}
+events.on("doorStateChange", (door, player) => {
+  const cabinet = CABINETS[door.frameName];
+  if (!cabinet || !player || !door.open) {
+    return;
+  }
+  shutLater(door);
+  if (playable(player)) {
+    use(player, door, cabinet);
+  }
+});
+onMissionChange(() => {
+  for (const timer2 of closing.values()) {
+    clearTimeout(timer2);
+  }
+  closing.clear();
+});
+
 // src/server/housing/furniture.ts
 var spawned = /* @__PURE__ */ new Map();
 function decorPose(entry2, item) {
@@ -24885,10 +25642,12 @@ function standIn(house, entry2) {
 var CARRY_TICK_MS = 100;
 var LIFT_STEP = 0.1;
 var TURN_STEP = Math.PI / 12;
+var SPIN_PER_MS = Math.PI / 2 / 1e3;
+var FULL_TURN = 2 * Math.PI;
 var CARRY_AHEAD = 0.9;
 var PICK_REACH = 1.8;
 var DOORWAY_CLEAR = 1.2;
-var KEYS_HINT = "Home/End turn it, PgUp/PgDn raise and lower it, Delete sells it back, Num 0 puts it back";
+var KEYS_HINT = "Home/End turn it (hold to keep turning), PgUp/PgDn raise and lower it, Delete sells it back, Num 0 puts it back";
 var editing = new PlayerSet();
 var carrying2 = new PlayerMap();
 var failures = new Once();
@@ -24965,7 +25724,9 @@ function pickUp(player, house, entry2, item, isNew) {
     item,
     previous: isNew ? null : { ...entry2 },
     isNew,
-    object: createDecor(entry2, house.world, false)
+    object: createDecor(entry2, house.world, false),
+    spin: 0,
+    spunAt: 0
   });
 }
 function blocksDoorway(entry2, item) {
@@ -25141,6 +25902,14 @@ every(CARRY_TICK_MS, () => {
       if (!player || insideHouse(player)?.id !== carried.houseId || !carried.object) {
         continue;
       }
+      if (carried.spin) {
+        const now = Date.now();
+        turnBy(
+          carried,
+          carried.spin * SPIN_PER_MS * Math.min(now - carried.spunAt, 2 * CARRY_TICK_MS)
+        );
+        carried.spunAt = now;
+      }
       const pose5 = carryTarget(player, carried.entry, carried.item);
       if (pose5) {
         carried.object.moveTo(pose5.position, 6, pose5.rotation);
@@ -25150,12 +25919,15 @@ every(CARRY_TICK_MS, () => {
     }
   }
 });
+function turnBy(carried, angle) {
+  carried.entry.yaw = ((carried.entry.yaw + angle) % FULL_TURN + FULL_TURN) % FULL_TURN;
+}
 function editKey(player, request) {
   const carried = carrying2.get(player.id);
   if (!editing.has(player.id) || !insideHouse(player)) {
     return;
   }
-  const { sell: sell4, cancel, turn, lift } = fields(request);
+  const { sell: sell4, cancel, turn, spin, lift } = fields(request);
   if (sell4) {
     if (carried) {
       sellCarried(player, carried);
@@ -25176,8 +25948,12 @@ function editKey(player, request) {
   }
   const turns = Math.sign(Number(turn) || 0);
   const lifts = Math.sign(Number(lift) || 0);
+  if (spin !== void 0) {
+    carried.spin = Math.sign(Number(spin) || 0);
+    carried.spunAt = Date.now();
+  }
   if (turns) {
-    carried.entry.yaw = (carried.entry.yaw + turns * TURN_STEP) % (2 * Math.PI);
+    turnBy(carried, turns * TURN_STEP);
   }
   if (lifts) {
     carried.entry.lift = Math.round((carried.entry.lift + lifts * LIFT_STEP) * 100) / 100;
@@ -25365,7 +26141,7 @@ function streetMarkers(player) {
   const browse2 = browsing.get(player.id);
   for (const house of here2()) {
     const home = homeOf(house);
-    const near2 = flatDistance(player.position, house.door) <= MARKER_RANGE5;
+    const near3 = flatDistance(player.position, house.door) <= MARKER_RANGE5;
     if (home?.owner === key2) {
       items3.push(
         arrow(house.id, house.door, "HOME", COLORS.green, 60, {
@@ -25373,7 +26149,7 @@ function streetMarkers(player) {
           map: { icon: "square", label: "Home", size: 5 }
         })
       );
-      if (house.parking && near2) {
+      if (house.parking && near3) {
         items3.push({
           id: `${house.id}/p`,
           position: house.parking.position,
@@ -25398,7 +26174,7 @@ function streetMarkers(player) {
           }
         )
       );
-    } else if (!home && near2) {
+    } else if (!home && near3) {
       items3.push(
         arrow(
           house.id,
@@ -25762,7 +26538,7 @@ function carCommand(player, slot) {
 }
 
 // src/server/housing/doorstep.ts
-var TICK_MS25 = 250;
+var TICK_MS26 = 250;
 var MARKER_EVERY = 4;
 var INSIDE_REACH = 1.6;
 var FALL_GUARD = 6;
@@ -25816,7 +26592,7 @@ function hint2(player, action2) {
   switch (action2.kind) {
     case "place": {
       const carried = carriedBy(player);
-      return carried?.isNew ? `G buy ${formatMoney(carried.item.price)} · Home/End turn · PgUp/PgDn raise · Num0 back` : "G place · Home/End turn · PgUp/PgDn raise · Del sell";
+      return carried?.isNew ? `G buy ${formatMoney(carried.item.price)} · Home/End turn (hold) · PgUp/PgDn raise · Num0 back` : "G place · Home/End turn (hold) · PgUp/PgDn raise · Del sell";
     }
     case "door":
       return action2.door.to === "street" ? "G · STEP OUTSIDE" : `G · ${action2.door.label}`;
@@ -25914,7 +26690,7 @@ function tickPlayer(player, now) {
     publish5(player);
   }
 }
-every(TICK_MS25, () => {
+every(TICK_MS26, () => {
   ticks++;
   const now = Date.now();
   for (const player of World.getPlayers()) {
@@ -25943,7 +26719,7 @@ function view(player, house) {
     owner: homeOf(house)?.ownerName ?? null
   };
 }
-function mineList(player, current5) {
+function mineList(player, current6) {
   return ownedBy(player).flatMap((house) => {
     const home = homeOf(house);
     return home ? [
@@ -25956,22 +26732,22 @@ function mineList(player, current5) {
         limit: LIMITS2[house.tier],
         sellFor: refundFor(house, home),
         cars: house.parking ? parkedAt(player, house.id).map((car) => ({ slot: car.slot + 1, model: car.model })) : [],
-        here: current5?.id === house.id
+        here: current6?.id === house.id
       }
     ] : [];
   });
 }
-function insideView(player, current5) {
-  const own = isOwner(player, current5);
+function insideView(player, current6) {
+  const own = isOwner(player, current6);
   return {
-    id: current5.id,
-    name: title(current5),
+    id: current6.id,
+    name: title(current6),
     mine: own,
-    owner: homeOf(current5)?.ownerName ?? null,
+    owner: homeOf(current6)?.ownerName ?? null,
     editing: isEditing(player),
-    decor: homeOf(current5)?.decor.length ?? 0,
-    limit: LIMITS2[current5.tier],
-    catalogue: own ? forTier(current5.tier).map((item) => ({
+    decor: homeOf(current6)?.decor.length ?? 0,
+    limit: LIMITS2[current6.tier],
+    catalogue: own ? forTier(current6.tier).map((item) => ({
       id: item.id,
       name: item.name,
       price: item.price,
@@ -25984,7 +26760,7 @@ provide(
   (player) => {
     const key2 = keyOf2(player);
     const list4 = here2();
-    const current5 = insideHouse(player);
+    const current6 = insideHouse(player);
     const visiting2 = list4.filter((house) => {
       const home = homeOf(house);
       return home && home.owner !== key2 && mayEnter(player, house);
@@ -25997,13 +26773,13 @@ provide(
     return {
       max: MAX_HOMES,
       owned: ownedAnywhere(player),
-      mine: mineList(player, current5),
+      mine: mineList(player, current6),
       visiting: visiting2,
       forSale: forSale2.slice(0, FOR_SALE_SHOWN),
       counts,
       total: list4.length,
       browsing: browsingId(player),
-      inside: current5 ? insideView(player, current5) : null,
+      inside: current6 ? insideView(player, current6) : null,
       prices: Object.fromEntries(
         TIERS.map((tier) => {
           const prices = list4.filter((house) => house.tier === tier).map((house) => house.price);
