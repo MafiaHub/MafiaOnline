@@ -63,7 +63,7 @@ first start and left in place.
 | F9 | Car radio on or off (also `/radio on` or `/radio off`); remembered with your record. |
 | K | Siren, in a police car. |
 | U | At a telephone booth, on police duty: call for backup. |
-| G | Under a station's arrow: sign on or clock off. On fire duty: hold to spray the hose (or the truck's roof cannon from its wheel), press next to a trapped civilian to lead them out. On ambulance duty: hold next to a patient to treat them. Down and waiting for a medic: press to give up and wake at the hospital. On the tobacco farm: press on an empty plot to plant, hold to water, pick off hornworms or pick ripe leaves. At the rum still: press to fire it up, tap to vent the pressure, hold to bottle, patch or steal; press beside a character to talk, and in a car stopped at the village store to buy molasses. At a home's door: buy it (press twice), go in, or knock; inside, at a door arrow: go out or into the next room; decorating: pick up and put down a piece; on your home's parking spot: park the car you sit in, or take a parked one out. |
+| G | Under a station's arrow: sign on or clock off. On fire duty: hold to spray the hose (or the truck's roof cannon from its wheel; indoors, the extinguisher), press next to a trapped civilian to lead them out, press at a burning building's door arrow to go in, out or into the next room. On ambulance duty: hold next to a patient to treat them. Down and waiting for a medic: press to give up and wake at the hospital. On the tobacco farm: press on an empty plot to plant, hold to water, pick off hornworms or pick ripe leaves. At the rum still: press to fire it up, tap to vent the pressure, hold to bottle, patch or steal; press beside a character to talk, and in a car stopped at the village store to buy molasses. At a home's door: buy it (press twice), go in, or knock; inside, at a door arrow: go out or into the next room; decorating: pick up and put down a piece; on your home's parking spot: park the car you sit in, or take a parked one out. |
 
 These are the default keys. Esc → Settings → Controls (or Settings in the
 city menu) moves any of them, the retail on-foot and car controls included;
@@ -387,6 +387,19 @@ The Jobs tab of the city menu shows every one of these with its live state.
   caught, dead or gone, when you clock off, or after three minutes; a
   squad drives off and is removed out of sight. One call at a time per
   officer, 90 seconds between calls, two squad cars in the city at once.
+
+  **Precinct calls.** Between wanted players the precinct radios in calls
+  of its own, about every three and a half minutes while anyone is on duty,
+  300 to 900 m from an officer (one at a time, never the same kind twice
+  running), marked on the map and on the compass when no wanted player is:
+  - *A bag snatcher.* A woman crouches on the pavement where her handbag was
+    taken; the thief (a `Hoolig`) hangs about a few steps away and runs once an
+    officer on duty comes within 45 m. G next to him, a punch or a nudge
+    with the car arrests him: $160. Shot dead he pays $50.
+  - *An armed robbery.* Two gangsters with pistols hold up a corner. They
+    open fire on officers on duty within 40 m (nobody else) and pay $150
+    each taken down; backup helps.
+  A call nobody answers goes cold after five minutes.
 - **Taxi.** Drive a cab (`taxi00`, `fordapicktaxi00`, `phantomtaxi00`) and
   people wave you down, as in single player: a walker up the street turns
   to the cab and waves (everyone sees it), and a HAILING marker shows them.
@@ -398,7 +411,12 @@ The Jobs tab of the city menu shows every one of these with its live state.
   the meter, a speed tip (up to 40% of the quote for the time left) and a
   smooth-ride tip (20% with no crash); then they get out and walk off. A
   crash gets a complaint and loses the smooth tip; the third one, or leaving
-  the driver's seat, and they get out without paying. `/taxi` starts or ends
+  the driver's seat, and they get out without paying. Not every fare is a
+  regular (the toast and the card say which, never the same special one
+  twice running): one *in a hurry* gives a shorter tip window but a speed
+  tip up to 80%; a *nervous* one tips 50% for a ride without a crash, little
+  for speed, and gets out after the second crash; a *high roller* pays 1.6
+  times the meter, but any crash costs every tip. `/taxi` starts or ends
   a shift and brings a cab. With no walkers about (no simulation host, the
   countryside) or no hail for 45 seconds, dispatch sends you to a fare
   waiting at a street corner instead. Any number of cabs work at once.
@@ -417,7 +435,7 @@ The Jobs tab of the city menu shows every one of these with its live state.
   otherwise, then burning themselves out after nine): a house front (flames
   up the facade), a burning car that explodes after four minutes, or a crash
   with one or two people lying in the road; a resident may crouch at a
-  burning house's door. Everyone sees the fires and the feed; only firefighters on duty get them on the city map (medics likewise for their calls).
+  burning house's door. A call is seldom the same kind as the one before. Everyone sees the fires and the feed; only firefighters on duty get them on the city map (medics likewise for their calls).
   Hold G within 35 m of a fire truck to spray the hose onto the nearest fire
   in front of you (24 m reach), or at a truck's wheel to use its roof cannon
   (32 m): the water arcs onto the flames, the fire shrinks as it goes down and
@@ -446,13 +464,37 @@ The Jobs tab of the city menu shows every one of these with its live state.
     two places in the room, and the barman and two drinkers (the bar's own
     people, at their own places) cower inside, crying for help; the bar
     serves nobody until it is over. Hose the front ($260), walk in through
-    the door arrow and hose the room ($40 a fire): the hose reaches in from a
-    truck within 35 m of the door. G next to someone gets them to follow
+    the door arrow and put the room out with the extinguisher ($40 a fire;
+    see below). G next to someone gets them to follow
     you; at the exit arrow they come out with you onto the pavement ($50
     each), where a medic on duty takes them (an ambulance call with $40
     more). Leave without them and they stay behind. Everyone out alive
     pays the crew a $160 bonus, half by water, half evenly ($650 in all for
     one firefighter).
+  - *A building with people inside*, the call a crew gets most. A vacant
+    home of the map (one nobody owns or is in) burns: flames out of the
+    ground floor beside its street door, and inside, in the furnished rooms
+    every home of its kind has (a tenement room, a flat, or a villa's salon,
+    dining room and bedroom), two to five fires on the furniture: the bed,
+    the sofa, the kitchen stove, the curtains. One or two residents lie or
+    cower somewhere in the rooms, crying for help; in a villa they are in
+    the dining room or the bedroom. The toast says what the neighbours told
+    the dispatcher. Hose the facade ($300), then G at the door arrow to go
+    in; each call has its own copy of the rooms. Inside, door arrows lead
+    out (green) and between a villa's rooms (gold, G), and the compass
+    points at whoever is still in the room, then the flames, then the next
+    room. Lead the residents to the exit arrow; through a door between rooms
+    they come along if they are right behind you ($120 each, an ambulance
+    call with $40 more). Every couple of minutes the fire spreads to another
+    piece of furniture, and five minutes after the call the smoke takes
+    whoever is still lying inside (a warning a minute before; the card
+    counts down). Everyone out and every fire out pays the crew a $200
+    bonus.
+  - *The extinguisher.* Indoors, in a burning bar or building, no hose
+    reaches: hold G for the extinguisher, a short jet (about 6 m) on the
+    flame in front of you that puts a room fire out in some seven seconds.
+    It holds 40 seconds of spray (the card and the prompt show what is
+    left); on foot within 8 m of a fire truck it fills up again.
   - *Arson.* A house fire may have its arsonist running off down the street,
     marked on the map. Police officers on duty within 1.5 km hear it on the
     radio and their compass points at him. A firefighter or an officer on
@@ -679,7 +721,43 @@ On Lost Heaven Extended the dead wake up at the doors of Lost Heaven Hospital,
 the mod's `9medic` building (placed by its `cache.bin` at (−759.22, 11.56,
 778.99); its doors open beside the stock Dispensary counter), and the doctors
 bill $50. The mod builds the hospital as an outer shell with doors and
-windows, so it has no rooms to walk into.
+windows and no rooms, so its inside is built from stock map objects
+(`server/lib/hospital_room.ts`) 150 m under the empty fields north of the
+city, at (−720, −150, 1420), 691 m from the nearest road on every map, in its
+own virtual world (`0x53000000`). A gold arrow on the landing in front of the
+east door bay (−755.45, 13.3, 762.2) leads in; the EXIT arrow inside the
+street doors leads back out.
+
+Inside, 42 by 24 m of rooms join by open doorways, with white walls over a
+green dado (`xzed`), board floors (`plotdrev`) and concrete ceilings
+(`plotcihly3`) under lit lamps:
+
+- **Entrance hall** (14 by 11 m, 4.5 m high): the reception desk with a
+  telephone, a typewriter, a green banker's lamp and the register, the
+  records behind it, rows of white waiting chairs, palms, a rug and lamps on
+  chains. It opens into the corridor.
+- **Corridor** (42 m): the doors to everything else, chairs, a clock.
+- **Consulting room**: the doctor's desk, an examination couch, a washbasin
+  under a medicine cabinet, his books.
+- **Lift lobby**: two lift doors, shut, and a bench.
+- **Men's and women's wards** (16 by 10 m each): ten iron beds (`xpostel 2`)
+  under frosted windows, curtain screens (`zavesik`), the nurse's trolley,
+  a basin and the linen.
+- **Theatre**: a bed under a hanging lamp, an instrument stand and trolley,
+  glazed instrument cabinets, two scrub basins and a concrete floor.
+
+While anyone is inside, scripted NPCs (`server/hospital/staff.ts`) play
+story-mission clips chosen by the pose they hold: the receptionist at her
+desk, three visitors waiting (one reading), the doctor writing at his desk,
+a surgeon bent over the theatre's patient with a nurse and an orderly
+scrubbing up, a nurse in each ward, a janitor sweeping the corridor, and
+patients lying in the beds. They leave 20 seconds after the last visitor.
+The job key (G) talks to whoever a player walks up to: they turn and answer,
+patients groan. The doctor patches a hurt player up to full health for $75.
+On Lost Heaven Extended the receptionist keeps the Dispensary's counter
+(bandages and tincture) and no attendant stands outside; on stock Lost
+Heaven the attendant still serves on the landing. Players still wake on
+the hospital's steps, not in a bed.
 
 An arrest is a jail sentence: 45 seconds, plus 30 for each wanted level above
 minor that the case reached. The police keep the prisoner's weapons, the
@@ -979,7 +1057,7 @@ vehicles, notifications) and the conventions.
 | `server/bars/`, `drunk.ts`, `lib/bar_room.ts` | Bars, their staff and drink counters; drunkenness, blackouts and drunk driving; the stock map's back-room bar. |
 | `server/housing/`, `lib/house_rooms.ts`, `lib/house_decor.ts`, `data/houses.js`, `client/housing.ts` | Homes: the houses of every map, buying and selling, keys and visitors, the shared rooms under the fields, the furnishing catalogue and its editor keys, parking at the kerb. |
 | `server/map_vote.ts`, `bootleg.ts`, `lib/maps.ts` | The default map, map votes, the bootleg run and the map registry. |
-| `server/championship.ts`, `jail/`, `jail/visits.ts`, `hospital.ts` | The Autodrom championship, jail sentences, jail visits and hospital respawns. |
+| `server/championship.ts`, `jail/`, `jail/visits.ts`, `hospital/`, `lib/hospital_room.ts` | The Autodrom championship, jail sentences, jail visits, hospital respawns and the hospital's wards and staff. |
 | `client/hud.ts`, `client/hud.html` | One transparent web view for toasts, feed, activity cards, race panel, level strip and the city menu; it also arbitrates the single native compass by priority. |
 | `client/markers.ts` | Beacons, checkpoint and crate markers, door arrows, turf rings, station arrows, bounty labels, and the city map blips (`CityMap`). World labels show only near and in sight. |
 | `client/selector.ts`, `client/selector.html` | The login flight, the login and register ticket and the one-time look. |
