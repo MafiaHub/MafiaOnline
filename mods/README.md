@@ -19,4 +19,8 @@ python3 tools/package_mod.py \
   mods/freeride-extended.zip --mission freeride:freeride_extended
 ```
 
+`countryside-map.zip` carries only `maps/fullmap.bmp` from MafiaCountrysideMap
+2.0, which the client shows as the city map on the countryside maps; see
+[server mods](../docs/server_mods.md#the-countryside-city-map).
+
 ZIP binaries and server snapshots are ignored by Git.

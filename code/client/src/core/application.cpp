@@ -148,6 +148,10 @@ namespace Mafia1Online::Core {
             Features::World::UninstallWorldHooks();
             ExitProcess(1);
         }
+        // The countryside map is presentation only; without it the retail map stays.
+        if (!host && !_cityMap.Install(_world)) {
+            Framework::Logging::GetLogger(FRAMEWORK_INNER_CLIENT)->warn("Could not install the city map hooks; every mission keeps the retail city map");
+        }
         if (!host) {
             // The profile is loaded by now: G_LoadSaveClass::Init ran inside
             // InitSystem, before the first mission tick created this instance.
@@ -449,6 +453,7 @@ namespace Mafia1Online::Core {
         _webUi.Shutdown();
         _settings.Shutdown();
         _chat.Shutdown();
+        _cityMap.Uninstall();
         Features::Death::UninstallDeathHooks();
         Features::Combat::UninstallCombatHooks();
         Features::Seat::UninstallSeatHooks();

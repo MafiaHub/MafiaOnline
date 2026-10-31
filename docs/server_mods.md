@@ -90,6 +90,27 @@ python3 tools/package_mod.py \
 Omit `--mission` to preserve the original mission directory and override it.
 The example ZIP is local and Git-ignored, alongside other mod binaries.
 
+## The countryside city map
+
+The held-TAB city map on The Countryside (`freekrajina`, and its night map)
+and Lost Heaven Extended (`freeride_extended`) shows the city and the
+countryside when the session provides `maps/fullmap.bmp`, the image of
+MafiaCountrysideMap 2.0 (forum.mafia-game.ru, 2016). Pack it from the
+downloaded mod folder; the tool leaves out its ASI, ASI loader
+(`dinput8.dll`, Ultimate ASI Loader) and `rw_data.dll` (byte-identical to the
+retail one) and keeps only the image:
+
+```bash
+python3 tools/package_mod.py "<MafiaCountrysideMap2.0 folder>" mods/countryside-map.zip
+```
+
+The ZIP (11,237,966 bytes) is local and Git-ignored like the other mods; its
+redistribution terms are unknown. Remove it to go back to the retail map
+everywhere. Any uncompressed 24- or 32-bit bitmap with the same layout can
+replace it: the client scales it to 2048 x 2048 and maps the world as
+`SDK::UI::Map::kCountryside` says. Other maps keep the retail city map.
+See the [native contract](native_contract.md#city-map-countryside-extension).
+
 ## Native integration and verification
 
 The retail `rw_data.dll` audited here has SHA-256

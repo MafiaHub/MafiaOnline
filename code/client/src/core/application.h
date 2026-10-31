@@ -5,6 +5,7 @@
 
 #include "features/car/car_service.h"
 #include "features/camera/camera_follow_service.h"
+#include "features/city_map/city_map_service.h"
 #include "features/npc/npc_host.h"
 #include "features/npc/npc_replicas.h"
 #include "features/pedestrian/pedestrian_replicas.h"
@@ -151,6 +152,7 @@ namespace Mafia1Online::Core {
         Features::Player::PlayerService _players;
         Features::Car::CarService _cars;
         Features::Camera::CameraFollowService _cameraFollow;
+        Features::CityMap::CityMapService _cityMap;
         Features::Pedestrian::PedestrianService _pedestrians;
         Features::Pedestrian::PedestrianReplicaService _pedestrianReplicas;
         Features::Npc::NpcHost _npcs;

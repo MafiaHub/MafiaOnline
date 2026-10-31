@@ -5,6 +5,7 @@
 #include "player_scripting.h"
 #include "script_runtime.h"
 #include "visual_scripting.h"
+#include "features/city_map/city_map_service.h"
 #include "features/world/world_service.h"
 #include "shared/scripting_catalog.h"
 
@@ -278,7 +279,7 @@ namespace Mafia1Online::Scripting {
     void ClientCityMap::Render() {
         if (gBlips.empty() || !GetWorld().IsReady() || !Map::IsShown()) return;
         Map::View view;
-        if (!Map::CurrentView(view)) return;
+        if (!Map::CurrentView(view, Features::CityMap::ActiveProjection())) return;
         const float seconds =
             static_cast<float>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count() % 60000) / 1000.0f;
         const float pulse     = 0.6f + 0.4f * std::sin(seconds * 2.0f * std::numbers::pi_v<float> * 1.5f);
@@ -299,7 +300,7 @@ namespace Mafia1Online::Scripting {
             const uint32_t fill = Argb(blip.rgb, blip.flash ? pulse : 1.0f);
             if (!inside) {
                 const float factor = Map::kEdge * kEdgeInset / reach;
-                const float dx = relative.u * view.extentX * 0.8f, dy = relative.v * view.extentY * 0.74f;
+                const float dx = relative.u * view.extentX * Map::kScreenWidthRatio, dy = relative.v * view.extentY * Map::kScreenHeightRatio;
                 relative.u *= factor;
                 relative.v *= factor;
                 float x = 0.0f, y = 0.0f;

@@ -38,8 +38,31 @@ namespace Mafia1Online::SDK::Graphics {
     };
     static_assert(sizeof(NativeViewport) == 0x18);
 
+    // LS3DF ITexture: slot 0 is Release (G_IndicatorsClass::GameDone
+    // 0x5f74ad), which frees the texture at the last reference.
+    struct NativeTexture {
+        struct VTable {
+            int(__stdcall *release)(NativeTexture *);
+        } *vtable;
+
+        void Release() { vtable->release(this); }
+    };
+
+    // IGraph::CreateITexture flags (LS3DF 0x1006c2c0 and ITexture::Create
+    // 0x10075f50). 0x200001 skips the cached-texture scan and passes the name
+    // through unresolved; its bit 0 is also ITC_FROM_MEMORY, which makes the
+    // name a 40-byte BITMAPINFOHEADER followed by uncompressed pixel rows.
+    // Such a texture is never read from or written to a presaved .565/.DXn
+    // cache file, and its pixels are copied before Create returns.
+    inline constexpr uint32_t kTextureFromMemory = 0x200001;
+
     struct NativeGraphVTable {
-        void *_unused00[0x0c / sizeof(void *)];
+        void *_unused00;
+        // CreateITexture(name, alphaName, flags, out) (VC6 places the
+        // four-argument overload first); G_IndicatorsClass::Tick calls it at
+        // 0x602812. Returns a negative LS3D_RESULT on failure.
+        int(__stdcall *createTexture)(NativeGraph *, const void *name, const char *alphaName, uint32_t flags, NativeTexture **out);
+        void *_unused08;
         bool(__stdcall *setTexture)(NativeGraph *, void *);
         void *(__stdcall *getMainHwnd)(NativeGraph *);
         void *_unused14[(0x2c - 0x14) / sizeof(void *)];
@@ -75,6 +98,7 @@ namespace Mafia1Online::SDK::Graphics {
         void(__stdcall *nullTimer)(NativeGraph *);
         uint32_t(__stdcall *getTimer)(NativeGraph *, uint32_t minimumMs, uint32_t maximumMs);
     };
+    static_assert(offsetof(NativeGraphVTable, createTexture) == 0x04);
     static_assert(offsetof(NativeGraphVTable, setTexture) == 0x0c);
     static_assert(offsetof(NativeGraphVTable, getMainHwnd) == 0x10);
     static_assert(offsetof(NativeGraphVTable, present) == 0x3c);

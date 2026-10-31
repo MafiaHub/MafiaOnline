@@ -93,3 +93,10 @@ target_link_libraries(Mafia1OnlineTrafficJamTests PRIVATE Framework::Framework)
 
 add_executable(Mafia1OnlineCrewCarRetireTests crew_car_retire_tests.cpp)
 target_include_directories(Mafia1OnlineCrewCarRetireTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../client/src")
+
+add_executable(Mafia1OnlineCityMapTests
+    city_map_tests.cpp
+    ../client/src/features/city_map/map_image.cpp
+)
+target_include_directories(Mafia1OnlineCityMapTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../client/src")
+target_link_libraries(Mafia1OnlineCityMapTests PRIVATE Mafia1OnlineSDK)
