@@ -8,18 +8,14 @@
 // same sheds, log piles and pole at the same positions and heights. Ground
 // heights below are sampled from the FREEKRAJINA scene.4ds ground mesh; the
 // still and its gear stand in the open ground between the log piles, at
-// least 5.4 m from any of them. The nearest road is the road graph line from
+// least 5 m from any of them. The nearest road is the road graph line from
 // crossing (-1850.7, -4.0, 1843.7) south past (-1610.3, 15.5, 1259.4),
 // 130 m east, beyond a fenced pasture whose fences (plot3/plot4) run from
 // (-1678, 1279) south-west to (-1734, 1225): cars reach the clearing round
 // its north side. Stock FREEKRAJINA also has barrels here that the mod's
 // scene lacks, so the distillery runs on Lost Heaven Extended only.
 //
-// The props are stock models (sizes from their a2.dta meshes): the pot
-// "xv sud" (0.64 x 0.77 m, scaled 1.5), the pipe "xv trubka4" (1.5 m long),
-// the worm tub "xsud 01" (0.84 x 1.0 m), mash vats "tutsud" (0.78 x 0.98 m,
-// centred), molasses sacks "xpytel2", casks "sud01" (base 0.5 m below the
-// origin) and crates "bedna01" (0.8 m, centred).
+// What stands in the camp, and the ground under it, is camp.ts.
 //
 // Elsewhere: Ernesto is bars' sailor (sailor03, the MISE16-SALIERY frame at
 // (-1778.47, -5.56, 19.44) in Salieri's billiard room, server/bars). The
@@ -32,17 +28,16 @@
 // point (-404.0, 17.0, 440.3) 12 m from its door arrow (lib/maps.ts); Paco
 // waits at the container docks crossing (lib/maps.ts).
 import * as maps from '../lib/maps';
-import type { ObjectSpec } from '../lib/placed_objects';
 import { flatDistance, onStreet, type Point } from '../lib/util';
 
 // The places around the still are chosen spots in the clearing's open
 // ground, each given by its offset from the pot or from a scene2.bin object
 // named in the header, at the height of the FREEKRAJINA scene.4ds ground
 // mesh ("Object211") sampled there:
-// - CASKS: the middle cask prop (cask2), 2.3 m east and 4.6 m north of the
-//   pot; ground 14.90.
-// - CRATES: between the crate props crate1 and crate3, 3.1 m west and 3.7 m
-//   south of the pot; ground 14.70.
+// - CASKS: the middle of the cask rack (camp.ts), 2.3 m east and 4.6 m
+//   north of the pot; ground 14.90.
+// - CRATES: the stack of cases (camp.ts), 3.1 m west and 3.7 m south of
+//   the pot; ground 14.70.
 // - YARD, where cars stop: the open ground east of the sheds toward the
 //   pasture's north corner, 10.4 m south-east of the shed "@bouda00" and
 //   14.3 m south of the log pile "klady03", with no scene2.bin object within
@@ -72,76 +67,6 @@ export const DRIVER_SPOT: Point = { x: -1477.8, y: 14.5, z: 762.0 };
 export const REVEAL_CAMERA: { position: Point; target: Point } = {
     position: { x: -1733.0, y: 18.5, z: 1256.0 },
     target: { x: -1744.0, y: 15.6, z: 1250.0 },
-};
-
-export type PropId =
-    | 'pot'
-    | 'pipe'
-    | 'worm'
-    | 'vat1'
-    | 'vat2'
-    | 'sack1'
-    | 'sack2'
-    | 'sack3'
-    | 'cask1'
-    | 'cask2'
-    | 'cask3'
-    | 'crate1'
-    | 'crate2'
-    | 'crate3';
-
-export const PROPS: readonly (ObjectSpec & { id: PropId })[] = [
-    { id: 'pot', model: 'xv sud.i3d', position: POT, scale: 1.5 },
-    { id: 'pipe', model: 'xv trubka4.i3d', position: { x: -1743.0, y: 15.85, z: 1250.0 } },
-    { id: 'worm', model: 'xsud 01.i3d', position: { x: -1742.0, y: 14.99, z: 1250.0 } },
-    { id: 'vat1', model: 'tutsud.i3d', position: { x: -1746.4, y: 15.06, z: 1251.0 } },
-    { id: 'vat2', model: 'tutsud.i3d', position: { x: -1746.4, y: 15.09, z: 1249.2 } },
-    {
-        id: 'sack1',
-        model: 'xpytel2.i3d',
-        position: { x: -1745.0, y: 14.64, z: 1253.4 },
-        yaw: 0.3,
-    },
-    {
-        id: 'sack2',
-        model: 'xpytel2.i3d',
-        position: { x: -1745.0, y: 14.85, z: 1253.4 },
-        yaw: -0.25,
-    },
-    {
-        id: 'sack3',
-        model: 'xpytel2.i3d',
-        position: { x: -1745.0, y: 14.64, z: 1254.4 },
-        yaw: 0.1,
-    },
-    { id: 'cask1', model: 'sud01.i3d', position: { x: -1741.0, y: 15.49, z: 1254.0 } },
-    { id: 'cask2', model: 'sud01.i3d', position: { x: -1741.7, y: 15.4, z: 1254.6 } },
-    { id: 'cask3', model: 'sud01.i3d', position: { x: -1742.4, y: 15.3, z: 1255.2 } },
-    {
-        id: 'crate1',
-        model: 'bedna01.i3d',
-        position: { x: -1747.5, y: 15.0, z: 1246.5 },
-        yaw: 0.2,
-    },
-    {
-        id: 'crate2',
-        model: 'bedna01.i3d',
-        position: { x: -1747.5, y: 15.8, z: 1246.5 },
-        yaw: 0.5,
-    },
-    {
-        id: 'crate3',
-        model: 'bedna01.i3d',
-        position: { x: -1746.5, y: 15.15, z: 1245.9 },
-        yaw: -0.3,
-    },
-];
-// The burst pot lies on its side; the pipe is gone.
-export const WRECK: ObjectSpec = {
-    model: 'xv sud.i3d',
-    position: { x: -1744.0, y: 15.29, z: 1250.0 },
-    rotation: { x: 1.45, y: 0.7, z: 0 },
-    scale: 1.5,
 };
 
 /* Reach */

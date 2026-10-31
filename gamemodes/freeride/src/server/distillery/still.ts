@@ -7,7 +7,7 @@
 // waits a while for someone of theirs to carry on.
 import * as profiles from '../lib/profiles';
 import { feed, name, text, toast, COLORS } from '../lib/notify';
-import { PlacedObjects } from '../lib/placed_objects';
+import { PlacedObjects, type ObjectSpec } from '../lib/placed_objects';
 import {
     distance,
     emit,
@@ -31,7 +31,8 @@ import {
     XP,
     type Operation,
 } from './operations';
-import { near, POT, PROPS, STILL_LEAVE, WRECK, type PropId } from './places';
+import { PROPS, WRECKED, type PropId } from './camp';
+import { near, POT, STILL_LEAVE } from './places';
 
 const BATCH_MS = 45_000;
 const BAND_LOW = 0.45;
@@ -104,10 +105,12 @@ export function syncProps(): void {
     const broken = wrecked();
 
     props.sync(
-        PROPS.map((spec) => [
-            spec.id,
-            spec.id === 'pot' && broken ? WRECK : spec.id === 'pipe' && broken ? null : spec,
-        ]),
+        PROPS.map((spec): [PropId, ObjectSpec | null] => {
+            // A piece the blast knocked over (or took, null) until the still stands again.
+            const knocked = broken ? WRECKED[spec.id] : undefined;
+
+            return [spec.id, knocked === undefined ? spec : knocked];
+        }),
     );
 }
 
