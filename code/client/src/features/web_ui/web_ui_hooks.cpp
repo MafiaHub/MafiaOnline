@@ -1,7 +1,6 @@
 #include "web_ui_hooks.h"
 
 #include "web_ui_service.h"
-#include "features/script/visual_scripting.h"
 
 #include <MinHook.h>
 #include <mafia1/sdk/graphics/native_graph.h>
@@ -35,7 +34,6 @@ namespace Mafia1Online::Features::WebUi {
         WebUiService *gService             = nullptr;
 
         void __stdcall PresentHook(Graph *graph) {
-            Scripting::RenderPreviewCommands();
             gService->OnPresent();
             gPresentOriginal(graph);
         }

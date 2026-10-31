@@ -194,8 +194,11 @@ default. For packaged custom fonts and CSS text styling, use a resource-owned
 For a 3D model inside a 2D dialog, call `Scene.createPreview("thunderbird00.i3d")`
 once and `Draw.preview(handle, x, y, width, height, yaw?, zoom?)` from each
 `render` event. The rectangle uses game backbuffer pixels. The preview draws
-after the mission scene and before the web view, and clears only its rectangle
-to a dark background. `yaw` is in radians; `zoom` is 0.5–2.5, with larger
+at the end of the mission scene's render (its `SCM_RENDER_DONE` callback,
+before the HUD and the web view) and clears only its rectangle to a dark
+background. Drawn there, a preview scene leaves the game's sound alone: LS3D
+skips its listener and sound pass, which would otherwise move the one
+DirectSound listener into the showroom. `yaw` is in radians; `zoom` is 0.5–2.5, with larger
 values moving the camera closer. `Scene.setPreviewTilt(handle, pitch, roll)`
 adds pitch and roll in radians. `Scene.setPreviewModel(handle, filename)` swaps
 the stock model without changing the handle. For named children,

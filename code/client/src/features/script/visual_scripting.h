@@ -18,7 +18,8 @@ namespace Mafia1Online::Scripting {
     void RegisterVisualResourceCleanup(Framework::Scripting::ResourceManager &manager);
     void BeginDrawFrame();
     void RenderDrawCommands();
-    // Runs from IGraph::Present after the game scene has ended, before CEF.
+    // Runs inside the world scene's SCM_RENDER_DONE callback, so each preview
+    // scene renders as a callback render without touching the sound listener.
     void RenderPreviewCommands();
     void ResetLocalVisuals();
     // True only while a collision-enabled, script-owned human remains active.

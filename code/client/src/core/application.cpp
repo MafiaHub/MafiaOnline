@@ -156,7 +156,16 @@ namespace Mafia1Online::Core {
             _settings.ApplyAll();
         }
         if (!host) {
+            // Inside the world scene's SCM_RENDER_DONE callback (cbScene message 2).
+            // Previews render their own scenes here, as callback renders:
+            // I3D_driver::Render (LS3DF 0x10062030) then skips the scene's sound
+            // listener and its sound pass (gated at 0x10062420 and 0x100624bc).
+            // Rendered at Present instead, each preview moved the one DirectSound
+            // listener into its showroom and made its sector the current sound
+            // sector, garbling the world's sound and leaving a freed sector in
+            // the driver's fade list when the preview closed.
             _chat.SetOverlay([this] {
+                Scripting::RenderPreviewCommands();
                 _nametags.Render(_world);
                 Scripting::RenderDrawCommands();
                 Scripting::ClientCityMap::Render();
