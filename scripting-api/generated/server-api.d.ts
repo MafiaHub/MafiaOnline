@@ -341,6 +341,21 @@ declare global {
     railwayHitPlayer: [player: Player, info: RailwayHitInfo];
 
     /**
+     * Dispatched when a traffic restart or a new simulation host took a rider off a tram or metro train: it stands where it stepped aboard, in a new life (spawnGeneration rises) with the same health and weapons. playerSpawn and playerRespawn do not fire for it.
+     */
+    playerRailwayEject: [player: Player, info: PlayerRailwayEjectInfo];
+
+    /**
+     * Dispatched when the jam watch (Traffic.setJamSettings) found a jam and asked the simulation host to take its cars off the road. Each car goes as the host's own despawn does, without vehicleDestroy; the host refills the road out of every player's sight. Something players left on the road may jam it again.
+     */
+    trafficJamReset: [info: TrafficJamResetInfo];
+
+    /**
+     * Dispatched when the simulation host's traffic starts over.
+     */
+    trafficHostChange: [info: TrafficHostChangeInfo];
+
+    /**
      * Dispatched after Vehicle.spawn created a vehicle.
      */
     vehicleSpawn: [vehicle: Vehicle];
@@ -1002,6 +1017,91 @@ declare global {
      * Damage applied: retail (|speed| - 2.5) * 4.2.
      */
     damage: number;
+  }
+
+  /**
+   * A rider taken off a tram or metro train.
+   */
+  interface PlayerRailwayEjectInfo {
+    /**
+     * The railway it rode, as last reported.
+     */
+    railway: RailwayInfo | null;
+  }
+
+  /**
+   * The server's jam watch over the simulation host's traffic.
+   */
+  interface TrafficJamSettings {
+    /**
+     * Whether the server resets jams on its own; default true.
+     */
+    enabled: boolean;
+
+    /**
+     * Cars a jam takes, each within radius of one of them; default 6.
+     */
+    minCars: number;
+
+    /**
+     * Size of a jam in units; default 35. No second reset within it during cooldownSeconds.
+     */
+    radius: number;
+
+    /**
+     * A car counts as standing below this speed in units per second, and while it keeps within 2 units of where it stopped; default 1.
+     */
+    maxSpeed: number;
+
+    /**
+     * How long every car of a jam has stood; default 60, longer than a crossing's wait.
+     */
+    stuckSeconds: number;
+
+    /**
+     * Seconds before the same place is reset again; default 30.
+     */
+    cooldownSeconds: number;
+
+    /**
+     * A car with a player on foot this close stays; default 8, the reach of a steal. The jam watch also leaves cars a player or NPC sits in, police cars and parked cars (no driver aboard) alone.
+     */
+    playerClearance: number;
+  }
+
+  /**
+   * A traffic jam the server cleared.
+   */
+  interface TrafficJamResetInfo {
+    /**
+     * Middle of the jammed cars.
+     */
+    position: { x: number; y: number; z: number };
+
+    /**
+     * Cars the simulation host was asked to take off the road.
+     */
+    vehicles: number;
+
+    /**
+     * How long the most recently stopped of them had stood.
+     */
+    stuckSeconds: number;
+  }
+
+  /**
+   * Why the traffic started over.
+   */
+  interface TrafficHostChangeInfo {
+    /**
+     * restart: Traffic.restartHost() had the host refill its traffic; handover: a standby simulation host took over (Traffic.restartHost(true), or the host left); attach: a simulation host joined while none ran.
+     */
+    reason: "restart" | "handover" | "attach";
+
+    /**
+     * Riders taken off trams and metro trains first (playerRailwayEject).
+     */
+    ejected: number;
   }
 
   /**
@@ -2607,6 +2707,45 @@ declare global {
      * @returns The number of railways; freeride has 38.
      */
     getCount(): number;
+  };
+
+  /**
+   * The city's car traffic, which the simulation host drives around every player. The server watches it for jams (trafficJamReset) and asks the host to take jammed cars off the road; the host refills the road out of every player's sight. A car a player or scripted NPC sits in, a car a player stands at and a car a player took always stay. resetArea and restartHost also take parked cars and the police and mafia cars with their crews, each once no police case, road block or mafia pursuit runs through it.
+   */
+  const Traffic: {
+    /**
+     * Returns the jam watch's settings.
+     * @returns The current settings.
+     */
+    getJamSettings(): TrafficJamSettings;
+
+    /**
+     * Changes the jam watch for the whole server. server.json's mod.trafficJam sets the same fields at start.
+     * @param settings The fields to change; the others stay.
+     * @returns False when a value is out of range (minCars 2-64, radius 1-200, maxSpeed 0-20, stuckSeconds 1-3600, cooldownSeconds 0-3600, playerClearance 0-200); nothing changes then.
+     */
+    setJamSettings(settings: Partial<TrafficJamSettings>): boolean;
+
+    /**
+     * Asks the simulation host to take its traffic cars within radius off the road: parked ones, and police and mafia cars with their crews (npcRetire), which go with the next police retirement pass once no police case, road block or mafia pursuit runs through them; the others go at once, as the host's own despawn does.
+     * @param position Center; three numbers are accepted too.
+     * @param radius Distance in units, up to 800.
+     * @returns How many cars the host was asked to remove; 0 without a host.
+     */
+    resetArea(position: Vector3 | { x: number; y: number; z: number }, radius: number): number;
+
+    /**
+     * Restarts the traffic: players aboard a tram or metro train step off where they boarded (playerRailwayEject), then the host takes its whole traffic pool off the road and refills it (trafficHostChange, reason restart). With handover the current host is kicked and the first standby host takes over one tick later; riders step off then (reason handover). The kicked host's process has to be started again to join as a standby.
+     * @param handover Hand over to a standby simulation host instead; defaults to false.
+     * @returns False without a host, or with handover and no standby host.
+     */
+    restartHost(handover?: boolean): boolean;
+
+    /**
+     * Whether a simulation host runs the traffic, and how many standby hosts wait to take over.
+     * @returns The host's state.
+     */
+    getHost(): { attached: boolean; standby: number };
   };
 
   /**
