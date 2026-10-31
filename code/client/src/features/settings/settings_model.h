@@ -5,6 +5,7 @@
 #include <nlohmann/json.hpp>
 
 #include <array>
+#include <filesystem>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -131,6 +132,33 @@ namespace Mafia1Online::Features::Settings {
         bool operator==(const HudSettings &) const = default;
     };
 
+    // How the game window is made, applied by Display's InitSystem hook at the
+    // next start: InitSystem builds the window and the D3D8 device once.
+    enum class DisplayMode : uint8_t {
+        // A captioned window of width x height.
+        Windowed,
+        // A window without borders covering the monitor, at its resolution.
+        Borderless,
+        // Exclusive fullscreen at width x height (IGraph::Init flag 0x2).
+        Fullscreen,
+    };
+
+    struct DisplaySettings {
+        DisplayMode mode = DisplayMode::Borderless;
+        // 0 x 0 is the monitor's own resolution. Borderless ignores both.
+        uint32_t width  = 0;
+        uint32_t height = 0;
+
+        bool operator==(const DisplaySettings &) const = default;
+    };
+
+    inline constexpr uint32_t kMinDisplayWidth  = 640;
+    inline constexpr uint32_t kMinDisplayHeight = 480;
+    inline constexpr uint32_t kMaxDisplayWidth  = 7680;
+    inline constexpr uint32_t kMaxDisplayHeight = 4320;
+
+    std::string_view DisplayModeId(DisplayMode mode);
+
     // Everything the mod's settings file holds. Retail-owned values stay
     // empty until the player changes them here; until then the selected Mafia
     // profile's values apply, as they always have.
@@ -146,12 +174,19 @@ namespace Mafia1Online::Features::Settings {
         float mediaVolume = 1.0f;
         VoiceSettings voice;
         HudSettings hud;
+        // Empty until the player picks one; the client config's "window" (or
+        // borderless at the monitor's resolution) applies until then.
+        std::optional<DisplaySettings> display;
     };
 
     inline constexpr int kSettingsVersion       = 1;
     inline constexpr size_t kMaxScriptKeys      = 256;
     inline constexpr size_t kMaxDeviceNameBytes = 256;
     inline constexpr size_t kMaxResourceName    = 64;
+
+    // Next to the client config, as ui.json is, so a second local instance
+    // started with its own config keeps its own settings.
+    std::filesystem::path SettingsFilePath(const std::string &projectPath);
 
     ClientSettings DefaultSettings();
     // Never throws. Unknown, malformed or out-of-range entries fall back to
@@ -166,6 +201,7 @@ namespace Mafia1Online::Features::Settings {
         Audio,
         Voice,
         Hud,
+        Display,
     };
     std::optional<Section> SectionFromId(std::string_view id);
     void ResetSection(ClientSettings &settings, Section section);

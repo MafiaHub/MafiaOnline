@@ -200,6 +200,13 @@ mod's own: the Mafia profile and every game file stay untouched.
   vertical look, keyboard steering linearity, double-tap roll, crosshair
   (off, dot, cross), speedometer unit, player names and health bars above
   heads, and the on/off switches resources define.
+* **Display**: borderless (the default: a window without borders covering
+  the monitor at its resolution), exclusive fullscreen or a window, and the
+  resolution for the last two from the sizes the graphics card offers. The
+  game builds its window once at start, so a change applies on the next start;
+  the page says what is running now. Fullscreen at a size the card lacks starts
+  borderless instead, and Alt-Tab out of fullscreen pauses the game until the
+  player returns (see `docs/native_contract.md`, "In-process display setup").
 * **Audio**: master, music, cars and speech (the retail volumes), voice
   chat (0-200 %) and resource web audio such as the car radio.
 * **Voice**: voice chat on/off, push-to-talk or voice activity, the

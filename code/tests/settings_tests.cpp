@@ -145,6 +145,24 @@ int main() {
     if (!ValidResourceName("freeride") || ValidResourceName("") || ValidResourceName("a/b") || ScriptKeyId("freeride", "f9") != "freeride/f9")
         return Fail(31, "resource names");
 
+    // Display: absent until chosen; a size needs both sides in range, else it
+    // is the monitor's (0 x 0); an unknown mode keeps borderless.
+    if (DefaultSettings().display || ToJson(DefaultSettings()).contains("display"))
+        return Fail(32, "display stays out of the file until chosen");
+    const auto fullscreen = ParseSettings(nlohmann::json::parse(R"({"display": {"mode": "fullscreen", "width": 2560, "height": 1440}})"));
+    if (!fullscreen.display || fullscreen.display->mode != DisplayMode::Fullscreen || fullscreen.display->width != 2560 || fullscreen.display->height != 1440)
+        return Fail(33, "display fullscreen");
+    const auto odd = ParseSettings(nlohmann::json::parse(R"({"display": {"mode": "huge", "width": 99999, "height": 300}})"));
+    if (!odd.display || odd.display->mode != DisplayMode::Borderless || odd.display->width != 0 || odd.display->height != 0)
+        return Fail(34, "display bounds");
+    const auto windowed = ParseSettings(ToJson(ParseSettings(nlohmann::json::parse(R"({"display": {"mode": "windowed", "width": 1280, "height": 720}})"))));
+    if (!windowed.display || !(*windowed.display == DisplaySettings {DisplayMode::Windowed, 1280, 720}))
+        return Fail(35, "display round trip");
+    auto chosen = windowed;
+    ResetSection(chosen, Section::Display);
+    if (chosen.display || SectionFromId("display") != Section::Display)
+        return Fail(36, "display reset");
+
     std::printf("settings_tests: ok\n");
     return 0;
 }

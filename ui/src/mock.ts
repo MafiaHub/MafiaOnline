@@ -26,6 +26,16 @@ function mockSettings(): GameSettings {
         media: 1,
         voice: { enabled: true, volume: 1, mode: 'pushToTalk', threshold: 0.03, releaseMs: 100, noiseSuppression: false, device: '' },
         hud: { nametags: true, nametagHealth: true },
+        display: { mode: 'borderless', width: 0, height: 0 },
+        displayActive: { mode: 'borderless', width: 2560, height: 1440 },
+        displayModes: [
+            [2560, 1440],
+            [1920, 1080],
+            [1600, 900],
+            [1280, 720],
+            [1024, 768],
+        ],
+        monitor: [2560, 1440],
         devices: ['Microphone (USB Audio)', 'Headset Microphone'],
         voiceAvailable: true,
         toggles: [{ resource: 'freeride', id: 'radio', label: 'Car radio', value: true }],
@@ -160,6 +170,7 @@ export function startMock(receive: (message: InboundMessage) => void) {
                 audio: { ...settings.audio, ...patch.audio },
                 voice: { ...settings.voice, ...patch.voice },
                 hud: { ...settings.hud, ...patch.hud },
+                display: { ...settings.display, ...patch.display },
                 media: patch.media ?? settings.media,
             };
             receive({ type: 'settings', payload: settings });

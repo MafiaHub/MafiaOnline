@@ -3,7 +3,7 @@ import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { send } from '../bridge';
 import { Button, Heading, Panel, Toggle } from '../components/ui';
-import { type GameSettings, type Preferences, type SettingsSlot, defaultPreferences, gameSettings, preferences, voiceLevel } from '../store';
+import { type DisplayMode, type DisplaySettings, type GameSettings, type Preferences, type SettingsSlot, defaultPreferences, gameSettings, preferences, voiceLevel } from '../store';
 import { colors, radii } from '../tokens.stylex';
 import { keyNameFromEvent, keyNameFromMouse } from './keys';
 
@@ -251,11 +251,12 @@ const styles = stylex.create({
     },
 });
 
-type Tab = 'controls' | 'gameplay' | 'audio' | 'voice' | 'interface';
+type Tab = 'controls' | 'gameplay' | 'display' | 'audio' | 'voice' | 'interface';
 
 const tabs: { id: Tab; label: string }[] = [
     { id: 'controls', label: 'Controls' },
     { id: 'gameplay', label: 'Gameplay' },
+    { id: 'display', label: 'Display' },
     { id: 'audio', label: 'Audio' },
     { id: 'voice', label: 'Voice' },
     { id: 'interface', label: 'Interface' },
@@ -447,6 +448,80 @@ function GameplayPage(props: { settings: GameSettings }) {
     );
 }
 
+const modeNames: Record<DisplayMode, string> = { borderless: 'Borderless', fullscreen: 'Fullscreen', windowed: 'Windowed' };
+
+function describeDisplay(display: DisplaySettings, monitor: [number, number]): string {
+    const [width, height] =
+        display.mode === 'borderless' ? monitor : display.width === 0 ? (display.mode === 'windowed' ? [1024, 768] : monitor) : [display.width, display.height];
+    return `${modeNames[display.mode]} ${width} × ${height}`;
+}
+
+// The game makes its window and Direct3D device once, at start (InitSystem),
+// so a change here is saved for the next start.
+function DisplayPage(props: { settings: GameSettings }) {
+    const { display, displayActive, displayModes, monitor } = props.settings;
+    const setDisplay = (values: Partial<DisplaySettings>) => send('settings:set', { display: values });
+    const size = display.width === 0 ? '0x0' : `${display.width}x${display.height}`;
+    const pending = describeDisplay(display, monitor) !== describeDisplay(displayActive, monitor);
+    const [monitorWidth, monitorHeight] = monitor;
+    // A window must fit on the monitor beside its caption; fullscreen takes what the card offers.
+    const sizes = displayModes.filter(([width, height]) => display.mode === 'fullscreen' || (width <= monitorWidth && height <= monitorHeight));
+    if (display.width !== 0 && !sizes.some(([width, height]) => width === display.width && height === display.height)) {
+        sizes.unshift([display.width, display.height]);
+    }
+    return (
+        <>
+            <p {...stylex.props(styles.note)}>
+                Running now: <b>{describeDisplay(displayActive, monitor)}</b>.{' '}
+                {pending ? <b>Restart Mafia Online to switch to {describeDisplay(display, monitor)}.</b> : 'Changes apply the next time you start Mafia Online.'}
+            </p>
+            <Section title="Window">
+                <Segmented<DisplayMode>
+                    label="Mode"
+                    value={display.mode}
+                    options={[
+                        { value: 'borderless', label: 'Borderless' },
+                        { value: 'fullscreen', label: 'Fullscreen' },
+                        { value: 'windowed', label: 'Windowed' },
+                    ]}
+                    onChange={(mode) => setDisplay({ mode })}
+                />
+                {display.mode !== 'borderless' && (
+                    <div {...stylex.props(styles.field, styles.fieldWide)}>
+                        <span>Resolution</span>
+                        <span {...stylex.props(styles.segmented)}>
+                            <select
+                                {...stylex.props(styles.select)}
+                                value={size}
+                                onChange={(event) => {
+                                    const [width, height] = (event.currentTarget as HTMLSelectElement).value.split('x').map(Number);
+                                    setDisplay({ width, height });
+                                }}
+                            >
+                                <option value="0x0">
+                                    {display.mode === 'windowed' ? 'Default (1024 × 768)' : `Monitor (${monitorWidth} × ${monitorHeight})`}
+                                </option>
+                                {sizes.map(([width, height]) => (
+                                    <option key={`${width}x${height}`} value={`${width}x${height}`}>
+                                        {width} × {height}
+                                    </option>
+                                ))}
+                            </select>
+                        </span>
+                    </div>
+                )}
+                <p {...stylex.props(styles.note)}>
+                    {display.mode === 'borderless'
+                        ? 'Covers the whole monitor at its own resolution. Alt-Tab switches away at once.'
+                        : display.mode === 'fullscreen'
+                          ? 'Takes over the monitor, usually the fastest. Alt-Tab pauses the game until you come back, so other players see you stand still. A resolution the graphics card does not offer falls back to borderless.'
+                          : 'A movable window with a title bar.'}
+                </p>
+            </Section>
+        </>
+    );
+}
+
 function AudioPage(props: { settings: GameSettings }) {
     const { audio, media, voice } = props.settings;
     const setAudio = (values: Partial<GameSettings['audio']>) => send('settings:set', { audio: values });
@@ -569,6 +644,7 @@ function InterfacePage() {
 const resets: Record<Tab, string[]> = {
     controls: ['controls'],
     gameplay: ['mouse', 'hud'],
+    display: ['display'],
     audio: ['audio'],
     voice: ['voice'],
     interface: [],
@@ -694,6 +770,8 @@ export function SettingsScreen(props: { onClose: () => void }) {
                     <ControlsPage settings={settings} capturing={capturing} onCapture={setCapturing} />
                 ) : tab === 'gameplay' && settings ? (
                     <GameplayPage settings={settings} />
+                ) : tab === 'display' && settings ? (
+                    <DisplayPage settings={settings} />
                 ) : tab === 'audio' && settings ? (
                     <AudioPage settings={settings} />
                 ) : tab === 'voice' && settings ? (

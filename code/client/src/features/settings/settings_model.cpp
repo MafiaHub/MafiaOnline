@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 
 namespace Mafia1Online::Features::Settings {
     namespace {
@@ -410,6 +411,27 @@ namespace Mafia1Online::Features::Settings {
             ReadBool(*hud, "nametags", settings.hud.nametags);
             ReadBool(*hud, "nametagHealth", settings.hud.nametagHealth);
         }
+        if (const auto *display = Member(root, "display"); display && display->is_object()) {
+            DisplaySettings chosen;
+            if (const auto *mode = Member(*display, "mode"); mode && mode->is_string()) {
+                const auto name = mode->get<std::string>();
+                for (const auto candidate : {DisplayMode::Windowed, DisplayMode::Borderless, DisplayMode::Fullscreen}) {
+                    if (name == DisplayModeId(candidate)) {
+                        chosen.mode = candidate;
+                    }
+                }
+            }
+            uint32_t width  = 0;
+            uint32_t height = 0;
+            ReadUInt(*display, "width", kMaxDisplayWidth, width);
+            ReadUInt(*display, "height", kMaxDisplayHeight, height);
+            // Both or neither: 0 x 0 is the monitor's resolution.
+            if (width >= kMinDisplayWidth && height >= kMinDisplayHeight) {
+                chosen.width  = width;
+                chosen.height = height;
+            }
+            settings.display = chosen;
+        }
         return settings;
     }
 
@@ -454,6 +476,9 @@ namespace Mafia1Online::Features::Settings {
                          {"noiseSuppression", settings.voice.noiseSuppression},
                          {"device", settings.voice.device}};
         root["hud"]   = {{"nametags", settings.hud.nametags}, {"nametagHealth", settings.hud.nametagHealth}};
+        if (settings.display) {
+            root["display"] = {{"mode", DisplayModeId(settings.display->mode)}, {"width", settings.display->width}, {"height", settings.display->height}};
+        }
         return root;
     }
 
@@ -463,6 +488,7 @@ namespace Mafia1Online::Features::Settings {
         if (id == "audio") return Section::Audio;
         if (id == "voice") return Section::Voice;
         if (id == "hud") return Section::Hud;
+        if (id == "display") return Section::Display;
         return std::nullopt;
     }
 
@@ -490,7 +516,26 @@ namespace Mafia1Online::Features::Settings {
             break;
         }
         case Section::Hud: settings.hud = defaults.hud; break;
+        case Section::Display: settings.display.reset(); break;
         }
+    }
+
+    std::string_view DisplayModeId(DisplayMode mode) {
+        switch (mode) {
+        case DisplayMode::Windowed: return "windowed";
+        case DisplayMode::Fullscreen: return "fullscreen";
+        case DisplayMode::Borderless: break;
+        }
+        return "borderless";
+    }
+
+    std::filesystem::path SettingsFilePath(const std::string &projectPath) {
+        const char *configOverride = std::getenv("MAFIA1ONLINE_CLIENT_CONFIG");
+        if (configOverride && *configOverride) {
+            const std::filesystem::path config(configOverride);
+            return config.parent_path() / (config.stem().string() + ".settings.json");
+        }
+        return std::filesystem::path(projectPath) / "config" / "settings.json";
     }
 
     std::map<std::string, std::vector<std::string>> FindConflicts(const std::vector<BoundSlot> &slots) {

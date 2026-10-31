@@ -147,6 +147,14 @@ export interface SettingsGroup {
     rows: { id: string; label: string; slots: string[] }[];
 }
 
+export type DisplayMode = 'borderless' | 'fullscreen' | 'windowed';
+
+export interface DisplaySettings {
+    mode: DisplayMode;
+    width: number;
+    height: number;
+}
+
 export interface GameSettings {
     groups: SettingsGroup[];
     slots: Record<string, SettingsSlot>;
@@ -172,6 +180,12 @@ export interface GameSettings {
         device: string;
     };
     hud: { nametags: boolean; nametagHealth: boolean };
+    // The window for the next start (0 x 0 is the monitor's resolution), the
+    // one running now, the sizes exclusive fullscreen can use and the monitor.
+    display: DisplaySettings;
+    displayActive: DisplaySettings;
+    displayModes: [number, number][];
+    monitor: [number, number];
     devices: string[];
     voiceAvailable: boolean;
     toggles: { resource: string; id: string; label: string; value: boolean }[];

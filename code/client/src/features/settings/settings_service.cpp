@@ -2,6 +2,7 @@
 
 #include "remapped_input.h"
 
+#include "features/display/system_init_hooks.h"
 #include "features/script/script_runtime.h"
 #include "shared/features/chat/text_policy.h"
 
@@ -29,17 +30,6 @@ namespace Mafia1Online::Features::Settings {
         constexpr size_t kMaxTogglesPerOwner    = 32;
         constexpr size_t kMaxLabel              = 64;
         constexpr size_t kMaxToggleId           = 32;
-
-        // Next to the client config, as ui.json is, so a second local
-        // instance started with its own config keeps its own settings.
-        std::filesystem::path SettingsPath(const std::string &projectPath) {
-            const char *configOverride = std::getenv("MAFIA1ONLINE_CLIENT_CONFIG");
-            if (configOverride && *configOverride) {
-                const std::filesystem::path config(configOverride);
-                return config.parent_path() / (config.stem().string() + ".settings.json");
-            }
-            return std::filesystem::path(projectPath) / "config" / "settings.json";
-        }
 
         SDK::Profile::NativeLoadSave &Profile() {
             return SDK::Profile::Get();
@@ -112,6 +102,31 @@ namespace Mafia1Online::Features::Settings {
             return ToJson(settings)["mouse"];
         }
 
+        // The window the game runs with, as the settings page names it.
+        // Borderless is always the monitor's size, which the file writes as 0 x 0,
+        // so switching to a window from it starts at the default size.
+        DisplaySettings ActiveDisplaySettings() {
+            const auto &active = Display::Active();
+            if (active.mode == DisplayMode::Borderless) {
+                return {active.mode, 0, 0};
+            }
+            return {active.mode, static_cast<uint32_t>(active.width), static_cast<uint32_t>(active.height)};
+        }
+
+        nlohmann::json DisplayJson(const DisplaySettings &display) {
+            ClientSettings settings;
+            settings.display = display;
+            return ToJson(settings)["display"];
+        }
+
+        nlohmann::json DisplayModesJson() {
+            nlohmann::json modes = nlohmann::json::array();
+            for (const auto &[width, height] : Display::FullscreenModes()) {
+                modes.push_back({width, height});
+            }
+            return modes;
+        }
+
         nlohmann::json AudioJson(const NativeAudio &audio) {
             ClientSettings settings;
             settings.audio = audio;
@@ -121,7 +136,7 @@ namespace Mafia1Online::Features::Settings {
 
     void SettingsService::Load(const std::string &projectPath) {
         const auto logger = Framework::Logging::GetLogger("Settings");
-        _path             = SettingsPath(projectPath);
+        _path             = SettingsFilePath(projectPath);
         _settings         = DefaultSettings();
         std::ifstream input(_path);
         if (!input) {
@@ -500,6 +515,10 @@ namespace Mafia1Online::Features::Settings {
             {"voiceAvailable", voice != nullptr},
             {"toggles", toggles},
             {"profile", {{"controls", !_settings.controls.has_value()}, {"audio", !_settings.audio.has_value()}}},
+            {"display", DisplayJson(_settings.display.value_or(ActiveDisplaySettings()))},
+            {"displayActive", DisplayJson(ActiveDisplaySettings())},
+            {"displayModes", DisplayModesJson()},
+            {"monitor", {Display::MonitorSize().first, Display::MonitorSize().second}},
         };
     }
 
@@ -515,8 +534,11 @@ namespace Mafia1Online::Features::Settings {
         if (!_settings.audio) {
             merged["audio"] = AudioJson(LiveAudio());
         }
+        if (!_settings.display) {
+            merged["display"] = DisplayJson(ActiveDisplaySettings());
+        }
         bool touched = false;
-        for (const char *section : {"mouse", "audio", "voice", "hud"}) {
+        for (const char *section : {"mouse", "audio", "voice", "hud", "display"}) {
             if (const auto it = patch.find(section); it != patch.end() && it->is_object()) {
                 merged[section].update(*it);
                 touched = true;
@@ -554,6 +576,11 @@ namespace Mafia1Online::Features::Settings {
         if (patch.contains("hud") && !(parsed.hud == _settings.hud)) {
             _settings.hud = parsed.hud;
             changed       = true;
+        }
+        // Kept for the next start: InitSystem makes the window and device once.
+        if (patch.contains("display") && parsed.display != _settings.display) {
+            _settings.display = parsed.display;
+            changed           = true;
         }
         if (changed) {
             Changed();
@@ -646,6 +673,7 @@ namespace Mafia1Online::Features::Settings {
             break;
         case Section::Voice: ApplyVoice(); break;
         case Section::Hud: break;
+        case Section::Display: break;
         }
         Changed();
         return std::nullopt;
