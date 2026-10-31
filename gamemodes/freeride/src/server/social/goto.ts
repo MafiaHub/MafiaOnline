@@ -1,6 +1,7 @@
 // Asking for a ride to a friend: /goto puts the request to them, and on
 // /accept the traveller appears behind them, or in a free seat of their car.
 import * as life from '../lib/life';
+import * as admin from '../lib/admin';
 import * as commands from '../lib/commands';
 import { toast } from '../lib/notify';
 import { MAIN_WORLD, playable, ahead, headingOf } from '../lib/util';
@@ -8,12 +9,14 @@ import { events } from '../lib/lifecycle';
 import { PlayerMap } from '../lib/players';
 import { Cooldown } from '../lib/cooldowns';
 import { challenge, opponent } from '../lib/challenges';
+import { Transfers } from '../lib/transfer';
 
 const GOTO_COOLDOWN_MS = 60_000;
 const RECENT_DAMAGE_MS = 15_000;
 
 const lastDamage = new PlayerMap<number>();
 const rides = new Cooldown(GOTO_COOLDOWN_MS);
+const adminMoves = new Transfers();
 
 function blocked(player: Player): string | null {
     if (!playable(player) || player.virtualWorld !== MAIN_WORLD) {
@@ -74,18 +77,54 @@ function bring(traveller: Player, host: Player): void {
     toast(host, `${traveller.nickname} is here.`, { tone: 'good' });
 }
 
+// An admin goes straight there: no request, no wait, and whatever they are
+// doing (a job shift, a race, the police after them), into the target's
+// world (an interior, a home) if they are inside one.
+function adminGoto(player: Player, target: Player): void {
+    if (!playable(player) || !playable(target)) {
+        toast(player, `${playable(player) ? target.nickname : 'You'} must be alive and spawned.`, {
+            tone: 'bad',
+        });
+
+        return;
+    }
+
+    const car = target.getVehicle();
+    const heading = headingOf(target.rotation);
+    const position = ahead((car ?? target).position, heading, car ? -4 : -1.6, 0.2);
+
+    if (player.getVehicle()) {
+        player.removeFromVehicle();
+    }
+
+    adminMoves.move(player, { position, heading }, target.virtualWorld, {
+        then: (moved) =>
+            toast(
+                player,
+                moved ? `Teleported to ${target.nickname}.` : 'The teleport was refused.',
+                { tone: moved ? 'good' : 'bad' },
+            ),
+    });
+}
+
 commands.register(
     {
         name: 'goto',
         aliases: ['tp'],
         usage: '/goto <player>',
-        help: 'Ask a player to bring you to them.',
+        help: 'Ask a player to bring you to them (admins go straight there).',
         category: 'Social',
     },
     (player, args) => {
         const target = opponent(player, args.join(' '));
 
         if (!target) {
+            return;
+        }
+
+        if (admin.isAdmin(player)) {
+            adminGoto(player, target);
+
             return;
         }
 
