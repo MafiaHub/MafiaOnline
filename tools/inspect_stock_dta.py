@@ -11,18 +11,22 @@ import re
 import struct
 
 
+# Game/WinMain.cpp GAME_DTA_UNLOCK_KEYS, in g_apszDtaArchives order.
 KEYS = {
     "a8": (0x6A63FA71, 0xEC45D8CE),  # patch and menus
-    "a6": (0x728E2DB9, 0x5055DA68),  # textures
-    "a1": (0xE7375F59, 0x0900210E),  # mission scenes
+    "b8": (0x79E21CDB, 0xB60F823F),
     "a2": (0x1417D340, 0xB6399E19),  # models
+    "a6": (0x728E2DB9, 0x5055DA68),  # textures
+    "a0": (0x7F3D9B74, 0xEC48FE17),
+    "a1": (0xE7375F59, 0x0900210E),  # mission scenes
     "a3": (0xA94B8D3C, 0x771F3888),  # animations
     "ac": (0xA94B8D3C, 0x771F3888),  # animations
-    "a4": (0x4F4BB0C6, 0xEA340420),  # animations
+    "a4": (0xA94B8D3C, 0x771F3888),  # animations
     "aa": (0xD4AD90C6, 0x67DA216E),  # tables and sounds
-    "a5": (0xF4F03A72, 0xE266FE62),
-    "a7": (0x959D1117, 0x5B763446),
-    "a9": (0x7F3D9B74, 0xEC48FE17),
+    "a5": (0x4F4BB0C6, 0xEA340420),
+    "a7": (0xF4F03A72, 0xE266FE62),
+    "a9": (0x959D1117, 0x5B763446),
+    "ab": (0x7F3D9B74, 0xEC48FE17),
 }
 
 
