@@ -5,6 +5,7 @@
 // landmarks races, jobs and events use. Positions come from the stock a1.dta
 // scenes and the mod's scene2.bin; road graphs from tools/export_road_graph.py.
 import * as barRoom from './bar_room';
+import * as hospitalRoom from './hospital_room';
 import roadsFreeride from '../data/roads_freeride.js';
 import roadsFreerideExtended from '../data/roads_freeride_extended.js';
 import roadsFreekrajina from '../data/roads_freekrajina.js';
@@ -304,6 +305,8 @@ export interface Hospital {
     name: string;
     door: Point;
     spawn: Placement;
+    /** Its wards stand under the fields (lib/hospital_room.ts), behind the interior "b:hospital". */
+    wards?: boolean;
 }
 
 export type MapId = 'freeride' | 'freeride_extended' | 'freekrajina';
@@ -396,6 +399,7 @@ export const MAPS: Readonly<Record<MapId, MapDefinition>> = {
             name: 'Lost Heaven Hospital',
             door: { x: -759.4, y: 14.9, z: 761.5 },
             spawn: { position: { x: -759.4, y: 14.9, z: 759.5 }, heading: Math.PI },
+            wards: true,
         },
         jail: CITY_JAIL,
         interiors: [
@@ -419,6 +423,28 @@ export const MAPS: Readonly<Record<MapId, MapDefinition>> = {
                 kind: 'public',
                 outside: { position: { x: -411.5, y: 17.45, z: 449.9 }, heading: Math.PI },
                 inside: { position: { x: -414.7, y: 17.36, z: 454.2 }, heading: Math.PI / 2 },
+            },
+            // The hospital (lib/hospital_room.ts). models/9medic.4ds has three
+            // door bays (3DVERE4, z 763.51) between four pillars whose fronts
+            // stand at z 762.59 (x -765.97..-764.51, -762.05..-760.6,
+            // -758.14..-756.68, -754.22..-752.76); its landing (floor y
+            // 13.24, x -764.97..-753.78, z 760.67..763.62) runs in front of
+            // them. The arrow stands in front of the east bay (doors x
+            // -756.68..-754.22), 0.4 m out from the pillars: 5.9 m from where
+            // the Dispensary's attendant stands on maps without wards
+            // (server/shops.ts), 4.0 m from where delivered patients walk in
+            // at the middle bay (-759.4, 762.0, ambulance/places.ts), 7.8 m up
+            // the steps from the ambulance sign-on arrow (-759.4, 11.6, 755.5)
+            // and 4.8 m from where players wake on the steps.
+            {
+                id: 'b:hospital',
+                // Not the map's name for it: its green label hangs over the doors.
+                name: 'Hospital Entrance',
+                kind: 'public',
+                world: hospitalRoom.WORLD,
+                open: hospitalRoom.isBuilt,
+                outside: { position: { x: -755.45, y: 13.3, z: 762.2 }, heading: Math.PI },
+                inside: hospitalRoom.arrival(),
             },
         ],
     },

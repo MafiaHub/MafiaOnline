@@ -4,7 +4,7 @@
 import * as life from './lib/life';
 import * as menu from './lib/menu';
 import * as commands from './lib/commands';
-import { SHOPS } from './shops';
+import { SHOPS, shopsHere } from './shops';
 import * as maps from './lib/maps';
 import { toast, card, name, text, COLORS } from './lib/notify';
 import { distance, formatMoney, formatMinutes, onStreet, playable, playerById } from './lib/util';
@@ -122,7 +122,9 @@ commands.register(
         }
 
         const shop = maps.current()?.shops
-            ? SHOPS.find((entry) => distance(player.position, entry.position) <= COUNTER_REACH)
+            ? shopsHere().find(
+                  (entry) => distance(player.position, entry.position) <= COUNTER_REACH,
+              )
             : undefined;
 
         if (!shop) {

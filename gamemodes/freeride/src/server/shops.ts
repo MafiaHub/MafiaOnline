@@ -10,12 +10,21 @@ import * as life from './lib/life';
 import * as maps from './lib/maps';
 import * as menu from './lib/menu';
 import * as commands from './lib/commands';
+import * as hospitalRoom from './lib/hospital_room';
 import { Cooldown } from './lib/cooldowns';
 import { events, every, onStart } from './lib/lifecycle';
 import { toast, card, compass, type Tone } from './lib/notify';
 import { fields } from './lib/payload';
 import { PlayerMap } from './lib/players';
-import { distance, emit, onClient, formatMoney, formatMinutes, type Point } from './lib/util';
+import {
+    distance,
+    emit,
+    onClient,
+    formatMoney,
+    formatMinutes,
+    MAIN_WORLD,
+    type Point,
+} from './lib/util';
 
 const WEAPON = Object.freeze({ BAT: 4, COLT: 6, THOMPSON: 10, SHOTGUN: 11, GRENADE: 15 });
 const START_FUEL_FRACTION = 0.12;
@@ -178,13 +187,42 @@ function shopsOpen(): boolean {
     return Boolean(maps.current()?.shops);
 }
 
-// On Lost Heaven Extended Salieri's front door opens into his bar (bars/),
-// where the clerk would stand in the doorway; the window keeps serving
-// without him.
-function shownShops(): readonly Shop[] {
-    return maps.current()?.id === 'freeride_extended'
-        ? SHOPS.map((shop) => (shop.id === 'salieri' ? { ...shop, model: null } : shop))
-        : SHOPS;
+// Where a map's hospital has wards (lib/hospital_room.ts) the Dispensary
+// sells at their reception desk instead of on the front landing: its counter
+// is the receptionist's spot, she is the hospital's own NPC
+// (hospital/staff.ts), so the client stands no clerk there.
+function inWards(shop: Shop): Shop {
+    return {
+        ...shop,
+        tagline: 'Ask at the reception desk',
+        position: hospitalRoom.placed(hospitalRoom.SPOTS.receptionist).position,
+        model: null,
+        animation: null,
+    };
+}
+
+/**
+ * The shops of the loaded map, as players find them. On Lost Heaven
+ * Extended Salieri's front door opens into his bar (bars/), where the clerk
+ * would stand in the doorway; the window keeps serving without him.
+ */
+export function shopsHere(): readonly Shop[] {
+    const map = maps.current();
+
+    return SHOPS.map((shop) => {
+        if (shop.id === 'salieri' && map?.id === 'freeride_extended') {
+            return { ...shop, model: null };
+        }
+
+        return shop.id === 'pharmacy' && map?.hospital?.wards ? inWards(shop) : shop;
+    });
+}
+
+/** The virtual world a shop serves in: the wards' for the Dispensary inside them, the street's otherwise. */
+export function shopWorld(shop: Shop): number {
+    return shop.id === 'pharmacy' && maps.current()?.hospital?.wards
+        ? hospitalRoom.WORLD
+        : MAIN_WORLD;
 }
 
 function shopState(player: Player): void {
@@ -194,7 +232,7 @@ function shopState(player: Player): void {
 
     emit(player, 'fr:shops:state', {
         generation: World.getMissionGeneration(),
-        shops: shownShops(),
+        shops: shopsHere(),
         courier: courier.has(player.id),
     });
 }
@@ -340,10 +378,17 @@ function buy(player: Player, request: unknown): void {
         return;
     }
 
-    const shop = SHOPS.find((entry) => entry.id === shopId);
+    const shop = shopsHere().find((entry) => entry.id === shopId);
     const offer = shop?.offers.find((entry) => entry.id === offerId);
 
-    if (!shop || !offer || distance(player.position, shop.position) > SHOP_REACH) {
+    // The Dispensary inside the wards serves only there; the street shops
+    // keep serving whoever reaches their counter.
+    if (
+        !shop ||
+        !offer ||
+        distance(player.position, shop.position) > SHOP_REACH ||
+        (shopWorld(shop) !== MAIN_WORLD && player.virtualWorld !== shopWorld(shop))
+    ) {
         return;
     }
 
