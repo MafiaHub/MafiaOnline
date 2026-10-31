@@ -184,8 +184,11 @@
 
     /* City menu */
     #menu { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(6, 6, 7, .55); pointer-events: auto; }
-    .menu { width: min(74rem, calc(100vw - 2rem)); height: min(48rem, calc(100vh - 2rem)); display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; background: var(--bg); color: var(--text); border: 1px solid var(--line); box-shadow: 0 1.5rem 4rem rgba(0, 0, 0, .6); animation: rise .18s var(--ease); }
-    @keyframes rise { from { opacity: 0; transform: translateY(.25rem); } }
+    .menu { width: min(74rem, calc(100vw - 2rem)); height: min(48rem, calc(100vh - 2rem)); display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; background: var(--bg); color: var(--text); border: 1px solid var(--line); box-shadow: 0 1.5rem 4rem rgba(0, 0, 0, .6); }
+    /* Only the render that opens the menu animates: renderMenu rebuilds the
+       dialog on every data refresh, and a replayed fade blinked it. */
+    .menu.opening { animation: menu-rise .18s var(--ease); }
+    @keyframes menu-rise { from { opacity: 0; transform: translateY(.25rem); } }
     .menu header { display: flex; align-items: center; gap: 1rem; min-width: 0; padding: 1.1rem 1.5rem 1rem; background: var(--panel); border-bottom: 3px double var(--line); }
     .menu .wallet { margin-left: auto; min-width: 0; color: var(--muted); font: 400 .78rem/1.35 var(--sans); text-align: right; }
     .menu .wallet b { display: block; margin-bottom: .2rem; color: var(--gold); font: 700 1.6rem/1 var(--serif); font-variant-numeric: tabular-nums lining-nums; }
@@ -293,7 +296,7 @@
   <script>
     const TABS = [["city", "City"], ["homes", "Homes"], ["jobs", "Jobs"], ["races", "Races"], ["players", "Players"], ["crew", "Crew"], ["leaders", "Leaders"], ["help", "Help"]];
     const state = {player: {spawned: false, alive: false, id: null}, hidden: false, profile: null, cards: new Map(), race: null,
-      raceAt: 0, speakers: new Map(), menuOpen: false, tab: "city", data: null, compose: null, keys: {}};
+      raceAt: 0, speakers: new Map(), menuOpen: false, menuOpening: false, f2Down: false, tab: "city", data: null, compose: null, keys: {}};
     const keyLabel = (key) => state.keys[key] || key.toUpperCase();
 
     function send(name, payload = {}) {
@@ -811,7 +814,9 @@
       const active = document.activeElement;
       const activeId = active?.id;
       const activeValue = active?.value;
-      box.replaceChildren(el("div", {class: "menu", role: "dialog", "aria-modal": "true"},
+      const opening = state.menuOpening;
+      state.menuOpening = false;
+      box.replaceChildren(el("div", {class: opening ? "menu opening" : "menu", role: "dialog", "aria-modal": "true"},
         el("header", {}, el("span", {class: "seal"}, "LH"),
           el("div", {}, el("p", {class: "eyebrow"}, "Lost Heaven · Free Ride"), el("h2", {}, "City Menu")),
           el("div", {class: "wallet"}, el("b", {}, money(data.you?.money)), data.you ? `${data.you.name} · Level ${data.you.level}` : "Loading…")),
@@ -847,18 +852,28 @@
       send("hud:tab", {tab});
       renderMenu();
     }
-    on("menu:open", ({tab, keys}) => { state.menuOpen = true; if (tab) state.tab = tab; if (keys) state.keys = keys; renderMenu(); });
-    on("menu:close", () => { state.menuOpen = false; composeTarget = null; renderMenu(); });
+    on("menu:open", ({tab, keys}) => { state.menuOpening = !state.menuOpen; state.menuOpen = true; if (tab) state.tab = tab; if (keys) state.keys = keys; renderMenu(); });
+    on("menu:close", () => { state.menuOpen = false; state.f2Down = false; composeTarget = null; renderMenu(); });
     on("menu:data", (data) => {
       state.data = data;
       const typing = document.activeElement?.tagName === "INPUT" && document.activeElement.value;
       if (!typing) renderMenu();
     });
+    // Only a press this page saw: the release of the F2 press that opened the
+    // menu (or its auto-repeat) arrives here too and must not close it.
+    document.addEventListener("keyup", (event) => {
+      if (event.key !== "F2") return;
+      const pressed = state.f2Down;
+      state.f2Down = false;
+      if (state.menuOpen && pressed) { event.preventDefault(); send("hud:close"); }
+    });
     document.addEventListener("keydown", (event) => {
       if (!state.menuOpen) return;
-      // F2 belongs to hud.ts's Key.bind, which sees it focused or not; also
-      // closing here raced it and reopened the menu.
-      if (event.key === "F2") { event.preventDefault(); return; }
+      // F2 opens the menu through hud.ts's Key.bind, but while this page has
+      // focus the client holds script keys back (Instance::IsLocalInputAvailable),
+      // so the page closes it, on release: by then the press is spent, and the
+      // key's release cannot reopen what the Key.bind press handler opens.
+      if (event.key === "F2") { event.preventDefault(); if (!event.repeat) state.f2Down = true; return; }
       if (event.key === "Escape") { event.preventDefault(); send("hud:close"); return; }
       if (document.activeElement?.tagName === "INPUT") return;
       const index = Number(event.key) - 1;
