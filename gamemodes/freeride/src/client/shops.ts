@@ -1,4 +1,5 @@
-// Client-only shopkeepers and labels. Models never decide a purchase: the
+// Client-only shopkeepers and labels (Yellow Pete is the server's NPC in his
+// cellar: server/pete.ts). Models never decide a purchase or a sale: the
 // server checks the player's life, distance, balance, car and inventory.
 import { COLORS } from './lib/color';
 import { distance, type Point } from './lib/geometry';
@@ -17,6 +18,8 @@ interface Offer {
     /** null: priced at the pump; 0: free (accepted, not bought). */
     price: number | null;
     note: string;
+    /** The shop pays the price for it (0: it will not take it). */
+    sell?: boolean;
 }
 
 interface Shop {
@@ -26,9 +29,8 @@ interface Shop {
     position: Point;
     /** Which way the clerk faces, when the shop says. */
     facing?: Point;
-    /** The door hinge's frame, and where it is when the frame is not found. */
-    entranceFrame?: string;
-    entrance?: Point;
+    /** Where its name hangs, when not over the counter (a cellar's street door). */
+    sign?: Point;
     model: string | null;
     animation: string | null;
     offers: Offer[];
@@ -88,28 +90,6 @@ function clearMarket(): void {
     Hud.hideScore();
 }
 
-function shopFacing(shop: Shop): Point {
-    if (shop.facing) {
-        return shop.facing;
-    }
-
-    const doorHinge = shop.entranceFrame
-        ? (World.findWorldFrame(shop.entranceFrame)?.getWorldPosition() ?? shop.entrance)
-        : null;
-
-    if (!doorHinge) {
-        return { x: 0, y: 0, z: 1 };
-    }
-
-    // Pete stands at the doorway. Point out from its hinge toward arrivals,
-    // not back into the door leaf.
-    const x = shop.position.x - doorHinge.x;
-    const z = shop.position.z - doorHinge.z;
-    const length = Math.hypot(x, z);
-
-    return length > 0.001 ? { x: x / length, y: 0, z: z / length } : { x: 0, y: 0, z: 1 };
-}
-
 function placeActors(): void {
     if (!World.isReady() || generation !== World.getMissionGeneration()) {
         return;
@@ -120,7 +100,12 @@ function placeActors(): void {
             continue;
         }
 
-        const handle = Scene.createHuman(shop.model, shop.position, shopFacing(shop), true);
+        const handle = Scene.createHuman(
+            shop.model,
+            shop.position,
+            shop.facing ?? { x: 0, y: 0, z: 1 },
+            true,
+        );
 
         if (handle === null) {
             continue;
@@ -164,6 +149,10 @@ function nextOffer(): void {
 }
 
 function priceOf(offer: Offer): string {
+    if (offer.sell) {
+        return offer.price ? `+$${offer.price}` : 'NO DEAL';
+    }
+
     if (offer.price === null) {
         return 'PRICE AT PUMP';
     }
@@ -187,10 +176,12 @@ function showShopCard(shop: Shop | null, player: Player): void {
             name: entry.name,
             price: priceOf(entry),
             note: entry.note,
-            affordable: entry.price === null || entry.price <= player.money,
+            affordable: entry.sell
+                ? Boolean(entry.price)
+                : entry.price === null || entry.price <= player.money,
         })),
         index: (selected.get(shop.id) ?? 0) % shop.offers.length,
-        action: offer.price === 0 ? 'ACCEPT' : 'BUY',
+        action: offer.sell ? 'SELL' : offer.price === 0 ? 'ACCEPT' : 'BUY',
         money: player.money,
     });
 }
@@ -256,13 +247,15 @@ events.on('render', () => {
     }
 
     for (const shop of shops) {
-        if (distance(player.position, shop.position) > LABEL_DISTANCE) {
-            continue;
+        const label = shop.sign ?? {
+            x: shop.position.x,
+            y: shop.position.y + 2.15,
+            z: shop.position.z,
+        };
+
+        if (distance(player.position, label) <= LABEL_DISTANCE) {
+            Draw.worldText(shop.name.toUpperCase(), label, 16, COLORS.gold, 3, true);
         }
-
-        const top = { x: shop.position.x, y: shop.position.y + 2.15, z: shop.position.z };
-
-        Draw.worldText(shop.name.toUpperCase(), top, 16, COLORS.gold, 3, true);
     }
 
     const shop = nearestShop(player);

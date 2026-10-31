@@ -114,6 +114,8 @@ export interface PlayerRecord
     drunk?: Drunkenness | null;
     /** The car radio's on/off; on unless false. */
     radio?: boolean;
+    /** Guns Yellow Pete sold the player and has not bought back, by weapon id (server/gunshop.ts). */
+    gunReceipts?: Record<string, number>;
 }
 
 /** What leaderboards rank by: a counter, money, or level (by experience). */

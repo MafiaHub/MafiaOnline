@@ -1,8 +1,8 @@
-// Four places with a reason to visit: Pete sells weapons, the pump's
-// attendants sell fuel, the pharmacy patches wounds, and Salieri's back window
-// starts a courier run.
-// Positions were read from the stock a1.dta mission scene2.bin frames:
-//   MISE19-MESTO: "1dvere u peteho" (Pete's doorway)
+// Four places with a reason to visit: Pete sells and buys back weapons in his
+// cellar, the pump's attendants sell fuel, the pharmacy patches wounds, and
+// Salieri's back window starts a courier run.
+// Positions were read from the stock a1.dta mission data:
+//   MISE19-MESTO: Pete's spot in his cellar, web point 9 (server/gunshop.ts)
 //   FREERIDE and FREERIDENOC: "_pumpa2", "lekarna", "Salieri_save".
 // Both selected Free Ride scenes contain the same latter three positions.
 import * as profiles from './lib/profiles';
@@ -11,22 +11,37 @@ import * as maps from './lib/maps';
 import * as menu from './lib/menu';
 import * as commands from './lib/commands';
 import * as hospitalRoom from './lib/hospital_room';
+import * as pete from './pete';
 import { Cooldown } from './lib/cooldowns';
 import { events, every, onStart } from './lib/lifecycle';
 import { toast, card, compass, type Tone } from './lib/notify';
 import { fields } from './lib/payload';
-import { PlayerMap } from './lib/players';
+import { PlayerMap, SentCache } from './lib/players';
 import {
     distance,
     emit,
     onClient,
+    onStreet,
     formatMoney,
     formatMinutes,
     MAIN_WORLD,
+    pick,
     type Point,
 } from './lib/util';
+import {
+    buyback,
+    counterLines,
+    dealFor,
+    GUNS,
+    receiptsFor,
+    refusal,
+    SIGN,
+    SPOT,
+    withReceipt,
+    type Gun,
+    type Receipts,
+} from './gunshop';
 
-const WEAPON = Object.freeze({ BAT: 4, COLT: 6, THOMPSON: 10, SHOTGUN: 11, GRENADE: 15 });
 const START_FUEL_FRACTION = 0.12;
 // The retail attendants (Pumper) fuel the car at this price per litre.
 const FUEL_PRICE_PER_LITRE = 3;
@@ -39,6 +54,9 @@ const COURIER_TICK_MS = 5000;
 const COURIER_COMPASS_PRIORITY = 60;
 const LOW_FUEL_RETRY_MS = 500;
 const LOW_FUEL_RETRY_COUNT = 30;
+// Pete's card follows what a customer carries while they are this near him.
+const PETE_CARD_RANGE = 12;
+const PETE_CARD_MS = 1000;
 
 /** Something a shop sells. */
 export interface Offer {
@@ -47,6 +65,8 @@ export interface Offer {
     /** null: priced at the pump; 0: free (accepted, not bought). */
     price: number | null;
     note: string;
+    /** The shop pays the price for it (0: it will not take it). */
+    sell?: boolean;
 }
 
 /** A shop, as client/shops.ts draws it. */
@@ -57,47 +77,26 @@ export interface Shop {
     position: Point;
     /** Which way the clerk faces, when the shop says. */
     facing?: Point;
-    /** The door hinge's frame, and where it is when the frame is not found. */
-    entranceFrame?: string;
-    entrance?: Point;
+    /** Where its name hangs, when not over the counter (a cellar's street door). */
+    sign?: Point;
     model: string | null;
     animation: string | null;
     offers: Offer[];
 }
 
 export const SHOPS: readonly Shop[] = [
+    // Pete is server/pete.ts's NPC down in his cellar; his card is each
+    // customer's own (peteLines): rounds for what they carry, and what he
+    // buys back.
     {
         id: 'pete',
         name: "Yellow Pete's",
-        tagline: 'No questions after dark',
-        position: { x: 61.13562, y: 6.12056, z: 113.52177 },
-        // Box24 is the shop door hinge in both Free Ride scenes. Pete faces
-        // away from the hinge toward players approaching the doorway.
-        entranceFrame: 'Box24',
-        entrance: { x: 60.58458, y: 6.09017, z: 113.82933 },
-        model: 'ProdZ1.i3d',
-        animation: 'BorecStat.i3d',
-        offers: [
-            { id: 'colt', name: 'Colt .45', price: 90, note: 'Six in the chamber, eighteen spare' },
-            {
-                id: 'shells',
-                name: 'Shotgun & shells',
-                price: 210,
-                note: 'For when a quiet word will not do',
-            },
-            {
-                id: 'thompson',
-                name: 'Thompson & drums',
-                price: 320,
-                note: 'A loud answer to a bad question',
-            },
-            {
-                id: 'grenades',
-                name: 'Three grenades',
-                price: 95,
-                note: 'Keep them out of the glovebox',
-            },
-        ],
+        tagline: 'Down the stairs. No questions after dark',
+        position: SPOT.position,
+        sign: SIGN,
+        model: null,
+        animation: null,
+        offers: GUNS.map(({ id, name, price, note }) => ({ id, name, price, note })),
     },
     // The stock attendants serve the cars here; no scripted one stands in.
     {
@@ -158,6 +157,22 @@ export const SHOPS: readonly Shop[] = [
 
 const PETE = SHOPS[0];
 
+// What Pete says over a deal.
+const SOLD_LINES: readonly string[] = [
+    'Clean, oiled, never been to court.',
+    'Good choice. You did not get it here.',
+    'Treat it gentle and it treats you the same.',
+];
+const ROUNDS_LINES: readonly string[] = [
+    'Fresh from the crate.',
+    'That should keep it talking a while.',
+];
+const BOUGHT_BACK_LINES: readonly string[] = [
+    'I will take it back. Not for what you paid, of course.',
+    'A little worn, but it will sell again.',
+    'Wiped clean? Good. It never left my wall.',
+];
+
 // How much each health offer restores.
 const HEALING: Readonly<Record<string, number>> = { bandage: 45, coffee: 18 };
 
@@ -178,6 +193,8 @@ interface LowFuel {
 }
 
 const purchases = new Cooldown(PURCHASE_COOLDOWN_MS);
+// The Pete lines each player was last sent.
+const peteCards = new SentCache();
 const courier = new PlayerMap<CourierRun>();
 // By vehicle id: personal cars still to be drained to their starting fuel.
 const lowFuelPending = new Map<number, LowFuel>();
@@ -225,19 +242,48 @@ export function shopWorld(shop: Shop): number {
         : MAIN_WORLD;
 }
 
+// Guns Pete sold the player and has not bought back (lib/profiles.ts keeps
+// them with the player's record, as it keeps the guns they carry).
+function receipts(player: Player): Receipts | undefined {
+    return profiles.get(player)?.gunReceipts;
+}
+
+function receipt(player: Player, gun: Gun, delta: number): void {
+    profiles.setField(player, 'gunReceipts', withReceipt(receipts(player), gun.weaponId, delta));
+}
+
+/** Pete's card for this player: what is on his wall, and what he would buy back from them. */
+function peteLines(player: Player): Offer[] {
+    const inventory = player.getInventory();
+
+    return counterLines(
+        (inventory?.weapons ?? []).map((weapon) => weapon.weaponId),
+        inventory?.selected ?? 0,
+        receipts(player),
+    );
+}
+
 function shopState(player: Player): void {
     if (!shopsOpen()) {
         return;
     }
 
+    const lines = peteLines(player);
+
+    peteCards.set(player.id, JSON.stringify(lines));
     emit(player, 'fr:shops:state', {
         generation: World.getMissionGeneration(),
-        shops: shopsHere(),
+        shops: shopsHere().map((shop) => (shop.id === PETE.id ? { ...shop, offers: lines } : shop)),
         courier: courier.has(player.id),
     });
 }
 
-function chargeAndApply(player: Player, cost: number, apply: () => boolean): boolean {
+function chargeAndApply(
+    player: Player,
+    cost: number,
+    apply: () => boolean,
+    failed = 'The deal fell through; your money was returned.',
+): boolean {
     if (!player.trySpendMoney(cost)) {
         toast(player, `You need ${formatMoney(cost)}; you have ${formatMoney(player.money)}.`, {
             tone: 'bad',
@@ -251,33 +297,121 @@ function chargeAndApply(player: Player, cost: number, apply: () => boolean): boo
     }
 
     player.giveMoney(cost);
-    toast(player, 'The deal fell through; your money was returned.', { tone: 'bad' });
+    toast(player, failed, { tone: 'bad' });
 
     return false;
 }
 
-function buyWeapon(player: Player, offer: Offer): boolean {
-    switch (offer.id) {
-        case 'colt':
-            return player.hasWeapon(WEAPON.COLT)
-                ? player.giveAmmo(WEAPON.COLT, 18)
-                : player.giveWeapon(WEAPON.COLT, 6, 18, true);
-        case 'shells':
-            return player.hasWeapon(WEAPON.SHOTGUN)
-                ? player.giveAmmo(WEAPON.SHOTGUN, 24)
-                : player.giveWeapon(WEAPON.SHOTGUN, 8, 24, true);
-        case 'thompson':
-            return player.hasWeapon(WEAPON.THOMPSON)
-                ? player.giveAmmo(WEAPON.THOMPSON, 100)
-                : player.giveWeapon(WEAPON.THOMPSON, 50, 100, true);
-        // A throwable's count is its loaded value; addItem adds to it.
-        case 'grenades':
-            return player.hasWeapon(WEAPON.GRENADE)
-                ? player.addItem(WEAPON.GRENADE, 3)
-                : player.giveWeapon(WEAPON.GRENADE, 3, 0, true);
-        default:
-            return false;
+// A piece off the wall. A throwable's count is its loaded value, and addItem
+// adds to the ones carried; a knife or a gun is one of a kind.
+function buyGun(player: Player, gun: Gun): void {
+    const carried = player.hasWeapon(gun.weaponId);
+
+    if (carried && gun.kind !== 'throwable') {
+        toast(player, `You carry a ${gun.name} already.`);
+
+        return;
     }
+
+    const handed = chargeAndApply(
+        player,
+        gun.price,
+        () =>
+            carried
+                ? player.addItem(gun.weaponId, gun.loaded)
+                : player.giveWeapon(gun.weaponId, gun.loaded, gun.reserve, true),
+        'You have no room to carry it. Your money was returned.',
+    );
+
+    if (!handed) {
+        return;
+    }
+
+    if (gun.kind === 'firearm') {
+        receipt(player, gun, 1);
+    }
+
+    toast(player, `${gun.name} for ${formatMoney(gun.price)}.`, { tone: 'good' });
+    pete.says(player, pick(SOLD_LINES), { voice: true, deal: true });
+}
+
+function buyRounds(player: Player, gun: Gun): void {
+    if (!gun.ammo || !player.hasWeapon(gun.weaponId)) {
+        return;
+    }
+
+    const { rounds, price } = gun.ammo;
+
+    if (chargeAndApply(player, price, () => player.giveAmmo(gun.weaponId, rounds))) {
+        toast(player, `${rounds} rounds for your ${gun.name}: ${formatMoney(price)}.`, {
+            tone: 'good',
+        });
+
+        pete.says(player, pick(ROUNDS_LINES), { voice: true, deal: true });
+    }
+}
+
+// Pete buys back only what he sold this player, one receipt a gun, at
+// BUYBACK_SHARE of his price: buying to sell always loses, and a gun found,
+// looted or issued by a job earns nothing here. The gun goes before the money.
+function sellGun(player: Player, gun: Gun): void {
+    if (!player.hasWeapon(gun.weaponId)) {
+        return;
+    }
+
+    if (receiptsFor(receipts(player), gun.weaponId) <= 0) {
+        pete.says(player, 'That piece never hung on my wall. Take it somewhere else.');
+
+        return;
+    }
+
+    const value = buyback(gun);
+
+    if (value <= 0 || !player.removeWeapon(gun.weaponId)) {
+        return;
+    }
+
+    receipt(player, gun, -1);
+    player.giveMoney(value);
+    toast(player, `Sold your ${gun.name} for ${formatMoney(value)}.`, { tone: 'good' });
+    pete.says(player, pick(BOUGHT_BACK_LINES), { voice: true, deal: true });
+}
+
+// Pete's lines are the player's own: the card they chose from must still be
+// what Pete offers them now (a gun picked up turns its line into rounds),
+// else they get the new card and nothing changes hands.
+function atPete(player: Player, offerId: unknown): void {
+    const deal = typeof offerId === 'string' ? dealFor(offerId) : null;
+
+    if (!deal || !peteLines(player).some((line) => line.id === offerId)) {
+        shopState(player);
+
+        return;
+    }
+
+    if (!pete.serving()) {
+        toast(player, 'Pete is not at his counter right now.', { tone: 'bad' });
+
+        return;
+    }
+
+    const refused = refusal(life.activity(player)?.kind);
+
+    if (refused) {
+        pete.says(player, refused);
+
+        return;
+    }
+
+    if (deal.kind === 'gun') {
+        buyGun(player, deal.gun);
+    } else if (deal.kind === 'ammo') {
+        buyRounds(player, deal.gun);
+    } else {
+        sellGun(player, deal.gun);
+    }
+
+    shopState(player);
 }
 
 // The attendant fuels the car himself (Pumper, server-charged); the counter
@@ -379,13 +513,11 @@ function buy(player: Player, request: unknown): void {
     }
 
     const shop = shopsHere().find((entry) => entry.id === shopId);
-    const offer = shop?.offers.find((entry) => entry.id === offerId);
 
     // The Dispensary inside the wards serves only there; the street shops
     // keep serving whoever reaches their counter.
     if (
         !shop ||
-        !offer ||
         distance(player.position, shop.position) > SHOP_REACH ||
         (shopWorld(shop) !== MAIN_WORLD && player.virtualWorld !== shopWorld(shop))
     ) {
@@ -393,6 +525,18 @@ function buy(player: Player, request: unknown): void {
     }
 
     if (purchases.take(player) > 0) {
+        return;
+    }
+
+    if (shop.id === PETE.id) {
+        atPete(player, offerId);
+
+        return;
+    }
+
+    const offer = shop.offers.find((entry) => entry.id === offerId);
+
+    if (!offer) {
         return;
     }
 
@@ -415,18 +559,6 @@ function buy(player: Player, request: unknown): void {
 
     if (offer.id === 'bandage' || offer.id === 'coffee') {
         buyHealth(player, offer, offer.price);
-
-        return;
-    }
-
-    if (chargeAndApply(player, offer.price, () => buyWeapon(player, offer))) {
-        toast(
-            player,
-            `${offer.name} for ${formatMoney(offer.price)}. Pete counts the bills twice.`,
-            {
-                tone: 'good',
-            },
-        );
     }
 }
 
@@ -471,6 +603,24 @@ every(COURIER_TICK_MS, () => {
             endCourier(player, 'The courier run expired. Salieri will not be pleased.');
         } else {
             courierCard(player);
+        }
+    }
+});
+
+// What a customer near Pete carries changes without a deal (a gun picked up,
+// dropped, emptied): their card follows.
+every(PETE_CARD_MS, () => {
+    if (!shopsOpen()) {
+        return;
+    }
+
+    for (const player of World.getPlayers()) {
+        if (
+            onStreet(player) &&
+            distance(player.position, PETE.position) <= PETE_CARD_RANGE &&
+            peteCards.changed(player, JSON.stringify(peteLines(player)))
+        ) {
+            shopState(player);
         }
     }
 });
