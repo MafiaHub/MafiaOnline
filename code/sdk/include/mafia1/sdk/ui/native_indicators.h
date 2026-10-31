@@ -107,6 +107,24 @@ namespace Mafia1Online::SDK::UI {
         void ParheliaSetFov(void *camera, float radians) {
             reinterpret_cast<void(__thiscall *)(NativeIndicators *, void *, float)>(kParheliaSetFov)(this, camera, radians);
         }
+        // G_IndicatorsClass::ResolutionChanged 0x601520: lays the HUD out for
+        // IGraph's current Scrn_sx/Scrn_sy (scale, gauges, menu offset and the
+        // single/double/triple screen mode for width > 2 or 3 x height). Only
+        // arithmetic on this object; G_LoadSaveClass::Init calls it once.
+        void ResolutionChanged() {
+            reinterpret_cast<void(__thiscall *)(NativeIndicators *)>(0x601520)(this);
+        }
+        // ParheliaApplyViewport 0x604a80, thiscall, ret 4: the mission
+        // scene's viewport and its active camera's aspect for the screen mode
+        // ResolutionChanged chose, remembering singleScreen at +0x46f4. With
+        // singleScreen set in a double or triple mode it also clears and
+        // presents three frames.
+        void ParheliaApplyViewport(bool singleScreen) {
+            reinterpret_cast<void(__thiscall *)(NativeIndicators *, bool)>(0x604a80)(this, singleScreen);
+        }
+        bool ParheliaSingleScreen() const {
+            return *reinterpret_cast<const bool *>(reinterpret_cast<const std::byte *>(this) + 0x46f4);
+        }
         // Large white centred text; copies at most 127 characters.
         void RaceFlashText(const char *text, float seconds) {
             reinterpret_cast<void(__thiscall *)(NativeIndicators *, const char *, float)>(0x5fafc0)(this, text, seconds);
