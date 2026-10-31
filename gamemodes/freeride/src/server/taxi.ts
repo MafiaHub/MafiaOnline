@@ -3,7 +3,10 @@
 // at the cab (taxiHail) and keeps waving; stop next to them (taxiPickup) and
 // they get into the back. Drive them to a corner across town on the meter,
 // and arrive quickly and smoothly for a tip. A crash makes the passenger
-// complain; a third gets them out without paying. Without a simulation host
+// complain; a third gets them out without paying. Fares are not all alike
+// (MOODS): one in a hurry tips for speed, a nervous one for a gentle ride
+// and leaves after the second crash, a high roller pays well but tips only
+// a ride without a scratch. Without a simulation host
 // (no walkers) or when nobody hails for a while, dispatch sends the cab to a
 // fare waiting at a street corner instead. /taxi starts or ends a shift and
 // brings a cab.
@@ -17,6 +20,7 @@ import {
     formatMinutes,
     formatMoney,
     onStreet,
+    pick,
     playable,
     plural,
     speedOf,
@@ -58,7 +62,86 @@ const DISPATCH_AFTER_MS = 45_000;
 const HAIL_TOAST_MS = 20_000;
 const COMPANY_CAB = 'taxi00.i3d';
 
+type Mood = 'regular' | 'hurry' | 'nervous' | 'highRoller';
+
+/** How a kind of fare rides: what it says getting in, what it tips for, how much it takes. */
+interface MoodSpec {
+    label: string;
+    line: string;
+    /** The quote and the meter's rate, as a share of the usual. */
+    quote: number;
+    /** The tip window, as a share of retail's ride time. */
+    window: number;
+    speedTip: number;
+    smoothTip: number;
+    crashesToLeave: number;
+    /** A crash costs every tip, not only the smooth one. */
+    crashCostsAll: boolean;
+    /** What they say at the first crash. */
+    complaint: string;
+}
+
+const MOODS: Readonly<Record<Mood, MoodSpec>> = {
+    regular: {
+        label: 'Regular fare',
+        line: '"Take me across town." The meter is running; quick and smooth gets a tip.',
+        quote: 1,
+        window: 1,
+        speedTip: SPEED_TIP,
+        smoothTip: SMOOTH_TIP,
+        crashesToLeave: CRASHES_TO_LEAVE,
+        crashCostsAll: false,
+        complaint: '"Hey! Watch the road!"',
+    },
+    hurry: {
+        label: 'In a hurry',
+        line: "\"I'm late! Step on it, there's a fat tip if you're quick.\" The tip is for speed.",
+        quote: 1,
+        window: 0.65,
+        speedTip: 0.8,
+        smoothTip: 0.1,
+        crashesToLeave: CRASHES_TO_LEAVE,
+        crashCostsAll: false,
+        complaint: '"Fast, I said, not dead!"',
+    },
+    nervous: {
+        label: 'Nervous',
+        line: '"Please, drive carefully. My nerves can\'t take it." A gentle ride tips well; two crashes and they get out.',
+        quote: 1,
+        window: 1.3,
+        speedTip: 0.1,
+        smoothTip: 0.5,
+        crashesToLeave: 2,
+        crashCostsAll: false,
+        complaint: '"Oh God! Careful, please!"',
+    },
+    highRoller: {
+        label: 'High roller',
+        line: '"Get me there in one piece and in good time, and you won\'t regret it." They pay well; any crash costs every tip.',
+        quote: 1.6,
+        window: 1,
+        speedTip: 0.5,
+        smoothTip: 0.3,
+        crashesToLeave: CRASHES_TO_LEAVE,
+        crashCostsAll: true,
+        complaint: '"Do you know who I am? Mind the paintwork."',
+    },
+};
+
+// Most fares are regulars; the others now and then, never the same twice running.
+const MOOD_DRAW: readonly Mood[] = [
+    'regular',
+    'regular',
+    'regular',
+    'hurry',
+    'hurry',
+    'nervous',
+    'nervous',
+    'highRoller',
+];
+
 interface Ride {
+    mood: Mood;
     from: Point;
     target: Point;
     quote: number;
@@ -88,6 +171,8 @@ interface TaxiShift {
     /** A fare waiting at a street corner, sent by dispatch. */
     corner: Point | null;
     lastSpeed: number;
+    /** The last fare's mood, which the next special one is not. */
+    lastMood: Mood;
 }
 
 // When a player without a shift was last told someone waves.
@@ -230,6 +315,7 @@ const shifts = defineShift<TaxiShift>({
         ride: null,
         corner: null,
         lastSpeed: 0,
+        lastMood: 'regular',
     }),
 
     tick: tickShift,
@@ -349,19 +435,31 @@ function dispatch(player: Player, shift: TaxiShift): void {
     showMarkers(player, shift);
 }
 
+function drawMood(shift: TaxiShift): Mood {
+    const fresh = MOOD_DRAW.filter((mood) => mood === 'regular' || mood !== shift.lastMood);
+    const mood = pick(fresh.length ? fresh : MOOD_DRAW) ?? 'regular';
+
+    shift.lastMood = mood;
+
+    return mood;
+}
+
 function startRide(player: Player, shift: TaxiShift, from: Point, passenger: Npc | null): void {
     const target = corner(from, 700, 1600);
     const straight = flatDistance(from, target);
+    const mood = drawMood(shift);
+    const spec = MOODS[mood];
 
     shift.corner = null;
     shift.phase = 'ride';
     shift.ride = {
+        mood,
         from: { ...from },
         target,
-        quote: quoteFor(straight),
+        quote: Math.round(quoteFor(straight) * spec.quote),
         metres: 0,
         last: null,
-        tipWindow: new Countdown(rideTimeMs(straight)),
+        tipWindow: new Countdown(Math.round(rideTimeMs(straight) * spec.window)),
         crashes: 0,
         lastCrashAt: 0,
     };
@@ -372,25 +470,29 @@ function startRide(player: Player, shift: TaxiShift, from: Point, passenger: Npc
 
     compass(player, HUD, COMPASS_PRIORITY, { position: target });
     showMarkers(player, shift);
-    toast(
-        player,
-        `"Take me across town, ${Math.round(straight)} m." The meter is running; quick and smooth gets a tip.`,
-        { title: 'Taxi', tone: 'gold' },
-    );
+    toast(player, `${spec.line} ${Math.round(straight)} m.`, {
+        title: `Taxi · ${spec.label}`,
+        tone: 'gold',
+        seconds: 7,
+    });
 }
 
 function meterOf(ride: Ride): number {
+    const rate = MOODS[ride.mood].quote;
+
     return Math.min(
-        Math.round(FLAG_DROP + ride.metres * RATE_PER_METRE),
+        Math.round((FLAG_DROP + ride.metres * RATE_PER_METRE) * rate),
         Math.round(ride.quote * METER_CAP),
     );
 }
 
 function pay(player: Player, shift: TaxiShift, ride: Ride): number {
     const meter = meterOf(ride);
+    const spec = MOODS[ride.mood];
     const timeLeft = Math.max(0, ride.tipWindow.left()) / ride.tipWindow.ms;
-    const speedTip = Math.round(ride.quote * SPEED_TIP * timeLeft);
-    const smoothTip = ride.crashes === 0 ? Math.round(ride.quote * SMOOTH_TIP) : 0;
+    const tipped = !(spec.crashCostsAll && ride.crashes > 0);
+    const speedTip = tipped ? Math.round(ride.quote * spec.speedTip * timeLeft) : 0;
+    const smoothTip = ride.crashes === 0 ? Math.round(ride.quote * spec.smoothTip) : 0;
     const total = meter + speedTip + smoothTip;
 
     reward(player, { money: total, counters: ['fares'], xp: XP, reason: 'Taxi fare' });
@@ -424,7 +526,9 @@ function crash(player: Player, shift: TaxiShift): void {
     ride.lastCrashAt = now;
     ride.crashes++;
 
-    if (ride.crashes >= CRASHES_TO_LEAVE) {
+    const spec = MOODS[ride.mood];
+
+    if (ride.crashes >= spec.crashesToLeave) {
         toast(player, '"That\'s it, let me out!" Your fare leaves without paying.', {
             title: 'Taxi',
             tone: 'bad',
@@ -441,12 +545,13 @@ function crash(player: Player, shift: TaxiShift): void {
         return;
     }
 
-    const lines = ['"Hey! Watch the road!"', '"Are you trying to kill me?"'];
+    const lines = [spec.complaint, '"Are you trying to kill me?"'];
 
-    toast(player, `${lines[Math.min(ride.crashes, lines.length) - 1]} No tip for a rough ride.`, {
-        title: 'Taxi',
-        tone: 'bad',
-    });
+    toast(
+        player,
+        `${lines[Math.min(ride.crashes, lines.length) - 1]} ${spec.crashCostsAll ? 'No tips at all now.' : 'No tip for a rough ride.'}`,
+        { title: 'Taxi', tone: 'bad' },
+    );
 }
 
 // ---- Native taxi passengers (Taxi module) -------------------------------
@@ -664,7 +769,7 @@ function showCard(player: Player, shift: TaxiShift, cab: Vehicle, now: number): 
     if (shift.phase === 'boarding') {
         subtitle = 'Your fare is getting in';
     } else if (current) {
-        subtitle = 'Drive the fare to the drop-off';
+        subtitle = `${MOODS[current.mood].label}: to the drop-off`;
         rows.push(
             ['Meter', formatMoney(meterOf(current))],
             ['Drop-off', `${Math.round(flatDistance(cab.position, current.target))} m`],
