@@ -25,17 +25,23 @@
 //  (Salieri's own furniture of the story missions, @Rbstol1, @rstul1,
 //  @hqzdl01, @flasa2, @hqsvtl1 and the fan @Rvetr1, cannot be map objects:
 //  MapObject takes only names of letters, digits, "_", "-", "." and spaces.)
-//  plotdrev7.4ds    a steel door with a notice: the way out
-// The pieces stand upright or lie flat, turned by 0 or a quarter turn.
+//  plotdrev7.4ds    a steel door with a notice: the way out, set into the
+//                   south wall, the brick cut round it (map_objects.ts)
+// The pieces stand upright or lie flat, turned by 0 or a quarter turn. No two
+// faces lie in one plane, where they would flicker
+// (tests/interior_surfaces.test.ts).
 import * as log from './log';
 import {
     MapStructure,
     QUARTER,
     available,
+    facing,
+    named,
     offset,
     optionsFor,
     relative,
     standing,
+    steelDoor,
     tryCreate,
     type Piece,
 } from './map_objects';
@@ -50,7 +56,15 @@ const HEIGHT = 2.5;
 const ROOM_X = 9;
 const ROOM_Z = 4.05;
 
+/** The room's half-length (x), half-width (z) and height. */
+export const ROOM = Object.freeze({ x: ROOM_X, z: ROOM_Z, height: HEIGHT });
+
 const COUNTER = Object.freeze({ x: 1, z: 1.95, length: 6.6, height: 1.05 });
+// The brick facings' plane, 5 cm in front of the wall boxes (whose faces are
+// at ROOM_Z - 0.005, their middles 0.12 out and 0.25 thick).
+const BRICK_Z = ROOM_Z - 0.05;
+// The way out, in the south wall near its east end: the door's middle.
+const DOOR_X = 6.6;
 
 /** Where a drinker stands or sits; `slot` names the spot. */
 export interface PatronSpot extends Placement {
@@ -95,6 +109,9 @@ function table(list: Piece[], x: number, z: number, seated = false): void {
 
 export function pieces(): Piece[] {
     const list: Piece[] = [];
+    // The door stands in the south wall, set back from the brick's face and
+    // into the wall box behind it, the brick cut round it.
+    const { door, cut } = steelDoor(true, -BRICK_Z, 1, DOOR_X);
 
     for (const z of [-ROOM_Z - 0.12, ROOM_Z + 0.12]) {
         for (const x of [-6, 0, 6]) {
@@ -117,25 +134,26 @@ export function pieces(): Piece[] {
 
     // Brick 5 cm in front of every wall; it runs on through the corners and
     // the ceiling where nobody sees it.
-    for (const z of [-ROOM_Z + 0.05, ROOM_Z - 0.05]) {
-        for (const x of [-6, 6]) {
-            list.push(standing('plotcihly1.i3d', { x, y: 1.35, z }, 0));
-        }
+    for (const x of [-6, 6]) {
+        list.push(standing('plotcihly1.i3d', { x, y: 1.35, z: BRICK_Z }, 0));
     }
+
+    list.push(...named(facing('plotcihly1', true, -BRICK_Z, -ROOM_X, ROOM_X, cut)));
 
     for (const x of [-ROOM_X + 0.05, ROOM_X - 0.05]) {
         list.push(standing('plotcihly1.i3d', { x, y: 1.35, z: 0 }, QUARTER));
     }
 
-    // The counter: a wall box cut down to 1.05 x 0.6 m, boards on top.
+    // The counter: a wall box cut down to 0.6 m deep, boards on top, 2 cm
+    // over the box's own top so the two never flicker.
     list.push(
         standing('xzed.i3d', { x: COUNTER.x, y: 0, z: COUNTER.z }, 0, {
-            scale: { x: COUNTER.length / 6, y: COUNTER.height / 2.5, z: 2.5 },
+            scale: { x: COUNTER.length / 6, y: (COUNTER.height - 0.02) / 2.5, z: 2.5 },
         }),
     );
 
     list.push(
-        standing('plotdrev.i3d', { x: COUNTER.x, y: COUNTER.height + 0.01, z: COUNTER.z }, 0, {
+        standing('plotdrev.i3d', { x: COUNTER.x, y: COUNTER.height, z: COUNTER.z }, 0, {
             flat: true,
             scale: { x: (COUNTER.length + 0.1) / 12, y: 0.8 / 2.7, z: 1 },
         }),
@@ -146,7 +164,8 @@ export function pieces(): Piece[] {
         list.push(standing('xzidle 04.i3d', { x, y: 0.21, z: 1.2 }, 0));
     }
 
-    const top = COUNTER.height + 0.02;
+    // What stands on the boards, just clear of them.
+    const top = COUNTER.height + 0.005;
 
     list.push(standing('xflaska 1.i3d', { x: -1.6, y: top, z: 2.05 }, 0));
     list.push(standing('xflaska 1.i3d', { x: -1.45, y: top, z: 1.9 }, 0));
@@ -156,9 +175,10 @@ export function pieces(): Piece[] {
     list.push(standing('xradio 1.i3d', { x: 4.0, y: top, z: 2.05 }, 0));
     list.push(standing('xpopelnik.i3d', { x: -0.6, y: top, z: 1.8 }, 0));
 
-    // The back bar, its shelves under bottles.
+    // The back bar, its shelves under bottles: xskrin 01's box is
+    // y -1.215..1.135, z -0.312..0.363, its back 7 mm off the brick.
     for (const x of [-0.6, 2.6]) {
-        list.push(standing('xskrin 01.i3d', { x, y: 1.21, z: ROOM_Z - 0.4 }, 0));
+        list.push(standing('xskrin 01.i3d', { x, y: 1.21, z: BRICK_Z - 0.37 }, 0));
         list.push(standing('2flask.i3d', { x: x - 0.3, y: 2.35, z: ROOM_Z - 0.45 }, 0));
         list.push(standing('xflaska 1.i3d', { x: x + 0.3, y: 2.35, z: ROOM_Z - 0.45 }, 0));
     }
@@ -172,7 +192,7 @@ export function pieces(): Piece[] {
         list.push(standing('xsvetlo 10 on.i3d', { x, y: HEIGHT, z: 0.4 }, 0));
     }
 
-    list.push(standing('plotdrev7.i3d', { x: 7.3, y: 1.16, z: -ROOM_Z }, 0));
+    list.push(...named([door]));
 
     return list;
 }

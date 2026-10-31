@@ -30,15 +30,18 @@
 // The models, their boxes [x0, x1, y0, y1, z0, z1] measured from the LOD 0
 // meshes with their frame transforms (BOXES). A model faces local -z unless
 // FRONTS says otherwise.
-//  xzed          a 6 x 2.5 m wall box painted white over a green dado
-//                (0XEX1), finished on both faces: every wall, stretched to
-//                the room's height; a short piece over a doorway is its lintel
+//  xzed          a 6 x 2.5 x 0.25 m wall box painted white over a green
+//                dado (0XEX1), finished on both faces, its ends and its top
+//                but not underneath: every wall, stretched to the room's
+//                height; a short piece over a doorway is its lintel, with a
+//                plotcihly3 plane under it for the underside it lacks
 //  plotdrev      a 12 x 2.7 m double-sided plane of boards (PRKNA01): the
 //                floors, tiled to fit
 //  plotcihly3    the same plane in bare concrete: the ceilings, the
 //                theatre's floor
 //  plotdrev7     a white steel door with a notice: the street doors, the
-//                lifts
+//                lifts, each set into a gap in its wall (map_objects.ts
+//                steelDoor)
 //  9kober4       a 4.5 x 2.9 m rug, xvesak a coat stand, xkvet01 a potted
 //                plant, fikus a palm in a tub, xobraz03 a portrait, xobraz09
 //                a still life (both single-sided, facing -z), xobraz10 a
@@ -66,16 +69,23 @@
 //                ceiling; xsvetlo 09 on a lit bowl on chains (1.66 m), hung
 //                in the hall and, shortened, over the theatre's bed
 // Lamps, pictures, the rug, the curtains and the chairs people sit on do not
-// collide.
+// collide. No two faces lie in one plane, where they would flicker: walls on
+// one line meet end to end, a wall stops at the middle of the wall it runs
+// into, pictures and cabinets hang HANG off their wall, and doors stand back
+// from their wall's face (tests/interior_surfaces.test.ts checks them).
 import * as log from './log';
 import {
+    HANG,
     MapStructure,
     QUARTER,
     available,
+    named,
     offset,
     optionsFor,
     relative,
+    steelDoor,
     tryCreate,
+    type DoorCut,
     type Piece,
 } from './map_objects';
 import type { Placement, Point } from './util';
@@ -90,14 +100,17 @@ const HALL_HEIGHT = 4.5;
 // The doorways' and the hall opening's top.
 const LINTEL = 2.3;
 const OPENING_TOP = 3.0;
-const WALL = 0.24;
+// The thickness of an xzed wall (z -0.125..0.125).
+const WALL = 0.25;
 
 type Box = readonly [number, number, number, number, number, number];
 
-// [minX, maxX, minY, maxY, minZ, maxZ] in model space.
+// [minX, maxX, minY, maxY, minZ, maxZ] in model space, to the centimetre;
+// to the millimetre for what hangs on a wall, where it decides whether the
+// piece's back is in the wall or floats off it.
 // prettier-ignore
 export const BOXES = {
-    'plotdrev7': [-1.4, 0, -1.16, 1.24, 0, 0.1],
+    'plotdrev7': [-1.397, 0.003, -1.165, 1.235, 0, 0.1],
     '9kober4': [-2.24, 2.24, -0.02, -0.02, -1.44, 1.44],
     'xvesak': [-0.39, 0.25, -0.01, 1.8, -0.4, 0.24],
     '9pstul2': [-1.3, 1.4, -0.61, 0.31, -0.52, 0.53],
@@ -110,23 +123,23 @@ export const BOXES = {
     'xskrin 11': [-0.45, 0.65, -0.07, 2.1, -0.24, 0.24],
     'xskrin 10': [-0.4, 0.4, -0.45, 0.45, -0.25, 0.25],
     'xskrin 08': [-0.4, 0.4, 0, 1, -0.49, 0.45],
-    'xhodiny 2': [-0.25, 0.25, -0.8, 0, -0.04, 0],
-    'xobraz03': [-0.23, 0.23, -0.22, 0.38, -0.02, 0],
-    'xobraz09': [-0.23, 0.23, 0, 0.45, -0.01, 0.01],
-    'xobraz10': [-0.04, 0.34, 0, 0.58, 0, 0.03],
-    '9tabul': [-0.28, 0.26, -0.44, 0.41, -0.01, 0.02],
+    'xhodiny 2': [-0.25, 0.253, -0.8, 0, -0.04, 0.005],
+    'xobraz03': [-0.225, 0.225, -0.225, 0.375, -0.02, 0],
+    'xobraz09': [-0.225, 0.225, 0, 0.45, -0.01, 0.01],
+    'xobraz10': [-0.038, 0.337, 0, 0.585, 0.003, 0.029],
+    '9tabul': [-0.282, 0.26, -0.442, 0.412, -0.011, 0.016],
     'xzidle 03': [-0.22, 0.3, -0.52, 0.58, -0.25, 0.25],
     'xkvet01': [-0.2, 0.2, 0, 0.65, -0.23, 0.23],
     'fikus': [-0.53, 0.49, -0.16, 1.82, -0.46, 0.63],
     'xsvetlo 10 on': [-0.27, 0.27, -0.24, 0, -0.27, 0.27],
     'xsvetlo 09 on': [-0.3, 0.3, -0.37, 1.29, -0.3, 0.3],
     'xpostel 2': [-0.64, 0.66, -0.41, 0.7, -0.38, 2.04],
-    'okno3': [-0.68, 0.64, -0.79, 0.66, 0, 0],
+    'okno3': [-0.684, 0.642, -0.794, 0.663, 0.001, 0.001],
     '9vozik': [-0.66, 0.99, -0.28, 0.48, -0.4, 0.41],
     'xstul16': [-1, 1, -0.39, 0.39, -0.38, 0.38],
     'xstul19': [-0.75, 0.75, -0.44, 0.41, -0.75, 0.75],
     'umyvadlo': [-0.38, 0.38, -0.54, 0.54, -0.33, 0.33],
-    '9lekarna': [-0.15, 0.17, -0.26, 0.24, -0.1, 0.11],
+    '9lekarna': [-0.151, 0.167, -0.261, 0.239, -0.101, 0.115],
     'xkybl 1': [-0.19, 0.19, 0, 0.4, -0.18, 0.18],
     'xkoste 1': [-0.23, 0.24, -0.04, 1.82, -0.07, 0.06],
     'xlavicka': [-0.85, 0.85, 0, 0.82, -0.22, 0.39],
@@ -158,6 +171,16 @@ interface PutOptions {
     passable?: boolean;
 }
 
+/**
+ * How far from a wall's face a model hung on it has its box centre: its back
+ * HANG off the face (a model's depth is along its own z).
+ */
+function standoff(model: Model, scale = 1): number {
+    const [, , , , z0, z1] = BOXES[model];
+
+    return HANG + ((z1 - z0) * scale) / 2;
+}
+
 /** A model with its box centre on (x, z), its bottom (or top) at y, facing `facing`. */
 function put(
     model: Model,
@@ -184,6 +207,9 @@ function put(
         passable,
     };
 }
+
+// The medicine cabinet, enlarged to read across a room.
+const CABINET: PutOptions = { scale: 1.6 };
 
 function raw(
     model: string,
@@ -223,10 +249,26 @@ function wallPiece(
     );
 }
 
+// The plane under a lintel, the underside an xzed box lacks: from below a
+// doorway would otherwise look up through the lintel to the ceiling.
+function soffit(list: Piece[], alongX: boolean, line: number, cut: Opening, y: number): void {
+    list.push(
+        raw(
+            'plotcihly3',
+            alongX ? { x: cut.at, y, z: line } : { x: line, y, z: cut.at },
+            { x: QUARTER, y: alongX ? 0 : QUARTER, z: 0 },
+            { x: cut.width / 12, y: WALL / 2.7, z: 1 },
+        ),
+    );
+}
+
 /**
  * A straight wall on the line x (or z) = `line` from `from` to `to`, `height`
- * high, cut by its openings; each stretch is split into pieces of at most 6 m
- * and runs on half a wall's thickness at both ends to close the corners.
+ * high, cut by its openings; each stretch is split into pieces of at most 6 m.
+ * It ends on the middle line of the wall it meets, so a corner closes, the end
+ * is buried 0.125 m inside the other wall rather than flush with its far face,
+ * and a wall carrying on along the same line meets it end to end instead of
+ * doubling it (two faces in one plane flicker).
  */
 function wall(
     list: Piece[],
@@ -237,11 +279,11 @@ function wall(
     height: number,
     openings: readonly Opening[] = [],
 ): void {
-    let start = from - WALL / 2;
+    let start = from;
     const cuts = [...openings].sort((a, b) => a.at - b.at);
 
     for (const cut of [...cuts, null]) {
-        const end = cut ? cut.at - cut.width / 2 : to + WALL / 2;
+        const end = cut ? cut.at - cut.width / 2 : to;
         const pieces = Math.ceil((end - start) / 6);
         const length = (end - start) / pieces;
 
@@ -250,7 +292,10 @@ function wall(
         }
 
         if (cut) {
-            wallPiece(list, alongX, line, cut.at, cut.width, cut.top ?? LINTEL, height);
+            const top = cut.top ?? LINTEL;
+
+            wallPiece(list, alongX, line, cut.at, cut.width, top, height);
+            soffit(list, alongX, line, cut, top);
             start = cut.at + cut.width / 2;
         }
     }
@@ -312,9 +357,25 @@ const CONSULTING_DOOR = -10.5;
 const LOBBY_DOOR = 10.5;
 const HALL_OPENING = 5;
 const WARD_DOOR = 13;
+// The street doors, a pair in the middle of the hall's south wall (the
+// middles of the two leaves), and the lifts in the lobby's east wall.
+const STREET_DOORS: readonly number[] = [-0.7, 0.7];
+const LIFTS: readonly number[] = [-2.2, -4.8];
+
+// The opening a door's cut makes in an xzed wall.
+function opening(cut: DoorCut): Opening {
+    return { at: (cut.from + cut.to) / 2, width: cut.to - cut.from, top: cut.top };
+}
 
 function shell(list: Piece[]): void {
     const { hall, corridor, consulting, lobby, men, theatre, women } = ROOMS;
+    // The doors stand in their walls, the hall to their north, the lobby west.
+    const street = STREET_DOORS.map((x, i) =>
+        steelDoor(true, hall.z0 + WALL / 2, 1, x, { mirror: i > 0 }),
+    );
+    const lifts = LIFTS.map((z) => steelDoor(false, lobby.x1 - WALL / 2, -1, z));
+
+    list.push(...named([...street, ...lifts].map(({ door }) => door)));
 
     // The corridor's south side: the consulting room, the hall's opening, the lobby.
     wall(list, true, 0, corridor.x0, consulting.x0, HEIGHT);
@@ -338,13 +399,28 @@ function shell(list: Piece[]): void {
     wall(list, false, men.x1, men.z0, men.z1, HEIGHT);
     wall(list, false, women.x0, women.z0, women.z1, HEIGHT);
     // The hall (its walls 4.5 m high), the consulting room and the lobby.
-    wall(list, true, hall.z0, hall.x0, hall.x1, HALL_HEIGHT);
+    wall(list, true, hall.z0, hall.x0, hall.x1, HALL_HEIGHT, [
+        opening({
+            from: Math.min(...street.map(({ cut }) => cut.from)),
+            to: Math.max(...street.map(({ cut }) => cut.to)),
+            top: street[0].cut.top,
+        }),
+    ]);
+
     wall(list, false, hall.x0, hall.z0, hall.z1, HALL_HEIGHT);
     wall(list, false, hall.x1, hall.z0, hall.z1, HALL_HEIGHT);
     wall(list, true, consulting.z0, consulting.x0, consulting.x1, HEIGHT);
     wall(list, false, consulting.x0, consulting.z0, consulting.z1, HEIGHT);
     wall(list, true, lobby.z0, lobby.x0, lobby.x1, HEIGHT);
-    wall(list, false, lobby.x1, lobby.z0, lobby.z1, HEIGHT);
+    wall(
+        list,
+        false,
+        lobby.x1,
+        lobby.z0,
+        lobby.z1,
+        HEIGHT,
+        lifts.map(({ cut }) => opening(cut)),
+    );
 
     for (const [key, room] of Object.entries(ROOMS)) {
         slab(
@@ -379,14 +455,13 @@ function seated(list: readonly (readonly [number, number])[], x: number, z: numb
 
 function hall(list: Piece[]): void {
     const { z0, x0, x1 } = ROOMS.hall;
-
-    // The street doors, a pair in the middle of the south wall.
-    for (const x of [-0.7, 0.7]) {
-        list.push(put('plotdrev7', x, 0, z0 + WALL / 2 + 0.06, N));
-    }
+    // The faces of its south, west and east walls.
+    const south = z0 + WALL / 2;
+    const west = x0 + WALL / 2;
+    const east = x1 - WALL / 2;
 
     list.push(put('xvesak', -2.3, 0, z0 + 0.45, N));
-    list.push(put('xobraz10', 2.6, 1.45, z0 + WALL / 2 + 0.02, N, { passable: true }));
+    list.push(put('xobraz10', 2.6, 1.45, south + standoff('xobraz10'), N, { passable: true }));
     list.push(put('9kober4', -0.6, 0.01, -6.0, E, { passable: true }));
 
     list.push(put('9pstul2', DESK.x, 0, DESK.z, E));
@@ -396,11 +471,14 @@ function hall(list: Piece[]): void {
     list.push(put('9notes', DESK.x, DESK.top, DESK.z + 0.35, W));
     list.push(put('xstroj01', DESK.x + 0.15, DESK.top, DESK.z + 0.25, W));
     // The records behind the desk, the clock over them.
-    list.push(put('9skrinsk', x1 - WALL / 2 - 0.2, 0, DESK.z - 2.0, W));
-    list.push(put('xskrin 11', x1 - WALL / 2 - 0.26, 0, DESK.z, W));
-    list.push(put('9skrinsk', x1 - WALL / 2 - 0.2, 0, DESK.z + 2.0, W));
+    list.push(put('9skrinsk', east - 0.2, 0, DESK.z - 2.0, W));
+    list.push(put('xskrin 11', east - 0.26, 0, DESK.z, W));
+    list.push(put('9skrinsk', east - 0.2, 0, DESK.z + 2.0, W));
     list.push(
-        put('xhodiny 2', x1 - WALL / 2 - 0.02, 3.4, DESK.z, W, { top: true, passable: true }),
+        put('xhodiny 2', east - standoff('xhodiny 2'), 3.4, DESK.z, W, {
+            top: true,
+            passable: true,
+        }),
     );
 
     for (const x of WAITING_ROWS) {
@@ -409,8 +487,8 @@ function hall(list: Piece[]): void {
         }
     }
 
-    list.push(put('xobraz03', x0 + WALL / 2 + 0.01, 1.7, -7.2, E, { passable: true }));
-    list.push(put('xobraz09', x0 + WALL / 2 + 0.02, 1.7, -4.4, E, { passable: true }));
+    list.push(put('xobraz03', west + standoff('xobraz03'), 1.7, -7.2, E, { passable: true }));
+    list.push(put('xobraz09', west + standoff('xobraz09'), 1.7, -4.4, E, { passable: true }));
 
     for (const [x, z] of [
         [6.5, -10.5],
@@ -420,16 +498,17 @@ function hall(list: Piece[]): void {
     }
 
     list.push(put('fikus', -6.3, 0, -10.3));
-    list.push(put('9tabul', -2.6, 1.5, z0 + WALL / 2 + 0.02, N, { passable: true }));
+    list.push(put('9tabul', -2.6, 1.5, south + standoff('9tabul'), N, { passable: true }));
 
     // More chairs along the south wall, facing the desk across the hall.
     for (const x of [-5.3, -4.6, -3.9]) {
-        list.push(put('xzidle 03', x, 0, z0 + WALL / 2 + 0.3, N));
+        list.push(put('xzidle 03', x, 0, south + 0.3, N));
     }
 
-    // Palms either side of the opening into the corridor.
+    // Palms either side of the opening into the corridor, their leaves clear
+    // of its wall.
     for (const x of [-3.2, 3.2]) {
-        list.push(put('fikus', x, 0, -0.6));
+        list.push(put('fikus', x, 0, -0.7));
     }
 
     for (const [x, z] of [
@@ -456,8 +535,17 @@ function corridor(list: Piece[]): void {
 
     list.push(put('xkvet01', -20.6, 0, 0.4));
     list.push(put('xkvet01', 20.6, 0, 0.4));
-    list.push(put('xhodiny 2', -3.5, 2.6, 3 - WALL / 2 - 0.02, S, { top: true, passable: true }));
-    list.push(put('9tabul', 3.5, 1.2, 3 - WALL / 2 - 0.02, S, { passable: true }));
+    // The clock and a notice on its north wall.
+    const north = ROOMS.corridor.z1 - WALL / 2;
+
+    list.push(
+        put('xhodiny 2', -3.5, 2.6, north - standoff('xhodiny 2'), S, {
+            top: true,
+            passable: true,
+        }),
+    );
+
+    list.push(put('9tabul', 3.5, 1.2, north - standoff('9tabul'), S, { passable: true }));
 }
 
 function consulting(list: Piece[]): void {
@@ -471,13 +559,13 @@ function consulting(list: Piece[]): void {
     list.push(put('xsvetlo 08 on', x - 0.7, 0.78, z - 0.1, N));
     list.push(put('xkniha 1', x + 0.5, 0.78, z, N));
     list.push(put('9notes', x + 0.1, 0.78, z - 0.05, N));
-    list.push(put('xobraz10', x, 1.6, z0 + WALL / 2 + 0.01, N, { passable: true }));
+    list.push(put('xobraz10', x, 1.6, z0 + WALL / 2 + standoff('xobraz10'), N, { passable: true }));
     // The examination couch along the west wall, the books and the basin.
     list.push(put('xpostel 2', x0 + 0.8, 0, -2.6, N));
     list.push(put('9skrinsk', x1 - 0.32, 0, -2.0, W));
     list.push(put('xskrin 11', x1 - 0.38, 0, -4.4, W));
     list.push(put('umyvadlo', x0 + 0.5, 0, -5.6, E));
-    list.push(put('9lekarna', x0 + WALL / 2 + 0.17, 1.35, -5.6, E, { scale: 1.6 }));
+    list.push(put('9lekarna', x0 + WALL / 2 + standoff('9lekarna', 1.6), 1.35, -5.6, E, CABINET));
     list.push(put('xkvet01', x1 - 0.5, 0, z0 + 0.5));
     list.push(put('xsvetlo 10 on', x, HEIGHT, -3.5, N, { top: true, passable: true }));
 }
@@ -485,12 +573,8 @@ function consulting(list: Piece[]): void {
 function lobby(list: Piece[]): void {
     const { x1, z0 } = ROOMS.lobby;
 
-    // The lifts, shut.
-    for (const z of [-2.2, -4.8]) {
-        list.push(put('plotdrev7', x1 - WALL / 2 - 0.06, 0, z, W));
-    }
-
-    list.push(put('9tabul', x1 - WALL / 2 - 0.02, 1.5, -3.5, W, { passable: true }));
+    // A notice between the lifts (shell() sets them into the east wall).
+    list.push(put('9tabul', x1 - WALL / 2 - standoff('9tabul'), 1.5, -3.5, W, { passable: true }));
     list.push(put('xlavicka', 10.5, 0, z0 + WALL / 2 + 0.35, N));
     list.push(put('xkvet01', 8.0, 0, z0 + 0.5));
     list.push(put('xsvetlo 10 on', 10.5, HEIGHT, -3.5, N, { top: true, passable: true }));
@@ -516,7 +600,10 @@ function ward(list: Piece[], women: boolean): void {
     for (const x of NORTH_BEDS) {
         list.push(put('xpostel 2', m(x), 0, z1 - BED_Z, N));
         list.push(
-            put('okno3', m(x), 1.78, z1 - WALL / 2 - 0.01, S, { scale: 0.8, passable: true }),
+            put('okno3', m(x), 1.78, z1 - WALL / 2 - standoff('okno3', 0.8), S, {
+                scale: 0.8,
+                passable: true,
+            }),
         );
     }
 
@@ -543,7 +630,17 @@ function ward(list: Piece[], women: boolean): void {
     // The nurse's trolley in the aisle, a basin and the linen at the ends.
     list.push(put('9vozik', m(TROLLEY.x), 0, TROLLEY.z, N));
     list.push(put('umyvadlo', m(x0 + 0.5), 0, 8.0, women ? W : E));
-    list.push(put('9lekarna', m(x0 + WALL / 2 + 0.17), 1.35, 8.0, women ? W : E, { scale: 1.6 }));
+    list.push(
+        put(
+            '9lekarna',
+            m(x0 + WALL / 2 + standoff('9lekarna', 1.6)),
+            1.35,
+            8.0,
+            women ? W : E,
+            CABINET,
+        ),
+    );
+
     list.push(put('xskrin 11', m(-5.0 - WALL / 2 - 0.26), 0, 7.2, women ? E : W));
     // A chair beside the third bed for whoever visits it.
     list.push(put('xzidle 03', m(-13.45), 0, 10.4, women ? E : W, { passable: true }));
@@ -573,7 +670,7 @@ function theatre(list: Piece[]): void {
         list.push(put('umyvadlo', x0 + WALL / 2 + 0.36, 0, z, E));
     }
 
-    list.push(put('9lekarna', x0 + WALL / 2 + 0.17, 1.35, 7.0, E, { scale: 1.6 }));
+    list.push(put('9lekarna', x0 + WALL / 2 + standoff('9lekarna', 1.6), 1.35, 7.0, E, CABINET));
 
     for (const z of [5.0, 10.0]) {
         list.push(put('xsvetlo 10 on', 0, HEIGHT, z, N, { top: true, passable: true }));

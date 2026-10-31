@@ -65,8 +65,8 @@ export const PLANS: Readonly<Record<rooms.RoomKey, RoomPlan>> = {
         label: 'the salon',
         fires: [
             { x: 3.0, z: -2.6, radius: 0.7, height: 1.8, what: 'the standard lamp' },
-            { x: 6.5, z: -1.5, radius: 0.9, height: 2.6, what: 'the curtains' },
-            { x: 6.5, z: 2.2, radius: 0.9, height: 2.6, what: 'the curtains' },
+            { x: 6.3, z: -1.5, radius: 0.9, height: 2.6, what: 'the curtains' },
+            { x: 6.3, z: 2.2, radius: 0.9, height: 2.6, what: 'the curtains' },
             { x: 3.25, z: 3.9, radius: 0.7, height: 2.0, what: 'the clock' },
             { x: 4.0, z: -0.3, radius: 1.3, height: 1.0, what: 'the rug' },
         ],
@@ -78,7 +78,7 @@ export const PLANS: Readonly<Record<rooms.RoomKey, RoomPlan>> = {
         fires: [
             { x: 3.1, z: 0.6, radius: 1.3, height: 1.2, what: 'the dining table' },
             { x: 1.0, z: 3.4, radius: 0.8, height: 1.8, what: 'the cabinet' },
-            { x: 5.0, z: -3.1, radius: 0.8, height: 1.6, what: 'the palm' },
+            { x: 5.0, z: -2.78, radius: 0.8, height: 1.6, what: 'the palm' },
         ],
         people: [
             { x: 5.5, z: 1.9 },
@@ -90,7 +90,7 @@ export const PLANS: Readonly<Record<rooms.RoomKey, RoomPlan>> = {
         label: 'the bedroom',
         fires: [
             { x: 3.5, z: 2.1, radius: 1.3, height: 1.2, what: 'the bed' },
-            { x: 3.6, z: -3.4, radius: 0.9, height: 1.0, what: 'the ottoman' },
+            { x: 3.6, z: -3.04, radius: 0.9, height: 1.0, what: 'the ottoman' },
             { x: -0.64, z: 1.8, radius: 0.7, height: 2.0, what: 'the wardrobe' },
             { x: 5.44, z: -1.8, radius: 0.8, height: 1.2, what: 'the armchair' },
         ],

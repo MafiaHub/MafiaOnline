@@ -39,6 +39,143 @@ export function standing(
     return { model, position, rotation: { x: flat ? QUARTER : 0, y: yaw, z: 0 }, scale, passable };
 }
 
+// How far a piece hung on a wall (a picture, a clock, a wall cabinet) keeps
+// its back off the wall's face: clear of it, so no face of it ever lies in
+// the wall's plane and flickers, and close enough that nothing floats.
+export const HANG = 0.005;
+
+// plotdrev7.4ds, the white steel door the built rooms are left by: one slab
+// 1.4 m wide, 2.4 m high and 0.1 m thick, finished on both faces (@VRAT01).
+// Its origin is on its hinge edge and its back face: x -1.397..0.003,
+// y -1.165..1.235, z 0..0.1 (the LOD0 mesh).
+export const STEEL_DOOR = Object.freeze({
+    model: 'plotdrev7',
+    x0: -1.397,
+    x1: 0.003,
+    y0: -1.165,
+    y1: 1.235,
+    depth: 0.1,
+});
+// A door set into a wall stands DOOR_RECESS back from the wall's face, so no
+// face of it lies in the wall's plane and it never stands out into the room;
+// the wall laps DOOR_LAP over its sides and top, so no gap shows round it,
+// and it stands DOOR_SINK into the floor, its underside clear of the floor's
+// plane.
+export const DOOR_RECESS = 0.02;
+export const DOOR_LAP = 0.01;
+export const DOOR_SINK = 0.01;
+
+/** The gap a wall leaves for a door, along the wall, and the gap's top. */
+export interface DoorCut {
+    from: number;
+    to: number;
+    top: number;
+}
+
+/**
+ * The steel door set into a wall on z = const (alongX) or x = const, whose
+ * face towards the room is at `face`, the room lying on its `side` (+1 or -1
+ * along the wall's normal); `mid` is the door's middle along the wall and
+ * `mirror` turns it round (the other leaf of a pair). Returns the door and the
+ * cut its wall must leave for it, DOOR_LAP smaller than the door all round.
+ */
+export function steelDoor(
+    alongX: boolean,
+    face: number,
+    side: 1 | -1,
+    mid: number,
+    { floor = 0, mirror = false }: { floor?: number; mirror?: boolean } = {},
+): { door: Piece; cut: DoorCut } {
+    const { model, x0, x1, y0, y1, depth } = STEEL_DOOR;
+    const yaw = (alongX ? 0 : QUARTER) + (mirror ? Math.PI : 0);
+    const cx = (x0 + x1) / 2;
+    const cz = depth / 2;
+    // The box centre turned by the yaw: +z goes to (sin, cos), +x to (cos, -sin).
+    const wx = cx * Math.cos(yaw) + cz * Math.sin(yaw);
+    const wz = -cx * Math.sin(yaw) + cz * Math.cos(yaw);
+    const across = face - side * (DOOR_RECESS + depth / 2);
+    const centre = alongX ? { x: mid, z: across } : { x: across, z: mid };
+    const half = (x1 - x0) / 2;
+    const bottom = floor - DOOR_SINK;
+
+    return {
+        door: {
+            model,
+            position: { x: centre.x - wx, y: bottom - y0, z: centre.z - wz },
+            rotation: { x: 0, y: yaw, z: 0 },
+            scale: null,
+            passable: false,
+        },
+        cut: {
+            from: mid - half + DOOR_LAP,
+            to: mid + half - DOOR_LAP,
+            top: bottom + (y1 - y0) - DOOR_LAP,
+        },
+    };
+}
+
+// The facing planes (plotcihly1, plotcihly4: 12 x 2.7 m, finished on both
+// sides) are never cut short or squeezed to fit round a door, which would
+// stretch their texture: see facing().
+const FACING_WIDTH = 12;
+const FACING_HEIGHT = 2.7;
+
+/**
+ * The facing planes of a wall on z = `line` (alongX) or x = `line`, from
+ * `from` to `to` along it, scaled `sx` along the wall like the room's other
+ * facings, with a gap for a door. Below the door's top the planes run out
+ * from either side of the gap, above it on from its left edge, every one at
+ * its full size: the two rows meet at the door's top, which must be less
+ * than 2.7 m above the floor and more than 2.7 m under the ceiling's top, and
+ * what runs on past the room's ends, under the floor and over the ceiling is
+ * hidden behind the other facings and the slabs. Next to each other the planes
+ * repeat their texture without a seam. Model names come back bare, as
+ * steelDoor's: a room whose pieces carry the extension adds it (named()).
+ */
+export function facing(
+    model: string,
+    alongX: boolean,
+    line: number,
+    from: number,
+    to: number,
+    cut: DoorCut,
+    sx = 1,
+): Piece[] {
+    const width = FACING_WIDTH * sx;
+    const list: Piece[] = [];
+    const plane = (mid: number, y: number): void => {
+        list.push({
+            model,
+            position: alongX ? { x: mid, y, z: line } : { x: line, y, z: mid },
+            rotation: { x: 0, y: alongX ? 0 : QUARTER, z: 0 },
+            scale: sx === 1 ? null : { x: sx, y: 1, z: 1 },
+            passable: false,
+        });
+    };
+    const below = cut.top - FACING_HEIGHT / 2;
+    const above = cut.top + FACING_HEIGHT / 2;
+
+    for (let edge = cut.from; edge > from; edge -= width) {
+        plane(edge - width / 2, below);
+        plane(edge - width / 2, above);
+    }
+
+    for (let edge = cut.to; edge < to; edge += width) {
+        plane(edge + width / 2, below);
+    }
+
+    for (let edge = cut.from; edge < to; edge += width) {
+        plane(edge + width / 2, above);
+    }
+
+    return list;
+}
+
+/** The pieces with ".i3d" on their model names, for the rooms that name them so. */
+export function named(pieces: readonly Piece[]): Piece[] {
+    return pieces.map((piece) => ({ ...piece, model: `${piece.model}.i3d` }));
+}
+
 /** The options MapObject.create takes for a piece; a scale only when it has one. */
 export function optionsFor(piece: Piece, virtualWorld: number): ObjectOptions {
     const options: ObjectOptions = { virtualWorld, collision: !piece.passable };
