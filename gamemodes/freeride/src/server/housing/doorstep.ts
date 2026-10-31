@@ -117,8 +117,8 @@ function hint(player: Player, action: HomeAction): string | null {
             const carried = carriedBy(player);
 
             return carried?.isNew
-                ? `G buy ${formatMoney(carried.item.price)} · Home/End turn · PgUp/PgDn raise · Num0 back`
-                : 'G place · Home/End turn · PgUp/PgDn raise · Del sell';
+                ? `G buy ${formatMoney(carried.item.price)} · Home/End turn (hold) · PgUp/PgDn raise · Num0 back`
+                : 'G place · Home/End turn (hold) · PgUp/PgDn raise · Del sell';
         }
 
         case 'door':

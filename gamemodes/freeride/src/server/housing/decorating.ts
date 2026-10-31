@@ -18,6 +18,9 @@ import type { Point } from '../lib/util';
 const CARRY_TICK_MS = 100;
 const LIFT_STEP = 0.1;
 const TURN_STEP = Math.PI / 12;
+// A turn key held down turns the piece on at a quarter turn a second.
+const SPIN_PER_MS = Math.PI / 2 / 1000;
+const FULL_TURN = 2 * Math.PI;
 // How far in front of the player a carried piece floats, beyond its own half-size.
 const CARRY_AHEAD = 0.9;
 // How close to the probe in front of the player a piece is picked up.
@@ -25,10 +28,11 @@ const PICK_REACH = 1.8;
 // How close a solid piece may come to where people arrive and to the door arrows.
 const DOORWAY_CLEAR = 1.2;
 // The decorating keys (client/housing.ts), off the keys the game plays with:
-// Home/End (or numpad 4/6) turn, PgUp/PgDn (or numpad 8/2) raise and lower,
+// Home/End (or numpad 4/6) turn (a tap by a step, held on smoothly), PgUp/PgDn
+// (or numpad 8/2) raise and lower,
 // Delete sells back, numpad 0 puts back or ends decorating.
 const KEYS_HINT =
-    'Home/End turn it, PgUp/PgDn raise and lower it, Delete sells it back, Num 0 puts it back';
+    'Home/End turn it (hold to keep turning), PgUp/PgDn raise and lower it, Delete sells it back, Num 0 puts it back';
 
 interface Carried {
     houseId: string;
@@ -40,6 +44,10 @@ interface Carried {
     isNew: boolean;
     /** The model following the player, without collision. */
     object: MapObject | null;
+    /** Which way a held turn key turns it on (1 right, -1 left), 0 when none is held. */
+    spin: number;
+    /** When the turning was last applied. */
+    spunAt: number;
 }
 
 const editing = new PlayerSet();
@@ -161,6 +169,8 @@ function pickUp(
         previous: isNew ? null : { ...entry },
         isNew,
         object: createDecor(entry, house.world, false),
+        spin: 0,
+        spunAt: 0,
     });
 }
 
@@ -396,6 +406,19 @@ every(CARRY_TICK_MS, () => {
                 continue;
             }
 
+            if (carried.spin) {
+                const now = Date.now();
+
+                // The time since the last tick, at most two of them: a stall
+                // does not swing the piece round in one go.
+                turnBy(
+                    carried,
+                    carried.spin * SPIN_PER_MS * Math.min(now - carried.spunAt, 2 * CARRY_TICK_MS),
+                );
+
+                carried.spunAt = now;
+            }
+
             const pose = carryTarget(player, carried.entry, carried.item);
 
             if (pose) {
@@ -407,6 +430,10 @@ every(CARRY_TICK_MS, () => {
     }
 });
 
+function turnBy(carried: Carried, angle: number): void {
+    carried.entry.yaw = (((carried.entry.yaw + angle) % FULL_TURN) + FULL_TURN) % FULL_TURN;
+}
+
 function editKey(player: Player, request: unknown): void {
     const carried = carrying.get(player.id);
 
@@ -414,7 +441,7 @@ function editKey(player: Player, request: unknown): void {
         return;
     }
 
-    const { sell, cancel, turn, lift } = fields(request);
+    const { sell, cancel, turn, spin, lift } = fields(request);
 
     if (sell) {
         if (carried) {
@@ -442,8 +469,13 @@ function editKey(player: Player, request: unknown): void {
     const turns = Math.sign(Number(turn) || 0);
     const lifts = Math.sign(Number(lift) || 0);
 
+    if (spin !== undefined) {
+        carried.spin = Math.sign(Number(spin) || 0);
+        carried.spunAt = Date.now();
+    }
+
     if (turns) {
-        carried.entry.yaw = (carried.entry.yaw + turns * TURN_STEP) % (2 * Math.PI);
+        turnBy(carried, turns * TURN_STEP);
     }
 
     if (lifts) {
