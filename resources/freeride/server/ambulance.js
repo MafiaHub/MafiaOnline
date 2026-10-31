@@ -2,8 +2,8 @@
 // models/9medic.4ds, which both city scenes' cache.bin place at
 // (-759.22, 11.56, 778.99): its entrance steps run down to z 758 facing the
 // street whose road graph line runs along z 729.1; the sign-on arrow is at
-// the foot of the steps) and takes one of the stock ambulances parked at the
-// kerb (lib/stations.js keeps them there). Calls come in from the street: someone collapsed, someone
+// the foot of the steps) and takes one of the stock ambulances parked on the
+// forecourt (lib/stations.js keeps them there). Calls come in from the street: someone collapsed, someone
 // badly hurt, a smoke victim the fire brigade carried out, and players who
 // went down while a medic is on duty: they wait for one before the usual
 // respawn (lib/life.js holds it). The medic drives there, holds G beside
@@ -39,13 +39,18 @@ const AMBULANCE = "ambulance00.i3d";
 const CITY_HOSPITAL = {
     name: "Lost Heaven Hospital",
     signOn: {x: -759.4, y: 11.6, z: 755.5},
-    // Nose to +x at the kerb of the street in front of the steps, on the
-    // street (the bay's height): a parked car nobody drives does not settle.
+    // Off the road, on the forecourt between the kerb (z 739.5, 0.2 m up from
+    // the street) and the steps, either side of the walk to the doors, noses
+    // to +x. The street in front is a T-junction (road crossing at x -759.7,
+    // z 729.1): anything stood in it holds up the traffic. The forecourt is
+    // level at 11.35-11.4 under both cars (Line03aaa of scene.4ds) and a
+    // parked car nobody drives does not settle, so they stand at that height.
     spots: [
-        {position: {x: -752.0, y: 11.55, z: 733.0}, heading: Math.PI / 2},
-        {position: {x: -764.0, y: 11.55, z: 733.0}, heading: Math.PI / 2},
+        {position: {x: -749.0, y: 11.45, z: 746.5}, heading: Math.PI / 2},
+        {position: {x: -770.0, y: 11.45, z: 746.5}, heading: Math.PI / 2},
     ],
-    bay: {x: -759.4, y: 11.5, z: 735.0},
+    // Where the patients are unloaded: on the forecourt too, not in the junction.
+    bay: {x: -759.4, y: 11.4, z: 745.0},
     // The landing in front of the doors (3DVERE4 at z 763.5, floor y 13.2).
     door: {x: -759.4, y: 13.3, z: 762.0},
 };
