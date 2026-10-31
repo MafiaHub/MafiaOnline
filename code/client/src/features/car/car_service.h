@@ -17,6 +17,7 @@
 #include <chrono>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
@@ -47,6 +48,12 @@ namespace Mafia1Online::Features::Car {
         void RegisterRPC();
         void Update(World::WorldService &world);
         bool Sample(uint64_t networkId, Framework::Utils::TransformSnapshot &out) const;
+        // Where on its controller's physics clock (the frame clock its poses
+        // carry) the car this client shows is now: for a car it simulates,
+        // its own last physics step. Nothing for a car not shown lately.
+        std::optional<double> ShownControllerClock(uint64_t networkId) const;
+        // The cars this client simulates, with their native cars.
+        void ForEachSimulated(const std::function<void(uint64_t, SDK::Car::NativeCar &)> &visit) const;
         void Reset();
         SDK::Scene::NativeFrame *OnNativeDestroyed(World::WorldService &world, void *car);
         bool OnNativeExplosion(World::WorldService &world, SDK::Car::NativeCar *car);
@@ -111,6 +118,10 @@ namespace Mafia1Online::Features::Car {
             // Controller: the frame clock (World::FrameClock) of the physics
             // step its car's pose comes from.
             double simClock = 0.0;
+            // Observer: the controller's clock of the pose it showed last,
+            // and the frame clock it showed it at.
+            double shownControllerClock = 0.0;
+            double shownAt = 0.0;
             // The update serial of the last actor tick DriveObserver placed.
             uint64_t drivenSerial = 0;
             // Until this local clock time the car runs on corrected native

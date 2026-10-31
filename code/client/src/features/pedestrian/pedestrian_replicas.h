@@ -1,5 +1,6 @@
 #pragma once
 
+#include "shared/features/pedestrian/pedestrian_reaction.h"
 #include "shared/net/sample_clock.h"
 
 #include <utils/snapshot_buffer.h>
@@ -8,7 +9,9 @@
 
 #include <chrono>
 #include <cstdint>
+#include <deque>
 #include <optional>
+#include <random>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -22,12 +25,20 @@ namespace Mafia1Online::SDK::Scene {
     struct NativeFrame;
 }
 
+namespace Mafia1Online::SDK::Car {
+    struct NativeCar;
+}
+
 namespace Mafia1Online::Shared::Entities {
     class PedestrianEntity;
 }
 
 namespace Mafia1Online::Features::World {
     class WorldService;
+}
+
+namespace Mafia1Online::Features::Car {
+    class CarService;
 }
 
 namespace Mafia1Online::Features::Pedestrian {
@@ -51,12 +62,18 @@ namespace Mafia1Online::Features::Pedestrian {
         // walker shows on this screen now, and the walker leaves at once and
         // is not shown again. Nothing when this client shows no such walker.
         std::optional<Framework::Utils::TransformSnapshot> HandOff(World::WorldService &world, uint64_t walkerId);
-        // A car's body met the replica wearing this model (C_don_ocas::Collision,
-        // the car's velocity as the impact). From knockdown speed retail Hit
-        // takes the walker's collision out and lays it down in that contact;
-        // the host's own knockdown is a round trip and a render delay away,
-        // so this copy does both now, on every client the car meets it.
-        void OnCarContact(const SDK::Scene::NativeFrame *model, const glm::vec3 &velocity);
+        // How a walker reacts to a car is decided where the car really is:
+        // on its simulation controller, which runs retail's own rules for it
+        // (Shared::Pedestrian::Reaction) and plays the reaction at once. Every
+        // other player plays it once its copy of the car is at that moment,
+        // and the host applies it to the walker the replicas follow.
+        //
+        // Controller: a car this client simulates met the replica wearing
+        // this model (C_don_ocas::Collision, the car's velocity as the
+        // impact): Hit's side-step below knockdown damage, else its fall.
+        void OnCarContact(World::WorldService &world, const SDK::Scene::NativeFrame *model, uint64_t carId, SDK::Car::NativeCar &car, const glm::vec3 &velocity);
+        // A reaction another car's controller decided, the server checked.
+        void OnReaction(const Shared::Pedestrian::Reaction &reaction);
 
       private:
         // The host reports every 100 ms, and the server's far band every
@@ -94,16 +111,34 @@ namespace Mafia1Online::Features::Pedestrian {
             bool settled = false;
             // Borrowed already dead: its last clip runs to its end at once.
             bool fallen = false;
-            // A car knocked this copy down here first (OnCarContact): its fall
-            // plays where it was hit until the host's knockdown reaches the
-            // shown moment; the host's fall is then taken as this one.
-            struct Knockdown {
-                glm::vec3 facing {0.0f};
+            // A car's reaction this copy plays itself, from where it stood,
+            // moved by the clips' own root motion: the clip, the one queued
+            // behind a fall, then the breath until the host's walker, a
+            // render delay behind, is past the reaction too.
+            struct Reacting {
+                Shared::Pedestrian::ReactionKind kind = Shared::Pedestrian::ReactionKind::Dodge;
+                int32_t animation = 0;
+                int32_t queued = 0;
+                bool fatal = false;
+                glm::vec3 facing {0.0f, 0.0f, 1.0f};
+                enum class Phase : uint8_t { Clip, Queued, Done } phase = Phase::Clip;
+                // The host's walker showed it.
+                bool confirmed = false;
                 std::chrono::steady_clock::time_point since;
             };
-            std::optional<Knockdown> knockdown;
-            // The host's fall that confirmed this copy's own, played already.
-            int32_t confirmedFall = 0;
+            std::optional<Reacting> reaction;
+            // Back on the host's poses after a reaction: the gap to them
+            // closes over Shared::Pedestrian::kHandOverSeconds.
+            struct HandOver {
+                glm::vec3 from {0.0f};
+                glm::vec3 fromDirection {0.0f, 0.0f, 1.0f};
+                bool measured = false;
+                glm::vec3 offset {0.0f};
+                std::chrono::steady_clock::time_point since;
+            };
+            std::optional<HandOver> handOver;
+            // Controller: the last contact it decided for this walker.
+            std::chrono::steady_clock::time_point lastContact;
             int32_t appliedAlpha = -1;
             // The taxi wave shown, Shared::Taxi::kWave*.
             uint8_t appliedWave = 0;
@@ -121,6 +156,18 @@ namespace Mafia1Online::Features::Pedestrian {
         // element, its replica's state kept, shows it again.
         void Reclaim(uint64_t walkerId);
         void AdvanceFades(uint32_t frameMs);
+        // Controller: Tick's threat test of every replica against each car
+        // this client simulates (0x454221-0x45488d).
+        void DetectThreats(World::WorldService &world, Car::CarService &cars);
+        // Controller: sends a reaction it decided and plays it here.
+        void Decide(World::WorldService &world, Replica &replica, Shared::Pedestrian::Reaction &reaction);
+        // Plays a reaction on this copy from now.
+        void StartReaction(Replica &replica, const Shared::Pedestrian::Reaction &reaction, uint8_t voice);
+        // A reaction's frame; false once this copy follows the host's poses
+        // again.
+        bool PlayReaction(Replica &replica, int32_t shownAnimation, bool shownAlive, uint32_t frameMs, std::chrono::steady_clock::time_point now);
+        // Players: reactions waiting for this client's copy of their car.
+        void PlayDueReactions(Car::CarService &cars);
 
         std::unordered_map<uint64_t, Replica> _replicas;
         // Walkers an NPC replica replaced, while the server still streams them.
@@ -138,6 +185,13 @@ namespace Mafia1Online::Features::Pedestrian {
             Replica replica;
         };
         std::vector<Fading> _fading;
+        struct PendingReaction {
+            Shared::Pedestrian::Reaction reaction;
+            std::chrono::steady_clock::time_point received;
+        };
+        std::deque<PendingReaction> _pendingReactions;
+        // Retail's rnd draws a controller makes: the scream, a fatal fall.
+        std::minstd_rand _random {std::random_device {}()};
         std::chrono::steady_clock::time_point _lastUpdate;
     };
 } // namespace Mafia1Online::Features::Pedestrian

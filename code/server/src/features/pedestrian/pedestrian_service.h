@@ -56,13 +56,6 @@ namespace Mafia1Online::Features::Pedestrian {
             std::function<void(Shared::Entities::PedestrianEntity &, uint64_t killerId)> death;
         };
 
-        // A driver may report a car contact this far from the walker's
-        // last reported position (car length plus 100 ms at speed).
-        static constexpr float kCarImpactReach = 10.0f;
-        static constexpr float kMaxImpactSpeed = 80.0f;
-        // One impact per walker in this window, as the driver's own cooldown.
-        static constexpr std::chrono::milliseconds kCarImpactCooldown {500};
-
         void RegisterRPC(const Simulation::SimulationService &simulation, Player::PlayerService &players, Car::CarService &cars);
         void SetEvents(Events events) {
             _events = std::move(events);
@@ -114,6 +107,9 @@ namespace Mafia1Online::Features::Pedestrian {
         Events _events;
         std::unordered_map<uint32_t, Walker> _walkers;
         std::unordered_map<uint64_t, uint32_t> _keyByNetworkId;
-        std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> _lastCarImpact;
+        // Each walker's last accepted dodge and contact (Shared::Pedestrian::
+        // Reaction), for kReactionGapMs.
+        std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> _lastDodge;
+        std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> _lastContact;
     };
 } // namespace Mafia1Online::Features::Pedestrian

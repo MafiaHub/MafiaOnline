@@ -1991,6 +1991,39 @@ namespace Mafia1Online::Features::Car {
         }
     }
 
+    std::optional<double> CarService::ShownControllerClock(uint64_t networkId) const {
+        // A car shown in an earlier frame than the last few stopped being
+        // shown (it left, sank or was taken over).
+        constexpr double kShownWithinMs = 250.0;
+        const auto stream = _streams.find(networkId);
+        if (stream == _streams.end()) {
+            return std::nullopt;
+        }
+        const double now = World::FrameClock::NowMs();
+        if (stream->second.simulationController) {
+            return stream->second.simClock > 0.0 && now - stream->second.simClock <= kShownWithinMs ? std::optional<double>(stream->second.simClock) : std::nullopt;
+        }
+        if (stream->second.shownAt <= 0.0 || now - stream->second.shownAt > kShownWithinMs) {
+            return std::nullopt;
+        }
+        return stream->second.shownControllerClock;
+    }
+
+    void CarService::ForEachSimulated(const std::function<void(uint64_t, SDK::Car::NativeCar &)> &visit) const {
+        if (!_world || !_world->IsReady()) {
+            return;
+        }
+        for (const auto &[networkId, stream] : _streams) {
+            const auto native = _nativeById.find(networkId);
+            if (!stream.simulationController || native == _nativeById.end() || native->second.removalQueued) {
+                continue;
+            }
+            if (auto *car = static_cast<SDK::Car::NativeCar *>(_world->NativeObjects().Resolve(native->second.handle))) {
+                visit(networkId, *car);
+            }
+        }
+    }
+
     bool CarService::ToggleSyncMode() {
         _predictedSync = !_predictedSync;
         return _predictedSync;
@@ -2080,6 +2113,8 @@ namespace Mafia1Online::Features::Car {
                                           : CarPoseBuffer::LeadSeconds(span, kLeadExitRate, kLeadExitSeconds);
         const double renderTime =
             stream.poses.AdvanceDelay(_frameClock, static_cast<float>(frameMs)) + stream.poses.AdvanceLead(leadMs, dt, leadSeconds);
+        stream.shownControllerClock = renderTime - stream.poseClockOffset;
+        stream.shownAt              = _frameClock;
         if (contact) {
             // Native physics runs on the replicated pedals and steering, then
             // is pulled toward the replicated pose at the render time, still

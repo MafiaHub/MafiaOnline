@@ -110,6 +110,8 @@ namespace Mafia1Online::Features::Pedestrian {
             spawned.generator = pool == generators.end() ? Shared::Pedestrian::Spawned::kNoGenerator : static_cast<uint8_t>(pool - generators.begin());
             spawned.walkStyle = static_cast<uint8_t>(element->WalkStyle());
             spawned.umbrella = element->HasUmbrella();
+            spawned.voice = element->Voice();
+            spawned.health = element->Health();
             spawned.x = position.x;
             spawned.y = position.y;
             spawned.z = position.z;

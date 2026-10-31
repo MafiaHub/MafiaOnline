@@ -28,6 +28,10 @@ namespace Mafia1Online::Shared::Pedestrian {
         uint8_t walkStyle = 0;
         // Rain umbrella in the right hand (C_traffic_element +0x4c).
         bool umbrella = false;
+        // The voice its screams use (+0x1f6) and the health ActivateFree
+        // rolled (60 + rnd(20), +0x15c).
+        uint8_t voice = 0;
+        float health = 0.0f;
         float x = 0.0f;
         float y = 0.0f;
         float z = 0.0f;
@@ -40,6 +44,8 @@ namespace Mafia1Online::Shared::Pedestrian {
             stream->Serialize(write, generator);
             stream->Serialize(write, walkStyle);
             stream->Serialize(write, umbrella);
+            stream->Serialize(write, voice);
+            stream->Serialize(write, health);
             stream->Serialize(write, x);
             stream->Serialize(write, y);
             stream->Serialize(write, z);

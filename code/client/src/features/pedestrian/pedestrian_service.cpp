@@ -14,12 +14,14 @@
 #include "shared/features/pedestrian/pedestrian_entity.h"
 #include "shared/features/pedestrian/pedestrian_control.h"
 #include "shared/features/pedestrian/pedestrian_knockdown.h"
+#include "shared/features/pedestrian/pedestrian_reaction.h"
 #include "shared/features/pedestrian/pedestrian_scream.h"
 #include "shared/features/player/player_entity.h"
 
 #include <MinHook.h>
 #include <core_modules.h>
 #include <logging/logger.h>
+#include <mafia1/sdk/car/native_car.h>
 #include <mafia1/sdk/core/game.h>
 #include <mafia1/sdk/core/mission.h>
 #include <mafia1/sdk/player/native_human.h>
@@ -48,6 +50,7 @@ namespace Mafia1Online::Features::Pedestrian {
                                                      const SDK::Player::Vector3 *, float, SDK::Scene::NativeFrame *);
         using WalkerHit         = bool(__thiscall *)(void *, int32_t, const SDK::Player::Vector3 &, const SDK::Player::Vector3 &, const SDK::Player::Vector3 &, float,
                                                SDK::Player::NativeActor *, uint32_t, SDK::Scene::NativeFrame *);
+        using WouldRunOver      = void *(__thiscall *)(SDK::Car::NativeCar *, const SDK::Player::Vector3 *, float);
 
         GeneratorGameInit gGeneratorGameInitOriginal = nullptr;
         GeneratorAI gGeneratorAIOriginal             = nullptr;
@@ -58,6 +61,7 @@ namespace Mafia1Online::Features::Pedestrian {
         uint64_t gScreamMissionGeneration            = 0;
         WalkerCollision gWalkerCollisionOriginal     = nullptr;
         WalkerHit gWalkerHitOriginal                 = nullptr;
+        WouldRunOver gWouldRunOverOriginal           = nullptr;
         PedestrianService *gService                  = nullptr;
         // Player: the local player's bullet on a walker replica, between the
         // walker collision's Hit and the element Hit it calls with the body
@@ -70,7 +74,7 @@ namespace Mafia1Online::Features::Pedestrian {
         bool gApplyingShotHit = false;
         constexpr uintptr_t kHookAddresses[] {SDK::Traffic::kGeneratorGameInit, SDK::Traffic::kGeneratorAI, SDK::Traffic::kTickElements,
                                               SDK::Traffic::kElementHit, SDK::Traffic::kWalkerCollision, SDK::Traffic::kElementNewScream,
-                                              SDK::Traffic::kWalkerHit};
+                                              SDK::Traffic::kWalkerHit, SDK::Car::kWouldRunOver};
 
         // Retail selects the nearest distance-selected generator with no
         // range limit: the search starts at 1e30 (C_game::Tick 0x5a5962).
@@ -197,12 +201,11 @@ namespace Mafia1Online::Features::Pedestrian {
         // player's police manager stays off, so this guards stray calls.
         void __fastcall RecruitPoliceHook(void *, uint32_t, void *, bool, float, bool) {}
 
-        // A car's physics runs only on its driver's client, which reports the
-        // contact with a walker replica; the host applies it (Impact). Every
-        // client's copy of the car knocks the replica down at once, as Hit
-        // does in this same contact, so the walker is no rigid body on the
-        // driver's screen nor on a passenger's. The host's own copies of
-        // networked cars never hit walkers.
+        // A car's physics runs only on its simulation controller's client,
+        // which decides the walker's reaction there, as Collision's Hit does
+        // in this same contact (PedestrianReplicaService::OnCarContact); every
+        // other client plays it when its copy of the car gets there. The
+        // host's own copies of networked cars never hit walkers.
         bool __fastcall WalkerCollisionHook(void *proxy, void *, SDK::Player::NativeActor *actor, const SDK::Player::Vector3 *position, const SDK::Player::Vector3 *direction,
                                             const SDK::Player::Vector3 *normal, float force, SDK::Scene::NativeFrame *frame) {
             if (!Simulation::IsHost()) {
@@ -215,6 +218,17 @@ namespace Mafia1Online::Features::Pedestrian {
                 return false;
             }
             return gWalkerCollisionOriginal(proxy, actor, position, direction, normal, force, frame);
+        }
+
+        // Tick's threat test (0x45427d) on the host: a car another client
+        // simulates is only a late copy here, so its controller decides the
+        // dodge where the car really is (a Reaction). The host's own traffic
+        // and police cars keep retail's test; nothing else calls it.
+        void *__fastcall WouldRunOverHook(SDK::Car::NativeCar *car, void *, const SDK::Player::Vector3 *position, float distance) {
+            if (Simulation::IsHost() && gService->SimulatedElsewhere(car)) {
+                return nullptr;
+            }
+            return gWouldRunOverOriginal(car, position, distance);
         }
 
         // A melee swing reaches a walker through its collision's Hit
@@ -290,7 +304,8 @@ namespace Mafia1Online::Features::Pedestrian {
             MH_CreateHook(reinterpret_cast<void *>(SDK::Traffic::kElementHit), reinterpret_cast<void *>(&ElementHitHook), reinterpret_cast<void **>(&gElementHitOriginal)) != MH_OK ||
             MH_CreateHook(reinterpret_cast<void *>(SDK::Traffic::kWalkerCollision), reinterpret_cast<void *>(&WalkerCollisionHook), reinterpret_cast<void **>(&gWalkerCollisionOriginal)) != MH_OK ||
             MH_CreateHook(reinterpret_cast<void *>(SDK::Traffic::kElementNewScream), reinterpret_cast<void *>(&ElementNewScreamHook), reinterpret_cast<void **>(&gElementNewScreamOriginal)) != MH_OK ||
-            MH_CreateHook(reinterpret_cast<void *>(SDK::Traffic::kWalkerHit), reinterpret_cast<void *>(&WalkerHitHook), reinterpret_cast<void **>(&gWalkerHitOriginal)) != MH_OK) {
+            MH_CreateHook(reinterpret_cast<void *>(SDK::Traffic::kWalkerHit), reinterpret_cast<void *>(&WalkerHitHook), reinterpret_cast<void **>(&gWalkerHitOriginal)) != MH_OK ||
+            MH_CreateHook(reinterpret_cast<void *>(SDK::Car::kWouldRunOver), reinterpret_cast<void *>(&WouldRunOverHook), reinterpret_cast<void **>(&gWouldRunOverOriginal)) != MH_OK) {
             Uninstall();
             return false;
         }
@@ -367,41 +382,19 @@ namespace Mafia1Online::Features::Pedestrian {
                 }
             }
         });
-        // Host: a car impact a driver reported and the server checked. Retail
-        // C_don_ocas::Collision hits the walker with hit type 5 on the torso
-        // (5) for the contact speed x 4.2 (0x44cba3-0x44cbb5).
-        network->RegisterRPC<Shared::Pedestrian::Impact>([this](const Shared::Pedestrian::Impact &impact, MafiaNet::Packet *) {
-            if (!Simulation::IsHost() || !_world || !_world->IsReady() || impact.missionGeneration != _world->LoadedMissionGeneration()) {
+        // A car's controller decided how a walker reacts to it (Shared::
+        // Pedestrian::Reaction) and the server checked it. A player plays it
+        // on its replica once its copy of the car gets there; the host
+        // applies it to the walker every replica follows.
+        network->RegisterRPC<Shared::Pedestrian::Reaction>([this](const Shared::Pedestrian::Reaction &reaction, MafiaNet::Packet *) {
+            if (!_world || !_world->IsReady() || reaction.missionGeneration != _world->LoadedMissionGeneration() || !Shared::Pedestrian::ReactionWellFormed(reaction)) {
                 return;
             }
-            const SDK::Player::Vector3 direction {impact.directionX, impact.directionY, impact.directionZ};
-            const float speed = std::sqrt(direction.x * direction.x + direction.y * direction.y + direction.z * direction.z);
-            auto *element = _reporter.ActiveElement(impact.key);
-            auto *car = static_cast<SDK::Player::NativeActor *>(_world->NativeObjects().Resolve(_world->NativeObjects().FindByNetwork(impact.carId)));
-            // Hit reads the car's position for the dodge, so it must exist.
-            if (!element || !car || car->GetType() != SDK::Player::NativeActor::Type::Car || !std::isfinite(speed)) {
+            if (!Simulation::IsHost()) {
+                static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->PedestrianReplicas().OnReaction(reaction);
                 return;
             }
-            // Hit charges a car's impact only when its driver (seat 0) is
-            // C_game's player (0x45891e-0x458948): here, that driver's replica.
-            auto *game = SDK::Core::Mission::Get()->Game();
-            auto *driver = static_cast<SDK::Seat::NativeCar *>(static_cast<void *>(car))->GetOwner(0);
-            auto *police = SDK::Police::PoliceManager(game);
-            // C_don_ocas::Collision 0x44ca50 runs before the Hit: a beat cop
-            // (pedestrian type 1 or 3) run into is a hit patrolman for the
-            // driver (DalJsemPochuzkariDoDrzky).
-            const uint8_t type = element->PedestrianType();
-            if (driver && (type == SDK::Traffic::kPolicePedestrian || type == SDK::Traffic::kPoliceSecondaryPedestrian)) {
-                police->ReportPatrolmanHit(driver);
-            }
-            auto *previous = game->ExchangePlayer(driver);
-            reinterpret_cast<ElementHit>(SDK::Traffic::kElementHit)(element, kCarImpactHit, &direction, kTorso, car, speed * Shared::Pedestrian::kCarImpactDamageScale);
-            game->ExchangePlayer(previous);
-            // ...and after it, a walker it killed counts as a run-over
-            // (NextNaSrackySoudruh) while the police are active.
-            if (driver && element->Health() <= 0.0f && police->IsActive()) {
-                police->CountRunOver(driver);
-            }
+            ApplyReaction(reaction);
         });
         // Host: a player's melee hit on a walker's replica that the server
         // checked. C_human::AI's walker branch (0x571323-0x571377): the
@@ -560,31 +553,89 @@ namespace Mafia1Online::Features::Pedestrian {
         if (!_world || !_world->IsReady() || !replication || actor->GetType() != SDK::Player::NativeActor::Type::Car) {
             return;
         }
-        auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
-        application->PedestrianReplicas().OnCarContact(model, {direction.x, direction.y, direction.z});
+        // Only the car's controller has the contact where it really happens.
         const uint64_t carId = _world->NativeObjects().FindByNative(actor).networkId;
         const auto *car = carId ? replication->GetEntity<Shared::Entities::CarEntity>(carId) : nullptr;
         if (!car || car->simulationControllerGuid != static_cast<uint64_t>(replication->GetMyGUID())) {
             return;
         }
-        const uint64_t walkerId = application->PedestrianReplicas().WalkerOfModel(model);
-        const auto now = std::chrono::steady_clock::now();
-        // The contact repeats every physics step while the car touches it.
-        if (!walkerId || (_lastImpact.contains(walkerId) && now - _lastImpact[walkerId] < kImpactCooldown)) {
+        auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
+        application->PedestrianReplicas().OnCarContact(*_world, model, carId, *static_cast<SDK::Car::NativeCar *>(static_cast<void *>(actor)),
+                                                       {direction.x, direction.y, direction.z});
+    }
+
+    bool PedestrianService::SimulatedElsewhere(SDK::Car::NativeCar *car) const {
+        auto *replication = Framework::CoreModules::GetReplication();
+        const uint64_t carId = _world && replication ? _world->NativeObjects().FindByNative(car).networkId : 0;
+        const auto *state = carId ? replication->GetEntity<Shared::Entities::CarEntity>(carId) : nullptr;
+        return state && state->simulationControllerGuid != 0 && state->simulationControllerGuid != static_cast<uint64_t>(replication->GetMyGUID());
+    }
+
+    void PedestrianService::ApplyReaction(const Shared::Pedestrian::Reaction &reaction) {
+        namespace Pedestrian = Shared::Pedestrian;
+        auto *element = _reporter.ActiveElement(reaction.key);
+        if (!element || !element->Model() || element->IsDead()) {
             return;
         }
-        if (_lastImpact.size() > 256) {
-            _lastImpact.clear();
+        // The walker starts where the controller saw it, which this one is
+        // ahead of by a replica's render delay.
+        const auto current = element->Position();
+        const glm::vec3 at(current.x, current.y, current.z);
+        if (glm::distance(at, reaction.position) <= Pedestrian::kReactionWalkerSlack) {
+            element->SetPose({reaction.position.x, reaction.position.y, reaction.position.z}, element->Direction());
         }
-        _lastImpact[walkerId] = now;
-        Shared::Pedestrian::CarImpact impact;
-        impact.missionGeneration = _world->LoadedMissionGeneration();
-        impact.walkerId = walkerId;
-        impact.carId = carId;
-        impact.directionX = direction.x;
-        impact.directionY = direction.y;
-        impact.directionZ = direction.z;
-        Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(impact, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
+        if (reaction.kind == Pedestrian::ReactionKind::Dodge) {
+            // Tick's dodge: SetAnim with the one-shot flag clear, as its
+            // precondition has it. Its scream each player plays itself.
+            element->PlayAnimation(reaction.animation, false);
+            return;
+        }
+        auto *car = static_cast<SDK::Player::NativeActor *>(_world->NativeObjects().Resolve(_world->NativeObjects().FindByNetwork(reaction.carId)));
+        // Hit reads the car's position for the dodge, so it must exist.
+        if (!car || car->GetType() != SDK::Player::NativeActor::Type::Car) {
+            return;
+        }
+        // C_don_ocas::Collision: a waving walker stops waving first.
+        if (element->TaxiWaving()) {
+            _taxi.Forget(element);
+            element->EndTaxiWave();
+        }
+        // Hit charges a car's impact only when its driver (seat 0) is
+        // C_game's player (0x45891e-0x458948): here, that driver's replica.
+        auto *game = SDK::Core::Mission::Get()->Game();
+        auto *driver = static_cast<SDK::Seat::NativeCar *>(static_cast<void *>(car))->GetOwner(0);
+        auto *police = SDK::Police::PoliceManager(game);
+        // Collision runs before the Hit: a beat cop (pedestrian type 1 or 3)
+        // run into is a hit patrolman for the driver (DalJsemPochuzkariDoDrzky).
+        const uint8_t type = element->PedestrianType();
+        if (driver && (type == SDK::Traffic::kPolicePedestrian || type == SDK::Traffic::kPoliceSecondaryPedestrian)) {
+            police->ReportPatrolmanHit(driver);
+        }
+        const SDK::Player::Vector3 impact {reaction.impact.x, reaction.impact.y, reaction.impact.z};
+        auto *previous = game->ExchangePlayer(driver);
+        reinterpret_cast<ElementHit>(SDK::Traffic::kElementHit)(element, kCarImpactHit, &impact, kTorso, car, Pedestrian::CarImpactDamage(reaction.impact));
+        game->ExchangePlayer(previous);
+        // ...and after it, a walker it killed counts as a run-over
+        // (NextNaSrackySoudruh) while the police are active.
+        if (driver && element->Health() <= 0.0f && police->IsActive()) {
+            police->CountRunOver(driver);
+        }
+        // Hit picked from this walker's heading and its own random draw; the
+        // controller's pick is what every player shows. Where Hit's outcome
+        // differs (this walker's health had changed meanwhile), Hit's stands.
+        const bool dead = element->IsDead();
+        if (reaction.kind == Pedestrian::ReactionKind::Sidestep) {
+            if (!dead && element->CurrentAnimation() != reaction.animation) {
+                element->PlayAnimation(reaction.animation, false);
+            }
+            return;
+        }
+        if (dead != reaction.fatal) {
+            return;
+        }
+        element->SetPose(element->Position(), {reaction.facing.x, 0.0f, reaction.facing.z});
+        element->KnockDown(Pedestrian::KnockdownCollisionDelay(reaction.animation));
+        element->SetKnockdownAnimations(reaction.animation, reaction.queued);
     }
 
     void PedestrianService::Reset() {

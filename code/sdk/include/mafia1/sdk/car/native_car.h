@@ -39,6 +39,12 @@ namespace Mafia1Online::SDK::Car {
     inline constexpr uintptr_t kDeform              = 0x4D5610;
     inline constexpr uintptr_t kDamageVehicle       = 0x4D6720;
     inline constexpr uintptr_t kCarHit              = 0x423600;
+    // C_car* __thiscall C_car::ChcesMeSejmout(const S_vector &position, float
+    // distance), ret 8: this car when it heads for `position` (ahead within
+    // `distance`, or speed x 1.8 for a negative one, which also needs a wheel
+    // on the road; within 2 m of its path and 4 m in height), else null.
+    // C_traffic_element::Tick asks it of every car (0x45427d).
+    inline constexpr uintptr_t kWouldRunOver        = 0x4230E0;
     inline constexpr uintptr_t kVehicleStateSize    = 0x4CEB30;
     inline constexpr uintptr_t kSaveVehicleState    = 0x4CEE00;
     inline constexpr uintptr_t kDropOut             = 0x427010;
@@ -234,6 +240,11 @@ namespace Mafia1Online::SDK::Car {
         // VEHICLE_LIGHT_STATE_MASTER lights only VEHICLE_LIGHT_TYPE_SIREN lamps.
         static constexpr uint32_t kSirenLightMask = 0x00010000;
 
+        // m_fSpeed (+0x59c), C_Vehicle::GetDriverSpeed: the speed retail's
+        // walkers judge a car by.
+        float DriverSpeed() const {
+            return _speed;
+        }
         Player::Vector3 LinearVelocity() const {
             return _linearVelocity;
         }
@@ -797,6 +808,11 @@ namespace Mafia1Online::SDK::Car {
         }
         NativeVehicle &Vehicle() {
             return _vehicle;
+        }
+        // C_car::ChcesMeSejmout (kWouldRunOver).
+        bool WouldRunOver(const Player::Vector3 &position, float distance) {
+            using Call = NativeCar *(__thiscall *)(NativeCar *, const Player::Vector3 *, float);
+            return reinterpret_cast<Call>(kWouldRunOver)(this, &position, distance) != nullptr;
         }
         const NativeVehicle &Vehicle() const {
             return _vehicle;

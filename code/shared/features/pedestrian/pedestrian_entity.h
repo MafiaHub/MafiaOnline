@@ -33,6 +33,11 @@ namespace Mafia1Online::Shared::Entities {
         // Waving for a taxi (Shared::Taxi::kWave*): the retail "MavaniNN
         // HPT.i3d" extended animation, 0 for none.
         uint8_t taxiWave = 0;
+        // The voice the host's walker screams in (C_traffic_element +0x1f6).
+        uint8_t voice = 0;
+        // The host's walker's health (+0x15c), as of its last hit: a car's
+        // controller decides from it whether the impact kills, as Hit will.
+        float health = 0.0f;
         // The host's sample clock for this pose (Shared::Net).
         uint16_t sampleClock = 0;
         // Server only: the simulation host whose snapshots move it.
@@ -70,6 +75,8 @@ namespace Mafia1Online::Shared::Entities {
             fields.Field(umbrella);
             fields.Field(alpha);
             fields.Field(taxiWave);
+            fields.Field(voice);
+            fields.Field(health);
             if (!fields.Writing() && model.size() > kMaxModelLength) {
                 model.clear();
             }
@@ -86,6 +93,7 @@ namespace Mafia1Online::Shared::Entities {
             fields.Field(umbrella);
             fields.Field(alpha);
             fields.Field(taxiWave);
+            fields.Field(health);
         }
     };
 } // namespace Mafia1Online::Shared::Entities

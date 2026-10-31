@@ -6,6 +6,7 @@
 #include "shared/features/npc/npc_report.h"
 #include "shared/features/npc/npc_seized.h"
 #include "shared/features/pedestrian/pedestrian_knockdown.h"
+#include "shared/features/pedestrian/pedestrian_reaction.h"
 #include "shared/features/railway/railway_report.h"
 
 #include <chrono>
@@ -499,6 +500,130 @@ namespace {
         for (const int32_t other : {0, 6, 109, 110, 111, 324}) {
             CHECK(Pedestrian::KnockdownCollisionDelay(other) == 0);
         }
+
+        // Hit queues the corpse settling or the get-up behind a side or back
+        // fall, and nothing behind a front one; its draw picks A or B.
+        CHECK(right.queued == Pedestrian::kFallRecover);
+        CHECK(back.queued == Pedestrian::kFallEndB);
+        CHECK(Pedestrian::CarKnockdown({0.0f, 0.0f, -10.0f}, facing, true, true).queued == Pedestrian::kFallEndA);
+        CHECK(front.queued == 0);
+        CHECK(Pedestrian::CarKnockdown({0.0f, 0.0f, 20.0f}, facing, true, true).animation == Pedestrian::kFallFrontDeadA);
+        CHECK(Pedestrian::CarKnockdown({0.0f, 0.0f, 20.0f}, facing, true, true).queued == 0);
+    }
+
+    // A walker's reaction to a car, decided on the car's controller as
+    // Tick's threat test and Collision's Hit would (0x452cd0, 0x4588d0).
+    void WalkerReactions() {
+        namespace Pedestrian = Shared::Pedestrian;
+        const glm::vec3 north {0.0f, 0.0f, 1.0f};
+        // Without a horn ChcesMeSejmout watches by speed; with one, 50 m for
+        // a moving car and 10 for one at walking pace (0x454238-0x45426c).
+        CHECK(Pedestrian::ThreatWatchDistance(20.0f, false) < 0.0f);
+        CHECK(Near(Pedestrian::ThreatWatchDistance(20.0f, true), 50.0f));
+        CHECK(Near(Pedestrian::ThreatWatchDistance(1.0f, true), 10.0f));
+        CHECK(Near(Pedestrian::ThreatWatchDistance(0.5f, true), 10.0f));
+
+        // The distance gate: 540 x 0.8 = 432 for a car heading the walker's
+        // way, 900 x 0.8 = 720 from the side, 900 head-on; none with a horn.
+        const glm::vec3 walker {0.0f, 0.0f, 0.0f};
+        CHECK(Pedestrian::ThreatClose(false, north, {0.0f, 0.0f, -20.0f}, north, walker));
+        CHECK(!Pedestrian::ThreatClose(false, north, {0.0f, 0.0f, -21.0f}, north, walker));
+        CHECK(Pedestrian::ThreatClose(false, {1.0f, 0.0f, 0.0f}, {-26.0f, 0.0f, 0.0f}, north, walker));
+        CHECK(!Pedestrian::ThreatClose(false, {1.0f, 0.0f, 0.0f}, {-27.0f, 0.0f, 0.0f}, north, walker));
+        CHECK(Pedestrian::ThreatClose(false, -north, {0.0f, 0.0f, 29.9f}, north, walker));
+        CHECK(!Pedestrian::ThreatClose(false, -north, {0.0f, 0.0f, 30.1f}, north, walker));
+        CHECK(Pedestrian::ThreatClose(true, -north, {0.0f, 0.0f, 49.0f}, north, walker));
+
+        // The dodge by the car's course against the walker's heading, and
+        // the mirror clip on the car's other side.
+        // A car from behind along the heading: the front dodge, 324 or 325.
+        CHECK(Pedestrian::CarDodge(walker, north, {0.0f, 0.0f, 10.0f}, {0.5f, 0.0f, -10.0f}) == Pedestrian::kDodgeFront);
+        CHECK(Pedestrian::CarDodge(walker, north, {0.0f, 0.0f, 10.0f}, {-0.5f, 0.0f, -10.0f}) == Pedestrian::kDodgeFront + 1);
+        // Head-on: the back dodge.
+        CHECK(Pedestrian::CarDodge(walker, north, {0.0f, 0.0f, -10.0f}, {-0.5f, 0.0f, 10.0f}) == Pedestrian::kDodgeBack);
+        // Across: the turn from the heading picks the side clip.
+        const int32_t fromLeft = Pedestrian::CarDodge(walker, north, {10.0f, 0.0f, 0.0f}, {-10.0f, 0.0f, 0.5f});
+        const int32_t fromRight = Pedestrian::CarDodge(walker, north, {-10.0f, 0.0f, 0.0f}, {10.0f, 0.0f, 0.5f});
+        CHECK(fromLeft == Pedestrian::kDodgeSideLeft || fromLeft == Pedestrian::kDodgeSideLeft + 1);
+        CHECK(fromRight == Pedestrian::kDodgeSideRight || fromRight == Pedestrian::kDodgeSideRight + 1);
+        for (const int32_t dodge : {fromLeft, fromRight}) {
+            CHECK(Pedestrian::IsDodge(dodge));
+        }
+        CHECK(Pedestrian::IsMegaPanic(331) && !Pedestrian::IsMegaPanic(329) && !Pedestrian::IsMegaPanic(6));
+
+        // Hit kills below 0.5 health.
+        CHECK(Pedestrian::CarImpactKills(70.0f, 69.6f));
+        CHECK(!Pedestrian::CarImpactKills(70.0f, 69.4f));
+
+        // Only what retail could play passes.
+        Pedestrian::Reaction dodge;
+        dodge.kind = Pedestrian::ReactionKind::Dodge;
+        dodge.animation = Pedestrian::kDodgeBack;
+        dodge.scream = Pedestrian::kDodgeScreamFirst + 5;
+        CHECK(Pedestrian::ReactionWellFormed(dodge));
+        auto loud = dodge;
+        loud.scream = Pedestrian::kDodgeScreamFirst + 6;
+        CHECK(!Pedestrian::ReactionWellFormed(loud));
+        auto falling = dodge;
+        falling.animation = Pedestrian::kFallBack;
+        CHECK(!Pedestrian::ReactionWellFormed(falling));
+
+        Pedestrian::Reaction sidestep;
+        sidestep.kind = Pedestrian::ReactionKind::Sidestep;
+        sidestep.animation = Pedestrian::kDodgeFront;
+        sidestep.impact = {0.0f, 0.0f, 3.0f};
+        CHECK(Pedestrian::ReactionWellFormed(sidestep));
+        sidestep.impact = {0.0f, 0.0f, 5.0f};
+        CHECK(!Pedestrian::ReactionWellFormed(sidestep));
+
+        const auto fall = Pedestrian::CarKnockdown({10.0f, 0.0f, 0.0f}, north, false);
+        Pedestrian::Reaction knockdown;
+        knockdown.kind = Pedestrian::ReactionKind::Knockdown;
+        knockdown.animation = static_cast<int16_t>(fall.animation);
+        knockdown.queued = static_cast<int16_t>(fall.queued);
+        knockdown.impact = {10.0f, 0.0f, 0.0f};
+        knockdown.facing = fall.facing;
+        CHECK(Pedestrian::ReactionWellFormed(knockdown));
+        auto dying = knockdown;
+        dying.fatal = true;
+        CHECK(!Pedestrian::ReactionWellFormed(dying));
+        dying.queued = Pedestrian::kFallEndA;
+        CHECK(Pedestrian::ReactionWellFormed(dying));
+        auto slow = knockdown;
+        slow.impact = {3.0f, 0.0f, 0.0f};
+        CHECK(!Pedestrian::ReactionWellFormed(slow));
+        auto broken = knockdown;
+        broken.position.x = std::numeric_limits<float>::quiet_NaN();
+        CHECK(!Pedestrian::ReactionWellFormed(broken));
+
+        // The wire keeps every field, the car clock to 1/256 ms.
+        knockdown.missionGeneration = 7;
+        knockdown.walkerId = 0x1234567890ull;
+        knockdown.key = 99;
+        knockdown.carId = 42;
+        knockdown.SetCarClock(123456.75);
+        knockdown.position = {1.5f, 2.5f, -3.5f};
+        MafiaNet::BitStream stream;
+        knockdown.Serialize(&stream, true);
+        Pedestrian::Reaction read;
+        read.Serialize(&stream, false);
+        CHECK(read.missionGeneration == 7 && read.walkerId == 0x1234567890ull && read.key == 99 && read.carId == 42);
+        CHECK(read.kind == Pedestrian::ReactionKind::Knockdown && read.animation == knockdown.animation && read.queued == knockdown.queued);
+        CHECK(Near(static_cast<float>(read.CarClock() - 123456.0), 0.75f));
+        CHECK(Near(read.position.z, -3.5f) && Near(read.impact.x, 10.0f) && Near(read.facing.z, knockdown.facing.z));
+
+        // A player plays it once its copy of the car is there, at once for a
+        // car it does not show, and gives up waiting after a second.
+        const double shown = 1000.0;
+        CHECK(!Pedestrian::ReactionDue(&shown, 1000.5, 10.0));
+        CHECK(Pedestrian::ReactionDue(&shown, 999.5, 10.0));
+        CHECK(Pedestrian::ReactionDue(nullptr, 5000.0, 0.0));
+        CHECK(Pedestrian::ReactionDue(&shown, 5000.0, Pedestrian::kReactionWaitLimitMs));
+
+        // The hand-over closes the whole gap, smoothly.
+        CHECK(Near(Pedestrian::HandOverRemaining(0.0f), 1.0f));
+        CHECK(Near(Pedestrian::HandOverRemaining(Pedestrian::kHandOverSeconds), 0.0f));
+        CHECK(Pedestrian::HandOverRemaining(0.1f) > Pedestrian::HandOverRemaining(0.15f));
     }
 } // namespace
 
@@ -512,6 +637,7 @@ int main() {
     RailwayShots();
     ScriptClips();
     WalkerKnockdowns();
+    WalkerReactions();
     if (failures == 0) {
         std::printf("contact sync tests passed\n");
     }

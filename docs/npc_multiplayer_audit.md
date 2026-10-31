@@ -834,3 +834,43 @@ driver counts only its own waving walkers and its own police record; a
 wanted driver ends only its own waves; the car is not locked while the
 passenger boards (the host waits for it to be nearly still); the passenger is
 removed out of sight instead of returning to traffic.
+
+## Walkers and cars
+
+Retail (reM, verified in IDA against Game.exe; reM's `RunAliveAI` has the
+horn test inverted and the dodge's side test on the heading, IDA is followed):
+
+- Element `Tick` asks every car `C_car::ChcesMeSejmout` (0x4230e0, also
+  reached through `C_traffic_car::ChcesMeSejmout` 0x4bad30; nothing else calls
+  it) whether it heads for the walker. The watch distance is -1 (speed x 1.8
+  ahead, a wheel on the road) unless `g_iTrafficCollisionCooldown` (0x63d738)
+  runs, which only `C_player::AI_drive`'s horn press sets (1000 ms, 0x591de5);
+  then 50 for a car faster than 1 m/s and 10 for a slower one. Without the
+  horn the car's frame must also be within 900 (squared), 540 when its
+  heading is within 45 degrees of the walker's, times 0.8 within 135. With no
+  clip track and no one-shot clip, the walker plays dodge 324 (ahead), 322
+  (head-on) or 326/328 (across, by AngleTo2), +1 on the car's other side by
+  position, and screams (200 + rnd(6), 5 to 40 m, 0x454859).
+- `C_don_ocas::Collision` (0x44ca50) hits the walker every contact step with
+  the car's velocity: below 16 damage (|v| x 4.2) `Hit` side-steps with the
+  same four dodges and the car pushes it; from 16 it knocks it down (the fall,
+  the queued fall end or get-up, the collision out until both are over). Over
+  5 m/s it plays the thud (sound table 184).
+
+Multiplayer: a car's simulation controller is the only client with the car
+where it really is, so it decides every walker reaction to that car with
+these rules against its replicas (`PedestrianReplicaService::DetectThreats`,
+`OnCarContact`), using the local horn cooldown and the walker's replicated
+health for the fatal fall. It plays the reaction at once and sends a
+`Pedestrian::Reaction` dated on its car's physics clock. The server checks the
+sender controls the car, the clips and distances, and forwards it to the host
+and the players near the walker. Each player plays it when its own copy of the
+car reaches that clock (`CarService::ShownControllerClock`), so the walker
+reacts where the car is on every screen. Each copy plays the clip and its
+queued clip from where it stood, then breathes until the host's walker, a
+render delay behind, is past the reaction, and eases onto the host's poses
+over 250 ms. The host applies the reaction from the controller's position:
+a dodge as Tick's SetAnim, a contact through retail `Hit` (damage, police,
+scoring) with the controller's clips where Hit's outcome agrees. Its own
+threat test ignores cars another client simulates (`WouldRunOverHook`); its
+traffic and police cars keep retail's.

@@ -301,6 +301,26 @@ namespace Mafia1Online::SDK::Traffic {
             *reinterpret_cast<uint32_t *>(Raw() + kCollisionUpdateDelay) = 0;
         }
         [[nodiscard]] bool HasCollisions() const { return *reinterpret_cast<const bool *>(Raw() + kHasCollisions); }
+        // Tick's threat dodge runs only with no clip track playing or
+        // blending (machine +0x2c, +0x80) and no one-shot clip (+0x16c,
+        // 0x454692-0x4546b4).
+        [[nodiscard]] bool AnimationFree() const {
+            const auto *machine = static_cast<const std::byte *>(_animationMachine);
+            return machine && !_animationFlag && *reinterpret_cast<const int32_t *>(machine + kMachineCurrentTrack) == -1 &&
+                   *reinterpret_cast<const int32_t *>(machine + kMachineBlendingTrack) == -1;
+        }
+        // m_uVoiceIndex (+0x1f6): the voice set ElementNewScream plays from.
+        [[nodiscard]] uint8_t Voice() const { return *reinterpret_cast<const uint8_t *>(Raw() + kVoice); }
+        void SetVoice(uint8_t voice) { *reinterpret_cast<uint8_t *>(Raw() + kVoice) = voice; }
+        // Hit's knockdown choice (0x458f19-0x459013): the fall Tick's SetAnim
+        // plays next (+0x164) and the clip queued behind it (+0x168), which
+        // Tick plays with m_sAnimationIndex's state (+0x16d) as its flag.
+        void SetKnockdownAnimations(int32_t fall, int32_t queued) {
+            _targetAnimation = fall;
+            *reinterpret_cast<int32_t *>(Raw() + kQueuedAnimation) = queued;
+            *reinterpret_cast<uint8_t *>(Raw() + kQueuedAnimationState) = queued ? 1 : 0;
+        }
+        [[nodiscard]] int32_t TargetAnimation() const { return _targetAnimation; }
         // Pedestrian nodes only: an element whose allowed node types were
         // never set (Activate sets them) finds no node otherwise.
         bool ActivateFree() {
@@ -430,6 +450,9 @@ namespace Mafia1Online::SDK::Traffic {
         static constexpr size_t kAnimationCountdown   = 0x170;
         static constexpr size_t kUsingObject          = 0x1bc;
         static constexpr size_t kCanSpeak             = 0x1fc;
+        static constexpr size_t kVoice                = 0x1f6;
+        static constexpr size_t kQueuedAnimation      = 0x168;
+        static constexpr size_t kQueuedAnimationState = 0x16d;
         static constexpr size_t kMachineCurrentTrack  = 0x2c;
         static constexpr size_t kMachineBlendingTrack = 0x80;
 
@@ -555,6 +578,11 @@ namespace Mafia1Online::SDK::Traffic {
         }
     }
 
+    // AI_drive's horn press sets the cooldown (0x591de5); while it runs,
+    // Tick watches every car farther ahead and drops its distance gate.
+    inline bool HornCooldownActive() {
+        return *reinterpret_cast<const int32_t *>(kCollisionCooldown) > 0;
+    }
     inline void CountDownCollisionCooldown(uint32_t frameMs) {
         auto &cooldown = *reinterpret_cast<int32_t *>(kCollisionCooldown);
         if (cooldown > 0) {

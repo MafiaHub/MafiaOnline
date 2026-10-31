@@ -2,17 +2,23 @@
 
 #include "pedestrian_replicas.h"
 
+#include "core/application.h"
+#include "features/car/car_service.h"
 #include "features/player/stalled_gait.h"
 #include "features/simulation/simulation_config.h"
 #include "features/world/fading_copies.h"
+#include "features/world/frame_clock.h"
 #include "features/world/world_service.h"
 #include "shared/features/pedestrian/pedestrian_entity.h"
 #include "shared/features/pedestrian/pedestrian_knockdown.h"
 
 #include <core_modules.h>
 #include <logging/logger.h>
+#include <mafia1/sdk/car/native_car.h>
 #include <mafia1/sdk/core/mission.h>
 #include <mafia1/sdk/traffic/native_traffic.h>
+#include <mafia1/sdk/world/native_fire.h>
+#include <networking/network_peer.h>
 #include <networking/replication/replication_manager.h>
 
 #include <glm/geometric.hpp>
@@ -35,12 +41,16 @@ namespace Mafia1Online::Features::Pedestrian {
         // end of a knockdown (Hit 0x4588d0), whose id comes a moment after
         // this copy's fall ends. Then the corpse settles.
         constexpr std::chrono::milliseconds kCorpseSettleDelay {500};
-        // A car's knockdown this copy played first waits this long for the
-        // host's: past the driver's report, the server, the host and back,
-        // and the render delay. A contact the host never applies (the server
-        // refused it, or only this client's copy of the car met the walker)
-        // then gives the walker back.
-        constexpr std::chrono::milliseconds kKnockdownConfirmLimit {1500};
+        // A reaction this copy played waits this long for the host's walker
+        // to be past it: the controller's report, the server, the host and
+        // back, the render delay, and the clips themselves. One the host
+        // never applied (the server refused it) then gives the walker back.
+        constexpr std::chrono::milliseconds kReactionConfirmLimit {3000};
+        // Tick's threat test reaches no further than a horn's 50 m watch
+        // plus a car length.
+        constexpr float kThreatScanDistance = 60.0f;
+        // Snapshot's own warp distance at a standstill.
+        constexpr float kHandOverSnapDistance = 4.0f;
         // How far a walker streamed in dead runs its clip at once.
         constexpr uint32_t kFallenLimitMs = 10000;
 
@@ -93,8 +103,11 @@ namespace Mafia1Online::Features::Pedestrian {
         return 0;
     }
 
-    void PedestrianReplicaService::OnCarContact(const SDK::Scene::NativeFrame *model, const glm::vec3 &velocity) {
-        if (!Shared::Pedestrian::KnocksDown(velocity)) {
+    void PedestrianReplicaService::OnCarContact(World::WorldService &world, const SDK::Scene::NativeFrame *model, uint64_t carId, SDK::Car::NativeCar &car,
+                                                const glm::vec3 &velocity) {
+        namespace Pedestrian = Shared::Pedestrian;
+        auto *replication = Framework::CoreModules::GetReplication();
+        if (!replication || !Pedestrian::FiniteVector(velocity) || !(glm::length(velocity) > 0.0f)) {
             return;
         }
         for (auto &[id, replica] : _replicas) {
@@ -102,28 +115,283 @@ namespace Mafia1Online::Features::Pedestrian {
             if (!element || element->Model() != model) {
                 continue;
             }
+            const auto *walker = replication->GetEntity<Shared::Entities::PedestrianEntity>(id);
             // Retail Hit returns at once for a dead walker, and a fallen one
             // has no collision a car could meet.
-            if (replica.dead || replica.settled || replica.fallen || replica.knockdown ||
-                Shared::Pedestrian::KnockdownCollisionDelay(element->CurrentAnimation()) != 0) {
+            if (!walker || !walker->alive || replica.dead || replica.settled || replica.fallen ||
+                (replica.reaction && replica.reaction->kind == Pedestrian::ReactionKind::Knockdown) ||
+                Pedestrian::KnockdownCollisionDelay(element->CurrentAnimation()) != 0) {
                 return;
             }
+            // Collision's Hit repeats every physics step of the contact; one
+            // decides it, as the server accepts one in kReactionGapMs.
+            const auto now = std::chrono::steady_clock::now();
+            if (std::chrono::duration<double, std::milli>(now - replica.lastContact).count() < Pedestrian::kReactionGapMs) {
+                return;
+            }
+            const auto position = element->Position();
             const auto direction = element->Direction();
-            const bool fatal = Shared::Pedestrian::CarImpactDamage(velocity) > Shared::Pedestrian::kSurelyFatalDamage;
-            const auto knockdown = Shared::Pedestrian::CarKnockdown(velocity, {direction.x, direction.y, direction.z}, fatal);
-            // Hit's knockdown steps (0x458eea-0x45916f) but the damage, which
-            // is the host's: the umbrella dropped, the collision out until
-            // the fall and its queued clip are over, the body turned to the
-            // impact, and the fall played as Tick's SetAnim would.
+            const glm::vec3 at(position.x, position.y, position.z);
+            const glm::vec3 facing(direction.x, direction.y, direction.z);
+            Pedestrian::Reaction reaction;
+            reaction.walkerId = id;
+            reaction.carId = carId;
+            reaction.position = at;
+            reaction.facing = facing;
+            reaction.impact = velocity;
+            if (Pedestrian::KnocksDown(velocity)) {
+                // Hit's knockdown: dead below 0.5 health, with its two random
+                // picks for a fatal fall.
+                reaction.kind = Pedestrian::ReactionKind::Knockdown;
+                reaction.fatal = Pedestrian::CarImpactKills(walker->health, Pedestrian::CarImpactDamage(velocity));
+                const auto knockdown = Pedestrian::CarKnockdown(velocity, facing, reaction.fatal, (_random() & 1) != 0);
+                reaction.animation = static_cast<int16_t>(knockdown.animation);
+                reaction.queued = static_cast<int16_t>(knockdown.queued);
+                reaction.facing = knockdown.facing;
+            }
+            else {
+                // Hit's slow contact dodges only with no clip track playing
+                // (0x458ab6); the car just pushes a walker mid-clip.
+                if (!element->AnimationFree() || Pedestrian::IsMegaPanic(element->CurrentAnimation())) {
+                    return;
+                }
+                reaction.kind = Pedestrian::ReactionKind::Sidestep;
+                const auto carAt = car.Position();
+                reaction.animation = static_cast<int16_t>(Pedestrian::CarDodge(at, facing, velocity, {carAt.x, carAt.y, carAt.z}));
+            }
+            replica.lastContact = now;
+            Decide(world, replica, reaction);
+            return;
+        }
+    }
+
+    void PedestrianReplicaService::OnReaction(const Shared::Pedestrian::Reaction &reaction) {
+        if (_pendingReactions.size() >= 64) {
+            _pendingReactions.pop_front();
+        }
+        _pendingReactions.push_back({reaction, std::chrono::steady_clock::now()});
+    }
+
+    void PedestrianReplicaService::Decide(World::WorldService &world, Replica &replica, Shared::Pedestrian::Reaction &reaction) {
+        auto *replication = Framework::CoreModules::GetReplication();
+        const auto *walker = replication ? replication->GetEntity<Shared::Entities::PedestrianEntity>(reaction.walkerId) : nullptr;
+        if (!walker) {
+            return;
+        }
+        reaction.missionGeneration = world.LoadedMissionGeneration();
+        // Its own car's poses carry this clock: each player's copy of the
+        // car is at this moment when it shows the pose of this frame.
+        reaction.SetCarClock(World::FrameClock::NowMs());
+        if (!Shared::Pedestrian::ReactionWellFormed(reaction)) {
+            return;
+        }
+        Framework::CoreModules::GetNetworkPeer()->BroadcastRPC(reaction, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
+        StartReaction(replica, reaction, walker->voice);
+    }
+
+    void PedestrianReplicaService::StartReaction(Replica &replica, const Shared::Pedestrian::Reaction &reaction, uint8_t voice) {
+        namespace Pedestrian = Shared::Pedestrian;
+        auto *element = replica.element;
+        if (!element || !element->IsActive() || replica.settled) {
+            return;
+        }
+        const bool knockdown = reaction.kind == Pedestrian::ReactionKind::Knockdown;
+        // Hit's knockdown steps (0x458eea-0x45916f): the umbrella dropped,
+        // the collision out until the fall and its queued clip are over, and
+        // the body turned to the impact; Tick's SetAnim plays the fall with
+        // the flag it had. A dodge plays as Tick's, with the flag clear.
+        bool flag = false;
+        glm::vec3 facing = reaction.facing;
+        if (knockdown) {
             if (element->HasUmbrella()) {
                 element->DropUmbrella();
             }
-            element->KnockDown(knockdown.collisionDelay);
-            element->SetPose(element->Position(), {knockdown.facing.x, 0.0f, knockdown.facing.z});
-            element->PlayAnimation(knockdown.animation, element->AnimationFlag());
+            element->KnockDown(Pedestrian::KnockdownCollisionDelay(reaction.animation));
+            flag = element->AnimationFlag();
+        }
+        else {
+            const auto direction = element->Direction();
+            facing = {direction.x, direction.y, direction.z};
+        }
+        const auto position = element->Position();
+        element->SetPose(position, {facing.x, 0.0f, facing.z});
+        element->RestartAnimation(reaction.animation, flag);
+        replica.holding = false;
+        replica.handOver.reset();
+        replica.reaction = Replica::Reacting {reaction.kind, reaction.animation, reaction.queued, reaction.fatal, facing, Replica::Reacting::Phase::Clip, false,
+                                              std::chrono::steady_clock::now()};
+        // Tick's dodge scream and Collision's thud, where the walker is.
+        if (reaction.scream >= 0) {
+            SDK::Traffic::PlayScream(voice, reaction.scream, position, Pedestrian::kDodgeScreamMinimumRange, Pedestrian::kDodgeScreamMaximumRange,
+                                     Pedestrian::kDodgeScreamCurve, Pedestrian::kDodgeScreamMinimumVolume);
+        }
+        auto *mission = SDK::Core::Mission::Get();
+        if (reaction.kind != Pedestrian::ReactionKind::Dodge && glm::dot(reaction.impact, reaction.impact) > Pedestrian::kImpactSoundSpeedSq && mission && mission->Game()) {
+            if (auto *sound = SDK::World::Fire::CreateTableSound(Pedestrian::kImpactSound)) {
+                sound->Frame()->SetWorldPosition({position.x, position.y + Pedestrian::kImpactSoundHeight, position.z});
+                sound->Frame()->Update();
+                SDK::World::Fire::PlayOwnedSound(mission->Game(), sound);
+            }
+        }
+    }
+
+    bool PedestrianReplicaService::PlayReaction(Replica &replica, int32_t shownAnimation, bool shownAlive, uint32_t frameMs, std::chrono::steady_clock::time_point now) {
+        namespace Pedestrian = Shared::Pedestrian;
+        auto &reaction = *replica.reaction;
+        auto *element = replica.element;
+        const bool knockdown = reaction.kind == Pedestrian::ReactionKind::Knockdown;
+        // Killed by something else mid-dodge: the host's death plays.
+        if (replica.dead && !knockdown) {
+            replica.reaction.reset();
             replica.holding = false;
-            replica.knockdown = Replica::Knockdown {knockdown.facing, std::chrono::steady_clock::now()};
+            return false;
+        }
+        // The host's walker shows it (its Hit may have picked another fall
+        // where its outcome differed).
+        if (!reaction.confirmed && (shownAnimation == reaction.animation || (reaction.queued && shownAnimation == reaction.queued) ||
+                                    (knockdown && (!shownAlive || Pedestrian::KnockdownCollisionDelay(shownAnimation) != 0)))) {
+            reaction.confirmed = true;
+        }
+        const auto advance = [&] {
+            if (replica.holding) {
+                return;
+            }
+            // Moved by the clip's root motion alone, from where it reacted.
+            replica.holding = element->TickAnimation(frameMs);
+            replica.holdingSince = now;
+            element->SetPose(element->Position(), {reaction.facing.x, 0.0f, reaction.facing.z});
+            if (!replica.holding) {
+                element->Model()->Tick(static_cast<int>(frameMs));
+                replica.holding = element->CountDownClip(frameMs);
+            }
+        };
+        if (reaction.phase != Replica::Reacting::Phase::Done) {
+            advance();
+            if (replica.holding) {
+                if (reaction.phase == Replica::Reacting::Phase::Clip && reaction.queued) {
+                    // Tick chains Hit's queued clip with the loaded flag; a
+                    // walker the host's Hit killed after all settles instead
+                    // of getting up.
+                    if (replica.dead && reaction.queued == Pedestrian::kFallRecover) {
+                        reaction.queued = Pedestrian::kFallEndB;
+                        reaction.fatal = true;
+                    }
+                    element->PlayAnimation(reaction.queued, true);
+                    reaction.phase = Replica::Reacting::Phase::Queued;
+                    replica.holding = false;
+                }
+                else {
+                    reaction.phase = Replica::Reacting::Phase::Done;
+                    // A corpse lies as its last clip left it; a living
+                    // walker breathes where it stands.
+                    if (!reaction.fatal && !replica.dead) {
+                        element->PlayAnimation(Player::kStopState, false);
+                        replica.holding = false;
+                    }
+                }
+            }
+            return true;
+        }
+        if (replica.dead) {
+            // Tick's end of a dead walker's last clip.
+            replica.settled = true;
+            element->SettleCorpse(SDK::Core::Mission::Get()->Game());
+            replica.reaction.reset();
+            return true;
+        }
+        const bool past = reaction.confirmed && shownAlive && shownAnimation != reaction.animation && shownAnimation != reaction.queued &&
+                          Pedestrian::KnockdownCollisionDelay(shownAnimation) == 0;
+        if (past || now - reaction.since > kReactionConfirmLimit) {
+            const auto position = element->Position();
+            const auto direction = element->Direction();
+            replica.handOver = Replica::HandOver {{position.x, position.y, position.z}, {direction.x, direction.y, direction.z}, false, glm::vec3(0.0f), now};
+            replica.reaction.reset();
+            replica.holding = false;
+            if (knockdown && !element->HasCollisions()) {
+                element->RestoreCollision();
+            }
+            return false;
+        }
+        advance();
+        return true;
+    }
+
+    void PedestrianReplicaService::DetectThreats(World::WorldService &world, Car::CarService &cars) {
+        namespace Pedestrian = Shared::Pedestrian;
+        auto *replication = Framework::CoreModules::GetReplication();
+        if (!replication) {
             return;
+        }
+        // The local horn's cooldown, which this client's AI_drive sets.
+        const bool horn = SDK::Traffic::HornCooldownActive();
+        cars.ForEachSimulated([&](uint64_t carId, SDK::Car::NativeCar &car) {
+            auto *frame = car.Frame();
+            if (!frame) {
+                return;
+            }
+            const auto framePosition = frame->WorldPosition();
+            const auto frameDirection = frame->WorldDirection();
+            const glm::vec3 carFrameAt(framePosition.x, framePosition.y, framePosition.z);
+            const glm::vec3 heading(frameDirection.x, frameDirection.y, frameDirection.z);
+            const auto velocity = car.Vehicle().LinearVelocity();
+            const auto carAt = car.Position();
+            const float watch = Pedestrian::ThreatWatchDistance(car.Vehicle().DriverSpeed(), horn);
+            for (auto &[id, replica] : _replicas) {
+                auto *element = replica.element;
+                if (!element || !element->IsActive() || !element->Model() || replica.dead || replica.settled || replica.fallen) {
+                    continue;
+                }
+                // A reaction still playing keeps its clip track; one done
+                // and breathing may react again, as retail's walker would.
+                if (replica.reaction && replica.reaction->phase != Replica::Reacting::Phase::Done) {
+                    continue;
+                }
+                const auto *walker = replication->GetEntity<Shared::Entities::PedestrianEntity>(id);
+                // Tick's earlier returns: a corpse, a taxi wave, a mega panic;
+                // then no clip track and no one-shot clip.
+                if (!walker || !walker->alive || walker->taxiWave || Pedestrian::IsMegaPanic(element->CurrentAnimation()) || !element->AnimationFree()) {
+                    continue;
+                }
+                const auto position = element->Position();
+                const glm::vec3 at(position.x, position.y, position.z);
+                if (glm::distance(at, carFrameAt) > kThreatScanDistance || !car.WouldRunOver(position, watch)) {
+                    continue;
+                }
+                const auto direction = element->Direction();
+                const glm::vec3 facing(direction.x, direction.y, direction.z);
+                if (!Pedestrian::ThreatClose(horn, heading, carFrameAt, facing, at)) {
+                    continue;
+                }
+                Pedestrian::Reaction reaction;
+                reaction.walkerId = id;
+                reaction.carId = carId;
+                reaction.kind = Pedestrian::ReactionKind::Dodge;
+                reaction.position = at;
+                reaction.facing = facing;
+                reaction.animation = static_cast<int16_t>(Pedestrian::CarDodge(at, facing, {velocity.x, velocity.y, velocity.z}, {carAt.x, carAt.y, carAt.z}));
+                reaction.scream = static_cast<int16_t>(Pedestrian::kDodgeScreamFirst + static_cast<int32_t>(_random() % Pedestrian::kDodgeScreamCount));
+                Decide(world, replica, reaction);
+            }
+        });
+    }
+
+    void PedestrianReplicaService::PlayDueReactions(Car::CarService &cars) {
+        auto *replication = Framework::CoreModules::GetReplication();
+        const auto now = std::chrono::steady_clock::now();
+        for (auto it = _pendingReactions.begin(); it != _pendingReactions.end();) {
+            const auto &reaction = it->reaction;
+            const double waited = std::chrono::duration<double, std::milli>(now - it->received).count();
+            const auto shown = cars.ShownControllerClock(reaction.carId);
+            if (!Shared::Pedestrian::ReactionDue(shown ? &*shown : nullptr, reaction.CarClock(), waited)) {
+                ++it;
+                continue;
+            }
+            const auto replica = _replicas.find(reaction.walkerId);
+            const auto *walker = replication ? replication->GetEntity<Shared::Entities::PedestrianEntity>(reaction.walkerId) : nullptr;
+            if (replica != _replicas.end() && walker && !replica->second.dead) {
+                StartReaction(replica->second, reaction, walker->voice);
+            }
+            it = _pendingReactions.erase(it);
         }
     }
 
@@ -141,6 +409,9 @@ namespace Mafia1Online::Features::Pedestrian {
         AdvanceFades(frameMs);
 
         SDK::Traffic::CountDownScreamCooldown(frameMs);
+        // TickElements never runs here: the horn's cooldown counts down
+        // as it would there.
+        SDK::Traffic::CountDownCollisionCooldown(frameMs);
         const auto generators = MissionGenerators();
         std::unordered_set<uint64_t> seen;
         std::unordered_set<uint64_t> handedOff;
@@ -225,35 +496,8 @@ namespace Mafia1Online::Features::Pedestrian {
             if (replica.settled) {
                 return;
             }
-            if (replica.knockdown) {
-                if (!shown.alive || Shared::Pedestrian::KnockdownCollisionDelay(shown.id) != 0) {
-                    // The host's knockdown: this copy's fall already plays.
-                    if (Shared::Pedestrian::KnockdownCollisionDelay(shown.id) != 0) {
-                        replica.confirmedFall = shown.id;
-                    }
-                    replica.knockdown.reset();
-                }
-                else if (now - replica.knockdown->since > kKnockdownConfirmLimit) {
-                    replica.knockdown.reset();
-                    element->RestoreCollision();
-                }
-                else {
-                    // Lies where the car hit it, moved by its fall's root
-                    // motion alone: the host's poses still walk on.
-                    if (!replica.holding) {
-                        replica.holding = element->TickAnimation(frameMs);
-                        replica.holdingSince = now;
-                        element->SetPose(element->Position(), {replica.knockdown->facing.x, 0.0f, replica.knockdown->facing.z});
-                        if (!replica.holding) {
-                            element->Model()->Tick(static_cast<int>(frameMs));
-                            replica.holding = element->CountDownClip(frameMs);
-                        }
-                    }
-                    return;
-                }
-            }
-            if (shown.id != replica.confirmedFall) {
-                replica.confirmedFall = 0;
+            if (replica.reaction && PlayReaction(replica, shown.id, shown.alive, frameMs, now)) {
+                return;
             }
             // Held at the extrapolation bound: retail's idle (SetAnim
             // blends to it) until the stream resumes, not a walk on the spot.
@@ -261,7 +505,7 @@ namespace Mafia1Online::Features::Pedestrian {
                                  Player::Stalled(renderTime, replica.newestTime, kSnapshotConfig.maxExtrapolationMs, replica.newestVelocity);
             const int32_t animation = stopped ? Player::kStopState : shown.id;
             const bool animationFlag = stopped ? false : shown.flag;
-            if (animation != element->CurrentAnimation() && animation != replica.confirmedFall) {
+            if (animation != element->CurrentAnimation()) {
                 // The host's knockdown takes the collision out as its Hit did
                 // there; SetAnim puts it back after the clip queued behind.
                 if (const uint32_t delay = Shared::Pedestrian::KnockdownCollisionDelay(animation)) {
@@ -270,8 +514,8 @@ namespace Mafia1Online::Features::Pedestrian {
                 element->PlayAnimation(animation, animationFlag);
                 replica.holding = false;
             }
-            // A fall that ended waits for the host's next clip, which comes
-            // later when this copy fell first: restarting it falls again.
+            // A fall that ended waits for the host's next clip: restarting
+            // it falls again.
             else if (replica.holding && shown.alive && Shared::Pedestrian::KnockdownCollisionDelay(animation) == 0 &&
                      now - replica.holdingSince > kLivingHoldLimit) {
                 element->RestartAnimation(animation, animationFlag);
@@ -294,8 +538,32 @@ namespace Mafia1Online::Features::Pedestrian {
                 // already carries the host's root motion, replaces it.
                 replica.holding = element->TickAnimation(frameMs);
                 replica.holdingSince = now;
-                const auto direction = glm::mat3_cast(pose.rotation) * glm::vec3(0.0f, 0.0f, 1.0f);
-                element->SetPose({pose.position.x, pose.position.y, pose.position.z}, {direction.x, 0.0f, direction.z});
+                glm::vec3 direction = glm::mat3_cast(pose.rotation) * glm::vec3(0.0f, 0.0f, 1.0f);
+                glm::vec3 position = pose.position;
+                // Back from a reaction it played itself: from where that
+                // left it onto the host's poses.
+                if (auto &handOver = replica.handOver) {
+                    if (!handOver->measured) {
+                        handOver->measured = true;
+                        handOver->offset = handOver->from - pose.position;
+                        handOver->since = now;
+                        // Too far to slide (the host never applied it): the
+                        // host's walker is where it is.
+                        if (glm::length(handOver->offset) > kHandOverSnapDistance) {
+                            handOver->offset = glm::vec3(0.0f);
+                        }
+                    }
+                    const float remaining = Shared::Pedestrian::HandOverRemaining(std::chrono::duration<float>(now - handOver->since).count());
+                    position += handOver->offset * remaining;
+                    const glm::vec3 blended = glm::mix(glm::vec3(direction.x, 0.0f, direction.z), glm::vec3(handOver->fromDirection.x, 0.0f, handOver->fromDirection.z), remaining);
+                    if (glm::length(blended) > 0.0001f) {
+                        direction = blended;
+                    }
+                    if (remaining <= 0.0f) {
+                        handOver.reset();
+                    }
+                }
+                element->SetPose({position.x, position.y, position.z}, {direction.x, 0.0f, direction.z});
                 if (!replica.holding) {
                     element->Model()->Tick(static_cast<int>(frameMs));
                     replica.holding = element->CountDownClip(frameMs);
@@ -308,6 +576,10 @@ namespace Mafia1Online::Features::Pedestrian {
         });
 
         _handedOff = std::move(handedOff);
+
+        auto &cars = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->Cars();
+        PlayDueReactions(cars);
+        DetectThreats(world, cars);
 
         for (auto it = _replicas.begin(); it != _replicas.end();) {
             if (seen.contains(it->first)) {
@@ -480,6 +752,7 @@ namespace Mafia1Online::Features::Pedestrian {
         }
         _fading.clear();
         _handedOff.clear();
+        _pendingReactions.clear();
         _lastUpdate = {};
     }
 } // namespace Mafia1Online::Features::Pedestrian

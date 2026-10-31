@@ -23,6 +23,11 @@ namespace Mafia1Online::Shared::Pedestrian {
     inline constexpr int32_t kFallBack = 106;
     inline constexpr int32_t kFallLeft = 107;
     inline constexpr int32_t kFallRight = 108;
+    // What Hit queues behind a side or back fall: the corpse settling (one
+    // of two at random) or getting up.
+    inline constexpr int32_t kFallEndA = 109;
+    inline constexpr int32_t kFallEndB = 110;
+    inline constexpr int32_t kFallRecover = 111;
     inline constexpr int32_t kFallFrontDeadA = 112;
     inline constexpr int32_t kFallFrontDeadB = 113;
     inline constexpr int32_t kFallFront = 114;
@@ -54,6 +59,9 @@ namespace Mafia1Online::Shared::Pedestrian {
 
     struct Knockdown {
         int32_t animation = 0;
+        // The clip Hit queues behind the fall, 0 for a front fall, which
+        // ends on its own; Tick plays it with the loaded flag set.
+        int32_t queued = 0;
         uint32_t collisionDelay = 0;
         // The walker's new heading.
         glm::vec3 facing {0.0f, 0.0f, 1.0f};
@@ -63,8 +71,9 @@ namespace Mafia1Online::Shared::Pedestrian {
     // `facing` (0x458f0c-0x45916f): within 45 degrees of its heading it falls
     // forward and turns to the impact, from behind 135 degrees it falls back
     // and turns against it, otherwise it falls to the side it was hit from.
-    // A fatal front fall picks one of two clips at random; this takes B.
-    inline Knockdown CarKnockdown(const glm::vec3 &impact, const glm::vec3 &facing, bool fatal) {
+    // A fatal fall picks one of two clips at random (rnd(2) != 0 takes A,
+    // 0x458f3a and 0x458ff6): `variantA` is that draw.
+    inline Knockdown CarKnockdown(const glm::vec3 &impact, const glm::vec3 &facing, bool fatal, bool variantA = false) {
         constexpr float kQuarterPi = 0.78539819f;
         constexpr float kThreeQuarterPi = 2.3561945f;
         constexpr float kPi = 3.14159265f;
@@ -73,7 +82,7 @@ namespace Mafia1Online::Shared::Pedestrian {
         Knockdown result;
         glm::vec3 turned = facing;
         if (angle < kQuarterPi) {
-            result.animation = fatal ? kFallFrontDeadB : kFallFront;
+            result.animation = fatal ? (variantA ? kFallFrontDeadA : kFallFrontDeadB) : kFallFront;
             turned = impact;
         }
         else if (!(angle < kThreeQuarterPi)) {
@@ -90,6 +99,9 @@ namespace Mafia1Online::Shared::Pedestrian {
                 delta -= 2.0f * kPi;
             }
             result.animation = delta < 0.0f ? kFallRight : kFallLeft;
+        }
+        if (result.animation != kFallFront && result.animation != kFallFrontDeadA && result.animation != kFallFrontDeadB) {
+            result.queued = fatal ? (variantA ? kFallEndA : kFallEndB) : kFallRecover;
         }
         result.collisionDelay = KnockdownCollisionDelay(result.animation);
         turned.y = 0.0f;

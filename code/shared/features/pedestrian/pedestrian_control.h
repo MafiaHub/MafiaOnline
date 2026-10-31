@@ -38,52 +38,6 @@ namespace Mafia1Online::Shared::Pedestrian {
         }
     };
 
-    // Player -> server: a car this client simulates collided with a walker's
-    // replica (C_don_ocas::Collision). The car's physics runs here alone, so
-    // its driver reports the contact; the server checks it and forwards it.
-    struct CarImpact {
-        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::PedestrianCarImpact");
-
-        uint64_t missionGeneration = 0;
-        uint64_t walkerId = 0;
-        uint64_t carId = 0;
-        // The Collision direction: the contact velocity, whose length sets
-        // the damage (x 4.2).
-        float directionX = 0.0f;
-        float directionY = 0.0f;
-        float directionZ = 0.0f;
-
-        void Serialize(MafiaNet::BitStream *stream, bool write) {
-            stream->Serialize(write, missionGeneration);
-            stream->Serialize(write, walkerId);
-            stream->Serialize(write, carId);
-            stream->Serialize(write, directionX);
-            stream->Serialize(write, directionY);
-            stream->Serialize(write, directionZ);
-        }
-    };
-
-    // Server -> simulation host: apply that car impact to the walker.
-    struct Impact {
-        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::PedestrianImpact");
-
-        uint64_t missionGeneration = 0;
-        uint32_t key = 0;
-        uint64_t carId = 0;
-        float directionX = 0.0f;
-        float directionY = 0.0f;
-        float directionZ = 0.0f;
-
-        void Serialize(MafiaNet::BitStream *stream, bool write) {
-            stream->Serialize(write, missionGeneration);
-            stream->Serialize(write, key);
-            stream->Serialize(write, carId);
-            stream->Serialize(write, directionX);
-            stream->Serialize(write, directionY);
-            stream->Serialize(write, directionZ);
-        }
-    };
-
     // Server -> simulation host: a player's melee swing hit a walker's
     // replica (the attacker's Combat::HitReport, Kind::Melee, which the
     // server checked against its accepted swing). The host applies it

@@ -4,6 +4,7 @@
 #include "walker_reporter.h"
 
 #include "shared/features/pedestrian/pedestrian_control.h"
+#include "shared/features/pedestrian/pedestrian_reaction.h"
 
 #include <mafia1/sdk/player/native_actor.h>
 
@@ -19,6 +20,10 @@ namespace Mafia1Online::SDK::Traffic {
 
 namespace Mafia1Online::SDK::Scene {
     struct NativeFrame;
+}
+
+namespace Mafia1Online::SDK::Car {
+    struct NativeCar;
 }
 
 namespace Mafia1Online::Features::World {
@@ -40,7 +45,8 @@ namespace Mafia1Online::Features::Pedestrian {
     // walkers of their own.
     class PedestrianService final {
       public:
-        // Players: a car hit a walker replica (C_don_ocas::Collision).
+        // Players: a car hit a walker replica (C_don_ocas::Collision); the
+        // car's controller decides the reaction.
         void OnReplicaCollision(SDK::Player::NativeActor *actor, const SDK::Player::Vector3 &direction, SDK::Scene::NativeFrame *model);
         // Players: the local player's melee swing hit a walker replica
         // (C_human::AI's sweep through C_don_ocas::Hit). The walker is the
@@ -54,6 +60,8 @@ namespace Mafia1Online::Features::Pedestrian {
         // player's own client saw arrives as a MeleeHit.
         bool IsNetworkPlayer(const SDK::Player::NativeActor *actor) const;
         bool IsNetworkObject(void *native) const;
+        // Host: a network car another client simulates.
+        bool SimulatedElsewhere(SDK::Car::NativeCar *car) const;
         struct Stats {
             uint32_t walkers          = 0;
             uint32_t activeGenerators = 0;
@@ -112,6 +120,8 @@ namespace Mafia1Online::Features::Pedestrian {
         };
 
         void ReportGenerators(const std::vector<SDK::Traffic::NativeTrafficGenerator *> &generators);
+        // Host: a car's reaction the server checked, applied to the walker.
+        void ApplyReaction(const Shared::Pedestrian::Reaction &reaction);
 
         World::WorldService *_world = nullptr;
         std::vector<Observer> _observers;
@@ -121,9 +131,6 @@ namespace Mafia1Online::Features::Pedestrian {
         TaxiHost _taxi;
         Shared::Pedestrian::Control _control;
         bool _reportedGenerators = false;
-        // Players: last car impact report per walker.
-        static constexpr std::chrono::milliseconds kImpactCooldown {500};
-        std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> _lastImpact;
         std::unordered_map<SDK::Traffic::NativeTrafficGenerator *, Selection> _selected;
     };
 

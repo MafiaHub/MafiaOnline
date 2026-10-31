@@ -6,6 +6,7 @@
 #include "features/simulation/simulation_service.h"
 #include "shared/features/pedestrian/pedestrian_control.h"
 #include "shared/features/pedestrian/pedestrian_entity.h"
+#include "shared/features/pedestrian/pedestrian_reaction.h"
 #include "shared/features/pedestrian/pedestrian_report.h"
 #include "shared/features/pedestrian/pedestrian_scream.h"
 #include "shared/features/player/player_entity.h"
@@ -17,6 +18,7 @@
 #include <networking/replication/replication_manager.h>
 
 #include <glm/geometric.hpp>
+#include <glm/vec2.hpp>
 #include <glm/gtc/quaternion.hpp>
 
 #include <cmath>
@@ -38,36 +40,52 @@ namespace Mafia1Online::Features::Pedestrian {
         _simulation = &simulation;
         _players = &players;
         auto *network = Framework::CoreModules::GetNetworkPeer();
-        network->RegisterRPC<Shared::Pedestrian::CarImpact>([this, &cars](const Shared::Pedestrian::CarImpact &impact, MafiaNet::Packet *packet) {
+        // A car's controller decided how a walker reacts to it, as retail
+        // does in the car's own frame. The host applies it to its walker; the
+        // players near it play it when their copy of the car gets there.
+        network->RegisterRPC<Shared::Pedestrian::Reaction>([this, &cars](const Shared::Pedestrian::Reaction &received, MafiaNet::Packet *packet) {
             const auto host = _simulation->Host();
-            const auto key = _keyByNetworkId.find(impact.walkerId);
-            auto *car = cars.Find(impact.carId);
-            if (!host || impact.missionGeneration != _missionGeneration || key == _keyByNetworkId.end() || !car ||
+            const auto key = _keyByNetworkId.find(received.walkerId);
+            auto *car = cars.Find(received.carId);
+            const auto sender = MafiaNet::ToPeerGuid(packet->guid);
+            if (!host || received.missionGeneration != _missionGeneration || key == _keyByNetworkId.end() || !car ||
                 car->terminalState != Shared::Entities::CarEntity::TerminalState::Active || car->missionGeneration != _missionGeneration ||
-                car->simulationControllerGuid == 0 || car->simulationControllerGuid != static_cast<uint64_t>(MafiaNet::ToPeerGuid(packet->guid))) {
+                car->simulationControllerGuid == 0 || car->simulationControllerGuid != static_cast<uint64_t>(sender) ||
+                !Shared::Pedestrian::ReactionWellFormed(received)) {
                 return;
             }
             const auto *walker = _walkers.at(key->second).entity;
-            const glm::vec3 direction(impact.directionX, impact.directionY, impact.directionZ);
-            const float speed = glm::length(direction);
-            const float dx = walker->position.x - car->position.x;
-            const float dz = walker->position.z - car->position.z;
-            if (!walker->alive || !std::isfinite(speed) || speed > kMaxImpactSpeed || dx * dx + dz * dz > kCarImpactReach * kCarImpactReach) {
+            const bool contact = received.kind != Shared::Pedestrian::ReactionKind::Dodge;
+            const float reach = contact ? Shared::Pedestrian::kContactReach : Shared::Pedestrian::kDodgeReach;
+            const glm::vec2 walkerAt(walker->position.x, walker->position.z);
+            const glm::vec2 carAt(car->position.x, car->position.z);
+            const glm::vec2 reactedAt(received.position.x, received.position.z);
+            if (!walker->alive || glm::distance(walkerAt, carAt) > reach + Shared::Pedestrian::kReactionWalkerSlack ||
+                glm::distance(walkerAt, reactedAt) > Shared::Pedestrian::kReactionWalkerSlack) {
                 return;
             }
+            // A knockdown ends whatever the walker was doing; the rest come
+            // at most once a gap per walker and kind.
             const auto now = std::chrono::steady_clock::now();
-            if (const auto last = _lastCarImpact.find(impact.walkerId); last != _lastCarImpact.end() && now - last->second < kCarImpactCooldown) {
+            auto &last = (contact ? _lastContact : _lastDodge)[received.walkerId];
+            if (received.kind != Shared::Pedestrian::ReactionKind::Knockdown &&
+                std::chrono::duration<double, std::milli>(now - last).count() < Shared::Pedestrian::kReactionGapMs) {
                 return;
             }
-            _lastCarImpact[impact.walkerId] = now;
-            Shared::Pedestrian::Impact forwarded;
-            forwarded.missionGeneration = _missionGeneration;
-            forwarded.key = key->second;
-            forwarded.carId = impact.carId;
-            forwarded.directionX = direction.x;
-            forwarded.directionY = direction.y;
-            forwarded.directionZ = direction.z;
-            Framework::CoreModules::GetNetworkPeer()->SendRPC(forwarded, MafiaNet::ToGuid(*host), MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
+            last = now;
+            auto reaction = received;
+            reaction.key = key->second;
+            auto *network = Framework::CoreModules::GetNetworkPeer();
+            network->SendRPC(reaction, MafiaNet::ToGuid(*host), MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
+            const float reachSq = (kStreamRange + kScreamRangeMargin) * (kStreamRange + kScreamRangeMargin);
+            _players->ForEach([&](Shared::Entities::PlayerEntity *player) {
+                const auto guid = _players->GuidForNetworkId(player->GetNetworkID());
+                const float dx = player->position.x - walker->position.x;
+                const float dz = player->position.z - walker->position.z;
+                if (guid != sender && guid != *host && dx * dx + dz * dz <= reachSq) {
+                    network->SendRPC(reaction, MafiaNet::ToGuid(guid), MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered);
+                }
+            });
         });
         network->RegisterRPC<Shared::Pedestrian::Scream>([this](const Shared::Pedestrian::Scream &received, MafiaNet::Packet *packet) {
             if (!FromHost(MafiaNet::ToPeerGuid(packet->guid), received.missionGeneration) || !Finite(received.x, received.y, received.z, 0.0f) ||
@@ -97,6 +115,8 @@ namespace Mafia1Online::Features::Pedestrian {
             entity->generator = spawned.generator;
             entity->walkStyle = spawned.walkStyle;
             entity->umbrella = spawned.umbrella;
+            entity->voice = spawned.voice;
+            entity->health = std::isfinite(spawned.health) ? spawned.health : 0.0f;
             entity->streaming.range = kStreamRange;
             entity->SetVirtualWorld(MafiaNet::VIRTUAL_WORLD_GLOBAL);
             SetPose(*entity, spawned.x, spawned.y, spawned.z, spawned.yaw);
@@ -155,6 +175,7 @@ namespace Mafia1Online::Features::Pedestrian {
             if (damaged.attackerId) {
                 walker->second.lastAttackerId = damaged.attackerId;
             }
+            walker->second.entity->health = damaged.healthAfter;
             if (_events.damage) {
                 _events.damage(*walker->second.entity, damaged.attackerId, damaged.hitType, damaged.damage, damaged.healthBefore, damaged.healthAfter);
             }
@@ -200,7 +221,8 @@ namespace Mafia1Online::Features::Pedestrian {
             _events.retire(*entity);
         }
         _keyByNetworkId.erase(entity->GetNetworkID());
-        _lastCarImpact.erase(entity->GetNetworkID());
+        _lastDodge.erase(entity->GetNetworkID());
+        _lastContact.erase(entity->GetNetworkID());
         _walkers.erase(walker);
         Framework::CoreModules::GetReplication()->DestroyEntity(entity);
     }
@@ -217,7 +239,8 @@ namespace Mafia1Online::Features::Pedestrian {
         Framework::Logging::GetLogger(FRAMEWORK_INNER_SERVER)->info("Removed {} pedestrians", _walkers.size());
         _walkers.clear();
         _keyByNetworkId.clear();
-        _lastCarImpact.clear();
+        _lastDodge.clear();
+        _lastContact.clear();
     }
 
     bool PedestrianService::SendMeleeHit(uint64_t walkerId, uint64_t attackerId, uint8_t weaponId, bool heavy, float damage, const glm::vec3 &direction,
