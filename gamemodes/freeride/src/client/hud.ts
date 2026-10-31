@@ -4,6 +4,7 @@
 // reads the replicated state bags and arbitrates the single native compass.
 import type { Point } from './lib/geometry';
 import { Page } from './lib/page';
+import { setCounterSink, type CounterCard } from './lib/panels';
 import { fields } from './lib/payload';
 import { onPicker } from './lib/picker';
 import { events, onServer, onStart, onStop } from './lib/runtime';
@@ -58,10 +59,14 @@ const page = new Page('HUD view', 'hud.html', { visible: true, focus: false, zIn
         page.emit(name, payload ?? {});
     }
 
+    page.emit('counter', counter ?? { hidden: true });
+
     lastPlayerState = '';
 });
 
 let queue: [name: string, payload: unknown][] = [];
+// The counter card on show, sent again to a page opened afresh.
+let counter: CounterCard | null = null;
 let menuOpen = false;
 let menuTab = 'city';
 const menuRefresh = new Timers();
@@ -90,6 +95,15 @@ function post(name: string, payload?: unknown): void {
 
     page.emit(name, payload ?? {});
 }
+
+// The shop or bar counter the player stands at (lib/panels.ts showCounter).
+setCounterSink((card) => {
+    counter = card;
+
+    if (page.isReady) {
+        page.emit('counter', card ?? { hidden: true });
+    }
+});
 
 function openView(): void {
     if (page.isOpen || !page.open()) {

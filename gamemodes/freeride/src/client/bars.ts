@@ -3,7 +3,7 @@
 // sends the choice. N picks the next drink, B orders it.
 import { COLORS } from './lib/color';
 import { distance, flatDistance, type Point } from './lib/geometry';
-import { bindCounterKeys, drawCounterCard } from './lib/panels';
+import { bindCounterKeys, showCounter } from './lib/panels';
 import { livePlayer } from './lib/player';
 import { events, onServer } from './lib/runtime';
 
@@ -96,18 +96,23 @@ function nextDrink(): void {
     Sound.play('00_kompas.wav', { volume: 0.45 });
 }
 
-function drawCard(bar: Bar, player: Player): void {
-    const index = selectedIndex(bar);
-    const drink = bar.drinks[index];
-    const price = drink.price === null ? 'A ROUND' : `$${drink.price}`;
+function showCard(bar: Bar | null, player: Player): void {
+    if (!bar) {
+        showCounter('bar', null);
 
-    drawCounterCard({
+        return;
+    }
+
+    showCounter('bar', {
         title: bar.name,
         tagline: bar.tagline,
-        offer: `${drink.name}  ·  ${price}`,
-        note: drink.note,
-        index,
-        count: bar.drinks.length,
+        lines: bar.drinks.map((drink) => ({
+            name: drink.name,
+            price: drink.price === null ? 'A ROUND' : `$${drink.price}`,
+            note: drink.note,
+            affordable: drink.price === null || drink.price <= player.money,
+        })),
+        index: selectedIndex(bar),
         action: 'ORDER',
         money: player.money,
     });
@@ -141,6 +146,8 @@ events.on('render', () => {
     const player = livePlayer();
 
     if (!player || generation !== World.getMissionGeneration()) {
+        showCounter('bar', null);
+
         return;
     }
 
@@ -159,9 +166,5 @@ events.on('render', () => {
         Draw.worldText('BAR · N / B', { x, y: y + 1.9, z }, 15, COLORS.gold, 3, true);
     }
 
-    const bar = counterHere();
-
-    if (bar) {
-        drawCard(bar, player);
-    }
+    showCard(counterHere(), player);
 });

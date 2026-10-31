@@ -2,7 +2,7 @@
 // server checks the player's life, distance, balance, car and inventory.
 import { COLORS } from './lib/color';
 import { distance, type Point } from './lib/geometry';
-import { bindCounterKeys, drawCounterCard } from './lib/panels';
+import { bindCounterKeys, showCounter } from './lib/panels';
 import { livePlayer } from './lib/player';
 import { events, log, onServer, onStop } from './lib/runtime';
 
@@ -171,16 +171,25 @@ function priceOf(offer: Offer): string {
     return offer.price === 0 ? 'NO CHARGE' : `$${offer.price}`;
 }
 
-function drawShopCard(shop: Shop, player: Player): void {
+function showShopCard(shop: Shop | null, player: Player): void {
+    if (!shop) {
+        showCounter('shop', null);
+
+        return;
+    }
+
     const offer = selectedOffer(shop);
 
-    drawCounterCard({
+    showCounter('shop', {
         title: shop.name,
         tagline: shop.tagline,
-        offer: `${offer.name}  ·  ${priceOf(offer)}`,
-        note: offer.note,
-        index: selected.get(shop.id) ?? 0,
-        count: shop.offers.length,
+        lines: shop.offers.map((entry) => ({
+            name: entry.name,
+            price: priceOf(entry),
+            note: entry.note,
+            affordable: entry.price === null || entry.price <= player.money,
+        })),
+        index: (selected.get(shop.id) ?? 0) % shop.offers.length,
         action: offer.price === 0 ? 'ACCEPT' : 'BUY',
         money: player.money,
     });
@@ -229,6 +238,8 @@ events.on('render', () => {
     const player = livePlayer();
 
     if (!player || generation !== World.getMissionGeneration()) {
+        showCounter('shop', null);
+
         return;
     }
 
@@ -256,13 +267,9 @@ events.on('render', () => {
 
     const shop = nearestShop(player);
 
-    if (!shop) {
-        return;
-    }
+    showShopCard(shop, player);
 
-    drawShopCard(shop, player);
-
-    if (shop.id === 'pete' && courier && now - lastDelivery > DELIVERY_RETRY_MS) {
+    if (shop?.id === 'pete' && courier && now - lastDelivery > DELIVERY_RETRY_MS) {
         lastDelivery = now;
         events.emitServer('fr:shop:deliver', {});
     }

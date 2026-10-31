@@ -1,5 +1,6 @@
-// The panels drawn straight onto the screen: the card at a shop or bar counter
-// and the one-line key prompts (the police call box, the job key).
+// What the counters and key prompts show: the card at a shop or bar counter
+// (drawn by the HUD page, hud.html) and the one-line key prompts drawn
+// straight onto the screen (the police call box, the job key).
 import { COLORS } from './color';
 
 /** "[N]": the key the player now presses for `key`, as prompts show it. */
@@ -21,45 +22,56 @@ export function bindCounterKeys(buy: () => void, next: () => void): void {
     Key.bind(NEXT_KEY, next);
 }
 
+/** One thing on a counter's list. */
+export interface CounterLine {
+    name: string;
+    /** "$25", "A ROUND", "NO CHARGE". */
+    price: string;
+    note: string;
+    /** The player has the cash for it (a free one always). */
+    affordable: boolean;
+}
+
+/** The counter the player stands at, as the HUD page draws it (hud.html #counter). */
 export interface CounterCard {
     title: string;
     tagline: string;
-    /** The selected offer and its price. */
-    offer: string;
-    note: string;
-    /** The selected offer's place in the list, from 0. */
+    lines: CounterLine[];
+    /** The selected line, from 0. */
     index: number;
-    count: number;
     /** What B does: ORDER, BUY, ACCEPT. */
     action: string;
     money: number;
+    /** The keys as the player bound them: "[N]", "[B]". */
+    nextKey: string;
+    buyKey: string;
 }
 
-/** The card of the counter the player stands at, at the bottom of the screen. */
-export function drawCounterCard(card: CounterCard): void {
-    const { width, height } = Web.getScreenSize();
-    const cardWidth = Math.min(520, width - 32);
-    const cardHeight = 184;
-    const left = (width - cardWidth) / 2;
-    const top = height - cardHeight - 28;
-    const center = width / 2;
+// Each module that has counters (shops, bars) says every frame which card it
+// has, or none; the HUD shows the first, and is told only when it changes.
+const counters = new Map<string, CounterCard | null>();
+let sink: ((card: CounterCard | null) => void) | null = null;
+let shown = '';
 
-    Draw.rect(left, top, cardWidth, cardHeight, COLORS.panel);
-    Draw.line(left + 12, top + 11, left + cardWidth - 12, top + 11, 2, COLORS.rule);
-    Draw.text(card.title.toUpperCase(), center, top + 38, 22, COLORS.text, 3);
-    Draw.text(card.tagline.toUpperCase(), center, top + 61, 12, COLORS.muted, 3);
-    Draw.line(left + 28, top + 70, left + cardWidth - 28, top + 70, 1, COLORS.rule);
-    Draw.text(card.offer, center, top + 102, 19, COLORS.text, 3);
-    Draw.text(card.note, center, top + 126, 12, COLORS.muted, 3);
-    Draw.line(left + 28, top + 138, left + cardWidth - 28, top + 138, 1, COLORS.rule);
-    Draw.text(
-        `${keyHint(NEXT_KEY)} NEXT  ${card.index + 1}/${card.count}      ${keyHint(BUY_KEY)} ${card.action}      CASH $${card.money}`,
-        center,
-        top + 164,
-        13,
-        COLORS.gold,
-        3,
-    );
+/** Where the card goes: the HUD page (hud.ts). */
+export function setCounterSink(next: (card: CounterCard | null) => void): void {
+    sink = next;
+    shown = '';
+}
+
+/** The card of `source`'s counter the player stands at, or null away from them. */
+export function showCounter(
+    source: string,
+    card: Omit<CounterCard, 'nextKey' | 'buyKey'> | null,
+): void {
+    counters.set(source, card && { ...card, nextKey: keyHint(NEXT_KEY), buyKey: keyHint(BUY_KEY) });
+    const current = [...counters.values()].find((entry) => entry !== null) ?? null;
+    const key = current ? JSON.stringify(current) : '';
+
+    if (key !== shown) {
+        shown = key;
+        sink?.(current);
+    }
 }
 
 const PROMPT_FILL = 0xd0121519;

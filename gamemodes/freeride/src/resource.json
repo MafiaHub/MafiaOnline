@@ -7,6 +7,14 @@
     "client/hud.html",
     "client/selector.html",
     "client/radio.html",
-    "client/car_picker.html"
+    "client/car_picker.html",
+    "client/fonts/inter-latin-400-normal.woff2",
+    "client/fonts/inter-latin-ext-400-normal.woff2",
+    "client/fonts/inter-latin-500-normal.woff2",
+    "client/fonts/inter-latin-ext-500-normal.woff2",
+    "client/fonts/inter-latin-600-normal.woff2",
+    "client/fonts/inter-latin-ext-600-normal.woff2",
+    "client/fonts/playfair-display-latin-700-normal.woff2",
+    "client/fonts/playfair-display-latin-ext-700-normal.woff2"
   ]
 }
