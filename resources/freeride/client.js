@@ -113,6 +113,73 @@
     }
   };
 
+  // src/client/lib/color.ts
+  var PARCHMENT = 15985110;
+  function rgb(hex) {
+    return typeof hex === "string" && /^#[0-9a-f]{6}$/i.test(hex) ? parseInt(hex.slice(1), 16) : PARCHMENT;
+  }
+  function withAlpha(color, alpha = 1) {
+    return Math.round(alpha * 255) * 16777216 + color;
+  }
+  function argb(hex, alpha = 1) {
+    return withAlpha(rgb(hex), alpha);
+  }
+  var COLORS = {
+    /** Labels and key prompts. */
+    gold: 4293379197,
+    text: 4294305483,
+    muted: 4290161297,
+    /** The rules across a counter card. */
+    rule: 4288444227,
+    panel: 3859944729,
+    /** Hud.showMessage takes no alpha. */
+    message: 15254909
+  };
+
+  // src/client/lib/panels.ts
+  function keyHint(key) {
+    return `[${Settings.getKeyLabel(key).toUpperCase()}]`;
+  }
+  var NEXT_KEY = "n";
+  var BUY_KEY = "b";
+  function bindCounterKeys(buy, next) {
+    Settings.describeKey(BUY_KEY, "Buy or accept at a shop or bar counter");
+    Settings.describeKey(NEXT_KEY, "Next offer at a shop or bar counter");
+    Key.bind(BUY_KEY, buy);
+    Key.bind(NEXT_KEY, next);
+  }
+  var counters = /* @__PURE__ */ new Map();
+  var sink2 = null;
+  var shown = "";
+  function setCounterSink(next) {
+    sink2 = next;
+    shown = "";
+  }
+  function showCounter(source, card) {
+    counters.set(source, card && { ...card, nextKey: keyHint(NEXT_KEY), buyKey: keyHint(BUY_KEY) });
+    const current = [...counters.values()].find((entry) => entry !== null) ?? null;
+    const key = current ? JSON.stringify(current) : "";
+    if (key !== shown) {
+      shown = key;
+      sink2?.(current);
+    }
+  }
+  var PROMPT_FILL = 3490845977;
+  var PROMPT_EDGE = 1894237309;
+  function drawPrompt(text2, { rise, width, height = 36, accent = false }) {
+    const screen = Web.getScreenSize();
+    const center = screen.width / 2;
+    const left = center - width / 2;
+    const top = screen.height - rise;
+    Draw.rect(left, top, width, height, PROMPT_FILL);
+    if (accent) {
+      Draw.rect(left, top, 4, height, COLORS.gold);
+      Draw.rect(left + 4, top, width - 4, 1, PROMPT_EDGE);
+    }
+    Draw.text(text2, accent ? center + 2 : center, top + 24, 15, COLORS.gold, 3);
+    return { center, top };
+  }
+
   // src/client/lib/payload.ts
   function fields(payload) {
     return typeof payload === "object" && payload !== null ? payload : {};
@@ -164,9 +231,11 @@
     for (const [name, payload] of queued) {
       page.emit(name, payload ?? {});
     }
+    page.emit("counter", counter ?? { hidden: true });
     lastPlayerState = "";
   });
   var queue = [];
+  var counter = null;
   var menuOpen = false;
   var menuTab = "city";
   var menuRefresh = new Timers();
@@ -188,6 +257,12 @@
     }
     page.emit(name, payload ?? {});
   }
+  setCounterSink((card) => {
+    counter = card;
+    if (page.isReady) {
+      page.emit("counter", card ?? { hidden: true });
+    }
+  });
   function openView() {
     if (page.isOpen || !page.open()) {
       return;
@@ -402,29 +477,6 @@
     }
     updateCompass(false);
   });
-
-  // src/client/lib/color.ts
-  var PARCHMENT = 15985110;
-  function rgb(hex) {
-    return typeof hex === "string" && /^#[0-9a-f]{6}$/i.test(hex) ? parseInt(hex.slice(1), 16) : PARCHMENT;
-  }
-  function withAlpha(color, alpha = 1) {
-    return Math.round(alpha * 255) * 16777216 + color;
-  }
-  function argb(hex, alpha = 1) {
-    return withAlpha(rgb(hex), alpha);
-  }
-  var COLORS = {
-    /** Labels and key prompts. */
-    gold: 4293379197,
-    text: 4294305483,
-    muted: 4290161297,
-    /** The rules across a counter card. */
-    rule: 4288444227,
-    panel: 3859944729,
-    /** Hud.showMessage takes no alpha. */
-    message: 15254909
-  };
 
   // src/client/lib/format.ts
   function formatMoney(amount) {
@@ -1367,58 +1419,6 @@
     flyFrame();
   });
 
-  // src/client/lib/panels.ts
-  function keyHint(key) {
-    return `[${Settings.getKeyLabel(key).toUpperCase()}]`;
-  }
-  var NEXT_KEY = "n";
-  var BUY_KEY = "b";
-  function bindCounterKeys(buy, next) {
-    Settings.describeKey(BUY_KEY, "Buy or accept at a shop or bar counter");
-    Settings.describeKey(NEXT_KEY, "Next offer at a shop or bar counter");
-    Key.bind(BUY_KEY, buy);
-    Key.bind(NEXT_KEY, next);
-  }
-  function drawCounterCard(card) {
-    const { width, height } = Web.getScreenSize();
-    const cardWidth = Math.min(520, width - 32);
-    const cardHeight = 184;
-    const left = (width - cardWidth) / 2;
-    const top = height - cardHeight - 28;
-    const center = width / 2;
-    Draw.rect(left, top, cardWidth, cardHeight, COLORS.panel);
-    Draw.line(left + 12, top + 11, left + cardWidth - 12, top + 11, 2, COLORS.rule);
-    Draw.text(card.title.toUpperCase(), center, top + 38, 22, COLORS.text, 3);
-    Draw.text(card.tagline.toUpperCase(), center, top + 61, 12, COLORS.muted, 3);
-    Draw.line(left + 28, top + 70, left + cardWidth - 28, top + 70, 1, COLORS.rule);
-    Draw.text(card.offer, center, top + 102, 19, COLORS.text, 3);
-    Draw.text(card.note, center, top + 126, 12, COLORS.muted, 3);
-    Draw.line(left + 28, top + 138, left + cardWidth - 28, top + 138, 1, COLORS.rule);
-    Draw.text(
-      `${keyHint(NEXT_KEY)} NEXT  ${card.index + 1}/${card.count}      ${keyHint(BUY_KEY)} ${card.action}      CASH $${card.money}`,
-      center,
-      top + 164,
-      13,
-      COLORS.gold,
-      3
-    );
-  }
-  var PROMPT_FILL = 3490845977;
-  var PROMPT_EDGE = 1894237309;
-  function drawPrompt(text2, { rise, width, height = 36, accent = false }) {
-    const screen = Web.getScreenSize();
-    const center = screen.width / 2;
-    const left = center - width / 2;
-    const top = screen.height - rise;
-    Draw.rect(left, top, width, height, PROMPT_FILL);
-    if (accent) {
-      Draw.rect(left, top, 4, height, COLORS.gold);
-      Draw.rect(left + 4, top, width - 4, 1, PROMPT_EDGE);
-    }
-    Draw.text(text2, accent ? center + 2 : center, top + 24, 15, COLORS.gold, 3);
-    return { center, top };
-  }
-
   // src/client/shops.ts
   var INTERACT_DISTANCE = 3.2;
   var LABEL_DISTANCE = 24;
@@ -1519,15 +1519,22 @@
     }
     return offer.price === 0 ? "NO CHARGE" : `$${offer.price}`;
   }
-  function drawShopCard(shop, player) {
+  function showShopCard(shop, player) {
+    if (!shop) {
+      showCounter("shop", null);
+      return;
+    }
     const offer = selectedOffer(shop);
-    drawCounterCard({
+    showCounter("shop", {
       title: shop.name,
       tagline: shop.tagline,
-      offer: `${offer.name}  ·  ${priceOf(offer)}`,
-      note: offer.note,
-      index: selected.get(shop.id) ?? 0,
-      count: shop.offers.length,
+      lines: shop.offers.map((entry) => ({
+        name: entry.name,
+        price: priceOf(entry),
+        note: entry.note,
+        affordable: entry.price === null || entry.price <= player.money
+      })),
+      index: (selected.get(shop.id) ?? 0) % shop.offers.length,
       action: offer.price === 0 ? "ACCEPT" : "BUY",
       money: player.money
     });
@@ -1560,6 +1567,7 @@
   events.on("render", () => {
     const player = livePlayer();
     if (!player || generation !== World.getMissionGeneration()) {
+      showCounter("shop", null);
       return;
     }
     showMoney(player);
@@ -1576,11 +1584,8 @@
       Draw.worldText(shop2.name.toUpperCase(), top, 16, COLORS.gold, 3, true);
     }
     const shop = nearestShop(player);
-    if (!shop) {
-      return;
-    }
-    drawShopCard(shop, player);
-    if (shop.id === "pete" && courier && now - lastDelivery > DELIVERY_RETRY_MS) {
+    showShopCard(shop, player);
+    if (shop?.id === "pete" && courier && now - lastDelivery > DELIVERY_RETRY_MS) {
       lastDelivery = now;
       events.emitServer("fr:shop:deliver", {});
     }
@@ -1628,17 +1633,21 @@
     selected2.set(bar.id, ((selected2.get(bar.id) ?? 0) + 1) % bar.drinks.length);
     Sound.play("00_kompas.wav", { volume: 0.45 });
   }
-  function drawCard(bar, player) {
-    const index = selectedIndex(bar);
-    const drink = bar.drinks[index];
-    const price = drink.price === null ? "A ROUND" : `$${drink.price}`;
-    drawCounterCard({
+  function showCard(bar, player) {
+    if (!bar) {
+      showCounter("bar", null);
+      return;
+    }
+    showCounter("bar", {
       title: bar.name,
       tagline: bar.tagline,
-      offer: `${drink.name}  ·  ${price}`,
-      note: drink.note,
-      index,
-      count: bar.drinks.length,
+      lines: bar.drinks.map((drink) => ({
+        name: drink.name,
+        price: drink.price === null ? "A ROUND" : `$${drink.price}`,
+        note: drink.note,
+        affordable: drink.price === null || drink.price <= player.money
+      })),
+      index: selectedIndex(bar),
       action: "ORDER",
       money: player.money
     });
@@ -1665,20 +1674,18 @@
   events.on("render", () => {
     const player = livePlayer();
     if (!player || generation2 !== World.getMissionGeneration()) {
+      showCounter("bar", null);
       return;
     }
     const position = player.getWorldPosition() ?? player.position;
-    for (const bar2 of bars) {
-      if (player.virtualWorld !== bar2.world || flatDistance(position, bar2.counter.position) > LABEL_DISTANCE2) {
+    for (const bar of bars) {
+      if (player.virtualWorld !== bar.world || flatDistance(position, bar.counter.position) > LABEL_DISTANCE2) {
         continue;
       }
-      const { x, y, z } = bar2.counter.position;
+      const { x, y, z } = bar.counter.position;
       Draw.worldText("BAR · N / B", { x, y: y + 1.9, z }, 15, COLORS.gold, 3, true);
     }
-    const bar = counterHere();
-    if (bar) {
-      drawCard(bar, player);
-    }
+    showCard(counterHere(), player);
   });
 
   // src/client/drunk.ts
