@@ -3,13 +3,15 @@
 // pays by wanted level; shooting a citizen costs the badge and a fine. On duty
 // the city's own police count the player as one of theirs (Police.setOfficer):
 // no crime of theirs is recorded, so they are never chased, fined or arrested,
-// and they can call for backup (backup.ts).
+// and they can call for backup (backup.ts). Between suspects the precinct
+// radios in calls of its own: a bag snatcher, an armed robbery (calls.ts).
 import * as profiles from '../lib/profiles';
 import * as life from '../lib/life';
 import * as nametag from '../lib/nametag';
 import * as menu from '../lib/menu';
 import * as commands from '../lib/commands';
 import * as backup from './backup';
+import * as calls from './calls';
 import { card, compass, feed, name, text, toast, COLORS } from '../lib/notify';
 import { distance, formatMoney, onStreet, vehicleById } from '../lib/util';
 import { events } from '../lib/lifecycle';
@@ -115,6 +117,8 @@ const duty = defineShift<Officer>({
         );
     },
 
+    beforeTick: (now) => calls.update(now),
+
     tick(officer, state, now) {
         if (!officer.spawned) {
             return;
@@ -123,12 +127,26 @@ const duty = defineShift<Officer>({
         const near = suspectsAt(now)
             .map((entry) => ({ ...entry, gap: distance(officer.position, entry.player.position) }))
             .sort((a, b) => a.gap - b.gap);
+        // A wanted player comes first; the precinct's own call otherwise.
+        const call = calls.callFor(officer);
 
-        compass(officer, HUD, COMPASS_PRIORITY, near[0] ? { playerId: near[0].player.id } : null);
+        calls.promptOfficer(officer);
+        compass(
+            officer,
+            HUD,
+            COMPASS_PRIORITY,
+            near[0] ? { playerId: near[0].player.id } : call ? { position: call.position } : null,
+        );
+
         card(officer, HUD, {
             title: 'Police duty',
-            subtitle: near.length ? 'Nearest suspect on your compass' : 'Quiet streets. Patrol.',
+            subtitle: near.length
+                ? 'Nearest suspect on your compass'
+                : call
+                  ? `${call.label}: on your compass`
+                  : 'Quiet streets. Patrol.',
             rows: [
+                ...(call ? [[call.label, `${Math.round(call.gap)} m`] as [string, string]] : []),
                 ...near
                     .slice(0, 3)
                     .map((entry): [string, string] => [
@@ -145,6 +163,11 @@ const duty = defineShift<Officer>({
     end(player, officer, how) {
         Police.setOfficer(player, false);
         backup.stop(player);
+
+        if (how.online) {
+            calls.clearPrompt(player);
+        }
+
         life.clearOverride(player);
 
         // The nametag goes by the flag, which the shift clears only after this.
@@ -228,6 +251,17 @@ menu.provide('duty', (player) => ({
     officers: duty.size,
     suspects: suspects().length,
 }));
+
+calls.configure({
+    onDuty: (player) => duty.has(player),
+    earn(player, amount) {
+        const officer = duty.get(player);
+
+        if (officer) {
+            officer.pay += amount;
+        }
+    },
+});
 
 backup.configure({
     onDuty: (player) => duty.has(player),
