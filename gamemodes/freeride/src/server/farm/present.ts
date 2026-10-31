@@ -16,12 +16,65 @@ import { priceOf, quality } from './market';
 import { mine } from './owners';
 import { RIPE, STAGE_MS, ripe, wilting } from './plant';
 import { LEAF, buyers, here, siteNow } from './sites';
-import { cargo, stocks, type Load, type Plant, type Stock } from './state';
+import { cargo, field, stocks, type Load, type Plant, type Stock } from './state';
 
 /** The id of the farm's card, compass source and markers. */
 export const HUD = 'farm';
 export const COMPASS_PRIORITY = 45;
 const LABEL_RANGE = 25;
+// The plot grid shows to a farmhand this close to the field's centre.
+const GRID_RANGE = 60;
+// Both sites space their plots 3 m apart in a row and 5 m between rows: a
+// tile a little smaller leaves a path between them.
+const TILE = { w: 2.4, d: 4.2 };
+
+/** A plot's ground tile: its colour, and whether it is drawn whole. */
+function plotLook(player: Player, plant: Plant | undefined): { color: string; solid: boolean } {
+    if (!plant) {
+        return { color: COLORS.muted, solid: false };
+    }
+
+    if (!mine(player, plant)) {
+        return { color: COLORS.muted, solid: true };
+    }
+
+    if (plant.pest) {
+        return { color: COLORS.red, solid: true };
+    }
+
+    if (ripe(plant)) {
+        return { color: COLORS.gold, solid: true };
+    }
+
+    return plant.dry ? { color: COLORS.blue, solid: true } : { color: LEAF, solid: true };
+}
+
+/**
+ * The field's plots as tiles on the ground: empty ones as corner brackets
+ * (lit up in full under a player who may plant there), planted ones outlined
+ * in the state of the plant: the farmhand's own green while growing, blue
+ * when dry, red with hornworms and gold when ripe; anyone else's grey.
+ */
+function plotTiles(player: Player, canPlant: boolean): Marker[] {
+    const site = siteNow();
+
+    if (flatDistance(player.position, site.field.center) > GRID_RANGE) {
+        return [];
+    }
+
+    return site.plots.map((plot) => {
+        const plant = field.get(plot.id);
+        const { color, solid } = plotLook(player, plant);
+
+        return {
+            id: `t${plot.id}`,
+            position: { x: plot.x, y: plot.y, z: plot.z },
+            color,
+            tile: { ...TILE, solid, glow: !plant && canPlant ? LEAF : undefined },
+            map: false,
+        };
+    });
+}
 
 /** A farmhand on duty, as the card shows them. */
 export interface Farmhand {
@@ -173,8 +226,10 @@ function markerItems(
         map: { icon: 'square', label: 'Tobacco field', size: 5 },
     });
 
-    // Only plants losing quality are labelled; the rest show by their size
-    // and the card counts them.
+    items.push(...plotTiles(player, ownPlants(profiles.keyOf(player)).length < MAX_PLANTS));
+
+    // Only plants losing quality are labelled; the rest show by their size,
+    // their tile's colour and the card's count.
     for (const { plant } of plantsNear(player.position, LABEL_RANGE)) {
         if (!wilting(plant)) {
             continue;

@@ -4,7 +4,8 @@
 // come from the server; nothing drawn here can claim a reward. An item may
 // carry `range` (hidden farther away), `ring` (a ground circle of that
 // radius), `beacon`, `model`, `primary`, `near` (how close its label shows),
-// `hint` (a second label line shown up close) and `map`: false keeps it off
+// `hint` (a second label line shown up close), `tile` (a ground rectangle,
+// see drawTile) and `map`: false keeps it off
 // the city map, an object sets its blip
 // ({icon, label, size, edge, flash}). Without `map`, objectives, beacons and
 // markers seen from afar get a plain blip; the close-up ones stay off.
@@ -23,6 +24,11 @@ const BOUNTY_RANGE = 350;
 const MODEL_RETRY_MS = 2000;
 const BLIP_SYNC_MS = 500;
 const RING_SEGMENTS = 32;
+// How far a ground tile is drawn, and how long its corner brackets are as a
+// share of each side.
+const TILE_NEAR = 45;
+const TILE_BRACKET = 0.28;
+const TILE_LIFT = 0.08;
 // A ring this far away is a few pixels across: fewer segments do.
 const FAR_RING_SEGMENTS = 12;
 const FAR_RING_DISTANCE = 50;
@@ -47,12 +53,26 @@ interface MarkerItem {
     color?: string;
     range?: number;
     ring?: number;
+    tile?: Tile;
     beacon?: boolean;
     model?: string;
     primary?: boolean;
     near?: number;
     hint?: string;
     map?: false | Pick<BlipOptions, 'icon' | 'label' | 'size' | 'edge' | 'flash'> | null;
+}
+
+/**
+ * A rectangle on the ground, `w` metres along x by `d` along z, centred on the
+ * item: corner brackets in the item's colour, drawn whole in `glow` while the
+ * viewer stands inside it (a farm plot G would plant). `solid` draws it whole
+ * all the time.
+ */
+interface Tile {
+    w: number;
+    d: number;
+    glow?: string;
+    solid?: boolean;
 }
 
 interface MarkerGroup {
@@ -179,6 +199,57 @@ function drawRing(
     );
 }
 
+function segment(from: Point, to: Point, thickness: number, color: number): void {
+    const a = screenPoint(from);
+    const b = screenPoint(to);
+
+    if (a && b) {
+        Draw.line(a.x, a.y, b.x, b.y, thickness, color);
+    }
+}
+
+function inside(tile: Tile, center: Point, eye: Point): boolean {
+    return Math.abs(eye.x - center.x) <= tile.w / 2 && Math.abs(eye.z - center.z) <= tile.d / 2;
+}
+
+function drawTile(center: Point, tile: Tile, color: string | undefined, eye: Point): void {
+    const distance = flatDistance(eye, center);
+
+    if (distance > TILE_NEAR) {
+        return;
+    }
+
+    const hot = tile.glow !== undefined && inside(tile, center, eye);
+    // Fades out over the last third of its reach.
+    const fade = Math.min(1, (TILE_NEAR - distance) / (TILE_NEAR / 3));
+    const tint = argb(hot ? tile.glow : color, (hot ? 0.95 : 0.6) * fade);
+    const thickness = hot ? 3 : distance < 12 ? 2 : 1;
+    const y = center.y + TILE_LIFT;
+    const corners: Point[] = [
+        { x: center.x - tile.w / 2, y, z: center.z - tile.d / 2 },
+        { x: center.x + tile.w / 2, y, z: center.z - tile.d / 2 },
+        { x: center.x + tile.w / 2, y, z: center.z + tile.d / 2 },
+        { x: center.x - tile.w / 2, y, z: center.z + tile.d / 2 },
+    ];
+
+    for (let index = 0; index < corners.length; index++) {
+        const from = corners[index];
+        const to = corners[(index + 1) % corners.length];
+
+        if (hot || tile.solid) {
+            segment(from, to, thickness, tint);
+            continue;
+        }
+
+        // Brackets: a short stroke from each end of the side toward its middle.
+        const dx = (to.x - from.x) * TILE_BRACKET;
+        const dz = (to.z - from.z) * TILE_BRACKET;
+
+        segment(from, { x: from.x + dx, y, z: from.z + dz }, thickness, tint);
+        segment(to, { x: to.x - dx, y, z: to.z - dz }, thickness, tint);
+    }
+}
+
 // A dark plate centred on (x, y) with the item's colour down its edge: the
 // title, and a second line under it when there is one.
 function drawPlate(
@@ -274,6 +345,10 @@ function drawItems(eye: Point, now: number): void {
 
             if (item.model) {
                 drawModel(key, item.model, position, now);
+            }
+
+            if (item.tile) {
+                drawTile(position, item.tile, item.color, eye);
             }
 
             if (item.ring && distance < item.ring * 6) {

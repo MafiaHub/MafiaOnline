@@ -108,7 +108,11 @@ export const farmers = defineShift<Farmer>({
         }
     },
 
-    summary: (farmer) => `You earned ${formatMoney(farmer.earned)} this shift.`,
+    // Sales and tips are paid the moment they happen; clocking off pays nothing more.
+    summary: (farmer) =>
+        farmer.earned > 0
+            ? `This shift's sales and tips, ${formatMoney(farmer.earned)}, are already in your pocket.`
+            : 'Nothing sold this shift.',
 });
 
 export function clockOff(player: Player): void {
