@@ -6,6 +6,8 @@ import * as barRoom from '../lib/bar_room';
 import * as firefighters from '../firefighters';
 import * as life from '../lib/life';
 import * as prison from '../lib/prison';
+import * as hospitalRoom from '../lib/hospital_room';
+import * as houseRooms from '../lib/house_rooms';
 import { CallClock, nearestGap, roadPointNear, roadside, spawnWreck } from '../lib/callouts';
 import { CIVILIANS, CROUCHED, LYING, MEN, WOMEN, spawnCivilian } from '../lib/civilians';
 import { npcsAvailable } from '../lib/npcs';
@@ -41,6 +43,19 @@ export const clock = new CallClock(FIRST_CALL_MS);
 
 export type StreetCallKind = 'minor' | 'serious' | 'labour' | 'cardiac' | 'pileup';
 
+// What comes in, by how often: mostly someone hurt, now and then the rest.
+const DRAW: readonly StreetCallKind[] = [
+    'minor',
+    'minor',
+    'serious',
+    'serious',
+    'labour',
+    'cardiac',
+    'pileup',
+];
+// The last call's kind, which the next one is not.
+let lastKind: StreetCallKind | null = null;
+
 function medicPlayers(): Player[] {
     return medics.crew().map(([player]) => player);
 }
@@ -52,8 +67,12 @@ export function dispatch(now: number): void {
     }
 
     const anchor: Player | undefined = pick(medicPlayers());
+    const fresh = DRAW.filter((kind) => kind !== lastKind);
+    const kind = pick(fresh.length ? fresh : DRAW);
 
-    streetCall(anchor?.position ?? null);
+    if (streetCall(anchor?.position ?? null, kind)) {
+        lastKind = kind;
+    }
 }
 
 function spawnPatient(model: string, position: Point): Npc | null {
@@ -71,15 +90,7 @@ function timeToLive(position: Point, ms: number): number {
 /** A street call: someone on the pavement by a road. Now and then a woman in labour, a heart attack or a pile-up. */
 export function streetCall(
     origin: Point | null,
-    kind: StreetCallKind = pick<StreetCallKind>([
-        'minor',
-        'minor',
-        'serious',
-        'serious',
-        'labour',
-        'cardiac',
-        'pileup',
-    ]),
+    kind: StreetCallKind = pick(DRAW),
 ): Call | Pileup | null {
     if (!npcsAvailable() || calls.size >= MAX_CALLS) {
         return null;
@@ -230,10 +241,16 @@ events.on('playerDeath', (player, killer, info) => {
         return;
     }
 
-    // Rooms built apart under the fields (the back-room bar, the jail): the
-    // interior has already put the player back in the street world, but no
-    // ambulance reaches them there.
-    if (barRoom.inRoom(player.position, 1) || prison.inHall(player.position, 2)) {
+    // Rooms built apart under the fields (the back-room bar, the jail, the
+    // hospital wards, the homes and the burning buildings in their rooms):
+    // the interior has already put the player back in the street world, but
+    // no ambulance reaches them there.
+    if (
+        barRoom.inRoom(player.position, 1) ||
+        prison.inHall(player.position, 2) ||
+        hospitalRoom.inRoom(player.position, 1) ||
+        houseRooms.roomAt(player.position, 1) !== null
+    ) {
         return;
     }
 
