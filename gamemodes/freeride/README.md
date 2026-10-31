@@ -13,7 +13,8 @@ npm run build          # typecheck, then bundle into resources/freeride
 npm run build:only     # bundle without the typecheck
 npm run lint           # eslint
 npm run format         # eslint --fix and prettier
-npm test               # unit tests (tests/*.test.ts)
+npm test               # unit tests (tests/*.test.ts; tests/setup.ts stubs the runtime)
+python ../../tools/check_models.py   # every model and clip named in src exists in the game
 node scripts/build.mjs --check   # fails if resources/freeride is stale
 ```
 

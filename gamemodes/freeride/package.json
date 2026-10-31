@@ -11,7 +11,7 @@
     "format:check": "eslint src tests && prettier --check .",
     "build": "npm run typecheck && node scripts/build.mjs",
     "build:only": "node scripts/build.mjs",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --import ./tests/setup.ts --test tests/*.test.ts"
   },
   "devDependencies": {
     "@stylistic/eslint-plugin": "^5.10.0",
