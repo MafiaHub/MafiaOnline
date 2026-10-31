@@ -190,8 +190,13 @@
 
   // src/client/lib/picker.ts
   var PICKER_EVENT = "fr:car:picker";
+  var pickerOpen = false;
   function announcePicker(open) {
+    pickerOpen = open;
     void events.emitLocal(PICKER_EVENT, { open });
+  }
+  function isPickerOpen() {
+    return pickerOpen;
   }
   function onPicker(handler) {
     events.onLocal(PICKER_EVENT, (data) => handler(Boolean(fields(data).open)));
@@ -242,7 +247,7 @@
   var catalogNames = null;
   var menuData = {};
   var menuPosted = "";
-  var pickerOpen = false;
+  var pickerOpen2 = false;
   var lastPlayerState = "";
   var compass = /* @__PURE__ */ new Map();
   var compassKey = null;
@@ -301,7 +306,7 @@
     }
   }
   function openMenu(tab) {
-    if (!LocalPlayer?.spawned || pickerOpen) {
+    if (!LocalPlayer?.spawned || pickerOpen2) {
       return;
     }
     openView();
@@ -426,11 +431,11 @@
   events.on("voiceStart", () => postVoice(true));
   events.on("voiceStop", () => postVoice(false));
   onPicker((open) => {
-    pickerOpen = open;
-    if (pickerOpen) {
+    pickerOpen2 = open;
+    if (pickerOpen2) {
       closeMenu();
     }
-    post("visibility", { hidden: pickerOpen });
+    post("visibility", { hidden: pickerOpen2 });
   });
   Settings.describeKey("f2", "City menu");
   Key.bind("f2", () => {
@@ -899,7 +904,7 @@
       return;
     }
     const eye = LocalPlayer.getWorldPosition();
-    if (!eye) {
+    if (!eye || isPickerOpen()) {
       return;
     }
     drawItems(eye, now);
@@ -1622,7 +1627,7 @@
         y: shop2.position.y + 2.15,
         z: shop2.position.z
       };
-      if (distance(player.position, label) <= LABEL_DISTANCE) {
+      if (!isPickerOpen() && distance(player.position, label) <= LABEL_DISTANCE) {
         Draw.worldText(shop2.name.toUpperCase(), label, 16, COLORS.gold, 3, true);
       }
     }
@@ -1722,7 +1727,7 @@
     }
     const position = player.getWorldPosition() ?? player.position;
     for (const bar of bars) {
-      if (player.virtualWorld !== bar.world || flatDistance(position, bar.counter.position) > LABEL_DISTANCE2) {
+      if (isPickerOpen() || player.virtualWorld !== bar.world || flatDistance(position, bar.counter.position) > LABEL_DISTANCE2) {
         continue;
       }
       const { x, y, z } = bar.counter.position;

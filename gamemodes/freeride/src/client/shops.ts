@@ -4,6 +4,7 @@
 import { COLORS } from './lib/color';
 import { distance, type Point } from './lib/geometry';
 import { bindCounterKeys, showCounter } from './lib/panels';
+import { isPickerOpen } from './lib/picker';
 import { livePlayer } from './lib/player';
 import { events, log, onServer, onStop } from './lib/runtime';
 
@@ -253,7 +254,7 @@ events.on('render', () => {
             z: shop.position.z,
         };
 
-        if (distance(player.position, label) <= LABEL_DISTANCE) {
+        if (!isPickerOpen() && distance(player.position, label) <= LABEL_DISTANCE) {
             Draw.worldText(shop.name.toUpperCase(), label, 16, COLORS.gold, 3, true);
         }
     }

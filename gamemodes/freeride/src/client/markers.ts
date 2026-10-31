@@ -12,6 +12,7 @@
 import { argb, rgb } from './lib/color';
 import { formatMoney } from './lib/format';
 import { flatDistance, type Point } from './lib/geometry';
+import { isPickerOpen } from './lib/picker';
 import { events, onServer, onStop } from './lib/runtime';
 
 const BEACON_HEIGHT = 40;
@@ -638,7 +639,8 @@ events.on('render', () => {
 
     const eye = LocalPlayer.getWorldPosition();
 
-    if (!eye) {
+    // The car picker's preview shows through its page; no label over the car.
+    if (!eye || isPickerOpen()) {
         return;
     }
 

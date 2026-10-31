@@ -4,6 +4,7 @@
 import { COLORS } from './lib/color';
 import { distance, flatDistance, type Point } from './lib/geometry';
 import { bindCounterKeys, showCounter } from './lib/panels';
+import { isPickerOpen } from './lib/picker';
 import { livePlayer } from './lib/player';
 import { events, onServer } from './lib/runtime';
 
@@ -155,6 +156,7 @@ events.on('render', () => {
 
     for (const bar of bars) {
         if (
+            isPickerOpen() ||
             player.virtualWorld !== bar.world ||
             flatDistance(position, bar.counter.position) > LABEL_DISTANCE
         ) {
