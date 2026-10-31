@@ -30,30 +30,66 @@ reM's field order and IDA data references agree on width at `+0x02`, height
 at `+0x06`, fullscreen at `+0x15`, and suspend-when-inactive at `+0x1f`.
 The independent SDK models these as typed `GameSetup` members with compile
 time offset and size checks. `MafiaEntryPoint` loads the setup before calling
-`InitSystem`. The mod temporarily sets width `1024`, height `768`, fullscreen
-false, and suspend-when-inactive false for that call. It restores all four
-original fields immediately afterward, on both success and failure. This
-keeps the resulting IGraph window and render mode at 1024 by 768 while
-preserving the user's persisted setup on the normal exit path. reM shows the
-retail exit path and `HandleVideoMemOverflow` callback both write the global
-setup to the `LS3D_setup` registry value. The exit path runs after the hook
-restores the fields. The callback is registered during `InitSystem`, so a
-second narrow hook restores the four original fields before forwarding a
+`InitSystem`. For that call only, the mod sets width, height, fullscreen, bit
+depth (`+0x0a`), refresh rate (`+0x0e`) and suspend-when-inactive from the
+display mode the player chose (Settings → Display, `settings.json`
+`"display"`), and restores all six fields immediately afterward, on both
+success and failure. reM shows the retail exit path and
+`HandleVideoMemOverflow` callback both write the global setup to the
+`LS3D_setup` registry value; the exit path runs after the hook restores the
+fields, and a second narrow hook restores them before forwarding a
 synchronous video-memory-overflow error to the retail callback, which then
 serializes and exits. No profile, game, or system file is edited directly by
 the mod.
 
+What the modes rely on, from `InitSystem` (Game.exe) and `IGraph::Init`
+(LS3DF `0x1006e790`), both read in IDA:
+
+- `InitSystem` puts the window's client area at (50, 50) with the setup's
+  width and height (`SetRect` at `0x5bf83a`), passes bit depth and refresh as
+  bytes (`0x5bf8da`, `0x5bf8f6`) and sets descriptor flag `0x2` from the
+  fullscreen byte `0x647ef9`. Its base flags `0x10090` include `0x80`.
+- **Windowed** (no flag `0x2`): the top-level window is `0x90CA0000`
+  (`WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE`, at
+  `0x1006e9e7`); with `0x80` the device renders through a `WS_CHILD` window
+  covering its client area, and the back buffer is the setup's size in the
+  desktop's format.
+- **Borderless** is windowed at the monitor's size; after `InitSystem` the mod
+  sets the top-level window to `WS_POPUP | WS_VISIBLE` at the monitor's
+  origin. LS3D's `MsgProc` (`0x1006da60`) handles only `WM_DESTROY`,
+  `WM_ACTIVATE`, `WM_CLOSE`, `WM_ERASEBKGND`, `WM_SYS*` and never moves or
+  sizes the window. The launcher maps the game into its own process after
+  `SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE)`, so monitor sizes
+  are real pixels.
+- **Fullscreen** (flag `0x2`): a topmost `WS_VISIBLE` window at (0, 0), an
+  exclusive device (`Windowed` 0) with the setup's size, `FullScreen_RefreshRateInHz`
+  from the refresh byte and a back buffer format found only by an exact
+  width/height match in the adapter's mode list in the 16- or 32-bit class
+  of the setup's bit depth; otherwise Init logs "Useful BackBuffer format not
+  found" and the game cannot start. The mod therefore sets bit depth 32 and
+  checks the size first with the same calls Init makes (`Direct3DCreate8(220)`,
+  `GetAdapterModeCount` `+0x18`, `EnumAdapterModes` `+0x1c` on the setup's
+  adapter, formats 20/21/22), using the highest refresh rate listed for it up
+  to 255; a size the adapter lacks falls back to borderless.
+- In fullscreen, Alt-Tab loses the device and `IGraph::Present`
+  (`0x1006d4c0`) loops `Sleep(250)`, `ProcessWinMessages` and
+  `TestCooperativeLevel` until it can `Reset`, so the game thread stops until
+  the player returns. The Framework's web views use managed textures only,
+  which survive `Reset`.
+
 | Hook or call | Original retail bytes | Convention, callers and effects | Lifetime and unload |
 | --- | --- | --- | --- |
-| `InitSystem` `0x5bf5a0` | `81 EC C4 02 00 00 53 55 56 57 89 54 24 18 8B E9 E8 6D 0C 05 00 33 DB 33 F6` | `bool __fastcall(HINSTANCE, bool* profileSelectionClosed)`; instance in `ECX`, out pointer in `EDX`, byte return in `AL`. Its sole retail call is `MafiaEntryPoint` at `0x5becf5`. IDA reads width at `0x5bf819`/`0x5bf841`, height at `0x5bf814`/`0x5bf83c`, fullscreen at `0x5bf8ae`, and suspend-inactive at `0x5bf8cb`; it forms the IGraph descriptor then calls virtual `IGraph::Init` at `0x5bf976`. It also mounts archives, initializes graphics, sound, 3D and menus, and reports failure through return false. The hook calls the original once with temporary typed setup fields and preserves its return/out parameter. | The hook is installed before the game entry point and removed before native shutdown. The global setup outlives `InitSystem`; no pointer to its temporary field values is retained. IDA finds no later direct reads of these four fields beyond initialization and setup serialization. Restore the original values even when initialization fails. |
-| `HandleVideoMemOverflow` `0x5beb00` | `51 81 7C 24 08 02 00 00 80 0F 85 B6 00 00 00 8D 44 24 00 8D 4C 24 08` | `void __cdecl(int error, int, const char*)` in reM; IDA confirms the first stack argument is compared with `0x80000002`. Its sole retail reference is the error-callback pointer placed into the IGraph descriptor at `0x5bf832`. On that video-memory error it clears the texture-color setting, writes all `0x3f` bytes of `g_InitSettings` to the `LS3D_setup` registry value at `0x5beb55`, presents the error and exits. The hook restores only the four temporary display fields before chaining so a callback during `InitSystem` cannot serialize them. Other error codes retain the retail path. | The callback pointer is held by IGraph after successful initialization and may be called later. The hook is installed before `InitSystem` and removed before the original `CloseSystem` releases IGraph. The saved original fields are valid only while the InitSystem hook is active and are not retained across shutdown. |
+| `InitSystem` `0x5bf5a0` | `81 EC C4 02 00 00 53 55 56 57 89 54 24 18 8B E9 E8 6D 0C 05 00 33 DB 33 F6` | `bool __fastcall(HINSTANCE, bool* profileSelectionClosed)`; instance in `ECX`, out pointer in `EDX`, byte return in `AL`. Its sole retail call is `MafiaEntryPoint` at `0x5becf5`. IDA reads width at `0x5bf819`/`0x5bf841`, height at `0x5bf814`/`0x5bf83c`, bit depth at `0x5bf8da`, refresh at `0x5bf8f6`, fullscreen at `0x5bf8ae`, and suspend-inactive at `0x5bf8cb`; it forms the IGraph descriptor then calls virtual `IGraph::Init` at `0x5bf976`. It also mounts archives, initializes graphics, sound, 3D and menus, and reports failure through return false. The hook calls the original once with temporary typed setup fields and preserves its return/out parameter. | The hook is installed before the game entry point and removed before native shutdown. The global setup outlives `InitSystem`; no pointer to its temporary field values is retained. IDA finds no later direct reads of these fields beyond initialization and setup serialization. Restore the original values even when initialization fails. |
+| `HandleVideoMemOverflow` `0x5beb00` | `51 81 7C 24 08 02 00 00 80 0F 85 B6 00 00 00 8D 44 24 00 8D 4C 24 08` | `void __cdecl(int error, int, const char*)` in reM; IDA confirms the first stack argument is compared with `0x80000002`. Its sole retail reference is the error-callback pointer placed into the IGraph descriptor at `0x5bf832`. On that video-memory error it clears the texture-color setting, writes all `0x3f` bytes of `g_InitSettings` to the `LS3D_setup` registry value at `0x5beb55`, presents the error and exits. The hook restores only the temporary display fields before chaining so a callback during `InitSystem` cannot serialize them. Other error codes retain the retail path. | The callback pointer is held by IGraph after successful initialization and may be called later. The hook is installed before `InitSystem` and removed before the original `CloseSystem` releases IGraph. The saved original fields are valid only while the InitSystem hook is active and are not retained across shutdown. |
 
-The window is created through the retail graphics initialization. Fullscreen
-must be false for a 1024 by 768 game window that can be placed beside another
-client. Clearing suspend-when-inactive in the same descriptor lets a second
-client continue ticking while its window lacks focus. Both settings remain
-session local because the original setup fields are restored after IGraph
-initialization.
+The window is created through the retail graphics initialization. Without
+a display choice in `settings.json`, the client config's `"window"` size makes
+a window (the two-client test places them side by side), and without that the
+game starts borderless at the monitor's resolution; the simulation host
+always keeps its hidden 1024 by 768 window. Clearing suspend-when-inactive in
+the same descriptor lets a second client continue ticking while its window
+lacks focus. All of it remains session local because the original setup fields
+are restored after IGraph initialization.
 
 ### Window close during a multiplayer session
 
@@ -471,7 +507,7 @@ game volume in the mod, those values stay the profile's. Mouse sensitivity,
 turning limit, invert Y, double-tap roll, crosshair (`m_uIndicatorMode`) and
 speech volume are read live by `C_player`, `G_Camera`, `C_human` and
 `G_IndicatorsClass::DrawAll`; the others need the calls below. Gamma is not
-offered: the mod runs windowed, where `SetGammaRamp` has no effect.
+offered: windowed and borderless, `SetGammaRamp` has no effect.
 
 | Retail item | Original bytes | Convention, callers and effects | Lifetime and unload |
 | --- | --- | --- | --- |
@@ -1606,6 +1642,49 @@ after the original, with the retail HUD font and untextured quads.
 | `I3D_frame::FindChildFrame`, frame vtable `+0x38` | 45 retail calls in `0x570000`–`0x590000` pass `ENUMF_ALL` (`0xffff`) through this slot. Nametags look up the `"neck"` bone that `C_human` binds its aim pose to. | The bone belongs to the human's model; the mod caches it per registry generation, so a replaced human is looked up again. |
 | `I3D_frame::GetWorldMatrix` `0x47acd0` | `test byte [frame+0xac], 0x20; jne; call 0x60fc30; lea eax, [frame+0x10]`. Rebuilds a dirty world matrix through its parents before returning it. Calling `I3D_frame::Update` alone left the cached translation at zero for the `emeth_*` Free Ride start dummies; `GetWorldMatrix` returned their real coordinates. | All SDK world position and direction reads use this call, including the selector's start frames, the neck and the camera. A ped seated in a moving car therefore does not expose last frame's matrix. |
 | `g_collision::TestLineHStatic` `0x5c74d0` | `__thiscall(0x647f48, const S_vector& start, const S_vector& direction, S_vector* hit, S_vector* normal, unsigned flags)`, `ret 0x14`; police line of sight calls it with null outputs and flags 0. Tests the static world only. | Hides a nametag behind walls. |
+
+### City map countryside extension
+
+The held-TAB city map (`G_IndicatorsClass::DrawAll` `0x5fb060`) shows a
+0.4 x 0.55 window of `maps\0mapar.bmp` (1024 x 1024, the city only). On
+`freekrajina`, `freekrajinanoc` and `freeride_extended` the client shows the
+city and countryside image of MafiaCountrysideMap 2.0 instead, when the
+session provides `maps/fullmap.bmp` (a server asset ZIP, see
+[server mods](server_mods.md#the-countryside-city-map)). `freeride`,
+`freeridenoc` and every other mission keep the retail map: the stock city's
+roads (x -3027..995, z -801..730) all lie on 0mapar.bmp, which has three
+times the vertical resolution. The road graphs of all three countryside maps
+lie on fullmap.bmp (u 0.038..0.999, v 0.098..0.820); the Extended map's few
+new roads are not drawn on it.
+
+The ASI (`libMafiaCountrysideMap2.0.asi`, MinGW, 2016) is not used. From a
+2 s `SetTimer` callback it compares the dword at `0x401001` (`0x8B042444`,
+`0x6D79780D`, `0x6D8A480D`, its three tables; the readme names 1.0, 1.1
+and 1.2, and this image holds the third)
+and, for the third, writes without `VirtualProtect`: `0x623b08` 0.55 → 0.18333334
+(`0x3E3BBBBC`), `0x627908` 1.8181818 → 5.4545450, `0x62791c` 0.47024599 →
+0.868, `0x627924` -0.00050728 → -0.0001694, `0x627928` 0.00022986 → 0.00023,
+"0mapar.bmp" at `0x639310` → "fullmap.bmp" for every mission, and a `call`
+over `add esp, 0D4h` at `0x5a3955` (end of `C_game::Init`) that sets
+`m_bMapEnabled` (`0x6c406c`) when the selected save number (`0x6d46a4`) is
+0, 65, 200, 380, 425, 500 or 570. `0x623b08` is a pooled constant that dog,
+traffic-car, pursuit and car-exit code also read, so the ASI changed their
+behaviour too; it left the half window `0x627918` (0.275), the clamp
+immediate 0.45 and the arrow scale `0x627910` at retail and compensated by
+raising the v base by 0.55 / 3, which leaves the arrow wrong near the
+map's edges. The client applies the same projection centred properly
+(`SDK::UI::Map::kCountryside`: u = x * 0.00023 + 0.73464239,
+v = z * -0.0001694 + 0.68466663, window 0.4 x 0.18333334), checked against
+the stock road graphs and the retail map by image registration. The
+multiplayer already enables the map on every mission (`MapEnable`), so the
+save-number part is not needed.
+
+| Hook, patch or call | Original retail bytes | Convention, callers and effects | Lifetime and unload |
+| --- | --- | --- | --- |
+| `G_IndicatorsClass::Tick` `0x6027b0` | `83 EC 24 53 55 56 57 8B 7C 24 38 33 DB` | `void __thiscall(G_IndicatorsClass*, unsigned frameMs)`, `ret 4`; called from `GameLoopSingle` `0x5497e4` and `GameLoopSingle1` `0x5bea22`, after the mission tick and before the scene renders. When `m_bMapEnabled` (`+0x46ec`) is set and `m_pMapTexture` (`+0x4090`) is null it creates the texture from `"0mapar.bmp"` at `0x602812`. The hook runs first: on a countryside mission with the image it stores its own texture there, so the original skips creation; otherwise it leaves the pointer null for the retail texture. Either way it selects the matching projection below at that moment, so DrawAll never pairs one texture with the other's constants. | Installed in `PostInit` (not on the simulation host), removed in `PreShutdown`. Retains no indicator or texture pointer. |
+| DrawAll operands, `D8 /r [disp32]` with the disp32 at `+2`: `0x5ff585`, `0x5ff759` (`D8 0D 28 79 62 00`, u scale); `0x5ff5a1`, `0x5ff778` (`D8 0D 24 79 62 00`, v scale); `0x5ff5ad`, `0x5ff784` (`D8 05 20 79 62 00`, u base); `0x5ff5bf`, `0x5ff796` (`D8 05 1C 79 62 00`, v base); `0x5ff7d2`, `0x5ffdad`, `0x600174` (`D8 25 18 79 62 00`, half window v); `0x5ff833`, `0x5ff9b2` (`D8 05 08 3B 62 00`, window v); `0x5ffdcb` (`D8 0D 10 79 62 00`, player arrow v scale 0.74 / window); `0x60018c` (`D8 0D 08 79 62 00`, destination v scale 1 / window) | As listed | The first four pairs are the player (or camera) and compass-destination projections, then the window origin, the texture quad's v extent, the arrow offset and the destination marker offset. Every target in `0x627908`..`0x627928` is read by DrawAll alone; `0x623b08` is shared, which is why the operands are redirected to a client-owned `DrawConstants` block rather than any `.rdata` being written. The block holds the retail values (`kRetailDraw`, bit-identical) until a countryside texture is created. The horizontal window (`0x6236c0`, `0x6232f8`, `0x624bdc`, immediate 0.6) is the same in both projections and is not touched. | Written once at install under one `VirtualProtect` of `0x5ff585`..`0x600192`; `PreShutdown` writes the original disp32s back. The block is static in the client DLL, which outlives the patch. |
+| DrawAll window clamp `0x5ff848` | `C7 44 24 1C 66 66 E6 3E` (`mov dword [esp+1Ch], 0.45`) | The lowest window origin, 1 - window v, taken when the window would leave the texture's bottom. An immediate, so the projection switch rewrites its four bytes at `0x5ff84c` (0.45 retail, 0.81666666 countryside). | Rewritten only from the Tick hook on the game thread; `PreShutdown` restores 0.45. |
+| `IGraph::CreateITexture` vtable `+0x04` (LS3DF `0x1006c2c0`) | — | `LS3D_RESULT __stdcall(IGraph*, char* name, char* alpha, unsigned flags, ITexture** out)`; the four-argument overload sits before the no-argument one (VC6 order), as Tick's call shows. Flags `0x200001` skip the cached-name scan and pass `name` through; bit 0 is also `ITC_FROM_MEMORY`, so `name` is a 40-byte `BITMAPINFOHEADER` and bottom-up 24-bit rows, copied by `LoadImage` (LS3DF `0x10079150`) before `Create` returns. A memory texture neither reads a presaved `_1.565`/`.DXn` cache nor writes one, so nothing is written next to the image, and it goes on the uncached list. `ClampTextureSize` rounds each side up to a power of two (2619 x 3063 would become 4096 x 4096), so the client area-averages the image to 2048 x 2048 first. The image is read with `rw_data` `dtaOpen` (the asset ZIP overlay first, then the game's own files). | The texture belongs to `G_IndicatorsClass` once stored: `GameDone` `0x5f74a0` (from `C_game::Done` `0x5a3daf`) releases it through ITexture slot 0 (`Release`) and clears the pointer, like the retail texture. Nothing else keeps it. |
 
 ### Melee
 

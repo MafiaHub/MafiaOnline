@@ -56,7 +56,7 @@ first start and left in place.
 | --- | --- |
 | F2 | City menu: events, homes, jobs, race lobbies, bounties, players, crews, leaderboards and help. Esc or F2 closes it; 1–8 switch tabs. |
 | F1 (hold) | The mod's own list of who is in town. |
-| Tab (hold) | The retail city map, with blips for job stations, fires and ambulance calls, your objectives (an arrow at the border when off the shown part) and your crewmates. |
+| Tab (hold) | The retail city map (on The Countryside and Lost Heaven Extended the city and countryside map, when the server has [`mods/countryside-map.zip`](server_mods.md#the-countryside-city-map)), with blips for job stations, fires and ambulance calls, your objectives (an arrow at the border when off the shown part) and your crewmates. |
 | T | Chat. Every command below can also be typed. |
 | V (hold) | Talk on proximity voice; players who hear you see a speaker above your name. |
 | N / B | At a shop or bar counter: next offer / buy or accept it. |
@@ -326,18 +326,60 @@ The event is announced to everyone and marked on the city map; its card shows to
 
 ## Places and jobs
 
-Pete, the dispensary clerk and Salieri's barman are solid, client-only
-`C_entity` humans; the pump is minded by the stock gas station attendants,
-whom every player sees the same (`Pumper`). Their positions come from stock
-mission scene frames; the server checks distance, life, mission generation and
-money before any purchase.
+The dispensary clerk and Salieri's barman are solid, client-only
+`C_entity` humans; Yellow Pete is a scripted NPC everyone sees the same
+(`server/pete.ts`), and the pump is minded by the stock gas station
+attendants (`Pumper`). Their positions come from stock mission data; the
+server checks distance, life, mission generation and money before any
+purchase or sale.
 
 | Place | Stock anchor | Purpose |
 | --- | --- | --- |
-| Yellow Pete's doorway | `MISE19-MESTO`: `1dvere u peteho` | Buy a Colt, shotgun, Thompson or grenades. |
+| Yellow Pete's cellar | `MISE19-MESTO` `check.bin` web point 9 | Buy guns, rounds and throwables; sell back what Pete sold you. |
 | The Night Pump | `FREERIDE`: `_pumpa2` | Stop at a pump with the engine off and press the exit key: the attendant fills the tank at $3 a litre, or as far as your money goes. |
 | The Dispensary | `FREERIDE`: `lekarna` | Restore health with bandages. |
 | Salieri's Back Window | `FREERIDE`: `Salieri_save` | Buy coffee and pie or take a courier envelope. |
+
+Lost Heaven Extended also has nine medicine cabinets on its walls (the
+mod's `9lekarna`, `blekarna`, `lekarna_hom`, `lekarn_aut`, `air_9lekarna`,
+`air_9lekarna2`, `pr_9lekarna`, `plh_9lekarna` and `plh_9lekarna4`, each
+a door whose leaf is `.Box02`). Open one hurt and it heals what the mod's own
+script did (30 to 50 health, up to 100), then shuts; that cabinet is empty
+for you for the next four or five minutes, as in the mod. Mission scripts do
+not run online, so `server/medkits.ts` does their part.
+
+Yellow Pete keeps his shop in the cellar under his door (`server/gunshop.ts`):
+through the street door, along the corridor, past the open grating and down
+the stairs, his name hanging over the street door. He stands where he stood
+behind his counter in mission 19, just inside the back bay's arch, facing the
+stairs; on stock Lost Heaven and on Lost Heaven Extended the cellar is the
+same. He is there while anyone is near his door: he waves newcomers down,
+folds his arms between customers, says a line over every deal and talks it
+over with his hands. Killed, he is back a minute later.
+
+| Piece | Price | Comes with | Rounds for one you carry |
+| --- | --- | --- | --- |
+| Knife | $30 | | |
+| Colt Detective Special | $90 | 6 + 18 | 18 for $25 |
+| S&W Model 10 M&P | $110 | 6 + 18 | 18 for $30 |
+| Colt 1911 | $140 | 7 + 21 | 21 for $35 |
+| S&W Model 27 Magnum | $180 | 6 + 18 | 18 for $45 |
+| Sawed-off shotgun | $190 | 2 + 22 | 20 for $45 |
+| Pump-action shotgun | $210 | 8 + 24 | 24 for $55 |
+| Thompson 1928 | $320 | 50 + 100 | 100 for $90 |
+| Mosin-Nagant 1891/30 | $380 | 5 + 10 | 10 for $60 |
+| US Rifle M1903 Springfield | $380 | 5 + 15 | 15 for $70 |
+| Three Molotov cocktails | $95 | | |
+| Three grenades | $95 | | |
+
+The order follows the stock Free Ride's own price tags in that cellar. Pete's
+card is each customer's own: a firearm they carry already shows as a box of
+rounds, and each firearm they carry shows as a line to sell, the one in hand
+first. He buys back only guns he sold that player (one sale back per gun
+bought, kept with the player's record) at 40% of his price; the rounds in it
+go with it. A gun found, looted or issued by a job shows `NO DEAL`. Nobody
+buys or sells while in a police or fire brigade uniform, in a duel, in jail
+or holding up a counter: what they carry then is the job's or the duel's.
 
 The courier job pays $180 for delivering to Yellow Pete's within eight minutes
 (`/courier` shows the time left). Personal cars start with little fuel so the
@@ -463,10 +505,11 @@ The Jobs tab of the city menu shows every one of these with its live state.
     room on stock Lost Heaven. Flames come out of the front and burn in
     two places in the room, and the barman and two drinkers (the bar's own
     people, at their own places) cower inside, crying for help; the bar
-    serves nobody until it is over. Hose the front ($260), walk in through
-    the door arrow and put the room out with the extinguisher ($40 a fire;
-    see below). G next to someone gets them to follow
-    you; at the exit arrow they come out with you onto the pavement ($50
+    serves nobody until it is over. Hose the front ($260), walk in (by a
+    side door at Morello's, through the door arrow at Salieri's) and put the
+    room out with the extinguisher ($40 a fire; see below). G next to
+    someone gets them to follow you; out of Morello's by a door and clear of
+    the building, or at the back room's exit arrow, they are out ($50
     each), where a medic on duty takes them (an ambulance call with $40
     more). Leave without them and they stay behind. Everyone out alive
     pays the crew a $160 bonus, half by water, half evenly ($650 in all for
@@ -561,7 +604,11 @@ The Jobs tab of the city menu shows every one of these with its live state.
   lean-to side, the trucks on the apron towards the road and the field the
   open grass east of the barn. Only farmhands on duty drive an empty truck.
   The field has seven rows of eight plots with a round hay bale
-  (`baliksena`) at each corner.
+  (`baliksena`) at each corner. Within 60 m of it a farmhand sees the plots
+  drawn on the ground: an empty one by its corners, lit up in full while
+  they stand on one they may plant; their own plants outlined green while
+  growing, blue when dry, red with hornworms and gold when ripe, and anyone
+  else's grey.
   Press G on an empty plot to plant a seedling ($10, up to eight plants each);
   the plants are stock bushes (`s_ker`) every player sees, growing through
   seedling, young, leafy and ripe (about 70, 90 and 90 seconds). A plant
@@ -585,7 +632,8 @@ The Jobs tab of the city menu shows every one of these with its live state.
   truck can be driven by anyone: whoever stops it at a buyer is paid. A
   wrecked truck loses its load; a loaded truck left standing is towed back
   and unloaded at the barn. `/farm` shows the way to the barn, or clocks off
-  from anywhere.
+  from anywhere. Sales and watering tips are paid the moment they happen;
+  clocking off adds nothing and only says what the shift brought in.
 
   The farm keeps its own clock: plants grow and cure only while a map with
   the farm is loaded, so a crop waits through the city map or a restart,
@@ -730,7 +778,8 @@ street doors leads back out.
 
 Inside, 42 by 24 m of rooms join by open doorways, with white walls over a
 green dado (`xzed`), board floors (`plotdrev`) and concrete ceilings
-(`plotcihly3`) under lit lamps:
+(`plotcihly3`) under lit lamps; the steel street and lift doors (`plotdrev7`)
+are set into their walls:
 
 - **Entrance hall** (14 by 11 m, 4.5 m high): the reception desk with a
   telephone, a typewriter, a green banker's lamp and the register, the
@@ -829,10 +878,10 @@ and health. Public interiors are shared. A safehouse is private to your crew
 (or to you, without one), dresses your wounds and tops up your magazines.
 Doors stay shut while the police are after you, and during races and duels.
 
-Lost Heaven Extended ships two: Sarah's apartment in Little Italy, a
+Lost Heaven Extended ships one: Sarah's apartment in Little Italy, a
 safehouse whose street door (`&& futro out`) and corridor (`&& chodba`) come
-from the mod's `quarters_sr.4ds`, and Morello's bar (see Bars below). Stock
-Lost Heaven's arrow at Salieri's door leads into its back-room bar. Other
+from the mod's `quarters_sr.4ds`. Its bars have working doors and no arrow
+(see Bars below). Stock Lost Heaven's arrow at Salieri's door leads into its back-room bar. Other
 interiors are not shipped, because
 their street side cannot be told from the model data. Record them in development mode: stand on the street at the door facing
 it and type `/entrance add <name> [public|safehouse]`, walk to where players
@@ -881,7 +930,8 @@ Furnishing: inside your home, F2 → Homes has a catalogue of stock pieces
 piano, and for villas the story missions' villa set (chesterfields, a china
 cabinet, a marble fireplace, a crystal chandelier, oil paintings, a palm).
 A piece you pick is carried in front of you and paid for when you put it
-down with G. Home/End (or numpad 4/6) turn it, PgUp/PgDn (numpad 8/2) raise
+down with G. Home/End (or numpad 4/6) turn it, a tap by 15° and held on smoothly
+(a quarter turn a second), PgUp/PgDn (numpad 8/2) raise
 it, for pictures flat on a wall or a chandelier under the ceiling, Delete
 sells it back at full price and numpad 0 puts it back (or, with nothing
 carried, ends decorating); the mouse wheel is left to the game's weapon
@@ -924,8 +974,9 @@ drink and B orders it; the barman turns to you and pours.
 On Lost Heaven Extended the mod places Salieri's bar of the story missions
 (`salierybar.4ds`) behind the stock front, with working doors: walk in
 through the front door or the side door off the alley. Morello's bar
-(`morellobar.4ds`, the bar of the mission Molotov Party) has a fixed door, so
-an arrow on the pavement in front of its windows leads in. Stock Lost Heaven
+(`morellobar.4ds`, the bar of the mission Molotov Party), its name over the
+shop windows of its front, is walked into by its doors at either side (the
+mission doors `morellobar.Object18cc` and `morellobar.Object01cc`). Stock Lost Heaven
 has no rooms behind Salieri's door; its arrow leads to a back room built
 from stock models (`server/lib/bar_room.ts`) 150 m under the fields beside
 the county jail, in its own virtual world: brick walls, board floor, a
@@ -960,7 +1011,10 @@ booked.
 
 `/goto <player>` asks someone for a ride; when they `/accept`, you arrive next
 to them, or in a free seat of their car, with your weapons and health. It is
-refused while wanted, in a fight or busy with an activity. `/pm` sends a
+refused while wanted, in a fight or busy with an activity. An admin's
+`/goto` (or `/tp`) asks nobody and refuses nothing: it takes them straight
+behind the player, into the interior or home they are in, even on a job
+shift or a race. `/pm` sends a
 private message, `/spectate <player|off>` watches through someone's camera
 and `/players` lists who is in town. Everyone's HUD lists who is talking on
 proximity voice.
@@ -1047,7 +1101,7 @@ vehicles, notifications) and the conventions.
 | `server/dealership.ts`, `economy.ts` | The car lot, the garage and car locks; `/pay` and the street wage. |
 | `server/lib/` | Shared rules: the database (`store.ts`), commands, profiles and ranks, respawn and activities, invitations, notifications, nametags, the road graph, admins, car prices, and the county jail building and its warden (`prison.js`, `warden.js`). |
 | `server/selector/`, `lib/accounts.ts`, `lib/flyover.ts`, `lib/spline.ts` | Logging in and registering, the one-time look and entering the city; accounts and remember tokens; the login flight. |
-| `server/ambience.ts`, `shops.ts`, `police.ts`, `props.ts`, `doors.ts`, `traffic.ts` | Clock and weather, shops and courier, police outcomes, prop repair, the door lab, the admins' traffic commands. |
+| `server/ambience.ts`, `shops.ts`, `police.ts`, `props.ts`, `doors.ts`, `medkits.ts`, `traffic.ts` | Clock and weather, shops and courier, police outcomes, prop repair, the door lab, Lost Heaven Extended's medicine cabinets, the admins' traffic commands. |
 | `server/races/`, `combat.ts`, `duels.ts`, `crews.ts`, `world_events.ts`, `social/` | Races, bounties, duels, crews, city events, rides, messages and dice. |
 | `server/export.ts`, `police_duty/`, `police_duty/backup.ts`, `taxi.ts`, `robbery.ts` | The jobs; `police_duty/backup.ts` is police duty's call boxes and backup. |
 | `server/firefighters/`, `ambulance/`, `lib/stations.ts`, `lib/jobkey.ts`, `client/rescue.ts` | The fire brigade and the ambulance; their stations (sign-on points and parked vehicles); the job key (G) and its prompt. |
