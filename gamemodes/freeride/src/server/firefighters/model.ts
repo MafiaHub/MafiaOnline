@@ -52,11 +52,30 @@ export interface Arsonist {
     alerted: Set<number>;
 }
 
+/**
+ * How a burning bar is got into: through its arrow (an interior of
+ * lib/maps.ts, the stock map's back room), or walked into by its own doors
+ * (Morello's on Lost Heaven Extended), where its rooms are a part of the street.
+ */
+export type BarEntry =
+    | { kind: 'arrow'; interior: MapInterior }
+    | {
+          kind: 'doors';
+          /** In the bar's rooms. */
+          inside(position: Point): boolean;
+          /** Out of the building and clear of it, through a door. */
+          clear(position: Point): boolean;
+      };
+
 /** A bar on fire, people inside. */
 export interface BarFire {
     id: Bar['id'];
     name: string;
-    interior: MapInterior;
+    entry: BarEntry;
+    /** Where the crew goes in from the street: its arrow, or the front of the building. */
+    door: Point;
+    /** Inside, where the compass points once nobody is left waiting. */
+    hall: Point;
     /** The world the bar's room is in. */
     world: number;
     /** Where the people led out stand on the pavement. */
@@ -261,16 +280,17 @@ export function burningInterior(player: Player): Incident | null {
         return incidents.get(spot.incidentId) ?? null;
     }
 
-    const interior = interiors.insideOf(player);
-
-    if (!interior) {
-        return null;
-    }
-
     return (
-        [...incidents.values()].find((incident) => incident.bar?.interior.id === interior.id) ??
+        [...incidents.values()].find((incident) => incident.bar && inBar(incident.bar, player)) ??
         null
     );
+}
+
+/** Whether the player is in the burning bar's rooms, by its arrow or its doors. */
+export function inBar(bar: BarFire, player: Player): boolean {
+    return bar.entry.kind === 'arrow'
+        ? interiors.insideOf(player)?.id === bar.entry.interior.id
+        : player.virtualWorld === bar.world && bar.entry.inside(player.position);
 }
 
 /**
@@ -376,7 +396,7 @@ export function targetOf(incident: Incident, player: Player): Point {
                     distance(a.position, player.position) - distance(b.position, player.position),
             )[0];
 
-        return inside?.position ?? incident.bar.interior.inside.position;
+        return inside?.position ?? incident.bar.hall;
     }
 
     return incident.position;

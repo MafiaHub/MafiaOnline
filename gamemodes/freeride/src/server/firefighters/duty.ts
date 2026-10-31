@@ -182,7 +182,11 @@ export const crews = defineShift<Crew>({
         }
     },
 
-    summary: (crew) => `You earned ${formatMoney(crew.earned)} this shift.`,
+    // Each fire pays the moment it is out; clocking off pays nothing more.
+    summary: (crew) =>
+        crew.earned > 0
+            ? `This shift's pay, ${formatMoney(crew.earned)}, is already in your pocket.`
+            : '',
 });
 
 // At a truck's wheel the firefighter works its roof cannon; the water is theirs.
@@ -372,7 +376,9 @@ function cardOf(
         } else if (incident.bar) {
             subtitle =
                 burningInterior(player) === incident
-                    ? 'Put the room out, lead them to the exit arrow'
+                    ? incident.bar.entry.kind === 'doors'
+                        ? 'Put the room out, lead them out through a door'
+                        : 'Put the room out, lead them to the exit arrow'
                     : `People inside ${incident.bar.name}: in through the door`;
         } else if (fuseAt) {
             subtitle = 'Knock the flames down before the pumps go up';

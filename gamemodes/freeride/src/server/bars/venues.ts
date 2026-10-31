@@ -152,6 +152,22 @@ export function contains(bar: Bar, position: Point): boolean {
     return bar.rooms ? inBoxes(bar.rooms, position) : barRoom.inRoom(position, 0.5);
 }
 
+/** How far the position is from the bar's rooms along the ground; 0 in them. */
+export function gapFromRooms(bar: Bar, position: Point): number {
+    if (!bar.rooms) {
+        return contains(bar, position) ? 0 : Infinity;
+    }
+
+    return Math.min(
+        ...bar.rooms.map((b) =>
+            Math.hypot(
+                Math.max(b.x0 - position.x, 0, position.x - b.x1),
+                Math.max(b.z0 - position.z, 0, position.z - b.z1),
+            ),
+        ),
+    );
+}
+
 const SALIERI: Bar = {
     id: 'salieri',
     name: "Salieri's Bar",
@@ -221,7 +237,9 @@ const MORELLO: Bar = {
     rooms: [box(-415.7, -406.0, 451.6, 461.2, 16.0, 20.5)],
     // The four stools in front of the counter (z 458.1).
     counter: { position: { x: -412.6, y: 17.35, z: 457.6 }, reach: 1.9 },
-    door: null,
+    // Its name hangs over the shop windows of the south front; the way in is
+    // by its working doors at the sides (lib/maps.ts).
+    door: { x: -411.5, y: 19.6, z: 450.9 },
     wake: { position: { x: -411.5, y: 17.45, z: 449.6 }, heading: Math.PI },
     bartender: {
         model: 'civil33.i3d',

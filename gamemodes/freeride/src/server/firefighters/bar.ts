@@ -10,13 +10,16 @@ import { COLORS, feed, text, toast, toastAll } from '../lib/notify';
 import { MAIN_WORLD, plain, type Point } from '../lib/util';
 import { crews } from './duty';
 import { presentIncidents } from './markers';
-import { incidents, newIncident, type Incident } from './model';
+import { incidents, newIncident, type BarEntry, type Incident } from './model';
 import { trap } from './rescue';
 
 /** Where a fire in one of the bars (server/bars/) burns and who is caught in it. */
 interface BarLayout {
-    /** The bar's interior in lib/maps.ts. */
-    interior: string;
+    /**
+     * The bar's interior in lib/maps.ts, for a bar entered by its arrow; a bar
+     * with working doors has none and is walked into.
+     */
+    interior?: string;
     /** Flames out of the shop windows beside the door. */
     front: Point;
     /** Who is caught inside: [barman, ...drinkers] indices. */
@@ -27,21 +30,23 @@ interface BarLayout {
     street: readonly Point[];
 }
 
-// Fires in a bar (server/bars/, its door in lib/maps.ts). Morello's bar on
-// Lost Heaven Extended (models/morellobar.4ds): flames out of the shop
-// windows east of the door arrow on the south front (z 451.5), and two in
-// its room (floor y 17.3, x -415.7..-406.0, z 451.6..461.2): between the
-// stools and the way in, and behind the counter's east end. Stock Lost
+// Fires in a bar (server/bars/). Morello's bar on Lost Heaven Extended
+// (models/morellobar.4ds), walked into by its doors at the sides: flames out
+// of the shop windows on the south front (z 451.5), and two in its room
+// (floor y 17.3, x -415.7..-406.0, z 451.6..461.2): between the stools and
+// the way in, and behind the counter's east end. Stock Lost
 // Heaven's back-room bar (lib/bar_room.ts, room-local coordinates): flames
 // out of Salieri's west shop window beside his door, one in the aisle in
 // front of the counter and one at the far end. The people caught inside are
 // the bar's own barman and drinkers, at their own places ([barman,
-// ...drinkers] indices); led to the exit arrow they come out on the
-// pavement between the door and the road (the road graph line at z 440.3
-// for Morello's, z -8.1 for Salieri's).
+// ...drinkers] indices). Led out of Morello's by a door and clear of the
+// building they are safe where they stand; led to the back room's exit arrow
+// they come out on the pavement between Salieri's door and the road (z -8.1).
+// A person counts as out of Morello's this far from its room: past its west
+// door, 2.8 m from the room, or its east one, in the room's east wall.
+const CLEAR_OF_BAR = 4.5;
 const BAR_FIRES: Readonly<Partial<Record<bars.Bar['id'], BarLayout>>> = {
     morello: {
-        interior: 'b:morello',
         front: { x: -408.0, y: 17.45, z: 450.6 },
         people: [0, 3, 4],
         rooms: () => [
@@ -70,19 +75,53 @@ const BAR_FIRES: Readonly<Partial<Record<bars.Bar['id'], BarLayout>>> = {
     },
 };
 
-// The bar that can burn on this map, if any: its fire layout and its interior.
-function barVenue(): { bar: bars.Bar; layout: BarLayout; interior: maps.MapInterior } | null {
-    const map = maps.current();
+// How the bar is got into: by its arrow's interior, or walked into by its doors.
+function entryOf(
+    bar: bars.Bar,
+    layout: BarLayout,
+): { entry: BarEntry; door: Point; hall: Point } | null {
+    if (layout.interior) {
+        const interior = maps.current()?.interiors?.find((entry) => entry.id === layout.interior);
 
+        return interior
+            ? {
+                  entry: { kind: 'arrow', interior },
+                  door: interior.outside.position,
+                  hall: interior.inside.position,
+              }
+            : null;
+    }
+
+    if (!bar.rooms) {
+        return null;
+    }
+
+    return {
+        entry: {
+            kind: 'doors',
+            inside: (position) => bars.contains(bar, position),
+            clear: (position) => bars.gapFromRooms(bar, position) >= CLEAR_OF_BAR,
+        },
+        door: bar.door ?? layout.front,
+        hall: bar.counter.position,
+    };
+}
+
+// The bar that can burn on this map, if any: its fire layout and how it is got into.
+function barVenue(): {
+    bar: bars.Bar;
+    layout: BarLayout;
+    way: { entry: BarEntry; door: Point; hall: Point };
+} | null {
     for (const bar of bars.bars()) {
         const layout = BAR_FIRES[bar.id];
-        const interior = layout && map?.interiors?.find((entry) => entry.id === layout.interior);
+        const way = layout ? entryOf(bar, layout) : null;
 
-        if (!layout || !interior || (bar.built && !barRoom.isBuilt())) {
+        if (!layout || !way || (bar.built && !barRoom.isBuilt())) {
             continue;
         }
 
-        return { bar, layout, interior };
+        return { bar, layout, way };
     }
 
     return null;
@@ -99,7 +138,7 @@ export function startBarFire(): Incident | null {
         return null;
     }
 
-    const { bar, layout, interior } = venue;
+    const { bar, layout, way } = venue;
     const front = Fire.create(layout.front, {
         radius: 2.0,
         height: 4,
@@ -131,12 +170,12 @@ export function startBarFire(): Incident | null {
         .filter((fire): fire is Fire => fire !== null);
     const incident = newIncident(
         'bar',
-        plain(interior.outside.position),
+        plain(way.door),
         `FIRE AT ${bar.name.toUpperCase()}`,
         front,
         {
             extra: inside,
-            bar: { id: bar.id, name: bar.name, interior, world, street: layout.street },
+            bar: { id: bar.id, name: bar.name, ...way, world, street: layout.street },
         },
     );
 

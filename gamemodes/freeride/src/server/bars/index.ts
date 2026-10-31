@@ -5,8 +5,7 @@
 // the story missions (models/salierybar.4ds) where the stock city has only
 // its front, with working doors: walk in through the front door or the side
 // door off the alley. It also places Morello's bar (models/morellobar.4ds),
-// whose door is a fixed mesh: an arrow on the pavement leads in
-// (lib/maps.ts). Stock Lost Heaven has no rooms behind Salieri's door, so
+// walked into by its working doors at the sides (lib/maps.ts). Stock Lost Heaven has no rooms behind Salieri's door, so
 // its arrow leads to a back-room bar built from stock models
 // (lib/bar_room.ts).
 //
@@ -35,6 +34,7 @@ import { barmanIn, cheers, forgetVenues, serve, standDown, tickStaff } from './s
 import {
     barsHere,
     contains,
+    gapFromRooms,
     DRINKS,
     interiorId,
     ROUND_PER_HEAD,
@@ -42,7 +42,7 @@ import {
     type Drink,
 } from './venues';
 
-export { DRINKS, ROUND_PER_HEAD, type Bar };
+export { DRINKS, ROUND_PER_HEAD, contains, gapFromRooms, type Bar };
 
 const TICK_MS = 500;
 const PURCHASE_COOLDOWN_MS = 2500;

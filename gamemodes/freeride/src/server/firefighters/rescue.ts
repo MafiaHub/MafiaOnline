@@ -3,7 +3,6 @@
 // somewhere in the rooms of a burning building. G next to one leads them
 // out; well clear of the fire (or, out of a bar or a building, through its
 // exit arrow) they are safe, and a medic on duty takes them from there.
-import * as interiors from '../interiors';
 import * as profiles from '../lib/profiles';
 import * as rooms from '../lib/house_rooms';
 import { COLORS, feed, name, text, toast } from '../lib/notify';
@@ -21,7 +20,7 @@ import {
 } from '../lib/util';
 import { earn } from './duty';
 import { presentIncidents } from './markers';
-import { incidents, indoors, type Civilian, type Incident } from './model';
+import { inBar, incidents, indoors, type Civilian, type Incident } from './model';
 
 const RESCUE_REACH = 3;
 const SAFE_DISTANCE = 12;
@@ -122,9 +121,11 @@ export function leadOut(player: Player, incident: Incident, civilian: Civilian):
     civilian.npc?.follow(player, 1.6);
     toast(
         player,
-        incident.bar || incident.building
-            ? 'They are on their feet. Lead them to the exit arrow; they come out with you.'
-            : 'They are on their feet. Lead them well clear of the fire.',
+        incident.bar?.entry.kind === 'doors'
+            ? 'They are on their feet. Lead them out through a door, clear of the building.'
+            : incident.bar || incident.building
+              ? 'They are on their feet. Lead them to the exit arrow; they come out with you.'
+              : 'They are on their feet. Lead them well clear of the fire.',
         { title: 'Rescue', tone: 'gold' },
     );
 
@@ -319,10 +320,25 @@ function follow(incident: Incident, civilian: Civilian, npc: Npc): void {
 
     const leader = playerById(civilian.leaderId);
     const bar = incident.bar;
+
+    // A bar walked into by its doors is a part of the street: out through a
+    // door and clear of the building, they are safe, as from a fire outside.
+    // (Checked as by the arrow, a leader who came in by the door was never
+    // "inside", so each step of the way left the person behind again.)
+    if (bar?.entry.kind === 'doors') {
+        if (bar.entry.clear(npc.position)) {
+            rescued(incident, civilian);
+        } else if (!leader || !leader.alive) {
+            leftBehind(civilian, npc, null, '');
+        }
+
+        return;
+    }
+
     // Out of a bar through its exit arrow; a leader who went out without
     // them leaves them behind.
-    const behind = bar && leader && interiors.insideOf(leader)?.id !== bar.interior.id;
-    const exit = bar?.interior.inside.position;
+    const behind = bar && leader && !inBar(bar, leader);
+    const exit = bar?.entry.interior.inside.position;
 
     if (
         bar &&

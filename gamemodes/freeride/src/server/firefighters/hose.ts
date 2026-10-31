@@ -43,7 +43,7 @@ interface Hose {
  */
 export function nearestTruck(player: Player): { vehicle: Vehicle; gap: number } | null {
     const indoors = burningInterior(player);
-    const door = indoors?.bar?.interior.outside.position ?? indoors?.building?.door;
+    const door = indoors?.bar?.door ?? indoors?.building?.door;
 
     return station.nearestVehicle(door ?? player.position);
 }

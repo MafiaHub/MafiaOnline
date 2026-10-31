@@ -412,18 +412,12 @@ export const MAPS: Readonly<Record<MapId, MapDefinition>> = {
                 outside: { position: { x: -1770.6, y: -5.2, z: 171.5 }, heading: -1.54 },
                 inside: { position: { x: -1759.4, y: -3.3, z: 171.8 }, heading: 1.6 },
             },
-            // Morello's bar, models/morellobar.4ds: its room ("Sect podl", floor
-            // y 17.31) behind the shop windows on the south front (z 451.5),
-            // whose bins stand on the pavement at z 450. Its door off the yard
-            // is a fixed mesh, so the arrow on the pavement leads in. Salieri's
-            // bar (models/salierybar.4ds) has working doors and needs no arrow.
-            {
-                id: 'b:morello',
-                name: "Morello's Bar",
-                kind: 'public',
-                outside: { position: { x: -411.5, y: 17.45, z: 449.9 }, heading: Math.PI },
-                inside: { position: { x: -414.7, y: 17.36, z: 454.2 }, heading: Math.PI / 2 },
-            },
+            // Morello's bar (models/morellobar.4ds) and Salieri's
+            // (models/salierybar.4ds) have working doors and need no arrow:
+            // Morello's are the mission doors "morellobar.Object18cc" (hinge
+            // (-418.5, 18.5, 455.3), west of its room) and
+            // "morellobar.Object01cc" (hinge (-406.9, 18.5, 456.6), its east
+            // wall), from the frames of the model in the mod's archive.
             // The hospital (lib/hospital_room.ts). models/9medic.4ds has three
             // door bays (3DVERE4, z 763.51) between four pillars whose fronts
             // stand at z 762.59 (x -765.97..-764.51, -762.05..-760.6,
