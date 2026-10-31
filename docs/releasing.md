@@ -26,7 +26,9 @@ starts the installed version without a prompt.
 
 ## Cutting a release
 
-From an up-to-date `main` with VERSION set:
+From an up-to-date `main` with VERSION set, and `npm install` run once in
+`gamemodes/freeride` (the release refuses a `resources/freeride` that is not
+what `gamemodes/freeride` builds to):
 
 ```bat
 set M1O_SERVICES_API_URL=...

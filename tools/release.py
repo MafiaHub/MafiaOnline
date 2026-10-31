@@ -102,7 +102,16 @@ def check_repository(tag):
         raise SystemExit(f"Tag {tag} already exists.")
 
 
+def check_freeride():
+    """resources/freeride is built from gamemodes/freeride and committed; a stale build must not ship."""
+    source = PROJECT_ROOT / "gamemodes" / "freeride"
+    if not (source / "node_modules").is_dir():
+        raise SystemExit("Run npm install in gamemodes/freeride first: the release checks resources/freeride is up to date.")
+    subprocess.run(["node", "scripts/build.mjs", "--check"], check=True, cwd=source)
+
+
 def package_server():
+    check_freeride()
     cache = package_client.read_cmake_cache(SERVER_BIN.parent / "CMakeCache.txt")
     if cache.get("CMAKE_BUILD_TYPE") != "Release":
         raise SystemExit(f"{SERVER_BIN} is not a Release build")
