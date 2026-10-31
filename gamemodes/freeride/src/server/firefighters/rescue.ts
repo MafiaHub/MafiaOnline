@@ -1,29 +1,44 @@
 // People caught in a fire: a crash's passengers on the road, a resident at
-// the house door, the barman and drinkers of a burning bar. G next to one
-// leads them out; well clear of the fire (or, out of a bar, through its exit
-// arrow) they are safe, and a medic on duty takes them from there.
+// the house door, the barman and drinkers of a burning bar, the residents
+// somewhere in the rooms of a burning building. G next to one leads them
+// out; well clear of the fire (or, out of a bar or a building, through its
+// exit arrow) they are safe, and a medic on duty takes them from there.
 import * as interiors from '../interiors';
 import * as profiles from '../lib/profiles';
+import * as rooms from '../lib/house_rooms';
 import { COLORS, feed, name, text, toast } from '../lib/notify';
 import { events } from '../lib/lifecycle';
 import { CIVILIANS, CROUCHED, PANIC_LINES, say, spawnCivilian, voiceFor } from '../lib/civilians';
 import { walkOff } from '../lib/npcs';
-import { distance, flatDistance, formatMoney, pick, playerById, type Point } from '../lib/util';
+import {
+    distance,
+    flatDistance,
+    formatMoney,
+    pick,
+    playerById,
+    type Placement,
+    type Point,
+} from '../lib/util';
 import { earn } from './duty';
 import { presentIncidents } from './markers';
-import { incidents, type Civilian, type Incident } from './model';
+import { incidents, indoors, type Civilian, type Incident } from './model';
 
 const RESCUE_REACH = 3;
 const SAFE_DISTANCE = 12;
 // A civilian led this close to the exit arrow inside is out.
 const EXIT_REACH = 3.5;
+// A building's rooms are small: out only once at its door.
+const BUILDING_EXIT_REACH = 1.8;
 const RESCUE_PAY = 120;
 // Each one led out of a burning bar: three of them, and the bonus besides.
 const BAR_RESCUE_PAY = 50;
-// A smoke victim out of a bar carries this much more on the medic's fare.
-const BAR_MEDIC_BONUS = 40;
+// A smoke victim out of a bar or a building carries this much more on the medic's fare.
+const INDOOR_MEDIC_BONUS = 40;
 const RESCUE_XP = 40;
 const PANIC_EVERY_MS = 9000;
+
+// How close behind their leader someone being led goes through a door with them.
+export const CARRY_REACH = 5;
 
 /** The ambulance's side of a hand-over (ambulance/scenes.ts). */
 export interface AmbulanceDesk {
@@ -40,8 +55,10 @@ export function setAmbulance(desk: AmbulanceDesk): void {
 export interface TrapOptions {
     model?: string;
     heading?: number;
-    /** The world of a bar built apart from the street. */
+    /** The world of a bar or a building built apart from the street. */
     world?: number;
+    /** The room of a burning building they are in. */
+    room?: rooms.RoomKey;
 }
 
 /** Someone caught in the fire, at `position`, in the clip they wait in. */
@@ -50,7 +67,12 @@ export function trap(
     position: Point,
     clip: string,
     index: number,
-    { model = pick(CIVILIANS), heading = Math.random() * Math.PI * 2, world }: TrapOptions = {},
+    {
+        model = pick(CIVILIANS),
+        heading = Math.random() * Math.PI * 2,
+        world,
+        room,
+    }: TrapOptions = {},
 ): void {
     const voice = voiceFor(model);
     const npc = spawnCivilian(model, position, heading, { voice, world });
@@ -71,6 +93,8 @@ export function trap(
         nextLineAt: Date.now() + 3000 + Math.random() * PANIC_EVERY_MS,
         outside: null,
         outsideReady: false,
+        room: room ?? null,
+        relead: false,
     });
 }
 
@@ -80,6 +104,7 @@ export function rescueNear(player: Player): { incident: Incident; civilian: Civi
             if (
                 civilian.state === 'trapped' &&
                 civilian.npc &&
+                civilian.npc.virtualWorld === player.virtualWorld &&
                 distance(civilian.npc.position, player.position) <= RESCUE_REACH
             ) {
                 return { incident, civilian };
@@ -97,13 +122,57 @@ export function leadOut(player: Player, incident: Incident, civilian: Civilian):
     civilian.npc?.follow(player, 1.6);
     toast(
         player,
-        incident.bar
+        incident.bar || incident.building
             ? 'They are on their feet. Lead them to the exit arrow; they come out with you.'
             : 'They are on their feet. Lead them well clear of the fire.',
         { title: 'Rescue', tone: 'gold' },
     );
 
     presentIncidents();
+}
+
+/** Those following this player closely enough to go through a door with them. */
+export function followersOf(player: Player, incident: Incident): Civilian[] {
+    return incident.civilians.filter(
+        (civilian) =>
+            civilian.state === 'following' &&
+            civilian.leaderId === player.id &&
+            civilian.npc !== null &&
+            distance(civilian.npc.position, player.position) <= CARRY_REACH,
+    );
+}
+
+/**
+ * Through a door between two rooms with their leader: the person is made
+ * again just behind where the leader arrives, and follows once there.
+ */
+export function carryThrough(
+    civilian: Civilian,
+    room: rooms.RoomKey,
+    arrival: Placement,
+    world: number,
+): void {
+    const behind = {
+        x: arrival.position.x - Math.sin(arrival.heading) * 1.2,
+        y: arrival.position.y,
+        z: arrival.position.z - Math.cos(arrival.heading) * 1.2,
+    };
+
+    civilian.npc?.remove();
+    civilian.npc = spawnCivilian(civilian.model, behind, arrival.heading, {
+        voice: civilian.voice,
+        world,
+    });
+
+    civilian.ready = false;
+    civilian.room = room;
+
+    if (civilian.npc) {
+        civilian.state = 'spawning';
+        civilian.relead = true;
+    } else {
+        civilian.state = 'gone';
+    }
 }
 
 /**
@@ -143,26 +212,25 @@ function rescued(incident: Incident, civilian: Civilian, handOff = true): void {
 
 /**
  * A medic on duty takes them to hospital; otherwise they go home. Out of a
- * bar, the medic's call carries a share of the big call's bonus.
+ * bar or a building, the medic's call carries a share of the big call's bonus.
  */
 function passOn(incident: Incident, npc: Npc | null): void {
     if (!npc) {
         return;
     }
 
-    const label = incident.bar
-        ? `Smoke victim from ${incident.bar.name}`
-        : `Smoke victim ${incident.where}`;
+    const place = incident.bar?.name ?? incident.building?.name ?? null;
+    const label = place ? `Smoke victim from ${place}` : `Smoke victim ${incident.where}`;
 
     if (
         !ambulance?.takePatient(npc, incident.position, label, {
-            bonus: incident.bar ? BAR_MEDIC_BONUS : 0,
+            bonus: place ? INDOOR_MEDIC_BONUS : 0,
         })
     ) {
         // Out of a bar, along the pavement rather than back into the building.
         const { x, y, z } = npc.position;
 
-        walkOff(npc, 20_000, { to: { x: x + 20, y, z: z + (incident.bar ? 0 : 20) } });
+        walkOff(npc, 20_000, { to: { x: x + 20, y, z: z + (place ? 0 : 20) } });
     }
 }
 
@@ -170,12 +238,20 @@ function passOn(incident: Incident, npc: Npc | null): void {
  * Led to the exit arrow, a civilian comes out onto the pavement: the one
  * inside goes and the same person stands outside, coughing.
  */
-function bringOut(incident: Incident, bar: NonNullable<Incident['bar']>, civilian: Civilian): void {
+export function bringOut(
+    incident: Incident,
+    street: readonly Point[],
+    civilian: Civilian,
+    heading = Math.PI,
+): void {
     civilian.npc?.remove();
     civilian.npc = null;
+    civilian.room = null;
     rescued(incident, civilian, false);
-    const spot = bar.street[civilian.index % bar.street.length];
-    const npc = spawnCivilian(civilian.model, spot, Math.PI, { voice: civilian.voice });
+    const spot = street[civilian.index % street.length];
+    const npc = spot
+        ? spawnCivilian(civilian.model, spot, heading, { voice: civilian.voice })
+        : null;
 
     if (!npc) {
         return;
@@ -190,10 +266,21 @@ export function updateCivilians(incident: Incident, now: number): void {
     for (const civilian of incident.civilians) {
         const npc = civilian.npc;
 
-        // Trapped civilians lie down once the host made them.
+        // Trapped civilians lie down once the host made them; one made again
+        // in the next room follows on.
         if (civilian.state === 'spawning' && npc && civilian.ready) {
-            civilian.state = 'trapped';
-            npc.playAnimation(civilian.clip, { loop: true });
+            const relead = civilian.relead;
+            const leader = relead ? playerById(civilian.leaderId) : null;
+
+            civilian.relead = false;
+
+            if (leader?.alive) {
+                civilian.state = 'following';
+                npc.follow(leader, 1.6);
+            } else {
+                civilian.state = 'trapped';
+                npc.playAnimation(relead ? CROUCHED : civilian.clip, { loop: true });
+            }
         } else if (civilian.state === 'following' && npc) {
             follow(incident, civilian, npc);
         } else if (civilian.state === 'outside' && civilian.outside && civilian.outsideReady) {
@@ -212,7 +299,24 @@ export function updateCivilians(incident: Incident, now: number): void {
     }
 }
 
+// Back down where they are: their leader is gone, dead, or went on without them.
+function leftBehind(civilian: Civilian, npc: Npc, leader: Player | null, why: string): void {
+    civilian.state = 'trapped';
+    npc.stop();
+    npc.playAnimation(CROUCHED, { loop: true });
+
+    if (leader) {
+        toast(leader, why, { title: 'Rescue', tone: 'bad' });
+    }
+}
+
 function follow(incident: Incident, civilian: Civilian, npc: Npc): void {
+    if (incident.building) {
+        followInBuilding(incident, incident.building, civilian, npc);
+
+        return;
+    }
+
     const leader = playerById(civilian.leaderId);
     const bar = incident.bar;
     // Out of a bar through its exit arrow; a leader who went out without
@@ -226,24 +330,48 @@ function follow(incident: Incident, civilian: Civilian, npc: Npc): void {
         flatDistance(npc.position, exit) <= EXIT_REACH &&
         Math.abs(npc.position.y - exit.y) < 3
     ) {
-        bringOut(incident, bar, civilian);
+        bringOut(incident, bar.street, civilian);
     } else if (!leader || !leader.alive || behind) {
-        civilian.state = 'trapped';
-        npc.stop();
-        npc.playAnimation(CROUCHED, { loop: true });
-
-        if (behind) {
-            toast(
-                leader,
-                'You left them behind inside. Go back in and bring them to the exit arrow.',
-                {
-                    title: 'Rescue',
-                    tone: 'bad',
-                },
-            );
-        }
+        leftBehind(
+            civilian,
+            npc,
+            behind ? leader : null,
+            'You left them behind inside. Go back in and bring them to the exit arrow.',
+        );
     } else if (!bar && flatDistance(npc.position, incident.position) >= SAFE_DISTANCE) {
         rescued(incident, civilian);
+    }
+}
+
+// Inside a building: out through the street door of the room people come in
+// by; a leader who left the room without them leaves them behind.
+function followInBuilding(
+    incident: Incident,
+    building: NonNullable<Incident['building']>,
+    civilian: Civilian,
+    npc: Npc,
+): void {
+    const leader = playerById(civilian.leaderId);
+    const spot = leader ? indoors.get(leader.id) : undefined;
+    const exitDoor = rooms.ROOMS[building.entry].doors.find((door) => door.to === 'street');
+    const exit = exitDoor ? rooms.toWorld(building.entry, exitDoor.at) : null;
+
+    if (
+        civilian.room === building.entry &&
+        exit &&
+        flatDistance(npc.position, exit) <= BUILDING_EXIT_REACH &&
+        Math.abs(npc.position.y - exit.y) < 3
+    ) {
+        bringOut(incident, building.street, civilian, building.out.heading);
+    } else if (!leader || !leader.alive) {
+        leftBehind(civilian, npc, null, '');
+    } else if (spot?.incidentId !== incident.id || spot.room !== civilian.room) {
+        leftBehind(
+            civilian,
+            npc,
+            leader,
+            'You left them behind. Go back for them and keep them close through the doors.',
+        );
     }
 }
 

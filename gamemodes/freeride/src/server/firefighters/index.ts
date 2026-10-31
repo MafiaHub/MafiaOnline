@@ -15,23 +15,35 @@
 //
 // With a crew on duty bigger calls come in too: a filling station alight,
 // whose pumps go up if the flames are not knocked down in time (pumps.ts); a
-// fire in a bar, where the crew goes in through the door, hoses the room and
-// leads the barman and the drinkers out to the street (bar.ts; the medics
-// take them from there); and a house set alight on purpose, its arsonist
+// fire in a bar, where the crew goes in through the door, puts the room out
+// with the extinguisher and leads the barman and the drinkers out to the
+// street (bar.ts; the medics take them from there); a home burning with its
+// residents inside, where the crew searches the furnished rooms, puts the
+// furniture out by hand and gets them out before the fire spreads and the
+// smoke takes them (building.ts); and a house set alight on purpose, its arsonist
 // running off down the street until a firefighter or a police officer on
 // duty grabs him (arson.ts). A pile-up the ambulance answers (ambulance/)
 // may have a wreck burning.
 import * as commands from '../lib/commands';
+import * as serverConsole from '../lib/console';
+import * as log from '../lib/log';
 import * as jobkey from '../lib/jobkey';
 import * as menu from '../lib/menu';
 import { WRECKS } from '../lib/callouts';
 import { compass, toast } from '../lib/notify';
 import { events, onStop } from '../lib/lifecycle';
 import { grabKey } from './arson';
+import { release as leaveBuilding } from './building';
 import { clock, endAll, forgetAll, startIncident } from './calls';
 import { COMPASS_PRIORITY, crews, station } from './duty';
 import { crewKey } from './hose';
-import { burning, incidents as open, nearestIncident, type Incident } from './model';
+import {
+    burning,
+    incidents as open,
+    nearestIncident,
+    type Incident,
+    type IncidentKind,
+} from './model';
 import { setAmbulance } from './rescue';
 
 // Grabbing an arsonist (firefighters and police officers on duty) goes
@@ -90,9 +102,27 @@ menu.provide('fire', (player) => ({
     earned: crews.get(player)?.earned ?? 0,
 }));
 
+const KINDS: readonly IncidentKind[] = ['building', 'house', 'car', 'crash', 'pump', 'bar'];
+
+// "fr fire [kind]": a fire now, near a firefighter on duty (else anyone on
+// the street), for trying the calls out. A building or a bar needs a crew on duty.
+serverConsole.action('fr', 'fire', ([kind]) => {
+    const chosen = KINDS.find((entry) => entry === kind) ?? 'building';
+    const anchor = crews.crew()[0]?.[0] ?? World.getPlayers()[0];
+    const incident = startIncident(chosen, anchor?.position ?? null);
+
+    log.info(
+        incident
+            ? `Started a ${chosen} fire ${incident.where}`
+            : `No ${chosen} fire could start (kinds: ${KINDS.join(', ')}; a building or a bar needs a firefighter on duty, two calls at most)`,
+    );
+});
+
 // After the shift's own (duty.ts): the crew is off duty before the calls go.
 onStop(endAll);
 events.on('missionChange', forgetAll);
+// Dead inside a burning building: out of its world before the respawn.
+events.on('playerDeath', (player) => leaveBuilding(player));
 
 export function onDuty(player: Player): boolean {
     return crews.has(player);

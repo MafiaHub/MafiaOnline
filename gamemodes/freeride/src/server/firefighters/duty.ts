@@ -9,16 +9,25 @@ import { defineShift } from '../lib/shift';
 import { COLORS, card, compass, feed, name, text, toast } from '../lib/notify';
 import { distance, formatMinutes, formatMoney, inFreeRide, playable, plural } from '../lib/util';
 import { arsonistHint, promptOfficers } from './arson';
+import { buildingRows, doorHint, release as leaveBuilding } from './building';
 import { clock, dispatch, updateIncidents } from './calls';
-import { HOSE_TO_TRUCK, hoseFor, nearestTruck, spray } from './hose';
+import {
+    EXTINGUISHER_SECONDS,
+    HOSE_TO_TRUCK,
+    hoseFor,
+    indoorsNow,
+    nearestTruck,
+    spray,
+    tendExtinguisher,
+} from './hose';
 import { presentIncidents } from './markers';
 import {
     burning,
     burningInterior,
     firesOf,
+    incidentNear,
     incidents,
     intensityOf,
-    nearestIncident,
     targetOf,
     titleOf,
 } from './model';
@@ -61,6 +70,8 @@ export interface Crew {
     cannon: WaterJet | null;
     cannonTruckId: number | null;
     spraying: boolean;
+    /** Seconds of spray left in the extinguisher (hose.ts). */
+    charge: number;
     hint: string | null;
 }
 
@@ -80,7 +91,8 @@ export const station = stations.define({
     vehicleLabel: 'FIRE TRUCK',
     pitch:
         'Put out fires around the city with the hose and lead people out of them. $260 to $420 a fire, split by the water each ' +
-        'firefighter puts on it, $120 for each person you lead out; a filling station or a bar with people inside pays about $600 in all, with a crew bonus. Press G here to sign on.',
+        'firefighter puts on it, $120 for each person you lead out; a filling station, a bar or a building with people inside pays $600 to $900 in all, ' +
+        'with a crew bonus. Indoors you work with the extinguisher. Press G here to sign on.',
     place: () => STATIONS[World.getMission()] ?? null,
     available,
     onDuty: (player) => crews.has(player),
@@ -124,6 +136,7 @@ export const crews = defineShift<Crew>({
             cannon: null,
             cannonTruckId: null,
             spraying: false,
+            charge: EXTINGUISHER_SECONDS,
             hint: null,
         };
     },
@@ -134,6 +147,7 @@ export const crews = defineShift<Crew>({
             player,
             'You are on duty. Get in one of the fire trucks in front of the station. Fires show on your compass and on the map (TAB). ' +
                 "Near a fire, hold G to spray: on foot within 35 m of a truck, or the roof cannon from the driver's seat. " +
+                'Inside a burning building you work with the extinguisher; refill it at a truck. ' +
                 'G next to a trapped person leads them out. Back under the arrow, G clocks you off.',
             { title: 'Fire brigade', tone: 'gold', seconds: 12 },
         );
@@ -158,9 +172,14 @@ export const crews = defineShift<Crew>({
     tick: (player, crew) => rounds(player, crew),
     afterTick: (now) => present(now),
 
-    end(_player, crew) {
+    end(player, crew, how) {
         crew.hose.destroy();
         crew.cannon?.destroy();
+
+        // Off duty inside a burning building: nobody else can open its door.
+        if (how.online) {
+            leaveBuilding(player);
+        }
     },
 
     summary: (crew) => `You earned ${formatMoney(crew.earned)} this shift.`,
@@ -227,7 +246,8 @@ function rounds(player: Player, crew: Crew): void {
         spray(player, crew);
     }
 
-    const nearest = nearestIncident(player.position);
+    tendExtinguisher(player, crew, TICK_MS);
+    const nearest = incidentNear(player);
 
     compass(
         player,
@@ -244,12 +264,22 @@ function rounds(player: Player, crew: Crew): void {
         (nearest.gap < hose.reach + 10 || burningInterior(player) === nearest.incident);
     let hint: string | null = null;
 
+    const door = rescue ? null : doorHint(player);
+    const indoors = indoorsNow(player);
+    const charge = `${Math.round((crew.charge / EXTINGUISHER_SECONDS) * 100)}%`;
+
     if (rescue) {
         hint = '[G] LEAD THEM OUT';
+    } else if (door) {
+        hint = door;
     } else if (crew.spraying) {
-        hint = 'SPRAYING · RELEASE G TO STOP';
+        hint = indoors
+            ? `EXTINGUISHER ${charge} · RELEASE G TO STOP`
+            : 'SPRAYING · RELEASE G TO STOP';
+    } else if (indoors && crew.charge <= 0) {
+        hint = 'EXTINGUISHER EMPTY · REFILL AT A TRUCK';
     } else if (near && burning(nearest.incident)) {
-        hint = '[G] HOLD TO SPRAY';
+        hint = indoors ? `[G] HOLD FOR THE EXTINGUISHER · ${charge}` : '[G] HOLD TO SPRAY';
     }
 
     hint = arsonistHint(player) ?? hint;
@@ -285,7 +315,7 @@ function cardOf(
     crew: Crew,
     now: number,
 ): { subtitle: string; rows: [string, string][] } {
-    const nearest = nearestIncident(player.position);
+    const nearest = incidentNear(player);
     const truck = station.isVehicle(player.getVehicle()) ? null : nearestTruck(player);
     const rows: [string, string][] = [];
     let subtitle =
@@ -314,8 +344,12 @@ function cardOf(
         ).length;
 
         if (trapped) {
-            rows.push([incident.bar ? 'Inside' : 'Trapped', `${trapped}`]);
+            rows.push([incident.bar || incident.building ? 'Inside' : 'Trapped', `${trapped}`]);
         }
+
+        const building = buildingRows(player, incident, now);
+
+        rows.push(...(building?.rows ?? []));
 
         const fuseAt = incident.pumps?.fuseAt;
 
@@ -333,10 +367,12 @@ function cardOf(
             ]);
         }
 
-        if (incident.bar) {
+        if (building) {
+            subtitle = building.subtitle;
+        } else if (incident.bar) {
             subtitle =
                 burningInterior(player) === incident
-                    ? 'Hose the room, lead them to the exit arrow'
+                    ? 'Put the room out, lead them to the exit arrow'
                     : `People inside ${incident.bar.name}: in through the door`;
         } else if (fuseAt) {
             subtitle = 'Knock the flames down before the pumps go up';
@@ -349,6 +385,15 @@ function cardOf(
 
     if (truck) {
         rows.push(['Nearest truck', `${Math.round(truck.gap)} m`]);
+    }
+
+    if (indoorsNow(player) || crew.charge < EXTINGUISHER_SECONDS) {
+        rows.push([
+            'Extinguisher',
+            crew.charge > 0
+                ? `${Math.round((crew.charge / EXTINGUISHER_SECONDS) * 100)}%`
+                : 'empty · refill at a truck',
+        ]);
     }
 
     rows.push(['This shift', `${plural(crew.fires, 'fire')} · ${formatMoney(crew.earned)}`]);

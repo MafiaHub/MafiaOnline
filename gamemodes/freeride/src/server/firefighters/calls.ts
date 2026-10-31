@@ -1,7 +1,8 @@
-// Where fires break out and how a call ends. Fires break out across the
+// Where fires break out and how a call ends. // Fires break out across the
 // city on the road graph: a house front, a burning car, a crash with people
 // trapped in it; with a crew on duty the bigger calls too (pumps.ts,
-// bar.ts), and a pile-up the ambulance answers may have a wreck burning.
+// bar.ts, building.ts), and a pile-up the ambulance answers may have a wreck
+// burning.
 // The pay for a fire is split by how much water each firefighter put on it.
 import * as bars from '../bars';
 import * as profiles from '../lib/profiles';
@@ -22,6 +23,12 @@ import {
 import { occupied } from '../lib/vehicles';
 import { ARSONIST_CHANCE, dismissArsonist, spawnArsonist, updateArsonist } from './arson';
 import { startBarFire } from './bar';
+import {
+    evacuate,
+    forgetAll as forgetBuildings,
+    startBuildingFire,
+    updateBuilding,
+} from './building';
 import { available, crews, earn, station } from './duty';
 import { presentIncidents } from './markers';
 import {
@@ -46,9 +53,10 @@ const MAX_INCIDENTS = 2;
 const INCIDENT_LIFETIME_MS = 9 * 60_000;
 const CAR_BLOWS_AFTER_MS = 4 * 60_000;
 const SMOKE_MS = 25_000;
-// The big calls come to about $500-700 for one firefighter: the filling
+// The big calls come to about $500-900 for one firefighter: the filling
 // station $380 + $40 + $160 = $580 saved; the bar $260 + 2 x $40 + 3 x $50
-// + $160 = $650 with everyone out.
+// + $160 = $650 with everyone out; a burning flat $300 + 3-5 x $40 + 1-2 x
+// $120 + $200 = $860 or so, a villa somewhat more.
 const PAY: Readonly<Record<IncidentKind, number>> = {
     house: 420,
     car: 260,
@@ -56,15 +64,18 @@ const PAY: Readonly<Record<IncidentKind, number>> = {
     pump: 380,
     bar: 260,
     pileup: 260,
+    building: 300,
 };
 // Each further fire of a call (the pumps, the rooms of a bar).
 const SPOT_PAY = 40;
 // For the whole crew, split half by water, half evenly: the pumps saved,
 // everyone out of the bar.
-const BONUS: Partial<Record<IncidentKind, number>> = { pump: 160, bar: 160 };
+const BONUS: Partial<Record<IncidentKind, number>> = { pump: 160, bar: 160, building: 200 };
 const XP = 70;
 
 export const clock = new CallClock(FIRST_FIRE_MS);
+// The kind of the last call, which the next one is not.
+let lastKind: IncidentKind | null = null;
 
 /** A pile-up's wreck already on the road (ambulance/scenes.ts), left standing when the call ends. */
 export interface PileupWreck {
@@ -86,6 +97,8 @@ export function startIncident(
             return startPumpFire(origin);
         case 'bar':
             return startBarFire();
+        case 'building':
+            return startBuildingFire(origin);
         case 'pileup':
             return wreck ? startPileupFire(wreck) : null;
         default:
@@ -252,6 +265,8 @@ function endIncident(incident: Incident, message: string | null, smokeMs = SMOKE
     }
 
     dismissArsonist(incident);
+    // Nobody can open a finished call's door from the inside: out they come.
+    evacuate(incident, smokeMs === 0);
 
     if (incident.bar) {
         bars.setClosed(incident.bar.id, false);
@@ -298,7 +313,10 @@ function complete(incident: Incident): void {
         return;
     }
 
-    if (incident.bar && incident.civilians.some((civilian) => civilian.state !== 'safe')) {
+    if (
+        (incident.bar || incident.building) &&
+        incident.civilians.some((civilian) => civilian.state !== 'safe')
+    ) {
         return;
     }
 
@@ -353,7 +371,7 @@ function complete(incident: Incident): void {
         text(
             incident.kind === 'pump'
                 ? ` saved the filling station ${incident.where}`
-                : ` got everyone out of ${incident.bar?.name}`,
+                : ` got everyone out of ${incident.bar?.name ?? incident.building?.name}`,
         ),
     ]);
 }
@@ -371,18 +389,26 @@ export function dispatch(now: number): void {
         return;
     }
 
-    // A crew on duty also gets the bigger calls: the filling station and the bar.
+    // A crew on duty also gets the bigger calls: the filling station, the
+    // bar and a building with people inside, the one they get most. The same
+    // kind of call does not come twice running while another would do.
     const anchor: Player | undefined = pick(
         crews.size ? crews.crew().map(([player]) => player) : street,
     );
     const kinds: IncidentKind[] = crews.size
-        ? ['house', 'house', 'car', 'crash', 'pump', 'bar']
+        ? ['building', 'building', 'house', 'car', 'crash', 'pump', 'bar']
         : ['house', 'house', 'car', 'crash'];
-    const kind = pick(kinds);
+    const fresh = kinds.filter((entry) => entry !== lastKind);
+    const kind = pick(fresh.length ? fresh : kinds);
     const origin = anchor?.position ?? null;
+    const started =
+        startIncident(kind, origin) ??
+        (kind === 'pump' || kind === 'bar' || kind === 'building'
+            ? startIncident('house', origin)
+            : null);
 
-    if (!startIncident(kind, origin) && (kind === 'pump' || kind === 'bar')) {
-        startIncident('house', origin);
+    if (started) {
+        lastKind = started.kind;
     }
 }
 
@@ -396,6 +422,7 @@ export function updateIncidents(now: number): void {
 
         updateCivilians(incident, now);
         updateArsonist(incident, now);
+        updateBuilding(incident, now);
 
         if (!burning(incident) && !waiting(incident) && !fleeing(incident)) {
             complete(incident);
@@ -423,10 +450,12 @@ export function updateIncidents(now: number): void {
                 fire.extinguish();
             }
 
+            const place = incident.bar?.name ?? incident.building?.name;
+
             endIncident(
                 incident,
-                incident.bar
-                    ? `the fire at ${incident.bar.name} burned itself out`
+                place
+                    ? `the fire at ${place} burned itself out`
                     : `the fire ${incident.where} burned itself out`,
             );
         }
@@ -443,6 +472,7 @@ export function endAll(): void {
 /** The mission change removed every fire, person and wreck. */
 export function forgetAll(): void {
     incidents.clear();
+    forgetBuildings();
 }
 
 events.on('fireExtinguished', (fire, info) => {
@@ -489,8 +519,8 @@ events.on('fireExtinguished', (fire, info) => {
         feed('fire', [
             ...names(crew, COLORS.red),
             text(
-                incident.bar
-                    ? ` put out the fire at ${incident.bar.name}`
+                incident.bar || incident.building
+                    ? ` put out the fire at ${incident.bar?.name ?? incident.building?.name}`
                     : ` put out the ${titleOf(incident).toLowerCase()} ${incident.where}`,
             ),
         ]);
