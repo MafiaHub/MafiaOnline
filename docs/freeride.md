@@ -1049,7 +1049,9 @@ minutes.
 Admins are listed by player record in the database; the server
 console manages them with `fr admin add|remove|list <player>`. `/car` gives
 an admin the full motor pool, or spawns a model directly with
-`/car <model.i3d>`.
+`/car <model.i3d>`. `/givemoney [player] <amount>` (or `/money`) gives a
+player cash, or the admin themself when no player is named; a negative
+amount takes it away. The player is told and the server log records it.
 
 The server clears traffic jams on its own (see `Traffic` in the
 [server scripting API](server_scripting_api.md)). `/traffic` shows the
