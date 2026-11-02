@@ -176,6 +176,18 @@ handle; `frame.id` exposes the numeric ID of an owned frame for
 The existing `Scene.createModel/createDummy` numeric APIs and
 `World.getMissionFrame(name)` snapshot remain available for older scripts.
 
+`Scene.createEffect(effect, position, direction?)` starts a stock particle
+effect at a world point on this client and returns a numeric handle, or
+`null` for an unknown effect, before mission load, or once 32 effects exist.
+`effect` is an index into the game's `tables\effects.tbl`, in
+`tables\EFFECTS.TXT` order: 90 (`dymovnice`) is the red smoke flare, 55
+(`slow_smoke`) grey smoke, 18 (`fireworks`) a firework. `direction` defaults
+to straight up. An effect that does not decay by itself emits until
+`Scene.destroyEffect(handle)`, a mission unload or the resource's stop; the
+particles already in the air then fade out on their own. Effects are drawn by
+the native particle manager (`C_ParticleManager::CreateParticle` with no
+parent frame) and never replicate, so every client starts its own.
+
 `Scene.projectWorld(position, checkOcclusion?)` returns screen pixel
 coordinates and explicit `onScreen`, `occluded`, and `visible` flags, or
 `null` before a camera exists. With `checkOcclusion: true`, the visibility

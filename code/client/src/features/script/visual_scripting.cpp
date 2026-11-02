@@ -14,6 +14,7 @@
 #include <mafia1/sdk/player/native_human.h>
 #include <mafia1/sdk/scene/native_scene.h>
 #include <mafia1/sdk/ui/native_hud.h>
+#include <mafia1/sdk/world/native_fire.h>
 
 #include <v8pp/convert.hpp>
 #include <v8pp/module.hpp>
@@ -43,6 +44,9 @@ namespace Mafia1Online::Scripting {
         constexpr size_t kMaxAnimationFilename = 59; // Retail track path uses a 64-byte buffer plus .tck and NUL.
         constexpr size_t kMaxDrawCommands = 512;
         constexpr size_t kMaxPreviews = 8;
+        constexpr size_t kMaxEffects = 32;
+        // tables\effects.tbl has 92 entries in retail; CreateParticle refuses the rest.
+        constexpr uint32_t kMaxEffectId = 1023;
         constexpr size_t kMaxTextBytes = 200;
         constexpr size_t kMaxWorldFrameNameLength = 64;
         constexpr float kMaxCoordinate = 16384.0f;
@@ -64,6 +68,17 @@ namespace Mafia1Online::Scripting {
         // Keep the model frame until the actor destructor hook can release it.
         std::unordered_map<SDK::Player::NativeActor *, NativeFrame *> gPendingHumanFrames;
         uint32_t gNextFrameId = kFirstFrameId;
+
+        // Particle effects from tables\effects.tbl, emitting at a world point
+        // until destroyed. They live in the mission's particle manager, so a
+        // closed mission takes them along and only the record is dropped.
+        struct LocalEffect {
+            int32_t guid = -1;
+            uint64_t missionGeneration = 0;
+            std::string owner;
+        };
+        std::unordered_map<uint32_t, LocalEffect> gEffects;
+        uint32_t gNextEffectId = 1;
 
         enum class DrawKind { Rectangle, Line, Circle, Text };
         struct DrawCommand {
@@ -137,7 +152,17 @@ namespace Mafia1Online::Scripting {
             entry.scene->DeleteFrame(entry.frame);
             entry.frame->Release();
         }
+        void ReleaseEffect(const LocalEffect &entry) {
+            if (SDK::Core::Mission::Get() && entry.missionGeneration == GetWorld().LoadedMissionGeneration()) {
+                SDK::World::Fire::DestroyParticle(entry.guid);
+            }
+        }
         void CleanupResource(const std::string &owner) {
+            for (auto it = gEffects.begin(); it != gEffects.end();) {
+                if (it->second.owner != owner) { ++it; continue; }
+                ReleaseEffect(it->second);
+                it = gEffects.erase(it);
+            }
             std::erase_if(gDrawCommands, [&owner](const DrawCommand &command) { return command.owner == owner; });
             std::erase_if(gPreviewCommands, [&owner](const PreviewCommand &command) { return command.owner == owner; });
             for (auto it = gPreviews.begin(); it != gPreviews.end();) {
@@ -540,6 +565,45 @@ namespace Mafia1Online::Scripting {
             }
             const uint32_t id = CreateFrame(nullptr, Owner(info.GetIsolate()));
             info.GetReturnValue().Set(id ? v8::Integer::NewFromUnsigned(info.GetIsolate(), id).As<v8::Value>() : v8::Null(info.GetIsolate()).As<v8::Value>());
+        }
+        void JS_CreateEffect(const v8::FunctionCallbackInfo<v8::Value> &info) {
+            glm::vec3 position {};
+            glm::vec3 direction {0.0f, 1.0f, 0.0f};
+            if (info.Length() < 2 || info.Length() > 3 || !info[0]->IsUint32() || info[0].As<v8::Uint32>()->Value() > kMaxEffectId ||
+                !ReadVector(info.GetIsolate(), info[1], position) ||
+                (info.Length() == 3 && !info[2]->IsUndefined() && !ReadVector(info.GetIsolate(), info[2], direction))) {
+                Args::Throw(info.GetIsolate(), "Scene.createEffect(effect, position, direction?) expects an effects.tbl index and world vectors");
+                return;
+            }
+            const auto owner = Owner(info.GetIsolate());
+            if (!Scene() || !SDK::Core::Mission::Get() || owner.empty() || gEffects.size() >= kMaxEffects) {
+                info.GetReturnValue().SetNull();
+                return;
+            }
+            const int32_t guid = SDK::World::Fire::CreateParticle(static_cast<int32_t>(info[0].As<v8::Uint32>()->Value()), {position.x, position.y, position.z},
+                                                                  {direction.x, direction.y, direction.z}, nullptr);
+            if (guid < 0) {
+                info.GetReturnValue().SetNull();
+                return;
+            }
+            const uint32_t id = gNextEffectId++;
+            gEffects.emplace(id, LocalEffect {guid, GetWorld().LoadedMissionGeneration(), owner});
+            info.GetReturnValue().Set(v8::Integer::NewFromUnsigned(info.GetIsolate(), id));
+        }
+        void JS_DestroyEffect(const v8::FunctionCallbackInfo<v8::Value> &info) {
+            uint32_t id = 0;
+            if (info.Length() != 1 || !ReadId(info[0], id)) {
+                Args::Throw(info.GetIsolate(), "Scene.destroyEffect(handle) expects an effect handle");
+                return;
+            }
+            const auto found = gEffects.find(id);
+            if (found == gEffects.end() || found->second.owner != Owner(info.GetIsolate())) {
+                info.GetReturnValue().Set(false);
+                return;
+            }
+            ReleaseEffect(found->second);
+            gEffects.erase(found);
+            info.GetReturnValue().Set(true);
         }
         uint32_t CreateHumanFrame(const std::string &model, const glm::vec3 &position, glm::vec3 direction, bool solid, const std::string &owner) {
             direction.y = 0.0f;
@@ -1244,6 +1308,8 @@ namespace Mafia1Online::Scripting {
     }
 
     void ResetLocalVisuals() {
+        for (const auto &[id, effect] : gEffects) ReleaseEffect(effect);
+        gEffects.clear();
         gDrawCommands.clear();
         gPreviewCommands.clear();
         for (auto &[id, preview] : gPreviews) ReleasePreview(preview);
@@ -1317,6 +1383,9 @@ namespace Mafia1Online::Scripting {
         scene.function("canUseHumanModel", &JS_CanUseHumanModel, docs("boolean", {param("filename", "string", false, "Bare stock human .i3d filename.")},
             "Checks that the stock model loads and has the complete skeleton required by native human collision and animation.", "False for a missing or non-human model, or before mission load."));
         scene.function("createDummy", &JS_CreateDummy, docs("number | null", {}, "Creates a local dummy frame; it has no mesh or collision."));
+        scene.function("createEffect", &JS_CreateEffect, docs("number | null", {param("effect", "number", false, "Index into the game's tables\\effects.tbl; 90 is the red smoke flare (dymovnice)."), param("position", "Vector3 | { x: number; y: number; z: number }"), param("direction", "Vector3 | { x: number; y: number; z: number }", true, "Emission direction; defaults to straight up.")},
+            "Starts a stock particle effect at a world point on this client only. Continuous effects emit until destroyEffect, mission unload or resource stop. Returns null for an unknown effect, before mission load, or once 32 effects exist."));
+        scene.function("destroyEffect", &JS_DestroyEffect, docs("boolean", {param("handle", "number")}, "Stops a particle effect this resource started; particles already emitted fade out on their own."));
         scene.function("createModelFrame", &JS_CreateModelFrame, docs("Frame | null", {param("filename", "string")}, "Loads a stock .i3d as a local model and returns a live Frame object."));
         scene.function("createDummyFrame", &JS_CreateDummyFrame, docs("Frame | null", {}, "Creates an invisible local dummy and returns a live Frame object."));
         scene.function("createHumanFrame", &JS_CreateHumanFrame, docs("Frame | null", {param("model", "string"), param("position", "Vector3 | { x: number; y: number; z: number }"), param("direction", "Vector3 | { x: number; y: number; z: number }", true), param("solid", "boolean", true, "Native collision on this client; defaults to false.")},

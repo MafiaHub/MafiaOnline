@@ -1047,6 +1047,18 @@ declare global {
     createDummy(): number | null;
 
     /**
+     * Starts a stock particle effect at a world point on this client only. Continuous effects emit until destroyEffect, mission unload or resource stop. Returns null for an unknown effect, before mission load, or once 32 effects exist.
+     * @param effect Index into the game's tables\effects.tbl; 90 is the red smoke flare (dymovnice).
+     * @param direction Emission direction; defaults to straight up.
+     */
+    createEffect(effect: number, position: Vector3 | { x: number; y: number; z: number }, direction?: Vector3 | { x: number; y: number; z: number }): number | null;
+
+    /**
+     * Stops a particle effect this resource started; particles already emitted fade out on their own.
+     */
+    destroyEffect(handle: number): boolean;
+
+    /**
      * Loads a stock .i3d as a local model and returns a live Frame object.
      */
     createModelFrame(filename: string): Frame | null;
