@@ -3970,12 +3970,12 @@ action("fr", "save", () => {
   writeNow();
   info("Player records saved");
 });
-action("fr", "money", ([who, dollars]) => {
-  if (who === void 0 || dollars === void 0) {
+action("fr", "money", ([who, dollars2]) => {
+  if (who === void 0 || dollars2 === void 0) {
     return false;
   }
   const target2 = findPlayer(who);
-  const amount = Number(dollars);
+  const amount = Number(dollars2);
   if (target2 && Number.isInteger(amount) && target2.giveMoney(amount)) {
     info(`${target2.nickname} now has ${formatMoney(target2.money)}`);
   } else {
@@ -4019,6 +4019,64 @@ action("fr", "say", (words) => {
   toastAll(words.join(" "), { title: "City Hall", tone: "gold", seconds: 8 });
   return true;
 });
+
+// src/server/main/admin.ts
+function dollars(text2) {
+  const cleaned = (text2 ?? "").replace(/[$,_]/g, "");
+  return /^[+-]?\d+$/.test(cleaned) ? Number(cleaned) : null;
+}
+register(
+  {
+    name: "givemoney",
+    aliases: ["money"],
+    usage: "/givemoney [player] <amount>",
+    help: "Admins: give a player money; a negative amount takes it.",
+    category: "Dev",
+    hidden: true
+  },
+  (player, args) => {
+    if (!isAdmin(player)) {
+      toast(player, "Only server admins can hand out money.", { tone: "bad" });
+      return;
+    }
+    const amount = dollars(args.at(-1));
+    const who = args.slice(0, -1).join(" ");
+    const target2 = who ? findPlayer(who) : player;
+    if (amount === null || amount === 0) {
+      player.sendMessage(
+        "Use /givemoney [player] <amount>, e.g. /givemoney Tommy 5000",
+        14273972
+      );
+      return;
+    }
+    if (!target2) {
+      toast(player, `No player named "${who}" is in town.`, { tone: "bad" });
+      return;
+    }
+    if (!target2.giveMoney(amount)) {
+      toast(
+        player,
+        amount < 0 ? `${target2.nickname} has only ${formatMoney(target2.money)}.` : "That would take them past the maximum balance.",
+        { tone: "bad" }
+      );
+      return;
+    }
+    const change2 = `${amount < 0 ? "-" : "+"}${formatMoney(Math.abs(amount))}`;
+    info(
+      `${player.nickname} gave ${target2.nickname} ${change2}; balance ${formatMoney(target2.money)}`
+    );
+    toast(player, `${target2.nickname}: ${change2}, now ${formatMoney(target2.money)}.`, {
+      tone: "good"
+    });
+    if (target2.id !== player.id) {
+      toast(
+        target2,
+        amount > 0 ? `An admin gave you ${formatMoney(amount)}.` : `An admin took ${formatMoney(-amount)} from you.`,
+        { tone: amount > 0 ? "good" : "bad" }
+      );
+    }
+  }
+);
 
 // src/server/lib/flyover.ts
 var zlib = __toESM(require("node:zlib"), 1);
@@ -6850,6 +6908,8 @@ function routeMarkers(race, racer) {
       label: last ? "FINISH" : `CHECKPOINT ${index + 1}/${cps.length}`,
       color: index === racer.cp ? last ? COLORS.green : COLORS.gold : COLORS.muted,
       beacon: true,
+      // The red flare rises from the one to drive to.
+      smoke: index === racer.cp,
       primary: index === racer.cp
     });
   }
@@ -6878,27 +6938,42 @@ function closeRace(race) {
 
 // src/server/races/lobby.ts
 var LOBBY_MS = 45e3;
+var GATHER_MS = 3 * 6e4;
 var COUNTDOWN_MS = 4e3;
 var START_REACH = 150;
 var MAX_RACES = 3;
 var CIRCUIT_CAR = "speedster00.i3d";
 var nextRaceId = 1;
-function lobbyCard(race, racer) {
+function atStartLine(race, racer) {
+  if (race.route.circuit) {
+    return true;
+  }
+  const car = racer.player.getSeat() === 0 ? racer.player.getVehicle() : null;
+  return playable(racer.player) && car !== null && car.terminalState === 0 && distance(car.position, race.route.start) <= START_REACH;
+}
+function startDeadline(race) {
+  return race.route.circuit ? race.lobbyEndsAt : race.lobbyEndsAt + GATHER_MS;
+}
+function gathering(race, now = Date.now()) {
+  return race.phase === "lobby" && !race.route.circuit && now >= race.lobbyEndsAt;
+}
+function lobbyCard(race, racer, arrived, now) {
   const { route } = race;
   const circuit = Boolean(route.circuit);
-  const car = racer.player.getVehicle();
   const seated2 = racer.player.getSeat() === 0;
-  const atStart = circuit || seated2 && car !== null && distance(car.position, route.start) <= START_REACH;
-  const you = circuit ? "You will be put on the grid" : atStart ? "At the start line" : seated2 ? "Drive to the start" : "Get a car (/garage)";
+  const atStart = atStartLine(race, racer);
+  const you = circuit ? "You will be put on the grid" : atStart ? "At the start line" : seated2 ? "Drive to the red smoke" : "Get a car (/garage)";
+  const waiting2 = gathering(race, now);
+  const timing = waiting2 ? ["Starts by", formatMinutes(startDeadline(race) - now)] : [circuit ? "Starts in" : "Entries close", formatMinutes(race.lobbyEndsAt - now)];
   card(racer.player, "race", {
     title: route.name,
     subtitle: circuit ? `Circuit · ${plural(route.laps ?? 1, "lap")} · ${lengthText(route)}` : `Street race · ${lengthText(route)} · ${route.checkpoints.length} checkpoints`,
     rows: [
-      ["Starts in", formatMinutes(race.lobbyEndsAt - Date.now())],
-      ["Racers", String(race.racers.size)],
+      timing,
+      circuit ? ["Racers", String(race.racers.size)] : ["At the start", `${arrived} of ${race.racers.size}`],
       ["You", you]
     ],
-    progress: Math.max(0, (race.lobbyEndsAt - Date.now()) / race.lobbyMs),
+    progress: waiting2 ? Math.max(0, (startDeadline(race) - now) / GATHER_MS) : Math.max(0, (race.lobbyEndsAt - now) / race.lobbyMs),
     tone: atStart ? "good" : "gold"
   });
 }
@@ -6924,8 +6999,8 @@ function join2(race, player) {
     returnTo: null,
     raceCarId: null
   });
-  const startsIn = formatMinutes(race.lobbyEndsAt - Date.now());
   if (race.route.circuit) {
+    const startsIn = formatMinutes(race.lobbyEndsAt - Date.now());
     toast(player, `You're in. A race car will be waiting for you on the grid in ${startsIn}.`, {
       title: race.route.name,
       tone: "gold"
@@ -6939,13 +7014,15 @@ function join2(race, player) {
         label: "START LINE",
         color: COLORS.gold,
         beacon: true,
+        smoke: true,
         primary: true
       }
     ]);
-    toast(player, `You're in. Be at the start line in a car within ${startsIn}.`, {
-      title: race.route.name,
-      tone: "gold"
-    });
+    toast(
+      player,
+      "You're in. Follow the compass to the red smoke at the start line; the race waits there until every racer has arrived.",
+      { title: race.route.name, tone: "gold", seconds: 8 }
+    );
   }
   for (const other of racerList(race)) {
     if (other.player.id !== player.id) {
@@ -6988,6 +7065,7 @@ function openRace(host, route, options = {}) {
     startedAt: 0,
     firstFinishAt: 0,
     lastStateAt: 0,
+    gatherAnnounced: false,
     entrants: 0,
     onConclude: options.onConclude ?? null
   };
@@ -7048,12 +7126,11 @@ function readyRacers(race) {
       ready2.push(racer);
       continue;
     }
-    const car = player.getSeat() === 0 ? player.getVehicle() : null;
-    if (!playable(player) || !car || car.terminalState !== 0 || distance(car.position, race.route.start) > START_REACH) {
+    if (!atStartLine(race, racer)) {
       leaveRace(
         race,
         racer,
-        "You were not at the start line in a car. The race went without you."
+        "You did not make it to the start line in a car. The race went without you."
       );
       continue;
     }
@@ -7107,24 +7184,38 @@ function takenAway(racer) {
   const kind = activity(racer.player)?.kind;
   return kind !== void 0 && kind !== "race" && kind !== "race-lobby";
 }
+function entriesClosed(race, waitingFor) {
+  const message = waitingFor ? `Entries are closed. The race waits at the start line for ${plural(waitingFor, "racer")} still on the way, ${formatMinutes(GATHER_MS)} at most.` : "Entries are closed. Everyone is at the start line.";
+  for (const racer of racerList(race)) {
+    toast(racer.player, message, { title: race.route.name, tone: "gold" });
+  }
+}
 function tickLobby(race, now) {
   for (const racer of racerList(race)) {
     if (takenAway(racer)) {
       leaveRace(race, racer, null);
-      continue;
-    }
-    if (!playable(racer.player)) {
-      continue;
-    }
-    if (now - race.lastStateAt >= 1e3) {
-      lobbyCard(race, racer);
     }
   }
+  const racers = racerList(race);
+  const arrived = racers.filter((racer) => atStartLine(race, racer)).length;
   if (now - race.lastStateAt >= 1e3) {
     race.lastStateAt = now;
+    for (const racer of racers) {
+      if (playable(racer.player)) {
+        lobbyCard(race, racer, arrived, now);
+      }
+    }
   }
-  if (now >= race.lobbyEndsAt) {
+  if (now < race.lobbyEndsAt) {
+    return;
+  }
+  if (arrived === racers.length || now >= startDeadline(race)) {
     startCountdown(race);
+    return;
+  }
+  if (!race.gatherAnnounced) {
+    race.gatherAnnounced = true;
+    entriesClosed(race, racers.length - arrived);
   }
 }
 
@@ -7634,7 +7725,13 @@ provide("races", (player) => {
       host: race.host,
       phase: race.phase,
       racers: racerList(race).map((racer) => racer.player.nickname),
-      secondsLeft: Math.max(0, Math.ceil((race.lobbyEndsAt - Date.now()) / 1e3)),
+      secondsLeft: Math.max(
+        0,
+        Math.ceil(
+          ((gathering(race) ? startDeadline(race) : race.lobbyEndsAt) - Date.now()) / 1e3
+        )
+      ),
+      gathering: gathering(race),
       joined: race.racers.has(player.id)
     })),
     recording: recording2 ? { name: recording2.name, checkpoints: recording2.checkpoints.length } : null
@@ -7698,9 +7795,18 @@ var CHAMPION_XP = 400;
 var ROUND_LOBBY_MS = 6e4;
 var BREAK_MS = 45e3;
 var RETRY_MS2 = 15e3;
+var AUTO_FIRST_MS = 15 * 6e4;
+var AUTO_EVERY_MS = 45 * 6e4;
+var AUTO_NOTICE_MS = 2 * 6e4;
+var AUTO_RETRY_MS = 5 * 6e4;
+var AUTO_MIN_PLAYERS = 2;
+var AUTO_CHECK_MS = 1e4;
+var CIRCUIT_BLIPS = "autodrom";
 var season = null;
 var champions = [];
 var nextRound = new Delay();
+var autoStart = new Delay();
+var nextAutoAt = 0;
 function load5() {
   champions = load("championship")?.champions ?? [];
 }
@@ -7785,6 +7891,7 @@ function scoreRound(finishers) {
 }
 function finishSeason(ended, table2) {
   season = null;
+  nextAutoAt = Date.now() + AUTO_EVERY_MS;
   if (!table2.length) {
     toastAll("The championship ends with nobody across the line.", {
       title: "Autodrom Championship"
@@ -7825,6 +7932,76 @@ function finishSeason(ended, table2) {
   });
   feed("record", [text(table2[0].name, COLORS.gold), text(" won the Autodrom Championship")]);
 }
+function begin2(startedBy) {
+  if (season) {
+    return "A championship is already under way. /championship shows the standings.";
+  }
+  const map = current();
+  if (!map?.circuit) {
+    return "There is no official circuit on this map. Vote for Lost Heaven Extended with /map.";
+  }
+  autoStart.cancel();
+  nextAutoAt = Date.now() + AUTO_EVERY_MS;
+  season = {
+    map: map.id,
+    round: 0,
+    points: /* @__PURE__ */ new Map(),
+    raceId: null,
+    startedBy
+  };
+  openRound();
+  return null;
+}
+function townsfolk() {
+  return World.getPlayers().filter((player) => player.spawned).length;
+}
+function tickAuto() {
+  const now = Date.now();
+  if (!hasCircuit(current())) {
+    nextAutoAt = 0;
+    autoStart.cancel();
+    return;
+  }
+  if (season || autoStart.pending) {
+    return;
+  }
+  if (!nextAutoAt) {
+    nextAutoAt = now + AUTO_FIRST_MS;
+  }
+  if (now < nextAutoAt) {
+    return;
+  }
+  if (townsfolk() < AUTO_MIN_PLAYERS) {
+    nextAutoAt = now + AUTO_RETRY_MS;
+    return;
+  }
+  nextAutoAt = now + AUTO_NOTICE_MS;
+  toastAll(
+    `The Autodrom Championship starts in ${formatMinutes(AUTO_NOTICE_MS)}: three rounds on the official circuit, a race car for everyone. Join with /race join or F2 -> Races.`,
+    { title: "Autodrom Championship", tone: "gold", seconds: 10 }
+  );
+  feed("race", [text("The Autodrom Championship", COLORS.gold), text(" starts soon")]);
+  autoStart.start(AUTO_NOTICE_MS, () => {
+    if (begin2("City Hall") === null) {
+      feed("race", [text("The Autodrom Championship", COLORS.gold), text(" has begun")]);
+    }
+  });
+}
+function circuitBlips() {
+  const map = current();
+  if (!hasCircuit(map)) {
+    return [];
+  }
+  return [
+    {
+      id: "circuit",
+      position: map.circuit.grid[0],
+      color: COLORS.gold,
+      range: 1,
+      map: { icon: "triangle", label: "Autodrom", size: 6 }
+    }
+  ];
+}
 register(
   {
     name: "championship",
@@ -7836,32 +8013,15 @@ register(
   (player, args) => {
     const action2 = (args[0] ?? "status").toLowerCase();
     if (action2 === "start") {
-      if (season) {
-        toast(
-          player,
-          "A championship is already under way. /championship shows the standings.",
-          { tone: "bad" }
-        );
-        return;
+      const problem = begin2(player.nickname);
+      if (problem) {
+        toast(player, problem, { tone: "bad" });
+      } else {
+        feed("race", [
+          name(player, COLORS.gold),
+          text(" started an Autodrom Championship")
+        ]);
       }
-      const map = current();
-      if (!map?.circuit) {
-        toast(
-          player,
-          "There is no official circuit on this map. Vote for Lost Heaven Extended with /map.",
-          { tone: "bad" }
-        );
-        return;
-      }
-      season = {
-        map: map.id,
-        round: 0,
-        points: /* @__PURE__ */ new Map(),
-        raceId: null,
-        startedBy: player.nickname
-      };
-      feed("race", [name(player, COLORS.gold), text(" started an Autodrom Championship")]);
-      openRound();
       return;
     }
     const table2 = standings().map((entry2, index) => `${index + 1}. ${entry2.name} ${entry2.points}`).join(" · ");
@@ -7873,6 +8033,9 @@ register(
 );
 provide("championship", () => ({
   available: Boolean(current()?.circuit),
+  // Where the circuit is, for a map without one.
+  circuitMap: Object.values(MAPS).find((map) => map.circuit)?.id ?? null,
+  nextInSeconds: !season && nextAutoAt ? Math.max(0, Math.ceil((nextAutoAt - Date.now()) / 1e3)) : null,
   running: season ? {
     round: Math.min(season.round + 1, ROUNDS.length),
     rounds: ROUNDS.length,
@@ -7882,7 +8045,12 @@ provide("championship", () => ({
   champions: champions.slice(0, 5)
 }));
 load5();
+every(AUTO_CHECK_MS, tickAuto);
+onStart(() => markersAll(CIRCUIT_BLIPS, circuitBlips()));
+events.on("playerSpawn", (player) => markers(player, CIRCUIT_BLIPS, circuitBlips()));
 onMissionChange(() => {
+  nextAutoAt = 0;
+  autoStart.cancel();
   if (!season) {
     return;
   }
@@ -8374,7 +8542,7 @@ function newSide(player) {
     spot: { position: plain(player.position), heading: headingOf(player.rotation) }
   };
 }
-function begin2(challenger, target2, firstTo, stake, kit) {
+function begin3(challenger, target2, firstTo, stake, kit) {
   for (const [player, other] of [
     [challenger, target2],
     [target2, challenger]
@@ -8583,7 +8751,7 @@ register(
         from: player,
         summary: `Duel · first to ${firstTo} · ${label2}${each ? ` · ${each}` : ""}`,
         text: `${player.nickname} challenges you to a duel: first to ${firstTo}, ${label2}${each ? `, ${each}` : ""}.`,
-        accept: (accepter, challenger) => begin2(challenger, accepter, firstTo, stake, kit)
+        accept: (accepter, challenger) => begin3(challenger, accepter, firstTo, stake, kit)
       },
       `Challenge sent to ${target2.nickname}.`
     );

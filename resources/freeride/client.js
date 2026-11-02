@@ -524,8 +524,12 @@
   var BOUNTY_REFRESH_MS = 250;
   var HINT_NEAR = 15;
   var ARROW_MODEL = "sipka.i3d";
+  var SMOKE_EFFECT = 90;
+  var SMOKE_RANGE = 600;
+  var SMOKE_OFF_RANGE = 650;
   var FALLBACK_MODEL = "9money.i3d";
   var groups = /* @__PURE__ */ new Map();
+  var smokes = /* @__PURE__ */ new Map();
   var models = /* @__PURE__ */ new Map();
   var blips = /* @__PURE__ */ new Map();
   var blipsSyncedAt = 0;
@@ -557,6 +561,31 @@
       }
       record.frame?.destroy();
       models.delete(key);
+    }
+  }
+  function samePoint(a, b) {
+    return a.x === b.x && a.y === b.y && a.z === b.z;
+  }
+  function putOut(key) {
+    const record = smokes.get(key);
+    if (record?.handle !== null && record?.handle !== void 0) {
+      Scene.destroyEffect(record.handle);
+    }
+    smokes.delete(key);
+  }
+  function keepSmoke(key, position, now) {
+    let record = smokes.get(key);
+    if (record && !samePoint(record.position, position)) {
+      putOut(key);
+      record = void 0;
+    }
+    if (!record) {
+      record = { handle: null, position: { ...position }, nextAttempt: 0 };
+      smokes.set(key, record);
+    }
+    if (record.handle === null && now >= record.nextAttempt) {
+      record.nextAttempt = now + MODEL_RETRY_MS;
+      record.handle = Scene.createEffect(SMOKE_EFFECT, position);
     }
   }
   function drawBeacon(base, color, distance2) {
@@ -679,6 +708,7 @@
     record.frame.setRotation({ w: Math.cos(spin / 2), x: 0, y: Math.sin(spin / 2), z: 0 });
   }
   function drawItems(eye, now) {
+    const lit = /* @__PURE__ */ new Set();
     for (const [group, items] of groups) {
       for (const item of items) {
         const position = itemPosition(item);
@@ -686,6 +716,13 @@
           continue;
         }
         const distance2 = flatDistance(eye, position);
+        if (item.smoke && !item.vehicleId) {
+          const key2 = itemKey(group, item);
+          if (distance2 <= (smokes.has(key2) ? SMOKE_OFF_RANGE : SMOKE_RANGE)) {
+            keepSmoke(key2, position, now);
+            lit.add(key2);
+          }
+        }
         if (item.range && distance2 > item.range) {
           if (item.model) {
             hideModel(group, item);
@@ -737,6 +774,11 @@
           alpha,
           item.primary ? 17 : 14
         );
+      }
+    }
+    for (const key of [...smokes.keys()]) {
+      if (!lit.has(key)) {
+        putOut(key);
       }
     }
   }
@@ -875,12 +917,16 @@
   events.on("missionUnload", () => {
     groups.clear();
     models.clear();
+    smokes.clear();
     labelSight.clear();
     bounties = [];
     blips.clear();
   });
   onStop(() => {
     releaseModels(null);
+    for (const key of [...smokes.keys()]) {
+      putOut(key);
+    }
     groups.clear();
   });
   events.on("render", () => {
