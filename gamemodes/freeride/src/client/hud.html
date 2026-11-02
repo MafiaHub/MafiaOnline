@@ -694,20 +694,36 @@
           : empty("No doors are open yet. Look for the arrows by building entrances.")));
     }
 
+    // On a map without the circuit it offers a vote for the one that has it.
+    function championshipPanel(data) {
+      const champ = data.championship;
+      if (!champ) return null;
+      const last = (champ.champions ?? []).length ? el("p", {}, `Last champion: ${champ.champions[0].name} (${champ.champions[0].points} pts)`) : null;
+      if (!champ.available) {
+        const map = (data.maps?.maps ?? []).find((entry) => entry.id === champ.circuitMap);
+        return map ? panel("Autodrom Championship", [
+          el("p", {}, `The official race circuit is on ${map.title}. Three rounds in identical race cars; the top three share $5,250.`), last,
+          map.available ? button(map.yours ? `You voted for ${map.title}` : `Vote for ${map.title}`, `/map ${map.id}`, !map.yours) : el("p", {}, "That map is not installed on this server.")]) : null;
+      }
+      if (champ.running) {
+        return panel("Autodrom Championship", [el("p", {class: "big"}, `${champ.running.name}`), el("p", {}, `Round ${champ.running.round} of ${champ.running.rounds}. Join each round with the race lobby; a race car waits on the grid.`),
+          el("div", {class: "lb"}, el("ol", {}, champ.running.standings.map((row) => el("li", {}, el("span", {}, row.name), el("b", {}, `${row.points} pts`)))))]);
+      }
+      return panel("Autodrom Championship", [
+        el("p", {}, "Three rounds on the official circuit (the triangle on the map): a sprint, a feature and a grand prix, in identical race cars. Every finish scores; the top three share $5,250."),
+        champ.nextInSeconds !== null ? el("p", {}, `The next one starts by itself in about ${minutes(champ.nextInSeconds)}.`) : null, last,
+        button("Start a championship now", "/championship start", true)]);
+    }
+
     function racesPage(data) {
       const races = data.races ?? {routes: [], races: []};
       const inRace = races.races.some((race) => race.joined);
       return el("div", {class: "grid"},
+        championshipPanel(data),
         panel("Live", races.races.length ? races.races.map((race) => line(race.route,
           race.phase === "lobby" ? `${race.gathering ? "At the start line" : "Lobby"} · ${race.racers.join(", ")} · ${race.secondsLeft} s` : `Running · ${race.racers.join(", ")}`,
           race.phase === "lobby" ? (race.joined ? button("Leave", "/race leave") : button("Join", `/race join ${race.id}`, true, inRace)) : null))
           : empty("No race on the streets right now. Pick a route and open one; everyone in town is invited.")),
-        data.championship?.available ? panel("Autodrom Championship", data.championship.running
-          ? [el("p", {class: "big"}, `${data.championship.running.name}`), el("p", {}, `Round ${data.championship.running.round} of ${data.championship.running.rounds}. Join each round with the race lobby; a race car waits on the grid.`),
-            el("div", {class: "lb"}, el("ol", {}, data.championship.running.standings.map((row) => el("li", {}, el("span", {}, row.name), el("b", {}, `${row.points} pts`)))))]
-          : [el("p", {}, "Three rounds on the official circuit: a sprint, a feature and a grand prix. Every finish scores; the top three share $5,250."),
-            (data.championship.champions ?? []).length ? el("p", {}, `Last champion: ${data.championship.champions[0].name} (${data.championship.champions[0].points} pts)`) : null,
-            button("Start a championship", "/championship start", true)]) : null,
         panel("Route book", races.routes.map((route) => line(
           [route.name, route.builtIn ? null : el("span", {class: "pill gold"}, "Player made")],
           `${(route.length / 1000).toFixed(1)} km · ${route.checkpoints} checkpoints${route.record ? ` · record ${clock(route.record.ms)} by ${route.record.name}` : ""}`,

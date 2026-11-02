@@ -280,6 +280,11 @@ every entrant on the street with a clean record is put on the grid in an
 identical Speedster, and ten seconds after leaving the race is returned to
 where they were.
 
+The circuit is a triangle on the city map. With at least two players in
+town a season starts by itself 15 minutes after the map loads and every 45
+minutes after that, announced two minutes ahead; on a map without the circuit
+F2 → Races offers a vote for Lost Heaven Extended instead.
+
 `/championship start` (or F2 → Races) runs a season of three rounds of one,
 two and three laps, with a minute to enter each round and a short break
 between them. Finishes score 25-18-15-12-10-8-6-4-2-1. After the last round

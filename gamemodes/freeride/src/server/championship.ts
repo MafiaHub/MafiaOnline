@@ -2,14 +2,27 @@
 // Extended). A season is three rounds of growing length; anyone can enter any
 // round, every finish scores points, and the standings after the last round
 // pay out and crown a champion. Champions are remembered between sessions.
+// Anyone can start a season (/championship start or F2 -> Races), and with
+// enough players in town one starts by itself every AUTO_EVERY_MS after a
+// warning. The circuit has a blip on the city map.
 import * as store from './lib/store';
 import * as maps from './lib/maps';
 import * as menu from './lib/menu';
 import * as commands from './lib/commands';
 import * as races from './races';
-import { toast, toastAll, feed, name, text, COLORS } from './lib/notify';
-import { formatMoney, formatDuration, plural } from './lib/util';
-import { onMissionChange } from './lib/lifecycle';
+import {
+    toast,
+    toastAll,
+    feed,
+    name,
+    text,
+    markers,
+    markersAll,
+    COLORS,
+    type Marker,
+} from './lib/notify';
+import { formatMoney, formatDuration, formatMinutes, plural } from './lib/util';
+import { events, every, onMissionChange, onStart } from './lib/lifecycle';
 import { reward } from './lib/rewards';
 import { Delay } from './lib/timers';
 
@@ -25,6 +38,16 @@ const CHAMPION_XP = 400;
 const ROUND_LOBBY_MS = 60_000;
 const BREAK_MS = 45_000;
 const RETRY_MS = 15_000;
+// Seasons that start themselves: the first a while after the circuit's map
+// loads, then one every AUTO_EVERY_MS, each announced AUTO_NOTICE_MS ahead.
+// Too few players in town puts it off by AUTO_RETRY_MS.
+const AUTO_FIRST_MS = 15 * 60_000;
+const AUTO_EVERY_MS = 45 * 60_000;
+const AUTO_NOTICE_MS = 2 * 60_000;
+const AUTO_RETRY_MS = 5 * 60_000;
+const AUTO_MIN_PLAYERS = 2;
+const AUTO_CHECK_MS = 10_000;
+const CIRCUIT_BLIPS = 'autodrom';
 
 interface Score {
     points: number;
@@ -62,6 +85,9 @@ interface ChampionshipDocument {
 let season: Season | null = null;
 let champions: Champion[] = [];
 const nextRound = new Delay();
+const autoStart = new Delay();
+// When the next season starts by itself; 0 until the circuit's map is loaded.
+let nextAutoAt = 0;
 
 function load(): void {
     champions = store.load<ChampionshipDocument>('championship')?.champions ?? [];
@@ -180,6 +206,7 @@ function scoreRound(finishers: readonly races.Finisher[]): void {
 
 function finishSeason(ended: Season, table: readonly Standing[]): void {
     season = null;
+    nextAutoAt = Date.now() + AUTO_EVERY_MS;
 
     if (!table.length) {
         toastAll('The championship ends with nobody across the line.', {
@@ -232,6 +259,99 @@ function finishSeason(ended: Season, table: readonly Standing[]): void {
     feed('record', [text(table[0].name, COLORS.gold), text(' won the Autodrom Championship')]);
 }
 
+// Starts a season on the loaded map; null when it cannot, with the reason.
+function begin(startedBy: string): string | null {
+    if (season) {
+        return 'A championship is already under way. /championship shows the standings.';
+    }
+
+    const map = maps.current();
+
+    if (!map?.circuit) {
+        return 'There is no official circuit on this map. Vote for Lost Heaven Extended with /map.';
+    }
+
+    autoStart.cancel();
+    nextAutoAt = Date.now() + AUTO_EVERY_MS;
+    season = {
+        map: map.id,
+        round: 0,
+        points: new Map(),
+        raceId: null,
+        startedBy,
+    };
+
+    openRound();
+
+    return null;
+}
+
+function townsfolk(): number {
+    return World.getPlayers().filter((player) => player.spawned).length;
+}
+
+function tickAuto(): void {
+    const now = Date.now();
+
+    if (!races.hasCircuit(maps.current())) {
+        nextAutoAt = 0;
+        autoStart.cancel();
+
+        return;
+    }
+
+    if (season || autoStart.pending) {
+        return;
+    }
+
+    if (!nextAutoAt) {
+        nextAutoAt = now + AUTO_FIRST_MS;
+    }
+
+    if (now < nextAutoAt) {
+        return;
+    }
+
+    if (townsfolk() < AUTO_MIN_PLAYERS) {
+        nextAutoAt = now + AUTO_RETRY_MS;
+
+        return;
+    }
+
+    nextAutoAt = now + AUTO_NOTICE_MS;
+    toastAll(
+        `The Autodrom Championship starts in ${formatMinutes(AUTO_NOTICE_MS)}: three rounds on the ` +
+            'official circuit, a race car for everyone. Join with /race join or F2 -> Races.',
+        { title: 'Autodrom Championship', tone: 'gold', seconds: 10 },
+    );
+
+    feed('race', [text('The Autodrom Championship', COLORS.gold), text(' starts soon')]);
+    autoStart.start(AUTO_NOTICE_MS, () => {
+        if (begin('City Hall') === null) {
+            feed('race', [text('The Autodrom Championship', COLORS.gold), text(' has begun')]);
+        }
+    });
+}
+
+// The circuit on the city map, for everyone on a map that has one.
+function circuitBlips(): Marker[] {
+    const map = maps.current();
+
+    if (!races.hasCircuit(map)) {
+        return [];
+    }
+
+    return [
+        {
+            id: 'circuit',
+            position: map.circuit.grid[0],
+            color: COLORS.gold,
+            range: 1,
+            map: { icon: 'triangle', label: 'Autodrom', size: 6 },
+        },
+    ];
+}
+
 commands.register(
     {
         name: 'championship',
@@ -244,38 +364,16 @@ commands.register(
         const action = (args[0] ?? 'status').toLowerCase();
 
         if (action === 'start') {
-            if (season) {
-                toast(
-                    player,
-                    'A championship is already under way. /championship shows the standings.',
-                    { tone: 'bad' },
-                );
+            const problem = begin(player.nickname);
 
-                return;
+            if (problem) {
+                toast(player, problem, { tone: 'bad' });
+            } else {
+                feed('race', [
+                    name(player, COLORS.gold),
+                    text(' started an Autodrom Championship'),
+                ]);
             }
-
-            const map = maps.current();
-
-            if (!map?.circuit) {
-                toast(
-                    player,
-                    'There is no official circuit on this map. Vote for Lost Heaven Extended with /map.',
-                    { tone: 'bad' },
-                );
-
-                return;
-            }
-
-            season = {
-                map: map.id,
-                round: 0,
-                points: new Map(),
-                raceId: null,
-                startedBy: player.nickname,
-            };
-
-            feed('race', [name(player, COLORS.gold), text(' started an Autodrom Championship')]);
-            openRound();
 
             return;
         }
@@ -296,6 +394,10 @@ commands.register(
 
 menu.provide('championship', () => ({
     available: Boolean(maps.current()?.circuit),
+    // Where the circuit is, for a map without one.
+    circuitMap: Object.values(maps.MAPS).find((map) => map.circuit)?.id ?? null,
+    nextInSeconds:
+        !season && nextAutoAt ? Math.max(0, Math.ceil((nextAutoAt - Date.now()) / 1000)) : null,
     running: season
         ? {
               round: Math.min(season.round + 1, ROUNDS.length),
@@ -308,8 +410,15 @@ menu.provide('championship', () => ({
 }));
 
 load();
+every(AUTO_CHECK_MS, tickAuto);
+onStart(() => markersAll(CIRCUIT_BLIPS, circuitBlips()));
+
+events.on('playerSpawn', (player) => markers(player, CIRCUIT_BLIPS, circuitBlips()));
 
 onMissionChange(() => {
+    nextAutoAt = 0;
+    autoStart.cancel();
+
     if (!season) {
         return;
     }
