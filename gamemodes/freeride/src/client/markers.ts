@@ -3,7 +3,8 @@
 // and blips on the city map (hold TAB) for those and for crewmates. Groups
 // come from the server; nothing drawn here can claim a reward. An item may
 // carry `range` (hidden farther away), `ring` (a ground circle of that
-// radius), `beacon`, `model`, `primary`, `near` (how close its label shows),
+// radius), `beacon`, `smoke` (the stock red smoke flare rising from it),
+// `model`, `primary`, `near` (how close its label shows),
 // `hint` (a second label line shown up close), `tile` (a ground rectangle,
 // see drawTile) and `map`: false keeps it off
 // the city map, an object sets its blip
@@ -39,6 +40,12 @@ const LABEL_SIGHT_MS = 150;
 const BOUNTY_REFRESH_MS = 250;
 const HINT_NEAR = 15;
 const ARROW_MODEL = 'sipka.i3d';
+// tables\effects.tbl entry 90, "dymovnice": the stock smoke flare, red
+// (2SMOKE4.BMP), emitting until it is stopped. Lit within SMOKE_RANGE and
+// put out a little farther, so standing on the edge does not flicker it.
+const SMOKE_EFFECT = 90;
+const SMOKE_RANGE = 600;
+const SMOKE_OFF_RANGE = 650;
 const FALLBACK_MODEL = '9money.i3d';
 
 type BlipOptions = NonNullable<Parameters<typeof CityMap.setBlip>[2]>;
@@ -56,6 +63,7 @@ interface MarkerItem {
     ring?: number;
     tile?: Tile;
     beacon?: boolean;
+    smoke?: boolean;
     model?: string;
     primary?: boolean;
     near?: number;
@@ -87,7 +95,15 @@ interface ModelRecord {
     model: string;
 }
 
+interface SmokeRecord {
+    handle: number | null;
+    position: Point;
+    nextAttempt: number;
+}
+
 const groups = new Map<string, MarkerItem[]>();
+// Group/item key -> the smoke flare lit for it.
+const smokes = new Map<string, SmokeRecord>();
 // Group/item key -> the model drawn for it.
 const models = new Map<string, ModelRecord>();
 // Blip id -> the options it was last set with, so only changes are sent.
@@ -137,6 +153,41 @@ function releaseModels(group: string | null): void {
 
         record.frame?.destroy();
         models.delete(key);
+    }
+}
+
+function samePoint(a: Point, b: Point): boolean {
+    return a.x === b.x && a.y === b.y && a.z === b.z;
+}
+
+function putOut(key: string): void {
+    const record = smokes.get(key);
+
+    if (record?.handle !== null && record?.handle !== undefined) {
+        Scene.destroyEffect(record.handle);
+    }
+
+    smokes.delete(key);
+}
+
+// Keeps a flare burning on the item while it is in reach. A refused one (the
+// client's effect cap) is tried again later.
+function keepSmoke(key: string, position: Point, now: number): void {
+    let record = smokes.get(key);
+
+    if (record && !samePoint(record.position, position)) {
+        putOut(key);
+        record = undefined;
+    }
+
+    if (!record) {
+        record = { handle: null, position: { ...position }, nextAttempt: 0 };
+        smokes.set(key, record);
+    }
+
+    if (record.handle === null && now >= record.nextAttempt) {
+        record.nextAttempt = now + MODEL_RETRY_MS;
+        record.handle = Scene.createEffect(SMOKE_EFFECT, position);
     }
 }
 
@@ -324,6 +375,8 @@ function drawModel(key: string, model: string, position: Point, now: number): vo
 }
 
 function drawItems(eye: Point, now: number): void {
+    const lit = new Set<string>();
+
     for (const [group, items] of groups) {
         for (const item of items) {
             const position = itemPosition(item);
@@ -333,6 +386,15 @@ function drawItems(eye: Point, now: number): void {
             }
 
             const distance = flatDistance(eye, position);
+
+            if (item.smoke && !item.vehicleId) {
+                const key = itemKey(group, item);
+
+                if (distance <= (smokes.has(key) ? SMOKE_OFF_RANGE : SMOKE_RANGE)) {
+                    keepSmoke(key, position, now);
+                    lit.add(key);
+                }
+            }
 
             if (item.range && distance > item.range) {
                 if (item.model) {
@@ -408,6 +470,13 @@ function drawItems(eye: Point, now: number): void {
                 alpha,
                 item.primary ? 17 : 14,
             );
+        }
+    }
+
+    // Flares whose item went, moved out of reach or lost its smoke.
+    for (const key of [...smokes.keys()]) {
+        if (!lit.has(key)) {
+            putOut(key);
         }
     }
 }
@@ -598,6 +667,8 @@ onServer<MarkerGroup>('fr:markers', (request) => {
 events.on('missionUnload', () => {
     groups.clear();
     models.clear();
+    // The mission's particles went with it.
+    smokes.clear();
     labelSight.clear();
     bounties = [];
     // The mission's blips went with it.
@@ -606,6 +677,11 @@ events.on('missionUnload', () => {
 
 onStop(() => {
     releaseModels(null);
+
+    for (const key of [...smokes.keys()]) {
+        putOut(key);
+    }
+
     groups.clear();
 });
 

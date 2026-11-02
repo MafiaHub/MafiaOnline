@@ -13,7 +13,7 @@ import { playable, emit, pick, formatDuration } from '../lib/util';
 import { events, every, onMissionChange, onStart, onStop } from '../lib/lifecycle';
 import { allRoutes, findRoute, lengthText, load, recordOf, type Route } from './routes';
 import { races, raceOf, openLobby, racerList, leaveRace, closeRace } from './race';
-import { join, openRace, tickLobby } from './lobby';
+import { gathering, join, openRace, startDeadline, tickLobby } from './lobby';
 import { tickCountdown, tickRunning } from './run';
 import {
     checkpoint,
@@ -149,7 +149,14 @@ menu.provide('races', (player) => {
             host: race.host,
             phase: race.phase,
             racers: racerList(race).map((racer) => racer.player.nickname),
-            secondsLeft: Math.max(0, Math.ceil((race.lobbyEndsAt - Date.now()) / 1000)),
+            secondsLeft: Math.max(
+                0,
+                Math.ceil(
+                    ((gathering(race) ? startDeadline(race) : race.lobbyEndsAt) - Date.now()) /
+                        1000,
+                ),
+            ),
+            gathering: gathering(race),
             joined: race.racers.has(player.id),
         })),
         recording: recording

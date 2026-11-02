@@ -228,14 +228,19 @@ the player list and the world labels on every client read them from there.
 
 ## Street races
 
-`/race` (or F2 → Races) opens a lobby on a route. Everyone in town is invited;
-racers have 45 seconds to reach the start line as a driver (`/garage` works
-in the lobby). The server then puts every car on a starting grid with
-`Vehicle.setTransform`, repairs it, holds it there through the countdown and
-releases all cars on the same tick. It checks each checkpoint against the
+`/race` (or F2 → Races) opens a lobby on a route. Everyone in town is invited
+and has 45 seconds to enter. Entrants drive to the start line, marked by the
+compass, a city-map blip and a red smoke flare (`/garage` works in the
+lobby). Once entries close the race waits there until every entrant is at
+the start line in the driver's seat, for three minutes at most; whoever has
+not arrived by then is left behind. The server then puts every car on a
+starting grid with `Vehicle.setTransform`, repairs it, holds it there through
+the countdown and releases all cars on the same tick. It checks each checkpoint against the
 car's replicated position, ranks the field live and sends each racer their
 place, time and standings. Checkpoints appear as beacons, labels and the
-compass. Up to three races and twelve racers per race can run at once.
+compass, and the next one has a red smoke flare rising from it (the stock
+`dymovnice` effect, `Scene.createEffect`). Up to three races and twelve
+racers per race can run at once.
 
 The pool is $100 + $120 per entrant, split 60/25/15 among the podium. A solo
 run on a built-in route pays $120, at most once every five minutes. Every

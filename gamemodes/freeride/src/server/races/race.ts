@@ -42,11 +42,14 @@ export interface Race {
     /** By player id. */
     racers: Map<number, Racer>;
     lobbyMs: number;
+    /** When entries close; a street race then waits at the start line (lobby.ts). */
     lobbyEndsAt: number;
     /** When the lights go green (set at the countdown). */
     startedAt: number;
     firstFinishAt: number;
     lastStateAt: number;
+    /** Whether the racers were told entries closed and the race waits for them. */
+    gatherAnnounced: boolean;
     /** How many took the start. */
     entrants: number;
     onConclude: ConcludeHandler | null;
@@ -121,6 +124,8 @@ export function routeMarkers(race: Race, racer: Racer): void {
             label: last ? 'FINISH' : `CHECKPOINT ${index + 1}/${cps.length}`,
             color: index === racer.cp ? (last ? COLORS.green : COLORS.gold) : COLORS.muted,
             beacon: true,
+            // The red flare rises from the one to drive to.
+            smoke: index === racer.cp,
             primary: index === racer.cp,
         });
     }

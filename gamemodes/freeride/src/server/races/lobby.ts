@@ -1,6 +1,8 @@
 // Before the start: the lobby everyone in the city is invited to, and the
-// starting grid. Street racers drive to the start line; circuit racers are
-// put on the grid in identical cars, wherever they were.
+// starting grid. Street racers drive to the start line, which the compass,
+// the city map and a red smoke flare point them to; once entries close the
+// race waits there until every entrant has arrived, or GATHER_MS at most.
+// Circuit racers are put on the grid in identical cars, wherever they were.
 import * as life from '../lib/life';
 import * as log from '../lib/log';
 import { toast, card, compass, markers, feed, name, text, COLORS } from '../lib/notify';
@@ -31,6 +33,9 @@ import {
 } from './race';
 
 const LOBBY_MS = 45_000;
+// After entries close, the longest a street race waits for its racers at the
+// start line; those still missing then are left behind.
+const GATHER_MS = 3 * 60_000;
 
 export const COUNTDOWN_MS = 4_000;
 export const START_REACH = 150;
@@ -50,20 +55,49 @@ export interface RaceOptions {
 
 let nextRaceId = 1;
 
-function lobbyCard(race: Race, racer: Racer): void {
+// A circuit puts everyone on the grid; a street racer is ready in the
+// driver's seat of a working car at the start line.
+function atStartLine(race: Race, racer: Racer): boolean {
+    if (race.route.circuit) {
+        return true;
+    }
+
+    const car = racer.player.getSeat() === 0 ? racer.player.getVehicle() : null;
+
+    return (
+        playable(racer.player) &&
+        car !== null &&
+        car.terminalState === 0 &&
+        distance(car.position, race.route.start) <= START_REACH
+    );
+}
+
+/** The latest the countdown starts: when entries close, or for a street race the gathering's end. */
+export function startDeadline(race: Race): number {
+    return race.route.circuit ? race.lobbyEndsAt : race.lobbyEndsAt + GATHER_MS;
+}
+
+/** Entries have closed and the race waits for its racers at the start line. */
+export function gathering(race: Race, now = Date.now()): boolean {
+    return race.phase === 'lobby' && !race.route.circuit && now >= race.lobbyEndsAt;
+}
+
+function lobbyCard(race: Race, racer: Racer, arrived: number, now: number): void {
     const { route } = race;
     const circuit = Boolean(route.circuit);
-    const car = racer.player.getVehicle();
     const seated = racer.player.getSeat() === 0;
-    const atStart =
-        circuit || (seated && car !== null && distance(car.position, route.start) <= START_REACH);
+    const atStart = atStartLine(race, racer);
     const you = circuit
         ? 'You will be put on the grid'
         : atStart
           ? 'At the start line'
           : seated
-            ? 'Drive to the start'
+            ? 'Drive to the red smoke'
             : 'Get a car (/garage)';
+    const waiting = gathering(race, now);
+    const timing: [string, string] = waiting
+        ? ['Starts by', formatMinutes(startDeadline(race) - now)]
+        : [circuit ? 'Starts in' : 'Entries close', formatMinutes(race.lobbyEndsAt - now)];
 
     card(racer.player, 'race', {
         title: route.name,
@@ -71,11 +105,15 @@ function lobbyCard(race: Race, racer: Racer): void {
             ? `Circuit · ${plural(route.laps ?? 1, 'lap')} · ${lengthText(route)}`
             : `Street race · ${lengthText(route)} · ${route.checkpoints.length} checkpoints`,
         rows: [
-            ['Starts in', formatMinutes(race.lobbyEndsAt - Date.now())],
-            ['Racers', String(race.racers.size)],
+            timing,
+            circuit
+                ? ['Racers', String(race.racers.size)]
+                : ['At the start', `${arrived} of ${race.racers.size}`],
             ['You', you],
         ],
-        progress: Math.max(0, (race.lobbyEndsAt - Date.now()) / race.lobbyMs),
+        progress: waiting
+            ? Math.max(0, (startDeadline(race) - now) / GATHER_MS)
+            : Math.max(0, (race.lobbyEndsAt - now) / race.lobbyMs),
         tone: atStart ? 'good' : 'gold',
     });
 }
@@ -108,9 +146,9 @@ export function join(race: Race, player: Player): boolean {
         raceCarId: null,
     });
 
-    const startsIn = formatMinutes(race.lobbyEndsAt - Date.now());
-
     if (race.route.circuit) {
+        const startsIn = formatMinutes(race.lobbyEndsAt - Date.now());
+
         toast(player, `You're in. A race car will be waiting for you on the grid in ${startsIn}.`, {
             title: race.route.name,
             tone: 'gold',
@@ -124,14 +162,17 @@ export function join(race: Race, player: Player): boolean {
                 label: 'START LINE',
                 color: COLORS.gold,
                 beacon: true,
+                smoke: true,
                 primary: true,
             },
         ]);
 
-        toast(player, `You're in. Be at the start line in a car within ${startsIn}.`, {
-            title: race.route.name,
-            tone: 'gold',
-        });
+        toast(
+            player,
+            "You're in. Follow the compass to the red smoke at the start line; " +
+                'the race waits there until every racer has arrived.',
+            { title: race.route.name, tone: 'gold', seconds: 8 },
+        );
     }
 
     for (const other of racerList(race)) {
@@ -190,6 +231,7 @@ export function openRace(
         startedAt: 0,
         firstFinishAt: 0,
         lastStateAt: 0,
+        gatherAnnounced: false,
         entrants: 0,
         onConclude: options.onConclude ?? null,
     };
@@ -279,18 +321,11 @@ function readyRacers(race: Race): Racer[] {
             continue;
         }
 
-        const car = player.getSeat() === 0 ? player.getVehicle() : null;
-
-        if (
-            !playable(player) ||
-            !car ||
-            car.terminalState !== 0 ||
-            distance(car.position, race.route.start) > START_REACH
-        ) {
+        if (!atStartLine(race, racer)) {
             leaveRace(
                 race,
                 racer,
-                'You were not at the start line in a car. The race went without you.',
+                'You did not make it to the start line in a car. The race went without you.',
             );
 
             continue;
@@ -371,27 +406,50 @@ export function takenAway(racer: Racer): boolean {
     return kind !== undefined && kind !== 'race' && kind !== 'race-lobby';
 }
 
+function entriesClosed(race: Race, waitingFor: number): void {
+    const message = waitingFor
+        ? `Entries are closed. The race waits at the start line for ${plural(waitingFor, 'racer')} ` +
+          `still on the way, ${formatMinutes(GATHER_MS)} at most.`
+        : 'Entries are closed. Everyone is at the start line.';
+
+    for (const racer of racerList(race)) {
+        toast(racer.player, message, { title: race.route.name, tone: 'gold' });
+    }
+}
+
 export function tickLobby(race: Race, now: number): void {
     for (const racer of racerList(race)) {
         if (takenAway(racer)) {
             leaveRace(race, racer, null);
-            continue;
-        }
-
-        if (!playable(racer.player)) {
-            continue;
-        }
-
-        if (now - race.lastStateAt >= 1000) {
-            lobbyCard(race, racer);
         }
     }
+
+    const racers = racerList(race);
+    const arrived = racers.filter((racer) => atStartLine(race, racer)).length;
 
     if (now - race.lastStateAt >= 1000) {
         race.lastStateAt = now;
+
+        for (const racer of racers) {
+            if (playable(racer.player)) {
+                lobbyCard(race, racer, arrived, now);
+            }
+        }
     }
 
-    if (now >= race.lobbyEndsAt) {
+    if (now < race.lobbyEndsAt) {
+        return;
+    }
+
+    // Everyone is there, or the wait is over: off they go with those who made it.
+    if (arrived === racers.length || now >= startDeadline(race)) {
         startCountdown(race);
+
+        return;
+    }
+
+    if (!race.gatherAnnounced) {
+        race.gatherAnnounced = true;
+        entriesClosed(race, racers.length - arrived);
     }
 }
