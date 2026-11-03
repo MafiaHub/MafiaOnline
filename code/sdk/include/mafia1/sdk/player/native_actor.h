@@ -33,8 +33,11 @@ namespace Mafia1Online::SDK::Player {
             Player = 2,
             Car    = 4,
             Door   = 6,
+            Railway = 8,
             DropOut = 17,
             Entity = 27,
+            // C_irenka, a police road block barrier.
+            Barrier = 31,
         };
 
         [[nodiscard]] Type GetType() const {
@@ -60,6 +63,11 @@ namespace Mafia1Online::SDK::Player {
         }
         [[nodiscard]] Scene::NativeFrame *Frame() const {
             return _frame;
+        }
+        // C_actor::~C_actor releases the frame when set; C_actor::Init
+        // clears it (reM C_actor.cpp, SetRemoveFrame).
+        void SetRemoveFrame(bool remove) {
+            _removeFrame = remove;
         }
 
         // These virtual calls are valid only for an actor created by the

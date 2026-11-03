@@ -6,7 +6,7 @@
 
 namespace Mafia1Online::Shared::Car {
     struct LoadFailure {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarLoadFailure");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarLoadFailure");
 
         uint64_t networkId = 0;
         uint64_t missionGeneration = 0;

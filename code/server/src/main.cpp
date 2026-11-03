@@ -19,8 +19,14 @@ int main(int argc, char **argv) {
     opts.gameName        = "Mafia 1";
     opts.gameVersion     = "1.2";
     opts.enableSignals   = true;
+#ifdef MAFIA1ONLINE_RPC_IDENTIFIER_SALT
+    opts.rpcIdentifierSalt = MAFIA1ONLINE_RPC_IDENTIFIER_SALT;
+#endif
     opts.modConfigSchema = {
         {"mission", Framework::Utils::ConfigFieldType::String, "", true, true, {}, "Stock or detected server mod mission directory name", true},
+        {"simulationToken", Framework::Utils::ConfigFieldType::String, "", false, false, {}, "Shared secret of the trusted simulation host; empty disables it"},
+        {"trafficJam", Framework::Utils::ConfigFieldType::Json, nlohmann::json::object(), false, false, {},
+         "Traffic jam watch: enabled, minCars, radius, maxSpeed, stuckSeconds, cooldownSeconds, playerClearance (any subset; the rest keep their defaults)"},
     };
     opts.argc = argc;
     opts.argv = argv;

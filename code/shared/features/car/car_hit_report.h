@@ -5,11 +5,28 @@
 #include <cstdint>
 
 namespace Mafia1Online::Shared::Car {
-    // A local shoot record's impact on a network car. The server consumes the
-    // matching accepted Fire pellet before forwarding an authoritative hit.
-    struct HitReport {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarHitReport");
+    enum class HitKind : uint8_t {
+        // A pellet of an accepted Fire (C_car::Hit type 0).
+        Bullet = 0,
+        // A strike of an accepted melee swing: C_human::AI hits a car with
+        // HIT_TYPE_HARD_KNOCKDOWN (1), which C_car::Hit deforms.
+        Melee = 1,
+    };
+    // C_car::Hit's hit type for each kind.
+    inline constexpr int32_t NativeHitType(HitKind kind) {
+        return kind == HitKind::Melee ? 1 : 0;
+    }
+    // reM HUMAN_AI_MELEE_CAR_SOUND: the sound table entry C_human::AI plays
+    // where a swing strikes a car.
+    inline constexpr uint32_t kMeleeCarSound = 23;
 
+    // A local shoot record's impact on a network car. The server consumes the
+    // matching accepted Fire pellet (a melee strike: swing) before forwarding
+    // an authoritative hit.
+    struct HitReport {
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarHitReport");
+
+        HitKind kind = HitKind::Bullet;
         uint64_t carId = 0;
         uint64_t missionGeneration = 0;
         uint64_t shooterId = 0;
@@ -33,6 +50,9 @@ namespace Mafia1Online::Shared::Car {
         float localDirectionZ = 0.0f;
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {
+            auto kindValue = static_cast<uint8_t>(kind);
+            stream->Serialize(write, kindValue);
+            kind = static_cast<HitKind>(kindValue);
             stream->Serialize(write, carId);
             stream->Serialize(write, missionGeneration);
             stream->Serialize(write, shooterId);
@@ -58,7 +78,7 @@ namespace Mafia1Online::Shared::Car {
     };
 
     struct AuthoritativeHit {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarAuthoritativeHit");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarAuthoritativeHit");
 
         uint64_t carId = 0;
         uint64_t missionGeneration = 0;
@@ -80,12 +100,20 @@ namespace Mafia1Online::Shared::Car {
         float localDirectionX = 0.0f;
         float localDirectionY = 0.0f;
         float localDirectionZ = 0.0f;
+        // The accepted report's shooter (a player or a host NPC), whose
+        // replica the simulation host passes to C_car::Hit as the attacker.
+        uint64_t shooterId = 0;
+        HitKind kind = HitKind::Bullet;
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {
+            auto kindValue = static_cast<uint8_t>(kind);
+            stream->Serialize(write, kindValue);
+            kind = static_cast<HitKind>(kindValue);
             stream->Serialize(write, carId);
             stream->Serialize(write, missionGeneration);
             stream->Serialize(write, controllerGuid);
             stream->Serialize(write, serverSequence);
+            stream->Serialize(write, shooterId);
             stream->Serialize(write, damage);
             stream->Serialize(write, directionX);
             stream->Serialize(write, directionY);
@@ -102,6 +130,26 @@ namespace Mafia1Online::Shared::Car {
             stream->Serialize(write, localDirectionX);
             stream->Serialize(write, localDirectionY);
             stream->Serialize(write, localDirectionZ);
+        }
+    };
+
+    // Server -> every player but the attacker: an accepted melee strike on a
+    // car, for its sound (the dent comes with the controller's mesh).
+    struct MeleeImpact {
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarMeleeImpact");
+
+        uint64_t carId = 0;
+        uint64_t missionGeneration = 0;
+        float x = 0.0f;
+        float y = 0.0f;
+        float z = 0.0f;
+
+        void Serialize(MafiaNet::BitStream *stream, bool write) {
+            stream->Serialize(write, carId);
+            stream->Serialize(write, missionGeneration);
+            stream->Serialize(write, x);
+            stream->Serialize(write, y);
+            stream->Serialize(write, z);
         }
     };
 } // namespace Mafia1Online::Shared::Car

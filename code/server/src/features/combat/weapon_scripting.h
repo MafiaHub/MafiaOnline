@@ -1,5 +1,7 @@
 #pragma once
 
+#include "shared/features/combat/combat_protocol.h"
+
 #include <v8.h>
 
 #include <cstdint>
@@ -16,6 +18,10 @@ namespace Mafia1Online::Scripting {
         // magazine for a firearm, one for anything else.
         static uint16_t DefaultLoaded(uint8_t weaponId);
         static bool IsSupported(uint32_t weaponId);
+        // A combat state's held weapons, each Describe plus loaded and reserve.
+        static v8::Local<v8::Array> HeldList(v8::Isolate *isolate, v8::Local<v8::Context> context, const Shared::Combat::State &state);
+        // {selected, weapons}: the Inventory type players and NPCs share.
+        static v8::Local<v8::Object> Inventory(v8::Isolate *isolate, v8::Local<v8::Context> context, const Shared::Combat::State &state);
 
         static void Register(v8::Isolate *isolate, v8::Local<v8::Object> global);
     };

@@ -90,6 +90,19 @@ at `0x5766FE`; that alone does not establish a complete death contract.
   retail `Do_Shoot`, validated on the server (combo, cadence, one hit per
   attack, reach, facing) and replayed on remote humans. Damage uses the retail
   per-item constants, doubled for a heavy blow, with the retail backstab.
+- A swing on a walker's replica reaches retail `C_don_ocas::Hit`
+  (`0x44ccf0`), whose element Hit does nothing on a player. The attacker
+  reports it as a melee `HitReport` (walker id, spawn generation 0, torso);
+  the server checks the accepted swing, reach with the walker's speed as lag
+  allowance and facing, and sends `Pedestrian::MeleeHit` to the simulation
+  host. The host runs `C_human::AI`'s walker branch: `HumanBoxing` while the
+  police are on, then `C_don_ocas::Hit` with the item damage (no heavy
+  doubling) and the accepted heavy flag for its backstab. Its walker reacts
+  natively and the animation replicates. The host drops its own copy of a
+  player's replayed swing on its walkers, and its `HumanBoxing` hook books
+  nothing for a player's replica outside a validated hit, so each validated
+  walker or NPC hit books the crime once (after the Hit for an NPC, as
+  retail does).
 - Grenade and Molotov throws are captured from `NewGrenade`, validated and
   shown on remote clients as disarmed copies. The thrower reports the
   detonation; the server applies explosion and fire damage.

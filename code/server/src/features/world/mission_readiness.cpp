@@ -19,12 +19,16 @@ namespace Mafia1Online::Features::World {
         }
     }
 
-    void MissionReadiness::OnConnect(MafiaNet::PeerGuid guid) {
+    void MissionReadiness::OnConnect(MafiaNet::PeerGuid guid, bool countsTowardAll) {
         _loadedByPeer[static_cast<uint64_t>(guid)] = 0;
+        if (!countsTowardAll) {
+            _uncounted.insert(static_cast<uint64_t>(guid));
+        }
     }
 
     void MissionReadiness::OnDisconnect(MafiaNet::PeerGuid guid) {
         _loadedByPeer.erase(static_cast<uint64_t>(guid));
+        _uncounted.erase(static_cast<uint64_t>(guid));
     }
 
     bool MissionReadiness::IsReady(MafiaNet::PeerGuid guid) const {
@@ -37,7 +41,7 @@ namespace Mafia1Online::Features::World {
             return false;
         }
         for (const auto &[guid, loadedGeneration] : _loadedByPeer) {
-            if (loadedGeneration != _generation) {
+            if (loadedGeneration != _generation && !_uncounted.contains(guid)) {
                 return false;
             }
         }

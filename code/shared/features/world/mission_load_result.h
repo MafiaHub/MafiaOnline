@@ -14,7 +14,7 @@ namespace Mafia1Online::Shared::World {
     };
 
     struct MissionLoadResult {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::MissionLoadResult");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::MissionLoadResult");
 
         uint64_t generation = 0;
         MissionLoadState state = MissionLoadState::Unloaded;

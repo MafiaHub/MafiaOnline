@@ -1,0 +1,1124 @@
+// Round trips of the quantized wire forms, the sender sample clock and the
+// railway rider blend.
+#include "client/src/features/car/car_pose_buffer.h"
+#include "client/src/features/npc/replica_motion.h"
+#include "client/src/features/player/host_lead.h"
+#include "client/src/features/player/human_states.h"
+#include "client/src/features/player/ride_blend.h"
+#include "client/src/features/player/stalled_gait.h"
+#include "client/src/features/railway/track_path.h"
+#include "client/src/features/world/fading_copies.h"
+#include "client/src/features/world/remote_clock.h"
+#include "shared/features/car/car_entity.h"
+#include "shared/features/car/car_movement.h"
+#include "shared/features/combat/aim_update.h"
+#include "shared/features/combat/combat_protocol.h"
+#include "shared/features/npc/npc_animation.h"
+#include "shared/features/npc/npc_entity.h"
+#include "shared/features/npc/npc_report.h"
+#include "shared/features/pedestrian/pedestrian_entity.h"
+#include "shared/features/pedestrian/pedestrian_report.h"
+#include "shared/features/player/player_entity.h"
+#include "shared/features/player/player_movement.h"
+#include "shared/features/railway/railway_report.h"
+#include "shared/net/quantize.h"
+#include "shared/net/sample_clock.h"
+
+#include <cmath>
+#include <cstdio>
+#include <limits>
+#include <utility>
+#include <vector>
+
+using namespace Mafia1Online;
+
+namespace {
+    int failures = 0;
+
+#define CHECK(condition)                                                                                                                                 \
+    do {                                                                                                                                                 \
+        if (!(condition)) {                                                                                                                              \
+            std::printf("%s:%d: %s\n", __FILE__, __LINE__, #condition);                                                                                  \
+            ++failures;                                                                                                                                  \
+        }                                                                                                                                                \
+    } while (false)
+
+    bool Near(float a, float b, float tolerance) {
+        return std::abs(a - b) <= tolerance;
+    }
+
+    bool Near(const glm::vec3 &a, const glm::vec3 &b, float tolerance) {
+        return Near(a.x, b.x, tolerance) && Near(a.y, b.y, tolerance) && Near(a.z, b.z, tolerance);
+    }
+
+    template <typename T>
+    T RoundTrip(T value) {
+        MafiaNet::BitStream stream;
+        value.Serialize(&stream, true);
+        T read;
+        read.Serialize(&stream, false);
+        return read;
+    }
+
+    template <typename T>
+    void TransformRoundTrip(T &source, T &target) {
+        MafiaNet::BitStream stream;
+        Framework::Networking::Replication::FieldSerializer writer(&stream, true);
+        source.SerializeTransform(writer);
+        Framework::Networking::Replication::FieldSerializer reader(&stream, false);
+        target.SerializeTransform(reader);
+        CHECK(writer.Good() && reader.Good());
+    }
+
+    // World::RemoteClock: the least delayed arrival maps a host's frame
+    // clock onto this one, followed continuously in time; a late report
+    // never moves it, and another clock resets it.
+    void RemoteClocks() {
+        Features::World::RemoteClock clock;
+        CHECK(!clock.Valid());
+        // Reports every 133 ms, 20 ms in transit, one of them 80 ms late.
+        const double now = 1000.0;
+        CHECK(clock.Observe(500.0, now + 20.0));
+        CHECK(Near(static_cast<float>(clock.OffsetAt(now + 20.0)), 520.0f, 1e-3f));
+        for (int i = 1; i <= 30; ++i) {
+            const double arrival = now + i * 133.0 + 20.0 + (i == 10 ? 80.0 : 0.0);
+            CHECK(!clock.Observe(500.0 + i * 133.0, arrival));
+            CHECK(Near(static_cast<float>(clock.OffsetAt(arrival + 50.0)), 520.0f, 1e-3f));
+        }
+        // A faster transit is followed over seconds, never stepped: the
+        // offset is where it was as the report lands and moves on smoothly.
+        const double landed = now + 31 * 133.0 + 10.0;
+        const double before = clock.OffsetAt(landed);
+        clock.Observe(500.0 + 31 * 133.0, landed);
+        CHECK(Near(static_cast<float>(clock.OffsetAt(landed)), static_cast<float>(before), 1e-4f));
+        CHECK(clock.OffsetAt(landed + 16.0) < before && clock.OffsetAt(landed + 16.0) > before - 0.1);
+        CHECK(clock.OffsetAt(landed + 32.0) < clock.OffsetAt(landed + 16.0));
+        for (int i = 32; i < 120; ++i) {
+            clock.Observe(500.0 + i * 133.0, now + i * 133.0 + 10.0);
+        }
+        const double late = now + 120 * 133.0;
+        CHECK(Near(static_cast<float>(clock.OffsetAt(late)), 510.0f, 0.5f));
+        CHECK(Near(static_cast<float>(clock.RemoteAt(late)), static_cast<float>(late - clock.OffsetAt(late)), 1e-3f));
+        // Another host's clock.
+        CHECK(clock.Observe(90000.0, now + 120 * 133.0));
+        clock.Reset();
+        CHECK(!clock.Valid());
+    }
+
+    // A web path's railway track: node i at points[i], each leading to the
+    // next; the last one leads nowhere.
+    struct LineGraph {
+        std::vector<glm::vec3> points;
+
+        [[nodiscard]] glm::vec3 Position(uint32_t node) const {
+            return points[node];
+        }
+        [[nodiscard]] std::optional<uint32_t> Next(uint32_t node) const {
+            return node + 1 < points.size() ? std::optional<uint32_t>(node + 1) : std::nullopt;
+        }
+        [[nodiscard]] std::optional<uint32_t> Previous(uint32_t node) const {
+            return node > 0 ? std::optional<uint32_t>(node - 1) : std::nullopt;
+        }
+    };
+
+    // Features::Railway::TrackPath: a front moves along the polyline Place
+    // follows, never along the chord between two reports.
+    void RailwayTrack() {
+        using Features::Railway::TrackPoint;
+        // A right-angle bend at (10, 0, 0), then 10 m on along +z.
+        const LineGraph graph {{{0.0f, 0.0f, 0.0f}, {10.0f, 0.0f, 0.0f}, {10.0f, 0.0f, 10.0f}, {10.0f, 0.0f, 20.0f}}};
+        const Features::Railway::TrackPath<LineGraph> track(graph);
+        const TrackPoint before = track.Settle({{6.0f, 0.0f, 0.0f}, 1});
+        const TrackPoint after  = track.Settle({{10.0f, 0.0f, 4.0f}, 2});
+        CHECK(before.node == 1 && after.node == 2);
+        // 4 m to the bend and 4 m on: 8 m of track, though the chord is 5.7.
+        const auto length = track.Distance(before, after);
+        CHECK(length && Near(*length, 8.0f, 1e-4f));
+        // Halfway is the bend itself, not the chord's midpoint inside it.
+        const TrackPoint half = track.Advance(before, 4.0f);
+        CHECK(Near(half.position, {10.0f, 0.0f, 0.0f}, 1e-4f));
+        const TrackPoint on = track.Advance(before, 6.0f);
+        CHECK(Near(on.position, {10.0f, 0.0f, 2.0f}, 1e-4f) && on.node == 2);
+        // Past the end it stops there, on the track.
+        CHECK(Near(track.Advance(after, 100.0f).position, {10.0f, 0.0f, 20.0f}, 1e-4f));
+        // A front Place moved a step past its node heads for the next one,
+        // however sharp the bend after it.
+        const TrackPoint overshot = track.Settle({{10.3f, 0.0f, 0.0f}, 1});
+        CHECK(overshot.node == 2);
+        const LineGraph hairpin {{{0.0f, 0.0f, 0.0f}, {10.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}}};
+        const Features::Railway::TrackPath<LineGraph> back(hairpin);
+        CHECK(back.Settle({{9.0f, 0.0f, 0.0f}, 1}).node == 1 && back.Settle({{10.2f, 0.0f, 0.0f}, 1}).node == 2);
+        CHECK(track.Settle({{9.95f, 0.0f, 0.0f}, 1}).node == 2);
+        // A report behind the earlier one is not on the way.
+        CHECK(!track.Distance(after, before));
+
+        // At equal end speeds the distance runs at that speed throughout.
+        const auto steady = Features::Railway::HermiteAlong(1.25f, 12.5f, 12.5f, 100.0, 0.5f);
+        CHECK(Near(steady.distance, 0.625f, 1e-4f) && Near(steady.speed, 12.5f, 1e-3f));
+        // Accelerating at 3 m/s2 from 5 m/s over 100 ms: the exact curve.
+        const auto speeding = Features::Railway::HermiteAlong(0.515f, 5.0f, 5.3f, 100.0, 0.5f);
+        CHECK(Near(speeding.distance, 0.25375f, 1e-4f) && Near(speeding.speed, 5.15f, 1e-3f));
+        // Tangents larger than the gap allows never run it backward.
+        float last = 0.0f;
+        for (int i = 0; i <= 20; ++i) {
+            const float d = Features::Railway::HermiteAlong(0.1f, 12.0f, 0.0f, 133.0, i / 20.0f).distance;
+            CHECK(d >= last - 1e-6f && d <= 0.1f + 1e-6f);
+            last = d;
+        }
+
+        // Past the newest report: on at its speed, a braking one to rest.
+        const auto cruise = Features::Railway::ExtrapolateAlong(10.0f, 0.0f, 500.0, 1000.0, 12.5f);
+        CHECK(Near(cruise.distance, 5.0f, 1e-4f) && Near(cruise.speed, 10.0f, 1e-4f));
+        const auto braking = Features::Railway::ExtrapolateAlong(3.0f, -3.0f, 2000.0, 1000.0, 12.5f);
+        CHECK(Near(braking.distance, 1.5f, 1e-4f) && Near(braking.speed, 0.0f, 1e-4f));
+        const auto speedingUp = Features::Railway::ExtrapolateAlong(12.0f, 3.0f, 1000.0, 1000.0, 12.5f);
+        CHECK(Near(speedingUp.speed, 12.5f, 1e-4f) && speedingUp.distance < 12.5f && speedingUp.distance > 12.0f);
+        CHECK(Features::Railway::ExtrapolateAlong(0.0f, -3.0f, 500.0, 1000.0, 12.5f).distance == 0.0f);
+    }
+
+    void FixedValues() {
+        for (const float value : {-8192.0f, -3027.1f, -0.004f, 0.0f, 0.3f, 1148.7f, 3462.4f, 8192.0f}) {
+            MafiaNet::BitStream stream;
+            float written = value;
+            Shared::Net::SerializeFixed(&stream, true, written, -8192.0f, 8192.0f, 20);
+            float read = 0.0f;
+            Shared::Net::SerializeFixed(&stream, false, read, -8192.0f, 8192.0f, 20);
+            // A step of 16384 / (2^20 - 1), a hair over 1/64 m.
+            CHECK(Near(read, value, 0.0079f));
+            CHECK(read == Shared::Net::QuantizeFixed(value, -8192.0f, 8192.0f, 20));
+        }
+        // Out of range and not finite: the escape carries the raw float.
+        for (const float value : {9000.5f, -1.0e7f, std::numeric_limits<float>::infinity()}) {
+            MafiaNet::BitStream stream;
+            float written = value;
+            Shared::Net::SerializeFixed(&stream, true, written, -8192.0f, 8192.0f, 20);
+            float read = 0.0f;
+            Shared::Net::SerializeFixed(&stream, false, read, -8192.0f, 8192.0f, 20);
+            CHECK(read == value);
+        }
+        MafiaNet::BitStream stream;
+        float nan = std::numeric_limits<float>::quiet_NaN();
+        Shared::Net::SerializeFixed(&stream, true, nan, 0.0f, 1.0f, 8);
+        float read = 0.0f;
+        Shared::Net::SerializeFixed(&stream, false, read, 0.0f, 1.0f, 8);
+        CHECK(std::isnan(read));
+    }
+
+    void Angles() {
+        for (const float angle : {-3.14159f, -1.0f, 0.0f, 0.5f, 3.1f, 3.5f, 7.0f}) {
+            MafiaNet::BitStream stream;
+            float written = angle;
+            Shared::Net::SerializeAngle(&stream, true, written, 10);
+            float read = 0.0f;
+            Shared::Net::SerializeAngle(&stream, false, read, 10);
+            const float difference = std::remainder(read - angle, glm::two_pi<float>());
+            CHECK(std::abs(difference) <= glm::pi<float>() / 1024.0f + 1e-5f);
+        }
+        const glm::vec3 direction = glm::normalize(glm::vec3(0.3f, -0.4f, -0.8f));
+        MafiaNet::BitStream stream;
+        glm::vec3 written = direction;
+        Shared::Net::SerializeDirection(&stream, true, written, 12, 11);
+        glm::vec3 read {0.0f};
+        Shared::Net::SerializeDirection(&stream, false, read, 12, 11);
+        CHECK(glm::dot(read, direction) > std::cos(glm::radians(0.2f)));
+    }
+
+    void Quaternions() {
+        const glm::quat cases[] = {glm::identity<glm::quat>(), glm::angleAxis(2.0f, glm::normalize(glm::vec3(0.2f, 1.0f, -0.3f))),
+                                   glm::quat(-0.9f, 0.1f, 0.3f, 0.2f), glm::angleAxis(-3.1f, glm::vec3(0.0f, 0.0f, 1.0f))};
+        for (glm::quat rotation : cases) {
+            rotation = glm::normalize(rotation);
+            MafiaNet::BitStream stream;
+            glm::quat written = rotation;
+            Shared::Net::SerializeQuat(&stream, true, written, 10);
+            glm::quat read;
+            Shared::Net::SerializeQuat(&stream, false, read, 10);
+            // The same rotation, either sign, within a fifth of a degree.
+            CHECK(std::abs(glm::dot(read, rotation)) > std::cos(glm::radians(0.2f) / 2.0f));
+        }
+    }
+
+    void PlayerTransform() {
+        Shared::Entities::PlayerEntity source;
+        source.position     = {-3027.1f, 121.7f, 3462.4f};
+        source.rotation     = glm::angleAxis(1.2f, glm::vec3(0.0f, 1.0f, 0.0f));
+        source.velocity     = {3.0f, -0.5f, 70.0f};
+        source.locomotion   = 0x123;
+        source.sampleClock  = 65530;
+        source.railway      = 7;
+        source.railwayPart  = 2;
+        source.railwayLocal = {0.4f, 1.2f, -6.75f};
+        source.railwayYaw   = -2.0f;
+        Shared::Entities::PlayerEntity target;
+        TransformRoundTrip(source, target);
+        CHECK(Near(target.position, source.position, 1.0f / 64.0f));
+        CHECK(Near(Shared::Net::YawOf(target.rotation), 1.2f, 0.01f));
+        CHECK(Near(target.velocity.x, 3.0f, 1.0f / 32.0f) && target.velocity.z == 70.0f);
+        CHECK(target.locomotion == 0x123 && target.sampleClock == 65530);
+        CHECK(target.railway == 7 && target.railwayPart == 2 && Near(target.railwayLocal, source.railwayLocal, 1.0f / 1024.0f) && Near(target.railwayYaw, -2.0f, 0.01f));
+
+        source.railway = Shared::Railway::kNoRailway;
+        source.position = {20000.0f, -900.0f, 5.0f};
+        TransformRoundTrip(source, target);
+        CHECK(target.railway == Shared::Railway::kNoRailway && target.railwayLocal == glm::vec3(0.0f));
+        CHECK(target.position.x == 20000.0f && target.position.y == -900.0f);
+    }
+
+    void WalkerTransforms() {
+        Shared::Entities::PedestrianEntity walker;
+        walker.position    = {12.3f, 4.5f, -67.8f};
+        walker.rotation    = glm::angleAxis(-0.7f, glm::vec3(0.0f, 1.0f, 0.0f));
+        walker.velocity    = walker.rotation * glm::vec3(0.0f, 0.0f, 1.4f);
+        walker.sampleClock = 1234;
+        Shared::Entities::PedestrianEntity walkerRead;
+        TransformRoundTrip(walker, walkerRead);
+        CHECK(Near(walkerRead.position, walker.position, 1.0f / 64.0f));
+        CHECK(Near(walkerRead.velocity, walker.velocity, 0.05f));
+        CHECK(walkerRead.sampleClock == 1234);
+
+        // Off the heading: a walker retreating sideways keeps its direction.
+        walker.velocity = walker.rotation * glm::vec3(-1.2f, 0.0f, 0.0f);
+        TransformRoundTrip(walker, walkerRead);
+        CHECK(Near(walkerRead.velocity, walker.velocity, 0.05f));
+
+        Shared::Entities::NpcEntity npc;
+        npc.position   = {1.0f, 2.0f, 3.0f};
+        npc.locomotion = -5;
+        // Backing off as it faces its target: the velocity points behind it.
+        npc.rotation = glm::angleAxis(0.4f, glm::vec3(0.0f, 1.0f, 0.0f));
+        npc.velocity = npc.rotation * glm::vec3(0.5f, 0.0f, -2.0f);
+        npc.aiming    = true;
+        npc.crouching = false;
+        npc.weapon    = 9;
+        Shared::Entities::NpcEntity npcRead;
+        npcRead.crouching = true;
+        TransformRoundTrip(npc, npcRead);
+        CHECK(npcRead.locomotion == -5 && Near(npcRead.position, npc.position, 1.0f / 64.0f));
+        // The stance rides with the pose it was taken in.
+        CHECK(npcRead.aiming && !npcRead.crouching && npcRead.weapon == 9);
+        CHECK(Near(npcRead.velocity, npc.velocity, 0.05f) && npcRead.velocity.y == 0.0f);
+
+        Shared::Npc::Snapshot snapshot;
+        snapshot.count             = 1;
+        snapshot.npcs[0].velocityX = -3.0f;
+        snapshot.npcs[0].velocityZ = 1.5f;
+        snapshot.npcs[0].weapon    = 12;
+        const auto snapshotRead    = RoundTrip(snapshot);
+        CHECK(snapshotRead.count == 1 && Near(snapshotRead.npcs[0].velocityX, -3.0f, 0.02f) && Near(snapshotRead.npcs[0].velocityZ, 1.5f, 0.02f));
+        CHECK(snapshotRead.npcs[0].weapon == 12);
+        // The death its Hit picked travels once it is dead, a head shot
+        // crouched included.
+        snapshot.count                  = 2;
+        snapshot.npcs[0].deathAnimation = 140;
+        snapshot.npcs[1].dead           = true;
+        snapshot.npcs[1].deathAnimation = 146;
+        snapshot.npcs[1].deathClock     = 65530;
+        snapshot.npcs[1].health         = 0.0f;
+        const auto deathRead            = RoundTrip(snapshot);
+        CHECK(deathRead.count == 2 && deathRead.npcs[0].deathAnimation == 0 && deathRead.npcs[1].dead && deathRead.npcs[1].deathAnimation == 146 &&
+              deathRead.npcs[1].deathClock == 65530);
+        CHECK(Shared::Combat::NativeDeathAnimation(146) && Shared::Combat::NativeDeathAnimation(131) && !Shared::Combat::NativeDeathAnimation(130) &&
+              !Shared::Combat::NativeDeathAnimation(147));
+        Shared::Pedestrian::Snapshot walkers;
+        walkers.count                = 1;
+        walkers.walkers[0].velocityX = 0.75f;
+        walkers.walkers[0].velocityZ = -1.25f;
+        const auto walkersRead       = RoundTrip(walkers);
+        CHECK(walkersRead.count == 1 && Near(walkersRead.walkers[0].velocityX, 0.75f, 0.02f) && Near(walkersRead.walkers[0].velocityZ, -1.25f, 0.02f));
+    }
+
+    void CarTransform() {
+        Shared::Entities::CarEntity car;
+        car.position        = {500.25f, 30.0f, -700.5f};
+        car.rotation        = glm::normalize(glm::quat(0.7f, 0.1f, 0.7f, -0.05f));
+        car.velocity        = {25.0f, -1.0f, 140.0f};
+        car.angularVelocity = {0.1f, -2.0f, 0.3f};
+        car.poseClockMs     = 0xdeadbeef;
+        car.poseClockFraction = 0x9c;
+        car.poseClockSource = 0x1234567890ull;
+        car.steeringInput   = -0.5f;
+        car.engineRotations = 4321.0f;
+        car.gear            = 3;
+        car.powerInput      = 1.0f;
+        car.clutchInput     = 0.5f;
+        car.skidMask        = 0x5;
+        Shared::Entities::CarEntity read;
+        TransformRoundTrip(car, read);
+        CHECK(Near(read.position, car.position, 1.0f / 256.0f));
+        // Smallest three at 12 bits: within a twentieth of a degree.
+        const glm::quat difference = read.rotation * glm::inverse(car.rotation);
+        CHECK(2.0f * std::atan2(glm::length(glm::vec3(difference.x, difference.y, difference.z)), std::abs(difference.w)) < glm::radians(0.05f));
+        CHECK(Near(read.velocity.x, 25.0f, 1.0f / 256.0f) && read.velocity.z == 140.0f);
+        CHECK(read.poseClockMs == 0xdeadbeef && read.poseClockFraction == 0x9c && read.poseClockSource == Shared::Entities::CarEntity::ClockSourceTag(car.poseClockSource) && read.poseClockSource != 0);
+        CHECK(read.gear == 3 && read.skidMask == 0x5 && Near(read.clutchInput, 0.5f, 1.0f / 63.0f) && read.powerInput == 1.0f);
+        CHECK(Near(read.steeringInput, -0.5f, 0.001f) && read.engineRotations == 4321.0f);
+    }
+
+    void Reports() {
+        Shared::Player::Movement movement;
+        movement.networkId   = 77;
+        movement.sequence    = 9;
+        movement.clockMs     = 4000;
+        movement.x           = -100.0f;
+        movement.yaw         = 2.0f;
+        movement.railway     = 3;
+        movement.railwayPart = 1;
+        movement.railwayZ    = -40.0f;
+        const auto movementRead = RoundTrip(movement);
+        CHECK(movementRead.networkId == 77 && movementRead.clockMs == 4000 && Near(movementRead.x, -100.0f, 0.0079f) && Near(movementRead.yaw, 2.0f, 0.002f));
+        CHECK(movementRead.railway == 3 && movementRead.railwayPart == 1 && movementRead.railwayZ == -40.0f);
+
+        Shared::Car::Movement car;
+        car.networkId    = 5;
+        car.fuel         = 12.5f;
+        car.maximumGear  = 5;
+        car.doorTargets  = {255, 0, 7};
+        car.slowFields   = false;
+        auto carRead     = RoundTrip(car);
+        CHECK(carRead.networkId == 5 && !carRead.slowFields && carRead.fuel == 0.0f && carRead.maximumGear == 0);
+        car.slowFields = true;
+        carRead        = RoundTrip(car);
+        CHECK(carRead.slowFields && carRead.fuel == 12.5f && carRead.maximumGear == 5 && carRead.doorTargets == car.doorTargets);
+        // The controller's pose keeps CarEntity's precision (1/256 m, 12-bit
+        // rotation), so the relay has none to lose.
+        const glm::quat turned = glm::normalize(glm::quat(0.93f, 0.05f, 0.36f, 0.02f));
+        car.x  = 1234.567f;
+        car.y  = 12.3456f;
+        car.z  = -987.654f;
+        car.qw = turned.w;
+        car.qx = turned.x;
+        car.qy = turned.y;
+        car.qz = turned.z;
+        carRead = RoundTrip(car);
+        CHECK(Near(carRead.x, car.x, 0.0021f) && Near(carRead.y, car.y, 0.0021f) && Near(carRead.z, car.z, 0.0021f));
+        const float carDot = std::abs(carRead.qw * turned.w + carRead.qx * turned.x + carRead.qy * turned.y + carRead.qz * turned.z);
+        CHECK(carDot > 0.99999f);
+
+        Shared::Railway::State railway;
+        railway.index            = 63;
+        railway.speed            = -12.0f;
+        railway.position         = {100.0f, 20.0f, -300.0f};
+        railway.direction        = {0.0f, 0.0f, 1.0f};
+        railway.wagonCount       = 2;
+        railway.wagonPositions[1] = {100.0f, 20.5f, -330.0f};
+        railway.wagonDirections[1] = {0.0f, 0.0f, 1.0f};
+        railway.onTrack          = true;
+        railway.frontNode        = 65535;
+        railway.front            = {100.25f, 20.5f, -295.75f};
+        railway.swayPhases       = {1.0f, 0.0f, -2.0f, 0.0f, 0.0f};
+        const auto railwayRead   = RoundTrip(railway);
+        CHECK(railwayRead.onTrack && railwayRead.frontNode == 65535 && Near(glm::vec3(railwayRead.front.x, railwayRead.front.y, railwayRead.front.z), {100.25f, 20.5f, -295.75f}, 0.004f));
+        CHECK(Near(railwayRead.swayPhases[0], 1.0f, 0.013f) && Near(railwayRead.swayPhases[2], -2.0f, 0.013f));
+        CHECK(railwayRead.index == 63 && railwayRead.wagonCount == 2 && Near(railwayRead.speed, -12.0f, 0.04f));
+        CHECK(Near(railwayRead.wagonPositions[1].z, -330.0f, 0.01f) && Near(railwayRead.wagonPositions[1].y, 20.5f, 0.01f));
+        // A snapshot is dated by the host's step to 1/256 ms.
+        Shared::Railway::Snapshot railways;
+        railways.SetHostTime(4294967295.75);
+        const auto railwaysRead = RoundTrip(railways);
+        CHECK(railwaysRead.hostTimeMs == 0xffffffffu && Near(static_cast<float>(railwaysRead.HostTimeFraction()), 0.75f, 1.0f / 256.0f));
+
+        Shared::Combat::AimUpdate aim;
+        aim.networkId        = 42;
+        aim.sequence         = 65535;
+        aim.aiming           = true;
+        aim.direction        = glm::normalize(glm::vec3(1.0f, 0.2f, 0.0f));
+        aim.poseTargetOffset = {3.0f, 1.5f, -9.0f};
+        const auto aimRead   = RoundTrip(aim);
+        CHECK(aimRead.networkId == 42 && aimRead.aiming && glm::dot(aimRead.direction, aim.direction) > 0.9999f && Near(aimRead.poseTargetOffset, aim.poseTargetOffset, 0.001f));
+        CHECK(Shared::Combat::NewerSequence(0, 65535) && !Shared::Combat::NewerSequence(65535, 0));
+
+        // A pistol shot carries one pellet, not ten.
+        Shared::Combat::Event shot;
+        shot.action              = Shared::Combat::Action::Fire;
+        shot.pelletCount         = 1;
+        shot.scatterRandom[1]    = 0.25f;
+        shot.pellets[0].x        = 4.0f;
+        shot.pellets[0].staticHit = true;
+        shot.pellets[0].hitY     = 2.0f;
+        MafiaNet::BitStream one;
+        shot.Serialize(&one, true);
+        shot.pelletCount = Shared::Combat::kMaximumShotPellets;
+        MafiaNet::BitStream ten;
+        shot.Serialize(&ten, true);
+        CHECK(one.GetNumberOfBytesUsed() + 150 < ten.GetNumberOfBytesUsed());
+        Shared::Combat::Event shotRead;
+        shotRead.Serialize(&one, false);
+        CHECK(shotRead.pelletCount == 1 && shotRead.scatterRandom[1] == 0.25f && shotRead.pellets[0].x == 4.0f && shotRead.pellets[0].hitY == 2.0f);
+        // An NPC's shot and reload carry the host clock they are played by.
+        shot.pelletCount = 1;
+        shot.sampleClock = 40000;
+        CHECK(RoundTrip(shot).sampleClock == 40000);
+        Shared::Combat::Event reload;
+        reload.action      = Shared::Combat::Action::Reload;
+        reload.sampleClock = 123;
+        CHECK(RoundTrip(reload).sampleClock == 123);
+        Shared::Npc::Fire fire;
+        fire.hostClockMs = 777;
+        CHECK(RoundTrip(fire).hostClockMs == 777);
+        Shared::Npc::Reload npcReload;
+        npcReload.hostClockMs = 65535;
+        CHECK(RoundTrip(npcReload).hostClockMs == 65535);
+        // A script clip names its revision, and the host dates that one.
+        Shared::Npc::Animation clip;
+        clip.name     = "Stand01.i3d";
+        clip.revision = 9;
+        CHECK(RoundTrip(clip).revision == 9 && RoundTrip(clip).name == "Stand01.i3d");
+        Shared::Npc::AnimationPlayed played;
+        played.revision    = 9;
+        played.hostClockMs = 4321;
+        const auto playedRead = RoundTrip(played);
+        CHECK(playedRead.revision == 9 && playedRead.hostClockMs == 4321);
+    }
+
+    void SampleClocks() {
+        // 50 ms samples whose 16-bit clock wraps, arriving 40-60 ms late.
+        Shared::Net::SampleClockMapper mapper;
+        double previous = 0.0;
+        for (int i = 0; i < 400; ++i) {
+            const uint64_t sent  = 60000 + static_cast<uint64_t>(i) * 50;
+            const double arrival = 1.0e6 + static_cast<double>(sent) + 40.0 + (i * 7 % 21);
+            const double mapped  = mapper.Map(Shared::Net::SampleClock(sent), arrival);
+            if (i > 60) {
+                // Steady spacing across the wrap: the late arrivals do not move it.
+                CHECK(std::abs(mapped - previous - 50.0) < 1.01);
+                CHECK(mapped <= arrival);
+            }
+            previous = mapped;
+        }
+    }
+
+    void HeldSampleClocks() {
+        // The server keeps a relayed pose's clock while its wire form holds.
+        Shared::Entities::PedestrianEntity walker;
+        // On the 1/64 m grid, so a millimetre stays in the same step.
+        walker.position    = {Shared::Net::QuantizeFixed(10.0f, -Shared::Net::kWorldHalfExtent, Shared::Net::kWorldHalfExtent, Shared::Net::kWorldPlaneBits), 2.0f, -5.0f};
+        walker.sampleClock = 100;
+        Shared::Net::RelayPose(walker, 200, [&] { walker.position.x += 0.001f; }); // Under 1/64 m.
+        CHECK(walker.sampleClock == 100);
+        Shared::Net::RelayPose(walker, 300, [&] { walker.position.x += 0.5f; });
+        CHECK(walker.sampleClock == 300);
+        // A held clock sent again (an idle refresh) maps to the time it had,
+        // however late it arrives, and the next new one still maps normally.
+        Shared::Net::SampleClockMapper mapper;
+        const double first = mapper.Map(1000, 5000.0);
+        CHECK(mapper.Map(1000, 9000.0) == first);
+        CHECK(std::abs(mapper.Map(1050, 5050.0) - (first + 50.0)) < 0.01);
+    }
+
+    void EventsShownWithTheirPoses() {
+        // Nothing mapped yet: an event plays at once.
+        Shared::Net::SampleClockMapper mapper;
+        CHECK(mapper.Shows(500, 0.0));
+        // Poses at clock 65500..65535, 0..400 (wrapping), mapped 1:1 onto
+        // local 10000 + clock offset; the picture is drawn 200 ms behind.
+        for (int i = 0; i <= 10; ++i) {
+            const uint16_t clock = static_cast<uint16_t>(65500 + i * 50);
+            mapper.Map(clock, 10000.0 + i * 50);
+        }
+        const double newest = 10000.0 + 10 * 50;
+        const double render = newest - 200.0;
+        // A death dated between two shown poses: shown; one dated after the
+        // picture: held; one past the wrap, still ahead: held.
+        CHECK(mapper.Shows(static_cast<uint16_t>(65500 + 5 * 50), render));
+        CHECK(!mapper.Shows(static_cast<uint16_t>(65500 + 9 * 50), render));
+        CHECK(!mapper.Shows(static_cast<uint16_t>(65500 + 10 * 50 + 20), render));
+        CHECK(mapper.Shows(static_cast<uint16_t>(65500 + 9 * 50), render + 150.0));
+        // A clock far ahead of the picture is one the mapper lost: shown.
+        CHECK(mapper.Shows(static_cast<uint16_t>(65500 + 10 * 50 + 5000), render));
+        // A clock long past (a corpse that lay for a while): shown.
+        CHECK(mapper.Shows(static_cast<uint16_t>(65500 - 20000), render));
+
+        // A walker's animations: the first shows at once, a change once the
+        // picture reaches its clock, in order, or after the wait limit.
+        using Clock = std::chrono::steady_clock;
+        const auto start = Clock::now();
+        Shared::Net::TimedChanges<int> walk;
+        walk.Observe(7, 65500, start);
+        CHECK(walk.Shown(mapper, render, start) == 7);
+        walk.Observe(8, static_cast<uint16_t>(65500 + 9 * 50), start);
+        walk.Observe(8, static_cast<uint16_t>(65500 + 9 * 50), start); // A repeat.
+        walk.Observe(9, static_cast<uint16_t>(65500 + 10 * 50), start);
+        CHECK(walk.Shown(mapper, render, start) == 7);
+        CHECK(walk.Shown(mapper, render + 150.0, start) == 8);
+        CHECK(walk.Shown(mapper, render + 150.0, start + std::chrono::milliseconds(100)) == 8);
+        CHECK(walk.Shown(mapper, render + 150.0, start + Shared::Net::kEventWaitLimit) == 9);
+        // The same clip played again, dated anew, plays again.
+        walk.Observe(9, static_cast<uint16_t>(65500 + 10 * 50 + 30), start);
+        walk.Observe(7, static_cast<uint16_t>(65500 + 10 * 50 + 40), start);
+        CHECK(walk.Shown(mapper, render + 225.0, start) == 9);
+        CHECK(walk.Shown(mapper, render + 245.0, start) == 7);
+    }
+
+    Features::Car::CarPoseSample CarAt(double time, float x, float speed) {
+        Features::Car::CarPoseSample pose;
+        pose.time     = time;
+        pose.position = {x, 0.0f, 0.0f};
+        pose.velocity = {speed, 0.0f, 0.0f};
+        return pose;
+    }
+
+    void CarResumeAfterHeartbeat() {
+        // Parked, its unchanged pose not resent for 3 s, then pulling away.
+        Features::Car::CarPoseBuffer buffer;
+        for (double t = 1000.0; t <= 1500.0; t += 33.0) {
+            buffer.Push(CarAt(t, 0.0f, 0.0f), t, false);
+        }
+        buffer.Push(CarAt(4500.0, 0.05f, 3.0f), 4500.0, false);
+        Features::Car::CarPoseSample out;
+        // Still parked until one interval before the first moving pose, not
+        // creeping (or overshooting on its tangent) across the pause.
+        CHECK(buffer.Sample(4400.0, out) && out.position.x == 0.0f);
+        CHECK(buffer.Sample(4480.0, out) && out.position.x >= 0.0f && out.position.x <= 0.05f);
+        CHECK(Near(buffer.IntervalMs(), 33.0f, 1.0f));
+    }
+
+    // A car at 20 m/s that brakes to a stop from 2.5 s, rendered every 16
+    // ms; `interval` gives the spacing of the poses sent at a time, `late`
+    // how late each arrives (in order). Returns the largest one-frame
+    // backward step of the shown car: an extrapolation the braking car's
+    // poses land behind is taken back over ~200 ms, a few cm a frame, where
+    // jumping to them would step back up to 0.5 a (0.15 s)^2 = 0.22 m.
+    template <typename Interval, typename Late>
+    float DriveCar(Features::Car::CarPoseBuffer &buffer, double until, Interval interval, Late late, float *maxStep) {
+        double sent       = 1000.0;
+        float lastX       = -1.0f;
+        float maxBackward = 0.0f;
+        *maxStep          = 0.0f;
+        std::vector<std::pair<double, Features::Car::CarPoseSample>> inFlight;
+        for (double now = 1000.0; now < until; now += 16.0) {
+            while (sent <= now) {
+                // Braking hard from 2.5 s: the newest pose then lags the
+                // extrapolation an observer runs.
+                const float speed = sent < 2500.0 ? 20.0f : std::max(0.0f, 20.0f - static_cast<float>(sent - 2500.0) * 0.02f);
+                const float x     = sent < 2500.0 ? static_cast<float>(sent - 1000.0) * 0.02f
+                                                  : 30.0f + (20.0f + speed) * 0.5f * static_cast<float>(std::min(sent - 2500.0, 1000.0)) * 0.001f;
+                inFlight.push_back({sent + late(sent), CarAt(sent, x, speed)});
+                sent += interval(sent);
+            }
+            for (auto it = inFlight.begin(); it != inFlight.end();) {
+                if (it->first <= now) {
+                    buffer.Push(it->second, it->first, false);
+                    it = inFlight.erase(it);
+                }
+                else {
+                    ++it;
+                }
+            }
+            const double renderTime = buffer.AdvanceDelay(now, 16.0f);
+            Features::Car::CarPoseSample shown;
+            if (!buffer.Present(renderTime, 0.016f, shown)) {
+                continue;
+            }
+            if (lastX >= 0.0f) {
+                maxBackward = std::max(maxBackward, lastX - shown.position.x);
+                *maxStep    = std::max(*maxStep, shown.position.x - lastX);
+            }
+            lastX = shown.position.x;
+        }
+        return maxBackward;
+    }
+
+    void CarBandChange() {
+        // 30 Hz, then the 7.5 Hz band from 2 s: the delay follows the interval
+        // and the car never steps back.
+        Features::Car::CarPoseBuffer buffer;
+        float maxStep        = 0.0f;
+        const float backward = DriveCar(buffer, 6000.0, [](double t) { return t < 2000.0 ? 33.0 : 133.0; }, [](double) { return 20.0; }, &maxStep);
+        CHECK(backward < 0.05f);
+        CHECK(maxStep < 0.6f);
+        CHECK(buffer.IntervalMs() > 110.0f && buffer.DelayMs() > 120.0f);
+    }
+
+    void CarLateCorrection() {
+        // A 250 ms hiccup as the braking car stops holds its poses back, then
+        // delivers them at once: it underruns, extrapolates at the 4.7 m/s it
+        // had past where it stopped, and the poses land behind it.
+        Features::Car::CarPoseBuffer buffer;
+        float maxStep        = 0.0f;
+        const float backward = DriveCar(
+            buffer, 5000.0, [](double) { return 33.0; }, [](double t) { return t >= 3300.0 && t < 3550.0 ? 3560.0 - t : 10.0; }, &maxStep);
+        CHECK(backward < 0.05f);
+        CHECK(maxStep < 0.6f);
+        // A correction decays: 7% after 200 ms, so at most a few centimetres
+        // a frame are ever taken back.
+        Features::Car::CarPoseBuffer snap;
+        snap.Push(CarAt(1000.0, 0.0f, 10.0f), 1000.0, false);
+        snap.Push(CarAt(1033.0, 0.33f, 10.0f), 1033.0, false);
+        Features::Car::CarPoseSample shown;
+        // Extrapolated 117 ms: 100 at 10 m/s, easing for the rest.
+        CHECK(snap.Present(1150.0, 0.016f, shown) && Near(shown.position.x, 0.33f + 1.0f + 0.5f * (1.0f - std::exp(-17.0f / 50.0f)), 0.001f));
+        snap.Push(CarAt(1150.0, 0.5f, 0.0f), 1150.0, false);                              // It had stopped.
+        CHECK(snap.Present(1150.0, 0.016f, shown) && shown.position.x > 1.2f);
+        CHECK(snap.Present(1150.0, 0.2f, shown) && shown.position.x < 0.6f);
+        // A jump beyond 5 m is applied at once.
+        CHECK(snap.Present(1250.0, 0.016f, shown) && shown.position.x < 0.6f);
+        snap.Push(CarAt(1200.0, 20.0f, 0.0f), 1200.0, false);
+        CHECK(snap.Present(1250.0, 0.016f, shown) && Near(shown.position.x, 20.0f, 0.001f));
+    }
+
+    // A car 10 m/s forward (+z) yawing at 1 rad/s, its mass centre 1 m
+    // ahead of the frame origin. Native physics turns it by angleAxis(-wt)
+    // about the mass centre (r x w): heading (-sin t, 0, cos t), the centre
+    // on a 10 m circle, the origin starting off at v + w x (q m) = (1, 0, 10).
+    void CarArcMotion() {
+        const glm::vec3 massCenter(0.0f, 0.0f, 1.0f);
+        const glm::vec3 yaw(0.0f, 1.0f, 0.0f);
+        const auto exact = [&](float t) {
+            Features::Car::CarPoseSample pose;
+            pose.time            = 1000.0 + t * 1000.0;
+            pose.rotation        = glm::angleAxis(-t, yaw);
+            const glm::vec3 centre = massCenter + 10.0f * glm::vec3(std::cos(t) - 1.0f, 0.0f, std::sin(t));
+            pose.position        = centre - pose.rotation * massCenter;
+            pose.velocity        = 10.0f * glm::vec3(-std::sin(t), 0.0f, std::cos(t));
+            pose.angularVelocity = yaw;
+            return pose;
+        };
+        Features::Car::CarPoseBuffer buffer;
+        buffer.SetMassCenter(massCenter);
+        buffer.Push(exact(0.0f), 1000.0, false);
+        Features::Car::CarPoseSample out;
+        // Extrapolated along the arc, turning the way native physics does.
+        CHECK(buffer.Sample(1100.0, out) && Near(out.position, exact(0.1f).position, 1e-4f));
+        CHECK(std::abs(glm::dot(out.rotation, exact(0.1f).rotation)) > 0.99999f);
+        CHECK(Near(out.velocity, exact(0.1f).velocity, 1e-3f));
+        // Hermite between poses on it with the origin's own velocities
+        // stays on it; the mass centre's velocities would cut the corner.
+        buffer.Push(exact(0.1f), 1100.0, false);
+        CHECK(buffer.Sample(1050.0, out) && Near(out.position, exact(0.05f).position, 2e-4f));
+        CHECK(std::abs(glm::dot(out.rotation, exact(0.05f).rotation)) > 0.99999f);
+        // The poses' velocities turned along the arc, not the curve's slope.
+        CHECK(Near(out.velocity, exact(0.05f).velocity, 1e-3f));
+
+        // Spinning on the spot about the mass centre: the origin circles it.
+        Features::Car::CarPoseBuffer spin;
+        spin.SetMassCenter(massCenter);
+        const auto spun = [&](float t) {
+            Features::Car::CarPoseSample pose;
+            pose.time            = 1000.0 + t * 1000.0;
+            pose.rotation        = glm::angleAxis(-2.0f * t, yaw);
+            pose.position        = massCenter - pose.rotation * massCenter;
+            pose.angularVelocity = 2.0f * yaw;
+            return pose;
+        };
+        spin.Push(spun(0.0f), 1000.0, false);
+        spin.Push(spun(0.1f), 1100.0, false);
+        CHECK(spin.Sample(1050.0, out) && Near(out.position, spun(0.05f).position, 1e-4f) && Near(out.velocity, glm::vec3(0.0f), 0.01f));
+        CHECK(std::abs(glm::dot(out.rotation, spun(0.05f).rotation)) > 0.99999f);
+    }
+
+    void CarExtrapolationEase() {
+        // Full speed to 100 ms past the newest pose, then easing to a stop at
+        // 150 ms worth instead of halting there.
+        Features::Car::CarPoseBuffer buffer;
+        buffer.Push(CarAt(1000.0, 0.0f, 20.0f), 1000.0, false);
+        Features::Car::CarPoseSample out;
+        CHECK(buffer.Sample(1100.0, out) && Near(out.position.x, 2.0f, 1e-4f) && Near(out.velocity.x, 20.0f, 1e-4f));
+        float last      = out.position.x;
+        float lastSpeed = out.velocity.x;
+        for (double t = 1105.0; t <= 1600.0; t += 5.0) {
+            CHECK(buffer.Sample(t, out) && out.position.x >= last && out.velocity.x <= lastSpeed && out.position.x - last <= 0.1f + 1e-4f);
+            last      = out.position.x;
+            lastSpeed = out.velocity.x;
+        }
+        CHECK(last <= 3.0f && last > 2.99f && lastSpeed < 0.01f);
+    }
+
+    // A car at 15 m/s, rendered every 16 ms, that comes near a car this
+    // client simulates from 1 s to 2.5 s: its render clock eases to the
+    // present and back, so it never lurches ahead (stepping the clock moved
+    // it 1.5 m in a frame) nor snaps back, and never steps backward.
+    void CarContactClock() {
+        Features::Car::CarPoseBuffer buffer;
+        float lastX   = 0.0f;
+        float minStep = 1.0f;
+        float maxStep = 0.0f;
+        bool shown    = false;
+        bool native   = false;
+        for (double now = 0.0; now < 6000.0; now += 16.0) {
+            for (double sent = std::floor(now / 33.0) * 33.0; sent > now - 16.0; sent -= 33.0) {
+                buffer.Push(CarAt(sent, static_cast<float>(sent) * 0.015f, 15.0f), sent + 10.0, false);
+            }
+            const bool contact      = now >= 1000.0 && now < 2500.0;
+            const double renderTime = buffer.AdvanceDelay(now, 16.0f) + buffer.AdvanceLead(contact ? buffer.DelayMs() : 0.0f, 0.016f, contact ? 0.3f : 1.0f);
+            if (!contact && native) {
+                // Native physics ran it a little off the path meanwhile.
+                buffer.Rebase(glm::vec3(lastX, 0.0f, 0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f), renderTime - 16.0);
+            }
+            native = contact;
+            Features::Car::CarPoseSample pose;
+            CHECK(buffer.Present(renderTime, 0.016f, pose));
+            if (contact) {
+                pose.position.x += 0.05f;
+            }
+            if (shown && now > 500.0) {
+                minStep = std::min(minStep, pose.position.x - lastX);
+                maxStep = std::max(maxStep, pose.position.x - lastX);
+            }
+            shown = true;
+            lastX = pose.position.x;
+            if (now > 2400.0 && now < 2500.0) {
+                // At the present by the end of the contact, but for the few
+                // ms the lead trails the delay as that settles.
+                CHECK(Near(pose.position.x, static_cast<float>(now) * 0.015f + 0.05f, 0.06f));
+            }
+        }
+        // 0.24 m a frame at speed, a quarter more or 10% less at most.
+        CHECK(maxStep < 0.24f * 1.25f + 0.05f + 0.01f);
+        CHECK(minStep > 0.24f * 0.9f - 0.05f);
+        CHECK(Near(buffer.LeadMs(), 0.0f, 1.0f));
+        // A rebase beyond a snap starts on the path.
+        buffer.Rebase(glm::vec3(lastX + 6.0f, 0.0f, 0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f), 5900.0);
+        Features::Car::CarPoseSample pose;
+        CHECK(buffer.Present(5900.0, 0.016f, pose) && Near(pose.position.x, 5900.0f * 0.015f, 0.01f));
+    }
+
+    // The same car near a car this client simulates from 6 s to 8 s (its
+    // delay settled), with a 120 ms round trip to its controller and 80 ms
+    // to this client: it is shown where it is on its controller by then,
+    // 100 ms past the newest pose's time, at full speed (the prediction does
+    // not count against the extrapolation bound), and the clock never runs
+    // it more than a quarter faster or 7.5% slower.
+    void CarContactPrediction() {
+        Features::Car::CarPoseBuffer buffer;
+        const float transit = Features::Car::CarPoseBuffer::TransitMs(120, 80);
+        CHECK(Near(transit, 100.0f, 1e-4f) && Features::Car::CarPoseBuffer::TransitMs(0, -1) == 0.0f &&
+              Features::Car::CarPoseBuffer::TransitMs(9999, 9999) == Features::Car::CarPoseBuffer::kMaxTransitMs);
+        float lastX   = 0.0f;
+        float minStep = 1.0f;
+        float maxStep = 0.0f;
+        bool shown    = false;
+        for (double now = 0.0; now < 14000.0; now += 16.0) {
+            for (double sent = std::floor(now / 33.0) * 33.0; sent > now - 16.0; sent -= 33.0) {
+                buffer.Push(CarAt(sent, static_cast<float>(sent) * 0.015f, 15.0f), sent + 10.0, false);
+            }
+            const bool contact   = now >= 6000.0 && now < 8000.0;
+            const float span     = buffer.DelayMs() + transit;
+            const float target   = contact ? span : 0.0f;
+            const float seconds  = contact ? Features::Car::CarPoseBuffer::LeadSeconds(span, 0.25f, 0.3f)
+                                           : Features::Car::CarPoseBuffer::LeadSeconds(span, 0.075f, 1.0f);
+            const double renderTime = buffer.AdvanceDelay(now, 16.0f) + buffer.AdvanceLead(target, 0.016f, seconds);
+            Features::Car::CarPoseSample pose;
+            CHECK(buffer.Present(renderTime, 0.016f, pose));
+            if (shown && now > 500.0) {
+                minStep = std::min(minStep, pose.position.x - lastX);
+                maxStep = std::max(maxStep, pose.position.x - lastX);
+            }
+            shown = true;
+            lastX = pose.position.x;
+            if (now > 7800.0 && now < 8000.0) {
+                CHECK(Near(pose.position.x, static_cast<float>(now + transit) * 0.015f, 0.06f) && Near(pose.velocity.x, 15.0f, 0.05f));
+            }
+        }
+        CHECK(maxStep < 0.24f * 1.25f + 0.01f);
+        CHECK(minStep > 0.24f * 0.925f - 0.01f);
+        CHECK(Near(buffer.LeadMs(), 0.0f, 1.0f));
+    }
+
+    // A car at 15 m/s handed to another controller at 2 s: its clock starts
+    // over (the first pose dated as it arrives, 0.2 m off the old path) and
+    // the buffer with it, but the shown car carries on from where it was.
+    void CarControllerChange() {
+        Features::Car::CarPoseBuffer buffer;
+        float lastX   = 0.0f;
+        float maxJump = 0.0f;
+        bool shown    = false;
+        for (double now = 0.0; now < 3000.0; now += 16.0) {
+            for (double sent = std::floor(now / 33.0) * 33.0; sent > now - 16.0; sent -= 33.0) {
+                const bool handed = sent >= 2000.0;
+                const double time = handed ? sent + 40.0 : sent;
+                buffer.Push(CarAt(time, static_cast<float>(sent) * 0.015f - (handed ? 0.2f : 0.0f), 15.0f), sent + 10.0, handed && sent < 2033.0);
+            }
+            const double renderTime = buffer.AdvanceDelay(now, 16.0f);
+            Features::Car::CarPoseSample pose;
+            if (!buffer.Present(renderTime, 0.016f, pose)) {
+                continue;
+            }
+            if (shown && now > 500.0) {
+                maxJump = std::max(maxJump, std::abs(pose.position.x - lastX - 0.24f));
+            }
+            shown = true;
+            lastX = pose.position.x;
+        }
+        // The new path runs 0.8 m behind (the new clock's 40 ms and the
+        // 0.2 m): clearing the buffer jumped the car back by that and stood
+        // it for the delay. Now it is closed like a correction, 19% a frame,
+        // and the car never steps backward.
+        CHECK(maxJump < 0.8f * (1.0f - std::exp(-16.0f / 75.0f)) + 0.01f);
+        CHECK(maxJump < 0.24f);
+        // A stream's first pose: the car runs into it.
+        Features::Car::CarPoseBuffer first;
+        first.Push(CarAt(1000.0, 15.0f, 15.0f), 1000.0, false);
+        Features::Car::CarPoseSample out;
+        CHECK(first.Sample(900.0, out) && Near(out.position.x, 13.5f, 1e-4f));
+    }
+
+    void RideBlend() {
+        using Features::Player::RemoteRide;
+        std::deque<std::pair<MafiaNet::Time, RemoteRide>> rides;
+        rides.push_back({1000, RemoteRide {}});
+        rides.push_back({1050, RemoteRide {4, 1, {0.0f, 0.0f, 2.0f}, 0.0f}});
+        rides.push_back({1100, RemoteRide {4, 1, {0.0f, 0.0f, 4.0f}, 3.0f}});
+        rides.push_back({1150, RemoteRide {4, 1, {0.0f, 0.0f, 6.0f}, -3.0f}});
+        RemoteRide ride;
+        float weight = 0.0f;
+        // Before boarding: nowhere near a ride.
+        CHECK(!Features::Player::RideAt(rides, 1020.0, ride, weight));
+        // Boarding blends in over kRideBlendMs from the first sample aboard.
+        CHECK(Features::Player::RideAt(rides, 1075.0, ride, weight) && Near(weight, 25.0f / 150.0f, 1e-4f));
+        CHECK(Near(ride.local.z, 3.0f, 1e-4f) && Near(ride.yaw, 1.5f, 1e-4f));
+        // The short way round from 3 to -3 radians, through pi.
+        CHECK(Features::Player::RideAt(rides, 1125.0, ride, weight) && std::abs(ride.yaw) > 3.1f);
+        CHECK(Features::Player::RideAt(rides, 1300.0, ride, weight) && weight == 1.0f && ride.local.z == 6.0f);
+        // Stepping off eases back out from the last offset aboard.
+        rides.push_back({1200, RemoteRide {}});
+        CHECK(Features::Player::RideAt(rides, 1260.0, ride, weight) && Near(weight, 1.0f - 60.0f / 150.0f, 1e-4f) && ride.local.z == 6.0f);
+        CHECK(!Features::Player::RideAt(rides, 1400.0, ride, weight));
+        // Aboard from the start of the history: no blend.
+        rides.erase(rides.begin());
+        CHECK(Features::Player::RideAt(rides, 1060.0, ride, weight) && weight == 1.0f);
+    }
+
+    void StalledGait() {
+        using namespace Features::Player;
+        // Runs and walks, with the weapon overlay bits; not the turns on the
+        // spot, the breath, a jump or a death.
+        CHECK(MovingGait(5) && MovingGait(6) && MovingGait(11) && MovingGait(20) && MovingGait(0x400 | 7));
+        CHECK(!MovingGait(1) && !MovingGait(8) && !MovingGait(9) && !MovingGait(10) && !MovingGait(97) && !MovingGait(131));
+        // A walking replica is in Go_*'s work state, so a swing overlays
+        // its gait; standing or turning, Do_Breath's, so it swings whole.
+        CHECK(GaitWorkState(1, 6) == 2 && GaitWorkState(2, 0x400 | 5) == 2 && GaitWorkState(1, 18) == 2);
+        CHECK(GaitWorkState(2, 1) == 1 && GaitWorkState(2, 10) == 1 && GaitWorkState(1, 97) == 1);
+        // A timed swing, hit steps, a clip or a fall stay the native's.
+        for (const int32_t work : {3, 4, 5, 6, 8}) {
+            CHECK(GaitWorkState(work, 6) == work && GaitWorkState(work, 1) == work);
+        }
+        const glm::vec3 running {0.0f, 0.0f, 5.0f};
+        // Inside the bound the body still moves; past it, held moving.
+        CHECK(!Stalled(1149.0, 1000.0, 150.0f, running));
+        CHECK(Stalled(1150.0, 1000.0, 150.0f, running));
+        // A body at rest (or only falling) held there is not stalled.
+        CHECK(!Stalled(5000.0, 1000.0, 150.0f, glm::vec3(0.05f, -3.0f, 0.0f)));
+        // Nothing received yet.
+        CHECK(!Stalled(5000.0, 0.0, 150.0f, running));
+    }
+
+    void HumanStates() {
+        using namespace Features::Player;
+        // Turning on the spot and cover hold their state; the variant bits
+        // (crouched 8270 = 0x2000 | 78) are dropped for PersonAnim.
+        for (const int16_t state : {8, 9, 10, 78, 79, 88, 92}) {
+            const auto animation = ClassifyHumanState(state);
+            CHECK(animation.state == state && !animation.oneShot);
+        }
+        CHECK(ClassifyHumanState(8270).state == 78);
+        // int16 carries 32855 (0x8000 | 87) negative; the mask still finds 87.
+        CHECK(ClassifyHumanState(static_cast<int16_t>(32855)).state == 87 && ClassifyHumanState(static_cast<int16_t>(32855)).oneShot);
+        // A peek or a shot round the corner plays once.
+        for (const int16_t state : {80, 82, 83, 87}) {
+            CHECK(ClassifyHumanState(state).oneShot);
+        }
+        // Still idle: a door clip, a death, an unknown state.
+        CHECK(ClassifyHumanState(287).state == 1 && ClassifyHumanState(131).state == 1 && ClassifyHumanState(93).state == 1);
+        // Each cover state maps to the call and side that sets it.
+        CHECK(CornerActionFor(78).call == CornerCall::None && CornerActionFor(10).call == CornerCall::None);
+        CHECK(CornerActionFor(81).call == CornerCall::View && CornerActionFor(81).view == 1);
+        CHECK(CornerActionFor(84).call == CornerCall::Fire && CornerActionFor(84).view == 0);
+        CHECK(CornerActionFor(86).call == CornerCall::Fire && CornerActionFor(86).view == 1);
+        CHECK(CornerActionFor(0x4000 | 87).call == CornerCall::Fire && CornerActionFor(0x4000 | 87).view == 2);
+        CHECK(CornerActionFor(89).call == CornerCall::FireAimed && CornerActionFor(89).view == 0);
+        CHECK(CornerActionFor(92).call == CornerCall::FireAimed && CornerActionFor(92).view == 2);
+        // A lean the body's own call took on the side's other clip, or with
+        // variant bits, still holds the streamed cover; another side, call
+        // or a state out of cover does not.
+        CHECK(HoldsCorner(89, 88) && HoldsCorner(88, 89) && HoldsCorner(91, 90) && HoldsCorner(0x2000 | 92, 92));
+        CHECK(!HoldsCorner(90, 88) && !HoldsCorner(84, 89) && !HoldsCorner(92, 88));
+        CHECK(!HoldsCorner(1, 88) && !HoldsCorner(78, 88));
+    }
+
+    // A car's knockdown of a player reaches its replicas only as the owner's
+    // locomotion state: each clip plays once and runs to its end there.
+    void PlayerKnockdowns() {
+        using namespace Features::Player;
+        // Hit's living falls and the side fall's get-up play once on a
+        // player's replica; an NPC's or walker's replica still idles.
+        for (const int16_t state : {106, 107, 108, 111, 114}) {
+            CHECK(KnockdownClip(state));
+            const auto animation = ClassifyPlayerState(state);
+            CHECK(animation.state == state && animation.oneShot);
+            CHECK(ClassifyHumanState(state).state == 1);
+        }
+        // The dead falls come with a death; the variant bits are dropped.
+        for (const int16_t state : {109, 110, 112, 113, 105, 115}) {
+            CHECK(!KnockdownClip(state));
+        }
+        CHECK(ClassifyPlayerState(0x2000 | 114).state == 114);
+        // Everything else classifies as for any human.
+        for (const int16_t state : {1, 6, 10, 78, 97, 287, 322}) {
+            CHECK(ClassifyPlayerState(state).state == ClassifyHumanState(state).state);
+            CHECK(ClassifyPlayerState(state).oneShot == ClassifyHumanState(state).oneShot);
+        }
+
+        // The fall runs in work state 4 to its end over a sample of the
+        // owner's idle or walk, or the same fall still streamed.
+        CHECK(HoldsKnockdown(4, 106, 1) && HoldsKnockdown(4, 107, 6) && HoldsKnockdown(4, 114, 114));
+        // The get-up the owner queued behind a side fall takes over.
+        CHECK(!HoldsKnockdown(4, 107, 111) && !HoldsKnockdown(4, 108, 111));
+        // Not once the track ended (idle again), nor in the steps (6), a
+        // swing (5) or for a clip that is no knockdown (a jump).
+        CHECK(!HoldsKnockdown(1, 106, 1) && !HoldsKnockdown(6, 106, 1) && !HoldsKnockdown(5, 114, 6));
+        CHECK(!HoldsKnockdown(4, 97, 1) && !HoldsKnockdown(4, 1, 106));
+    }
+
+    void ReleaseBlend() {
+        using namespace Features::Npc;
+        // The whole gap at the release, none at its end or after.
+        CHECK(ReleaseWeight(0.0f, 0.3f) == 1.0f);
+        CHECK(ReleaseWeight(0.3f, 0.3f) == 0.0f && ReleaseWeight(1.0f, 0.3f) == 0.0f);
+        // Half way, half the gap; easing out at both ends.
+        CHECK(Near(ReleaseWeight(0.15f, 0.3f), 0.5f, 1e-5f));
+        CHECK(ReleaseWeight(0.03f, 0.3f) > 0.95f && ReleaseWeight(0.27f, 0.3f) < 0.05f);
+        // Monotonic.
+        float previous = 1.0f;
+        for (float t = 0.0f; t <= 0.3f; t += 0.01f) {
+            const float weight = ReleaseWeight(t, 0.3f);
+            CHECK(weight <= previous);
+            previous = weight;
+        }
+        CHECK(ReleaseWeight(0.1f, 0.0f) == 0.0f && ReleaseWeight(std::numeric_limits<float>::quiet_NaN(), 0.3f) == 0.0f);
+    }
+
+    void ContactStep() {
+        using namespace Features::Npc;
+        const glm::vec3 north {0.0f, 0.0f, 1.0f};
+        // Facing +z: ahead is walk1, behind back1, +x strafR1 (Go_Right).
+        CHECK(StepFor({0.0f, 0.0f, 1.0f}, north).state == 6 && StepFor({0.0f, 0.0f, 1.0f}, north).speed == 1.7f);
+        CHECK(StepFor({0.0f, 0.0f, -1.0f}, north).state == 7 && StepFor({0.0f, 0.0f, -1.0f}, north).speed == 1.5f);
+        CHECK(StepFor({1.0f, 0.0f, 0.0f}, north).state == 12);
+        CHECK(StepFor({-1.0f, 0.0f, 0.0f}, north).state == 11);
+        // Facing +x, its right is -z; height does not count.
+        CHECK(StepFor({0.0f, 5.0f, -1.0f}, {1.0f, 0.0f, 0.0f}).state == 12);
+        // Mostly backwards with a little sideways is still back1.
+        CHECK(StepFor({0.3f, 0.0f, -1.0f}, north).state == 7);
+        // Nothing to go by: walk1.
+        CHECK(StepFor(glm::vec3(0.0f), north).state == 6 && StepFor(north, glm::vec3(0.0f)).state == 6);
+    }
+
+    void DeathDrawing() {
+        using namespace Features::Npc;
+        // The stream drives it until the host's moment of death is drawn,
+        // even on a body something else killed here.
+        CHECK(DeathDrawFor(false, false) == DeathDraw::Stream && DeathDrawFor(false, true) == DeathDraw::Stream);
+        // Then only a dead body is drawn onto the host's corpse; a living
+        // one waiting for its death stands.
+        CHECK(DeathDrawFor(true, true) == DeathDraw::Settle);
+        CHECK(DeathDrawFor(true, false) == DeathDraw::Stand);
+    }
+
+    void FadingReclaim() {
+        struct Copy {
+            uint64_t walkerId = 0;
+            float alpha = 1.0f;
+            std::vector<int> state;
+        };
+        std::vector<Copy> fading {{7, 0.6f, {1, 2}}, {9, 0.3f, {3}}};
+        // Nothing of an entity with no fading copy.
+        CHECK(!Features::World::TakeFading(fading, &Copy::walkerId, 8) && fading.size() == 2);
+        // Its own copy, with what it carried, and only that one leaves.
+        const auto copy = Features::World::TakeFading(fading, &Copy::walkerId, 9);
+        CHECK(copy && copy->walkerId == 9 && copy->alpha == 0.3f && copy->state == std::vector<int> {3});
+        CHECK(fading.size() == 1 && fading.front().walkerId == 7 && fading.front().state.size() == 2);
+        // Taken once: a second stream-in makes a new copy.
+        CHECK(!Features::World::TakeFading(fading, &Copy::walkerId, 9));
+    }
+
+    void DoorEnd() {
+        using namespace Features;
+        // Use_Actor's door clips: 271 + side/no door/rear/exit bits, the
+        // open-wheeler's 316-319; not a seated pose (246) or a pull-out.
+        CHECK(Player::DoorAnimation(271) && Player::DoorAnimation(287) && Player::DoorAnimation(294) && Player::DoorAnimation(316) && Player::DoorAnimation(319));
+        CHECK(!Player::DoorAnimation(246) && !Player::DoorAnimation(270) && !Player::DoorAnimation(295) && !Player::DoorAnimation(306) && !Player::DoorAnimation(1));
+        struct Entry {
+            uint32_t at;
+            int16_t locomotion;
+        };
+        const auto door = [](int16_t state) { return Player::DoorAnimation(state); };
+        const std::vector<Entry> exiting {{1000, 287}, {1100, 287}, {1200, 287}, {1300, 1}, {1400, 6}};
+        // Drawn mid-clip: where the host's clip ended, the first pose after.
+        CHECK(Npc::DoorEndTime(exiting, 1050.0, door) == 1300.0);
+        // Past it, or before any door pose: the time drawn.
+        CHECK(Npc::DoorEndTime(exiting, 1350.0, door) == 1350.0);
+        const std::vector<Entry> walking {{1000, 6}, {1100, 287}};
+        CHECK(Npc::DoorEndTime(walking, 1050.0, door) == 1050.0);
+        // Still in the clip at the newest pose: that pose.
+        const std::vector<Entry> still {{1000, 289}, {1100, 289}, {1200, 289}};
+        CHECK(Npc::DoorEndTime(still, 1150.0, door) == 1200.0);
+        // Before the oldest pose: as GaitAt, by the oldest one's state.
+        CHECK(Npc::DoorEndTime(still, 900.0, door) == 1200.0);
+        CHECK(Npc::DoorEndTime(exiting, 900.0, door) == 1300.0);
+    }
+
+    void HostView() {
+        using namespace Features::Player;
+        // Half of each round trip, kept within the buffer's bound one send
+        // interval past the newest pose.
+        CHECK(Near(HostTransitMs(80, 40, 50.0f, 150.0f), 60.0f, 1e-4f));
+        CHECK(Near(HostTransitMs(400, 100, 50.0f, 150.0f), 100.0f, 1e-4f));
+        CHECK(HostTransitMs(0, -1, 50.0f, 150.0f) == 0.0f && HostTransitMs(200, 0, 200.0f, 150.0f) == 0.0f);
+        // The lead eases to its target without overshooting.
+        Features::Player::HostLead lead;
+        float previous = 0.0f;
+        for (int i = 0; i < 120; ++i) {
+            const float ms = lead.Advance(200.0f, 1.0f / 60.0f, 0.3f);
+            CHECK(ms >= previous - 1e-3f && ms <= 200.0f + 1e-3f);
+            previous = ms;
+        }
+        CHECK(Near(previous, 200.0f, 1.0f));
+        // A jump decays to under a tenth in 200 ms; a teleport snaps.
+        HostCorrection correction;
+        correction.Rebase(glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f));
+        glm::vec3 offset {1.0f, 0.0f, 0.0f};
+        for (int i = 0; i < 12; ++i) {
+            offset = correction.Advance(1.0f / 60.0f);
+        }
+        CHECK(offset.x > 0.0f && offset.x < 0.1f);
+        correction.Rebase(glm::vec3(10.0f, 0.0f, 0.0f), glm::vec3(0.0f));
+        CHECK(correction.offset == glm::vec3(0.0f));
+    }
+} // namespace
+
+int main() {
+    FixedValues();
+    RemoteClocks();
+    RailwayTrack();
+    Angles();
+    Quaternions();
+    PlayerTransform();
+    WalkerTransforms();
+    CarTransform();
+    Reports();
+    SampleClocks();
+    HeldSampleClocks();
+    EventsShownWithTheirPoses();
+    CarResumeAfterHeartbeat();
+    CarBandChange();
+    CarLateCorrection();
+    CarArcMotion();
+    CarExtrapolationEase();
+    CarContactClock();
+    CarContactPrediction();
+    CarControllerChange();
+    RideBlend();
+    StalledGait();
+    HumanStates();
+    PlayerKnockdowns();
+    ReleaseBlend();
+    ContactStep();
+    DeathDrawing();
+    FadingReclaim();
+    DoorEnd();
+    HostView();
+    if (failures == 0) {
+        std::printf("network wire tests passed\n");
+    }
+    return failures == 0 ? 0 : 1;
+}

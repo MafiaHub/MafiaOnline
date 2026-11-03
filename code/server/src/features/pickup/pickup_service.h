@@ -3,7 +3,7 @@
 #include "shared/features/pickup/pickup_request.h"
 #include "shared/features/pickup/weapon_pickup_entity.h"
 
-#include <mafianet/peerinterface.h>
+#include <mafianet/peer_interface.h>
 
 #include <glm/vec3.hpp>
 

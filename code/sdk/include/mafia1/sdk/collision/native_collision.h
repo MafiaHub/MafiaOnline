@@ -7,6 +7,23 @@
 namespace Mafia1Online::SDK::Collision {
     inline constexpr uintptr_t kCollision          = 0x647F48;
     inline constexpr uintptr_t kTestLineHStatic    = 0x5C74D0;
+    // g_collision::DynErase(tDynamicCollObject *), ret 4: takes a dynamic
+    // object out of its grid cell; nothing when it has none.
+    inline constexpr uintptr_t kDynErase           = 0x5C38B0;
+
+    inline void DynErase(void *object) {
+        using Call = void(__thiscall *)(void *, void *);
+        reinterpret_cast<Call>(kDynErase)(reinterpret_cast<void *>(kCollision), object);
+    }
+
+    // g_collision::DynInsert(tDynamicCollObject *), ret 4: puts a dynamic
+    // object into the grid cell of its position; nothing when it has one.
+    inline constexpr uintptr_t kDynInsert          = 0x5C36C0;
+
+    inline void DynInsert(void *object) {
+        using Call = void(__thiscall *)(void *, void *);
+        reinterpret_cast<Call>(kDynInsert)(reinterpret_cast<void *>(kCollision), object);
+    }
 
     // g_collision::TestLineHStatic tests the static world grid only, not cars
     // or humans. __thiscall(g_collision*, const S_vector& start, const

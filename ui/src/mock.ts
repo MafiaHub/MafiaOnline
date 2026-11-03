@@ -1,11 +1,53 @@
 import type { InboundMessage, OutboundEvent } from './bridge';
-import { type UiState, chatOpen, pauseOpen, gameplayMenu } from './store';
+import { type GameSettings, type UiState, chatOpen, pauseOpen, gameplayMenu } from './store';
+
+function mockSettings(): GameSettings {
+    const slot = (key: string, label: string, conflicts: string[] = []) => ({ key, label, defaultLabel: label, mouse: true, wheel: true, clearable: true, conflicts });
+    return {
+        groups: [
+            { id: 'onFoot', label: 'On foot', rows: [{ id: 'forward', label: 'Move forward', slots: ['native:forward', 'native:forward2'] }, { id: 'use', label: 'Use / enter car', slots: ['native:use', 'native:use2'] }] },
+            { id: 'car', label: 'In a car', rows: [{ id: 'horn', label: 'Horn', slots: ['native:horn', 'native:horn2'] }] },
+            { id: 'multiplayer', label: 'Multiplayer', rows: [{ id: 'chat', label: 'Chat', slots: ['mod:chat'] }, { id: 'pushToTalk', label: 'Voice: push to talk', slots: ['mod:pushToTalk'] }] },
+            { id: 'script:freeride', label: 'Server: freeride', rows: [{ id: 'f9', label: 'Car radio on or off', slots: ['script:freeride/f9'] }] },
+        ],
+        slots: {
+            'native:forward': slot('up', 'Up'),
+            'native:forward2': slot('w', 'W'),
+            'native:use': slot('mouse2', 'Mouse 2'),
+            'native:use2': slot('u', 'U', ['Police: call for backup']),
+            'native:horn': slot('k', 'K', ['Siren (police car)']),
+            'native:horn2': slot('', ''),
+            'mod:chat': { ...slot('t', 'T'), mouse: false, wheel: false, clearable: false },
+            'mod:pushToTalk': { ...slot('v', 'V'), wheel: false },
+            'script:freeride/f9': { ...slot('f9', 'F9'), wheel: false },
+        },
+        mouse: { sensitivityX: 0.5, sensitivityY: 0.5, turnLimit: 0.5, steering: 0.2, invertY: false, doubleTapRoll: true, mph: true, crosshair: 0 },
+        audio: { sound: 1, music: 0.8, car: 1, speech: 1 },
+        media: 1,
+        voice: { enabled: true, volume: 1, mode: 'pushToTalk', threshold: 0.03, releaseMs: 100, noiseSuppression: false, device: '' },
+        hud: { nametags: true, nametagHealth: true },
+        display: { mode: 'borderless', width: 0, height: 0 },
+        displayActive: { mode: 'borderless', width: 2560, height: 1440 },
+        displayModes: [
+            [2560, 1440],
+            [1920, 1080],
+            [1600, 900],
+            [1280, 720],
+            [1024, 768],
+        ],
+        monitor: [2560, 1440],
+        devices: ['Microphone (USB Audio)', 'Headset Microphone'],
+        voiceAvailable: true,
+        toggles: [{ resource: 'freeride', id: 'radio', label: 'Car radio', value: true }],
+        profile: { controls: true, audio: false },
+    };
+}
 
 // Browser preview (npm run dev): stands in for the game so the screens can be
-// designed without launching it. #menu or #game picks the screen.
+// designed without launching it. #menu, #game or #loading picks the screen.
 export function startMock(receive: (message: InboundMessage) => void) {
     const view = location.hash.slice(1);
-    const screen = view.startsWith('game') ? 'game' : 'menu';
+    const screen = view.startsWith('game') ? 'game' : view.startsWith('loading') ? 'loading' : 'menu';
     const base: UiState = {
         screen,
         version: 'dev',
@@ -36,8 +78,11 @@ export function startMock(receive: (message: InboundMessage) => void) {
             preferences: {},
         },
     };
-    if (view === 'menu-connected') {
+    if (view === 'menu-connected' || screen === 'loading') {
         base.connection = { ...base.connection, phase: 'connected', status: 'Mission selected: freeride', active: true, playAvailable: true, host: '127.0.0.1', port: 27015 };
+    }
+    if (screen === 'loading') {
+        base.connection = { ...base.connection, status: 'Loading mission: freeride', playAvailable: false, host: 'salieri.example', port: 27016 };
     }
     let current = base;
     const push = (next: UiState) => {
@@ -45,6 +90,19 @@ export function startMock(receive: (message: InboundMessage) => void) {
         receive({ type: 'state', payload: next });
     };
     setTimeout(() => push(base), 0);
+    // #loading walks the bar through the retail loader's stages the way the
+    // client reports them; #loading-start stays before the first report.
+    if (screen === 'loading') {
+        setTimeout(() => receive({ type: 'loading', payload: { mission: 'freeride', progress: -1, stage: 'preparing' } }), 0);
+        if (view === 'loading') {
+            let progress = 0;
+            const timer = window.setInterval(() => {
+                progress = Math.min(1, progress + 0.03);
+                receive({ type: 'loading', payload: { mission: 'freeride', progress, stage: progress < 0.7 ? 'scene' : 'world' } });
+                if (progress >= 1) window.clearInterval(timer);
+            }, 400);
+        }
+    }
     if (screen === 'game') {
         const lines = [
             { author: '', text: 'Welcome to Lost Heaven. Type /car to call a ride.', color: 0 },
@@ -58,9 +116,9 @@ export function startMock(receive: (message: InboundMessage) => void) {
             payload: {
                 mission: 'freeride',
                 players: [
-                    { id: 1, name: 'Tommy', health: 100, alive: true, spawned: true, local: true },
-                    { id: 2, name: 'Sam', health: 64, alive: true, spawned: true, local: false },
-                    { id: 3, name: 'Paulie', health: 0, alive: false, spawned: true, local: false },
+                    { id: 1, name: 'Tommy', health: 100, alive: true, spawned: true, ping: 38, local: true },
+                    { id: 2, name: 'Sam', health: 64, alive: true, spawned: true, ping: 72, local: false },
+                    { id: 3, name: 'Paulie', health: 0, alive: false, spawned: true, ping: 140, local: false },
                 ],
             },
         });
@@ -99,8 +157,34 @@ export function startMock(receive: (message: InboundMessage) => void) {
             }
         });
     }
+    let settings = mockSettings();
     return (name: OutboundEvent, payload: unknown) => {
-        if (name === 'chat:send') {
+        if (name === 'settings:open' || name === 'settings:devices') {
+            receive({ type: 'settings', payload: settings });
+        }
+        else if (name === 'settings:set') {
+            const patch = payload as Partial<GameSettings>;
+            settings = {
+                ...settings,
+                mouse: { ...settings.mouse, ...patch.mouse },
+                audio: { ...settings.audio, ...patch.audio },
+                voice: { ...settings.voice, ...patch.voice },
+                hud: { ...settings.hud, ...patch.hud },
+                display: { ...settings.display, ...patch.display },
+                media: patch.media ?? settings.media,
+            };
+            receive({ type: 'settings', payload: settings });
+        }
+        else if (name === 'settings:bind') {
+            const { slot, key } = payload as { slot: string; key: string };
+            settings = { ...settings, slots: { ...settings.slots, [slot]: { ...settings.slots[slot], key, label: key.toUpperCase() } } };
+            receive({ type: 'settings', payload: settings });
+        }
+        else if (name === 'settings:reset') {
+            settings = mockSettings();
+            receive({ type: 'settings', payload: settings });
+        }
+        else if (name === 'chat:send') {
             receive({ type: 'chat:message', payload: { author: current.defaults.nickname, text: (payload as { text: string }).text, color: 0, time: Date.now() } });
         }
         else if (name === 'menu:connect') {

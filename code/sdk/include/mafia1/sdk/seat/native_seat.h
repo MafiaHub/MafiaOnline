@@ -14,8 +14,31 @@ namespace Mafia1Online::SDK::Seat {
     inline constexpr uintptr_t kHumanForceExitCar = 0x581220;
     inline constexpr uintptr_t kHumanClimbInCar = 0x581eb0;
     inline constexpr uintptr_t kHumanThrowFromCar = 0x587d70;
+    // C_human::intern_ThrowMeFromCar, void __thiscall(C_human*): frees the
+    // seated human's seat (+0x98, +0xac) and plays its throw-out (308-315).
+    inline constexpr uintptr_t kHumanThrowMeFromCar = 0x588b40;
+    // C_human::Intern_UseRailway, void __thiscall(C_human*, bool enter),
+    // ret 4: the end of a railway step. false takes the human back to world
+    // space and the primary sector, out of the wagon's collision list
+    // (DynGetOut), unlinks the camera of the local player and Unlocks.
+    inline constexpr uintptr_t kHumanInternUseRailway = 0x571b90;
     inline constexpr uintptr_t kCarGetOwner = 0x41dec0;
     inline constexpr uintptr_t kCarGetSeatProperty = 0x41dc30;
+    // C_car::SetEnterProtect1, void __thiscall(C_car*, int seat, bool),
+    // ret 8: sets or clears the seat's bit in m_uSeatProtectionMask, then
+    // m_bPhysicsUpdatePending and SetActState(active).
+    inline constexpr uintptr_t kCarSetEnterProtect1 = 0x429770;
+    // C_car::m_uSeatProtectionMask: C_car::Update registers a seat's use
+    // prompt only while its bit is set (0x41ffb0, removed at 0x4200d5).
+    inline constexpr size_t kCarSeatProtectionMask = 0x21c4;
+
+    // C_human +0xb4 (m_iAnimSpeedAccum): Use_Actor's last argument stores
+    // 1 there; ending that door (Intern_UseCar(true)) adds 100, and the next
+    // C_human::AI tick (0x570740) climbs to the paired seat on 101
+    // (Do_ClimbInCarLR) and clears it. The passenger door's slide across
+    // (C_player::Do_AB_OwnerNULL, USING_OBJECT_CAR_EXIT) passes 1. A
+    // network-controlled human runs NetDirect instead of AI and never climbs.
+    inline constexpr int32_t kHumanCarEventClimb = 101;
 
     enum class UseAction : int32_t {
         Enter = 1,
@@ -36,8 +59,22 @@ namespace Mafia1Online::SDK::Seat {
             using Call = bool(__thiscall *)(NativeCar *, int, bool *, bool *, bool *, bool *);
             return reinterpret_cast<Call>(kCarGetSeatProperty)(this, seat, &left, &hasDoor, &rear, &open);
         }
+
+        // Use_Actor clears the seat's bit for its door animation and only
+        // Intern_UseCar(bool) sets it again; while clear, the seat offers no
+        // use prompt.
+        [[nodiscard]] bool SeatEnterable(int seat) const {
+            const auto mask = *reinterpret_cast<const uint32_t *>(reinterpret_cast<const std::byte *>(this) + kCarSeatProtectionMask);
+            return ((mask >> seat) & 1u) != 0;
+        }
+
+        void SetSeatEnterable(int seat, bool enterable) {
+            using Call = void(__thiscall *)(NativeCar *, int, bool);
+            reinterpret_cast<Call>(kCarSetEnterProtect1)(this, seat, enterable);
+        }
     };
     static_assert(sizeof(NativeCar) == sizeof(Car::NativeCar));
+    static_assert(sizeof(NativeCar) >= kCarSeatProtectionMask + sizeof(uint32_t));
 
     // The seat state lives in C_human's prefix, shared by C_player and C_entity.
     struct NativeHuman {
@@ -51,7 +88,11 @@ namespace Mafia1Online::SDK::Seat {
         NativeCar *controlOverrideCar;
         NativeCar *currentCar2;
         int32_t seatId;
-        std::byte _unusedB0[0x410 - 0xb0];
+        int32_t vehicleAnimSubState;
+        // kHumanCarEventClimb while a slide across waits for C_human::AI.
+        int32_t carEvent;
+        int32_t carEventTime;
+        std::byte _unusedBC[0x410 - 0xbc];
         // 1 while a Use_Actor door animation holds the car's boarding lock.
         int32_t transitionState;
 
@@ -103,9 +144,21 @@ namespace Mafia1Online::SDK::Seat {
             using Call = bool(__thiscall *)(NativeHuman *, NativeCar *, int);
             return reinterpret_cast<Call>(kHumanThrowFromCar)(this, car, seat);
         }
+
+        // Retail's Corovacka branch of Do_ThrowCocotFromCar seats the new
+        // driver (Intern_UseCar) and calls this on it.
+        void ThrowOutOfSeat() {
+            reinterpret_cast<void(__thiscall *)(NativeHuman *)>(kHumanThrowMeFromCar)(this);
+        }
+
+        // Aboard a railway, +0x98 holds it as for a car.
+        void LeaveRailwayNow() {
+            reinterpret_cast<void(__thiscall *)(NativeHuman *, bool)>(kHumanInternUseRailway)(this, false);
+        }
     };
     static_assert(offsetof(NativeHuman, usedActorEnter) == 0x98);
     static_assert(offsetof(NativeHuman, usedActorLeave) == 0x9c);
     static_assert(offsetof(NativeHuman, seatId) == 0xac);
+    static_assert(offsetof(NativeHuman, carEvent) == 0xb4);
     static_assert(offsetof(NativeHuman, transitionState) == 0x410);
 } // namespace Mafia1Online::SDK::Seat

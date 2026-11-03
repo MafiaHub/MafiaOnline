@@ -2,13 +2,22 @@
 
 #include "combat_hooks.h"
 
+#include "core/application.h"
+#include "features/simulation/simulation_config.h"
+#include "features/world/world_service.h"
+#include "shared/features/combat/melee_rules.h"
+#include "shared/features/player/player_entity.h"
+
 #include "combat_service.h"
 
 #include <MinHook.h>
+#include <core_modules.h>
 #include <mafia1/sdk/combat/native_grenade.h>
 #include <mafia1/sdk/core/game.h>
 #include <mafia1/sdk/core/mission.h>
 #include <mafia1/sdk/player/native_human.h>
+#include <mafia1/sdk/police/native_police_manager.h>
+#include <networking/replication/replication_manager.h>
 
 #include <algorithm>
 #include <initializer_list>
@@ -34,6 +43,7 @@ namespace Mafia1Online::Features::Combat {
         using NewFireCall = void(__thiscall *)(NativeGame *, Vector3 *, void *, int32_t, float, float, bool);
         using GrenadeDestructorCall = void *(__thiscall *)(NativeGrenade *, uint32_t);
         using HumanNotifyCall = uint32_t(__stdcall *)(NativeFrame *, uint32_t, uint32_t, uint32_t);
+        using HumanBoxingCall = void(__thiscall *)(void *, NativeActor *);
         constexpr uint32_t kThrowGrenadeNote = 41;
 
         ShootingCall gShootingOriginal     = nullptr;
@@ -47,6 +57,8 @@ namespace Mafia1Online::Features::Combat {
         NewFireCall gNewFireOriginal = nullptr;
         GrenadeDestructorCall gGrenadeDestructorOriginal = nullptr;
         HumanNotifyCall gHumanNotifyOriginal = nullptr;
+        HumanBoxingCall gHumanBoxingOriginal = nullptr;
+        unsigned gValidatedMeleeDepth = 0;
         thread_local NativeGrenade *gTickingGrenade = nullptr;
         thread_local NativeActor *gGrenadeNotifyActor = nullptr;
         CombatService *gService            = nullptr;
@@ -59,6 +71,22 @@ namespace Mafia1Online::Features::Combat {
         thread_local unsigned gScatterReplayRemaining = 0;
         thread_local unsigned gScatterIndex = 0;
         thread_local bool gReplayProjectileQueued = false;
+
+        bool IsNetworkPlayer(NativeActor *actor) {
+            auto *application = static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance());
+            auto *replication = Framework::CoreModules::GetReplication();
+            const uint64_t id = actor && replication ? application->World().NativeObjects().FindByNative(actor).networkId : 0;
+            return id != 0 && replication->GetEntity<Shared::Entities::PlayerEntity>(id) != nullptr;
+        }
+
+        // C_shvestky::HumanBoxing (thiscall, retn 4; its only callers are
+        // C_human::AI's swing branches, 0x571342 and 0x5714e6).
+        void __fastcall HumanBoxingHook(void *police, void *, NativeActor *person) {
+            if (Simulation::IsHost() && !Shared::Combat::HostBooksBoxing(IsNetworkPlayer(person), gValidatedMeleeDepth != 0)) {
+                return;
+            }
+            gHumanBoxingOriginal(police, person);
+        }
 
         float __cdecl RandomHook() {
             const float actual = gRandomOriginal();
@@ -76,8 +104,15 @@ namespace Mafia1Online::Features::Combat {
         // A melee release only attacks when Do_Shoot changes the combo, the
         // attack animation, the work state or loads an overlay; a release
         // often does nothing, and notes toggle the armed flag on their own.
+        Npc::NpcHost &HostNpcs();
+
         bool __fastcall DoShootHook(NativeHuman *human, void *, bool pressed, const Vector3 *target) {
-            const bool captureMelee = gReplayDepth == 0 && gService && human->Actor().IsPlayer() && human->HoldsMeleeItem();
+            // On the simulation host its NPCs' swings (C_entity::Do_Shoot_Timed
+            // calls Do_Shoot, 0x52872d/0x52873d) are read the same way and
+            // sent for players to replay, as their shots are.
+            const bool npcMelee = gReplayDepth == 0 && gService && Simulation::IsHost() && !human->Actor().IsPlayer() && human->HoldsMeleeItem() &&
+                                  HostNpcs().Owns(&human->Actor());
+            const bool captureMelee = gReplayDepth == 0 && gService && (human->Actor().IsPlayer() || npcMelee) && human->HoldsMeleeItem();
             const bool captureThrow = gReplayDepth == 0 && gService && human->Actor().IsPlayer() && human->HoldsThrowable();
             if (captureThrow) {
                 const bool chargingBefore = human->GrenadeCharging();
@@ -114,14 +149,30 @@ namespace Mafia1Online::Features::Combat {
             const bool result = gDoShootOriginal(human, pressed, target);
             const auto after  = human->Melee();
             if (pressed && !armedBefore && human->MeleeArmed()) {
-                gService->OnNativeMeleeStart(*human);
+                if (npcMelee) {
+                    HostNpcs().OnMelee(*human, Shared::Combat::Action::MeleeStart, 0, 0);
+                }
+                else {
+                    gService->OnNativeMeleeStart(*human);
+                }
             }
             if (!pressed && armedBefore && (after.animationState != before.animationState || after.canWork != before.canWork || after.weaponChangeTime != before.weaponChangeTime || after.actionTimeRemaining != before.actionTimeRemaining)) {
                 const bool heavy = after.index == Shared::Combat::kHeavyMelee;
-                gService->OnNativeMelee(*human, heavy ? Shared::Combat::kHeavyMelee : static_cast<int8_t>(std::clamp(before.index, 0, 3)), holdMs);
+                const int8_t index = heavy ? Shared::Combat::kHeavyMelee : static_cast<int8_t>(std::clamp(before.index, 0, 3));
+                if (npcMelee) {
+                    HostNpcs().OnMelee(*human, Shared::Combat::Action::Melee, index, holdMs);
+                }
+                else {
+                    gService->OnNativeMelee(*human, index, holdMs);
+                }
             }
             else if (!pressed && armedBefore) {
-                gService->OnNativeMeleeCancel(*human);
+                if (npcMelee) {
+                    HostNpcs().OnMelee(*human, Shared::Combat::Action::MeleeCancel, 0, 0);
+                }
+                else {
+                    gService->OnNativeMeleeCancel(*human);
+                }
             }
             return result;
         }
@@ -196,9 +247,16 @@ namespace Mafia1Online::Features::Combat {
             return gGrenadeDestructorOriginal(grenade, flags);
         }
 
+        Npc::NpcHost &HostNpcs() {
+            return static_cast<Core::Application *>(Framework::CoreModules::GetClientInstance())->Npcs();
+        }
+
         void __fastcall ShootingHook(NativeHuman *human, void *) {
             const float before = human->ShotCount();
-            const bool captureLocal = gReplayDepth == 0 && gService && human->Actor().IsPlayer();
+            // On the simulation host its NPCs' shots are captured like
+            // the local player's and sent for players to replay.
+            const bool npc = gReplayDepth == 0 && gService && Simulation::IsHost() && HostNpcs().Owns(&human->Actor());
+            const bool captureLocal = gReplayDepth == 0 && gService && (human->Actor().IsPlayer() || npc);
             NativeHuman *previousHuman = gCapturingHuman;
             NativeShotData previousShot = gLocalShot;
             if (captureLocal) {
@@ -207,7 +265,12 @@ namespace Mafia1Online::Features::Combat {
             }
             gShootingOriginal(human);
             if (captureLocal && gLocalShot.captured && human->ShotCount() > before) {
-                gService->OnNativeShot(*human, gLocalShot);
+                if (npc) {
+                    HostNpcs().OnShot(*human, gLocalShot);
+                }
+                else {
+                    gService->OnNativeShot(*human, gLocalShot);
+                }
             }
             if (captureLocal) {
                 gCapturingHuman = previousHuman;
@@ -223,7 +286,12 @@ namespace Mafia1Online::Features::Combat {
                 const auto before = game->ShootRecords().size();
                 gScatterIndex = 0;
                 gScatterReplayRemaining = event.pelletCount > 1 ? event.pelletCount * 2 : 0;
-                const bool queued = gNewShootOriginal(game, actor, source, trajectory, 0.0f, particleEffectId, frame, event.pelletCount);
+                // Player damage is the server's (CombatService), so a replayed
+                // bullet carries none. On the simulation host it carries the
+                // native weapon damage: the host decides what it does to the
+                // walkers it runs, and network humans there stay protected.
+                const float replayDamage = Simulation::IsHost() ? damage : 0.0f;
+                const bool queued = gNewShootOriginal(game, actor, source, trajectory, replayDamage, particleEffectId, frame, event.pelletCount);
                 const auto records = game->ShootRecords();
                 gReplayProjectileQueued = queued && gScatterReplayRemaining == 0 && records.size() == before + event.pelletCount;
                 gScatterReplayRemaining = 0;
@@ -301,12 +369,14 @@ namespace Mafia1Online::Features::Combat {
             || MH_CreateHook(reinterpret_cast<void *>(SDK::Combat::kGrenadeAI), reinterpret_cast<void *>(&GrenadeAIHook), reinterpret_cast<void **>(&gGrenadeAIOriginal)) != MH_OK
             || MH_CreateHook(reinterpret_cast<void *>(SDK::Combat::kNewExplosion), reinterpret_cast<void *>(&NewExplosionHook), reinterpret_cast<void **>(&gNewExplosionOriginal)) != MH_OK
             || MH_CreateHook(reinterpret_cast<void *>(SDK::Combat::kNewFire), reinterpret_cast<void *>(&NewFireHook), reinterpret_cast<void **>(&gNewFireOriginal)) != MH_OK
-            || MH_CreateHook(reinterpret_cast<void *>(SDK::Combat::kGrenadeDestructor), reinterpret_cast<void *>(&GrenadeDestructorHook), reinterpret_cast<void **>(&gGrenadeDestructorOriginal)) != MH_OK) {
+            || MH_CreateHook(reinterpret_cast<void *>(SDK::Combat::kGrenadeDestructor), reinterpret_cast<void *>(&GrenadeDestructorHook), reinterpret_cast<void **>(&gGrenadeDestructorOriginal)) != MH_OK
+            || MH_CreateHook(reinterpret_cast<void *>(SDK::Police::kHumanBoxing), reinterpret_cast<void *>(&HumanBoxingHook), reinterpret_cast<void **>(&gHumanBoxingOriginal)) != MH_OK) {
             UninstallCombatHooks();
             return false;
         }
         for (uintptr_t address : {SDK::Player::kHumanShooting, SDK::Core::Game::kNewShoot, SDK::Core::Game::kRandomFloat, SDK::Player::kHumanDoShoot, SDK::Player::kHumanCanSpecialStroke, SDK::Player::kHumanNotify,
-                                  SDK::Combat::kNewGrenade, SDK::Combat::kGrenadeAI, SDK::Combat::kNewExplosion, SDK::Combat::kNewFire, SDK::Combat::kGrenadeDestructor}) {
+                                  SDK::Combat::kNewGrenade, SDK::Combat::kGrenadeAI, SDK::Combat::kNewExplosion, SDK::Combat::kNewFire, SDK::Combat::kGrenadeDestructor,
+                                  SDK::Police::kHumanBoxing}) {
             if (MH_EnableHook(reinterpret_cast<void *>(address)) != MH_OK) {
                 UninstallCombatHooks();
                 return false;
@@ -318,7 +388,8 @@ namespace Mafia1Online::Features::Combat {
     void UninstallCombatHooks() {
         gService = nullptr;
         for (uintptr_t address : {SDK::Player::kHumanShooting, SDK::Core::Game::kNewShoot, SDK::Core::Game::kRandomFloat, SDK::Player::kHumanDoShoot, SDK::Player::kHumanCanSpecialStroke, SDK::Player::kHumanNotify,
-                                  SDK::Combat::kNewGrenade, SDK::Combat::kGrenadeAI, SDK::Combat::kNewExplosion, SDK::Combat::kNewFire, SDK::Combat::kGrenadeDestructor}) {
+                                  SDK::Combat::kNewGrenade, SDK::Combat::kGrenadeAI, SDK::Combat::kNewExplosion, SDK::Combat::kNewFire, SDK::Combat::kGrenadeDestructor,
+                                  SDK::Police::kHumanBoxing}) {
             MH_DisableHook(reinterpret_cast<void *>(address));
             MH_RemoveHook(reinterpret_cast<void *>(address));
         }
@@ -333,6 +404,19 @@ namespace Mafia1Online::Features::Combat {
         gNewExplosionOriginal = nullptr;
         gNewFireOriginal = nullptr;
         gGrenadeDestructorOriginal = nullptr;
+        gHumanBoxingOriginal = nullptr;
+    }
+
+    ValidatedMeleeScope::ValidatedMeleeScope() {
+        ++gValidatedMeleeDepth;
+    }
+
+    ValidatedMeleeScope::~ValidatedMeleeScope() {
+        --gValidatedMeleeDepth;
+    }
+
+    bool ValidatedMeleeScope::Active() {
+        return gValidatedMeleeDepth != 0;
     }
 
     SDK::Combat::NativeGrenade *ReplayNativeThrow(int32_t type, const SDK::Player::Vector3 &origin, const SDK::Player::Vector3 &impulse) {

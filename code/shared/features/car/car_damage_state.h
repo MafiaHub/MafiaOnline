@@ -71,7 +71,7 @@ namespace Mafia1Online::Shared::Car {
     };
 
     struct DamageReport {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarDamageReport");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarDamageReport");
         uint64_t networkId = 0;
         uint64_t missionGeneration = 0;
         uint32_t sequence = 0;

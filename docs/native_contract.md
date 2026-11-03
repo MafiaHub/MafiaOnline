@@ -12,6 +12,17 @@ The x86 launcher is linked at `0x400000` with a `.fwgame` reservation larger
 than the retail image, so the Framework PE loader maps the game's absolute
 addresses at their original values.
 
+The launcher resolves the image's `kernel32!CreateMutexA` import to its own
+stub. `MafiaEntryPoint` pushes `"Mafia Launcher Super Mutex Shit"` at
+`0x5bebfb` (`68 48 7B 63 00`), calls `CreateMutexA` at `0x5bec16`
+(`FF 15 50 30 62 00`), discards the handle by calling `GetLastError` at
+`0x5bec1c`, and at `0x5bec22` (`3D B7 00 00 00 0F 84 85 08 00 00`) jumps to
+`0x5bf4b2` on `ERROR_ALREADY_EXISTS`, which unwinds and returns 0 without
+initializing anything. For that exact name the stub creates an unnamed mutex
+and clears the last error, so several local clients can run; every other
+name reaches `CreateMutexA` unchanged. Only the game image's imports pass
+through the resolver, and the mutex lives until process exit as in retail.
+
 ## In-process display setup
 
 The retail setup is a packed `S_game_setup` of size `0x3f` at `0x647ee4`.
@@ -19,30 +30,107 @@ reM's field order and IDA data references agree on width at `+0x02`, height
 at `+0x06`, fullscreen at `+0x15`, and suspend-when-inactive at `+0x1f`.
 The independent SDK models these as typed `GameSetup` members with compile
 time offset and size checks. `MafiaEntryPoint` loads the setup before calling
-`InitSystem`. The mod temporarily sets width `1024`, height `768`, fullscreen
-false, and suspend-when-inactive false for that call. It restores all four
-original fields immediately afterward, on both success and failure. This
-keeps the resulting IGraph window and render mode at 1024 by 768 while
-preserving the user's persisted setup on the normal exit path. reM shows the
-retail exit path and `HandleVideoMemOverflow` callback both write the global
-setup to the `LS3D_setup` registry value. The exit path runs after the hook
-restores the fields. The callback is registered during `InitSystem`, so a
-second narrow hook restores the four original fields before forwarding a
+`InitSystem`. For that call only, the mod sets width, height, fullscreen, bit
+depth (`+0x0a`), refresh rate (`+0x0e`) and suspend-when-inactive from the
+display mode the player chose (Settings → Display, `settings.json`
+`"display"`), and restores all six fields immediately afterward, on both
+success and failure. reM shows the retail exit path and
+`HandleVideoMemOverflow` callback both write the global setup to the
+`LS3D_setup` registry value; the exit path runs after the hook restores the
+fields, and a second narrow hook restores them before forwarding a
 synchronous video-memory-overflow error to the retail callback, which then
 serializes and exits. No profile, game, or system file is edited directly by
 the mod.
 
+What the modes rely on, from `InitSystem` (Game.exe) and `IGraph::Init`
+(LS3DF `0x1006e790`), both read in IDA:
+
+- `InitSystem` puts the window's client area at (50, 50) with the setup's
+  width and height (`SetRect` at `0x5bf83a`), passes bit depth and refresh as
+  bytes (`0x5bf8da`, `0x5bf8f6`) and sets descriptor flag `0x2` from the
+  fullscreen byte `0x647ef9`. Its base flags `0x10090` include `0x80`.
+- **Windowed** (no flag `0x2`): the top-level window is `0x90CA0000`
+  (`WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE`, at
+  `0x1006e9e7`); with `0x80` the device renders through a `WS_CHILD` window
+  covering its client area, and the back buffer is the setup's size in the
+  desktop's format.
+- **Borderless** is windowed at the monitor's size; after `InitSystem` the mod
+  sets the top-level window to `WS_POPUP | WS_VISIBLE` at the monitor's
+  origin. LS3D's `MsgProc` (`0x1006da60`) handles only `WM_DESTROY`,
+  `WM_ACTIVATE`, `WM_CLOSE`, `WM_ERASEBKGND`, `WM_SYS*` and never moves or
+  sizes the window. The launcher maps the game into its own process after
+  `SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE)`, so monitor sizes
+  are real pixels.
+- **Fullscreen** (flag `0x2`): a topmost `WS_VISIBLE` window at (0, 0), an
+  exclusive device (`Windowed` 0) with the setup's size, `FullScreen_RefreshRateInHz`
+  from the refresh byte and a back buffer format found only by an exact
+  width/height match in the adapter's mode list in the 16- or 32-bit class
+  of the setup's bit depth; otherwise Init logs "Useful BackBuffer format not
+  found" and the game cannot start. The mod therefore sets bit depth 32 and
+  checks the size first with the same calls Init makes (`Direct3DCreate8(220)`,
+  `GetAdapterModeCount` `+0x18`, `EnumAdapterModes` `+0x1c` on the setup's
+  adapter, formats 20/21/22), using the highest refresh rate listed for it up
+  to 255; a size the adapter lacks falls back to borderless.
+- In fullscreen, Alt-Tab loses the device and `IGraph::Present`
+  (`0x1006d4c0`) loops `Sleep(250)`, `ProcessWinMessages` and
+  `TestCooperativeLevel` until it can `Reset`, so the game thread stops until
+  the player returns. The Framework's web views use managed textures only,
+  which survive `Reset`.
+
 | Hook or call | Original retail bytes | Convention, callers and effects | Lifetime and unload |
 | --- | --- | --- | --- |
-| `InitSystem` `0x5bf5a0` | `81 EC C4 02 00 00 53 55 56 57 89 54 24 18 8B E9 E8 6D 0C 05 00 33 DB 33 F6` | `bool __fastcall(HINSTANCE, bool* profileSelectionClosed)`; instance in `ECX`, out pointer in `EDX`, byte return in `AL`. Its sole retail call is `MafiaEntryPoint` at `0x5becf5`. IDA reads width at `0x5bf819`/`0x5bf841`, height at `0x5bf814`/`0x5bf83c`, fullscreen at `0x5bf8ae`, and suspend-inactive at `0x5bf8cb`; it forms the IGraph descriptor then calls virtual `IGraph::Init` at `0x5bf976`. It also mounts archives, initializes graphics, sound, 3D and menus, and reports failure through return false. The hook calls the original once with temporary typed setup fields and preserves its return/out parameter. | The hook is installed before the game entry point and removed before native shutdown. The global setup outlives `InitSystem`; no pointer to its temporary field values is retained. IDA finds no later direct reads of these four fields beyond initialization and setup serialization. Restore the original values even when initialization fails. |
-| `HandleVideoMemOverflow` `0x5beb00` | `51 81 7C 24 08 02 00 00 80 0F 85 B6 00 00 00 8D 44 24 00 8D 4C 24 08` | `void __cdecl(int error, int, const char*)` in reM; IDA confirms the first stack argument is compared with `0x80000002`. Its sole retail reference is the error-callback pointer placed into the IGraph descriptor at `0x5bf832`. On that video-memory error it clears the texture-color setting, writes all `0x3f` bytes of `g_InitSettings` to the `LS3D_setup` registry value at `0x5beb55`, presents the error and exits. The hook restores only the four temporary display fields before chaining so a callback during `InitSystem` cannot serialize them. Other error codes retain the retail path. | The callback pointer is held by IGraph after successful initialization and may be called later. The hook is installed before `InitSystem` and removed before the original `CloseSystem` releases IGraph. The saved original fields are valid only while the InitSystem hook is active and are not retained across shutdown. |
+| `InitSystem` `0x5bf5a0` | `81 EC C4 02 00 00 53 55 56 57 89 54 24 18 8B E9 E8 6D 0C 05 00 33 DB 33 F6` | `bool __fastcall(HINSTANCE, bool* profileSelectionClosed)`; instance in `ECX`, out pointer in `EDX`, byte return in `AL`. Its sole retail call is `MafiaEntryPoint` at `0x5becf5`. IDA reads width at `0x5bf819`/`0x5bf841`, height at `0x5bf814`/`0x5bf83c`, bit depth at `0x5bf8da`, refresh at `0x5bf8f6`, fullscreen at `0x5bf8ae`, and suspend-inactive at `0x5bf8cb`; it forms the IGraph descriptor then calls virtual `IGraph::Init` at `0x5bf976`. It also mounts archives, initializes graphics, sound, 3D and menus, and reports failure through return false. The hook calls the original once with temporary typed setup fields and preserves its return/out parameter. | The hook is installed before the game entry point and removed before native shutdown. The global setup outlives `InitSystem`; no pointer to its temporary field values is retained. IDA finds no later direct reads of these fields beyond initialization and setup serialization. Restore the original values even when initialization fails. |
+| `HandleVideoMemOverflow` `0x5beb00` | `51 81 7C 24 08 02 00 00 80 0F 85 B6 00 00 00 8D 44 24 00 8D 4C 24 08` | `void __cdecl(int error, int, const char*)` in reM; IDA confirms the first stack argument is compared with `0x80000002`. Its sole retail reference is the error-callback pointer placed into the IGraph descriptor at `0x5bf832`. On that video-memory error it clears the texture-color setting, writes all `0x3f` bytes of `g_InitSettings` to the `LS3D_setup` registry value at `0x5beb55`, presents the error and exits. The hook restores only the temporary display fields before chaining so a callback during `InitSystem` cannot serialize them. Other error codes retain the retail path. | The callback pointer is held by IGraph after successful initialization and may be called later. The hook is installed before `InitSystem` and removed before the original `CloseSystem` releases IGraph. The saved original fields are valid only while the InitSystem hook is active and are not retained across shutdown. |
 
-The window is created through the retail graphics initialization. Fullscreen
-must be false for a 1024 by 768 game window that can be placed beside another
-client. Clearing suspend-when-inactive in the same descriptor lets a second
-client continue ticking while its window lacks focus. Both settings remain
-session local because the original setup fields are restored after IGraph
-initialization.
+The window is created through the retail graphics initialization. Without
+a display choice in `settings.json`, the client config's `"window"` size makes
+a window (the two-client test places them side by side), and without that the
+game starts borderless at the monitor's resolution; the simulation host
+always keeps its hidden 1024 by 768 window. Clearing suspend-when-inactive in
+the same descriptor lets a second client continue ticking while its window
+lacks focus. All of it remains session local because the original setup fields
+are restored after IGraph initialization.
+
+### Live display changes
+
+Settings → Display's Apply moves the running game to any mode and size
+(`features/display/live_display.cpp`). The request is queued and applied on the
+game thread right after `IGraph::Present` returns, outside any scene, the one
+point the engine itself Resets after a lost device. Read in IDA (LS3DF unless
+noted):
+
+- The engine keeps its only screen setup in the `IGRAPH_INIT_DESC` copy at
+  `0x101c55bc`. `Scrn_sx`/`Scrn_sy` (`0x100704e0`/`0x10070500`) return
+  `fullWidth`/`fullHeight` (`+0x20`/`+0x24`) when flag `0x80` at `+0x2c` is
+  set, else `width`/`height`. The device is created and Reset with the
+  `D3DPRESENT_PARAMETERS` at `0x101c52c0`.
+- `ResetDevice` (`0x1006e1a0`, `__fastcall`, bool in `CL`) frees the pooled
+  video-memory vertex and index buffers and its state block, calls
+  `IDirect3DDevice8::Reset` (`+0x38`) with those parameters, recreates its
+  shaders, state block and global buffers and re-pushes its render-state cache.
+  Nothing else in Game.exe or LS3DF holds a default-pool resource across frames;
+  the Framework's web view textures are managed.
+- For each mode the mod rewrites the windows, the descriptor and the
+  parameters as `IGraph::Init` (`0x1006e790`) writes them. A window or
+  borderless is flag `0x80`: a `WS_CHILD` window of the main window's class
+  (`g_childHWND` at `0x101c5408`, read live by `GetChildHWND` `0x1006c810`, the
+  mouse code and `IShow::SetRect` `0x100745a0`) is the device window, the back
+  buffer is the desktop's format and the full rectangle is the client size.
+  Exclusive fullscreen is flag `0x2`: no child, a topmost `WS_VISIBLE` main
+  window at the monitor's origin, the adapter mode's format and refresh, and
+  the present interval ONE with flag `0x100` else IMMEDIATE, as Init sets it.
+  The back buffer size is always stated, so a later lost-device Reset keeps it.
+  Init's frame arithmetic (`SM_CXFIXEDFRAME`) leaves out the wider DWM frame,
+  which clips 10 pixels of a window at start; a live change measures the client
+  area and grows the window by what is missing.
+- After the Reset, `IGraph::SetViewPort` (`0x1006e740`) refreshes the cached
+  viewport `I3D_driver::Render` compares against, Game.exe's
+  `G_IndicatorsClass::ResolutionChanged` (`0x601520`, arithmetic only) lays the
+  HUD out again, and `ParheliaApplyViewport` (`0x604a80`) with the current
+  single-screen flag (`+0x46f4`) resizes the mission scene's viewport and the
+  active camera's aspect. Menus compute their zoom when they open.
+- A refused Reset rebuilds what ran before; if that fails too the device stays
+  lost and `IGraph::Present` retries the Reset as after Alt-Tab.
 
 ### Window close during a multiplayer session
 
@@ -80,7 +168,7 @@ hooks belong to their feature directories.
 | --- | --- | --- | --- | --- |
 | `C_mission::Tick` at `0x5407e0` | `53 55 56 8B F1 57 8A 46 7C 84 C0 74 20 83 7E 78 01 7D 1A` | `void __thiscall(C_mission*, unsigned int frameTimeMs)`; `this` in `ECX`, one 32 bit stack argument, `ret 4` at `0x540948`. `C_mission` survives mission close/open and is released during `CloseSystem`. | IDA xrefs `0x5495c6`, `0x5be8ea`, `0x5ebc1e`: menu and gameplay loops. It restores suspended audio, ticks time shifts, scene, driver, animated models, initialized `C_game`, and transparency records. The mod calls the original exactly once, then its own update. | The mod stops updating before `CloseSystem` tears down the mission. Both hooks are disabled at normal process shutdown. |
 | `C_mission::Close` at `0x5405e0` | `53 56 8B F1 33 DB 38 5E 0C 0F 84 EE 01 00 00 8B 4E 24 3B CB 74 0D E8 65` | `void __thiscall(C_mission*)`; `this` in `ECX`, no stack arguments. The mission object survives close/open cycles. | Called by `Open`, `UnInit`, menu/gameplay loops and load helpers. It runs `C_game::Done`/`DoneIntern`, deletes actors and programs, clears caches and roads, and closes the scene. The world feature invalidates native handles before calling the original. | The world hook is removed in `Application::PreShutdown`, before the shell calls native `CloseSystem`; no handle survives disconnect or mission close. |
-| `CloseSystem` at `0x5c0080` | `55 56 57 B9 28 46 6D 00 E8 A3 4F 04 00 E8 BE 86 E4 FF` | `void __cdecl()`; no arguments, one caller at `0x5bf4aa`. Runs once at normal process shutdown. | Tears down profile, animations, vehicle materials, consoles, then calls `C_mission::UnInit` and releases the graphics and sound drivers. The mod shuts down before calling the original. | This is the teardown path. No native game object is retained after it returns. |
+| `CloseSystem` at `0x5c0080` | `55 56 57 B9 28 46 6D 00 E8 A3 4F 04 00 E8 BE 86 E4 FF` | `void __cdecl()`; no arguments, one caller at `0x5bf4aa`. Runs once at normal process shutdown. | Tears down profile, animations, vehicle materials, consoles, then calls `C_mission::UnInit` and releases the graphics and sound drivers. The hook first hides the IGraph main window (`ShowWindow(SW_HIDE)`, skipped when no graph exists), so the CEF and native teardown that follows is not shown as a frozen window, then the mod shuts down before calling the original. | This is the teardown path. No native game object is retained after it returns. |
 
 `C_game::SetTrafficVisible` at `0x5a8470` starts with retail bytes
 `53 8A 5C 24 08 8A CB E8 E4 64 EA FF 84 DB 0F 94 C3 8A CB E8 78 25 F0 FF`.
@@ -110,7 +198,7 @@ The client also reads the selected mission's `scene2.bin` through the normal,
 mod-aware `rw_data` exports. A bounded chunk parser reads only actor records
 (root `0x4c53`, actors `0xae20`, actor `0xae21`, type `0xae22`, frame name
 `0xae23`). It hides authored actor models before collision/game initialization,
-so parked cars, humans, weapons, physical props, aircraft and rail models do
+so parked cars, humans, weapons, aircraft and rail models do
 not survive as visible, unregistered shells. Static geometry used by generic
 props, doors, villa objects, bridge decks, turnouts, pumps and clocks remains;
 only doors retain their mission actor behaviours. Malformed actor metadata
@@ -125,11 +213,91 @@ traffic-car and police generation. Rail-generator and railway AI hooks skip
 native AI in every server mission. Mission rail generators are never created;
 if a runtime actor creates a pool, normal GameInit/GameDone still own it.
 
+### World props
+
+Breakable scene models (phone booths `PHbox01`, the hydrant `dopravni9B`
+whose crash model has the `;X1H;` piece, bins `popel01`/`kos01`, barrels)
+have collision primitives of material 41. `SpawnCrashActorFromFrame`
+(`0x431710`, `__fastcall`, `ret 8`) turns the model off, flags its subtree's
+primitives `0x20`, appends it to `C_game::m_ObjectsToDeactivate` (`+0x10`) and
+builds its pieces through `CreateCrashActors` (`0x430c50`, `ret 0x20`).
+`PropsService` hooks both: it records the primitives a break switched off,
+reports scene models by frame name together with the struck frame's name and
+replays remote breaks on that frame, because `ParseCrashConfigFromFrameName`
+(`0x431a00`) reads the crash settings from the struck frame's properties
+(`+0xc`; a model's own from its last visual child). Replayed pieces lose `CRASH_FLAG_EXPLODE` (`0x20`)
+and `CRASH_FLAG_START_FIRE` (`0x8`, `m_uCrashFlags` `+0x38c`): `C_crash_obj::AI`
+(`0x431be0`) would call `NewExplosion`/`NewFire` with damage on every client.
+Of the stock crash models only `xpumpa 2_c1` (`;M1000N22X1EF;`, three fuel
+pumps in freeride) and `barel_exp_c1` carry them, and the pump piece goes off
+on its first tick (`CreateActor` `0x4311d0` takes 2 off its health 1); a replay
+shows that blast and fire without damage. A repair turns the breakables back
+on, clears those flags, drops the `C_crash_obj` pieces as their AI would, then
+calls `DelAllHydrants` (`0x5b9ef0`), `LoadTelephones` (`0x5b6e00`) and
+`LoadSemaphores` (`0x5add10`). `DelSemaphore` (`0x5b6d50`), which
+`SpawnCrashActorFromFrame` calls with the model, matches `S_semaphore`'s first
+field, which the loader callback (`0x5ad900`) never writes, so whether it
+drops a light is undefined; reloading makes the repair independent of that.
+The stock freeride `scene2.bin` places 1,044 crash-model breakables (369
+`popel01`, 242 `dopravni9B`, 156 `kos01`, 127 `PHbox01`, 143 barrels, three
+fuel pumps and four cans); its `cache.bin` places one `xbarel 1` and 154 traffic signs
+(`dopravni1B`-`8B`). City cache instances (`off<n>seg<n>`) are left to retail,
+and the signs never reach `SpawnCrashActorFromFrame`: a car
+(`Collision_Filter_Body` `0x426d7e`, faster than 6 with someone in it) or shot
+(`TickShoot` `0x5aa76e`) that meets a static primitive with flag `0x20000`
+breaks one through `HandleSignalMarkCrash` (`0x5b7be0`). It takes the nearest
+active placement of a `C_game::m_SignalMarkIds` (`+0x1e4`) group within 10 m
+across and 5 m up, but only in segments streamed in around the camera, calls
+`CreateCrashActors` with the pooled model and its file name (`+0x154`), sets
+the primitive's `0x20` flag, closes the cache placement (`0x402cf0`) and tells
+the police. `CitySigns` hooks it and reports the `g_cacheBaseBlock`
+(`0x63d268`) segment and placement and the struck primitive's index in its
+`tree.klz` array; with no sign streamed in (the simulation host's traffic far
+from its camera) it breaks the nearest one itself without pieces. A remote
+break throws the pieces of the pooled model while its segment is in, sets the
+same primitive's flag and closes the placement, without the police. A repair
+clears the flags and turns the placements back on between streaming their
+segment out (`0x402a50`) and in (`0x4025d0`), so no stale pooled index takes
+another placement's model.
+
+The pieces of a break (breakable or sign) are `C_crash_obj` temporary actors
+(type 26, appended to `C_game::m_TemporaryActors`) whose physics each client
+runs; `C_crash_obj : C_PhThing`, the same body as a `C_box_new` up to
+`+0x38c`, so a piece sleeps and is placed as a physical prop is. Every client
+throws them from the same hit and impulse. `CrashPieces` takes the pieces a
+break appended; the client whose break stood reports, in throw order, where
+they came to rest once all sleep (the server keeps only that client's report),
+and the others put theirs there as they sleep, or at once when they throw them
+only then: a late joiner's snapshot breaks with the reported pieces, and a
+remote break farther than 200 m from the camera waits up to 30 s for them. The
+game drops pieces itself (`C_crash_obj::AI` on `CRASH_FLAG_REMOVE`, the
+farthest from the camera past its limit at `0x432740`), so a piece is looked
+up among the temporary actors before it is touched. The simulation host
+breaks without pieces.
+
+Every client loads the type 35 `C_box_new` props; `GameInit` (`0x567650`) and
+`GameDone` (`0x567720`) number them, and a pose is placed the way
+`C_PhThing::MoveCount` (`0x45ddb0`) and `Update` (`0x45a7a0`) place one, then
+left asleep the way `FindActors` (`0x45a560`) leaves a new piece: `INACTIVE`,
+or `ACTIVE` past both sleep limits while actors stand on it. A prop counts as
+at rest when `C_PhThing::AI` (`0x45a690`) would skip it (`m_fLowMotionTimeSeconds`
+`+0x32c` past `+0x330`, or `m_iStationaryTimeMs` `+0x9c` past 4000) or it is
+`INACTIVE`; `Update` puts one to sleep without zeroing its velocity.
+`C_box_new::Collision` (`0x567c80`) and `Hit` (`0x567ca0`), the vtable
+`0x6254f0` slots that wake a prop, are hooked to note who did it.
+
 ### Drawbridges and city traffic lights
 
-Mission-authored bridge actors are suppressed and the authored bridge geometry
-stays visible and stationary. The bridge GameInit hook remains for any runtime
-bridge: native initialization closes it, then `ShutDown(true)` prevents opening.
+Every client loads the mission's bridge actors (type 20). The simulation host
+runs them natively; players replay its phases, leaf angles and steamers
+(`BridgeService`, see the NPC multiplayer audit). Nothing shuts them down.
+
+Every client loads the gas station attendants (type 25, `C_pumper`) too. The
+host runs them and serves the cars the server hands it; players replay its
+state and animation through the native animation machine, and the customer's
+client runs the retail `Start` and release on its own car (`PumperService`,
+see the NPC multiplayer audit). Their `Collision`, `Hit` and `PumperPanic` are
+hooked off: the attendant never panics.
 
 reM `C_game::Tick` advances `m_uSemaphoreTime` through ten 3000 ms phases;
 `m_iSemaphoreStateZ` starts five phases after `m_iSemaphoreStateX`.
@@ -365,6 +533,36 @@ profile header or game installation. Profile and save-game writes are
 suppressed in every mod session, including native shutdown. An existing
 profile is required; with none present, a startup error is shown and the
 skipped picker returns Back without creating a file.
+
+## Player settings
+
+The settings screen (`Features::Settings`, `docs/ui.md`) applies retail
+controls the way the retail options menu does, but from the mod's own
+`config/settings.json`; the profile file is never written. The loaded
+profile's `G_LoadSaveClass` copy at `0x6d4628` (`g_pLoadSaveClass`) holds
+`m_Bindings[60]` at `+0x1f4` (reM `GameKey`, `0x0c` bytes each) and
+`m_ControlSettings` at `+0x4c4` (reM `G_ControlSettings`, `0x5c` bytes; IDA
+`G_IndicatorsClass::GameInit` reads `m_bUseMph` as `0x6d4b44`, which is
+`+0x4c4+0x58`). Until the player changes a binding, the mouse/HUD values or a
+game volume in the mod, those values stay the profile's. Mouse sensitivity,
+turning limit, invert Y, double-tap roll, crosshair (`m_uIndicatorMode`) and
+speech volume are read live by `C_player`, `G_Camera`, `C_human` and
+`G_IndicatorsClass::DrawAll`; the others need the calls below. Gamma is not
+offered: windowed and borderless, `SetGammaRamp` has no effect.
+
+| Retail item | Original bytes | Convention, callers and effects | Lifetime and unload |
+| --- | --- | --- | --- |
+| `G_LoadSaveClass::PushBindingsToInput` `0x607a60` | `56 57 8B F9 B9 30 7C 64 00 E8 82 86 EE FF 33 F6 81 C7 F4 01 00 00 56 57` | `void __thiscall(loadSave*)`. IDA callers: native Init `0x604f3a`/`0x604fe9`, ProfileChange `0x605118`, ProfileLoad `0x605973`, options controls `OnClick` `0x5e1714` and `OnDestroy` `0x5e1625`. `C_Input::Reset` on `g_sInput` `0x647c30`, `BindKey` for each of the 60 slots, then `SetSensitivity(400, 400, 400)`. | Called on the game thread from the client update, after the mod wrote changed slots, and only when a slot changed. `C_Input` reallocates its state vectors; the chat input hook reads them only inside its own `Update` call. |
+| `G_LoadSaveClass::Refresh` `0x60dfe0` | `81 EC 08 06 00 00 53 8A 9C 24 10 06 00 00 57 8B F9 F6 C3 01 74 16 A1 DC` | `void __thiscall(loadSave*, unsigned mask)`, `ret 4`. IDA callers: audio options `0x5e0d78`-`0x5e0f6f`, controls `0x5e163b`/`0x5e1720`/`0x5e18a3`/`0x5e18cc`, ProfileLoad `0x605995`. Bit 1 sets the ISND driver volume (`g_ISNDDriver` `0x647edc`, checked by retail), bit 2 sets every IShow record's music volume through `g_pMission->m_pGame` (`0x5b6600`), bits 1 or `0x20` set the vehicle sound gain. The mod passes 1 and `0x20`, plus 2 only while `g_pMission` has its game; never gamma (4) or force feedback. | No pointer kept. The mission's game owns the IShow records; an empty list is a no-op. |
+| `G_IndicatorsClass::GameInit` `0x5f73c0` | `A1 8C 78 63 00 56 8D B1 84 40 00 00 8B 50 24 8A 82 44 2D 00 00 84 C0 8B` | `void __thiscall(indicators*)` on `0x6bf980`. IDA callers: `C_game::Init` `0x5a0cb8` and controls `OnDestroy` `0x5e162f`. Releases and recreates the dashboard textures for mph/km/h and night mode; it reads `g_pMission->m_pGame`. | Called only when the speedometer unit changed while `C_game` is initialized; otherwise the next `C_game::Init` loads the right texture. The indicators own both textures. |
+| `C_game::UpdatePlayerControls` `0x5a7ff0` | `8A 41 40 56 84 C0 57 74 2F 8B 0D 8C 78 63 00 8B 41 38 8D 79 38 85 C0 74` | `void __thiscall(C_game*)`. IDA callers: `GameLoopSingle` `0x549793`, `GameLoopSingle1` `0x5be9a8` after the pause menu, options `0x5e0f87`/`0x5e172e`. Returns unless initialized (`+0x40`), then each `C_player` hands its driven car the steering linearity. | Called after a controls change while the mission's game is initialized. No actor pointer is kept. |
+
+Mod keys outside `C_Input` (chat, chat with `/`, held player list, siren, car
+sync mode) are compared as DirectInput scan codes from `ReadKey` and
+`IGraph::TestKey`, or as window-message scan codes in the web UI; push-to-talk
+is the Framework `VoiceClient` key polled through `GetAsyncKeyState` in the
+active layout. Script keys are remapped where `Key.bind` reads them, in the
+client's `GetBaseInput()`.
 
 ## Native chat and health display
 
@@ -716,7 +914,9 @@ requesting an explosion each tick after its burn timer until it becomes dead,
 so the per-car client stream deduplicates these requests. The server verifies
 mission generation, controller GUID and active terminal state, commits the
 `Exploded` state and lethal damage to recorded occupants, then clears seats.
-Clients call the original exactly once when they observe the new terminal
+It also deals the blast `CarExplosion` passes to `NewExplosion` (radius 10,
+damage 200, `0x421eed`/`0x421ef6`) to players on foot with the retail falloff,
+since every client suppresses native hits on players. Clients call the original exactly once when they observe the new terminal
 sequence. This includes the controller, so it does not receive two explosions.
 A late join creates its native car first and then applies the terminal state;
 native wreckage creation remains game-owned. Native explosion side effects
@@ -1484,6 +1684,49 @@ after the original, with the retail HUD font and untextured quads.
 | `I3D_frame::GetWorldMatrix` `0x47acd0` | `test byte [frame+0xac], 0x20; jne; call 0x60fc30; lea eax, [frame+0x10]`. Rebuilds a dirty world matrix through its parents before returning it. Calling `I3D_frame::Update` alone left the cached translation at zero for the `emeth_*` Free Ride start dummies; `GetWorldMatrix` returned their real coordinates. | All SDK world position and direction reads use this call, including the selector's start frames, the neck and the camera. A ped seated in a moving car therefore does not expose last frame's matrix. |
 | `g_collision::TestLineHStatic` `0x5c74d0` | `__thiscall(0x647f48, const S_vector& start, const S_vector& direction, S_vector* hit, S_vector* normal, unsigned flags)`, `ret 0x14`; police line of sight calls it with null outputs and flags 0. Tests the static world only. | Hides a nametag behind walls. |
 
+### City map countryside extension
+
+The held-TAB city map (`G_IndicatorsClass::DrawAll` `0x5fb060`) shows a
+0.4 x 0.55 window of `maps\0mapar.bmp` (1024 x 1024, the city only). On
+`freekrajina`, `freekrajinanoc` and `freeride_extended` the client shows the
+city and countryside image of MafiaCountrysideMap 2.0 instead, when the
+session provides `maps/fullmap.bmp` (a server asset ZIP, see
+[server mods](server_mods.md#the-countryside-city-map)). `freeride`,
+`freeridenoc` and every other mission keep the retail map: the stock city's
+roads (x -3027..995, z -801..730) all lie on 0mapar.bmp, which has three
+times the vertical resolution. The road graphs of all three countryside maps
+lie on fullmap.bmp (u 0.038..0.999, v 0.098..0.820); the Extended map's few
+new roads are not drawn on it.
+
+The ASI (`libMafiaCountrysideMap2.0.asi`, MinGW, 2016) is not used. From a
+2 s `SetTimer` callback it compares the dword at `0x401001` (`0x8B042444`,
+`0x6D79780D`, `0x6D8A480D`, its three tables; the readme names 1.0, 1.1
+and 1.2, and this image holds the third)
+and, for the third, writes without `VirtualProtect`: `0x623b08` 0.55 → 0.18333334
+(`0x3E3BBBBC`), `0x627908` 1.8181818 → 5.4545450, `0x62791c` 0.47024599 →
+0.868, `0x627924` -0.00050728 → -0.0001694, `0x627928` 0.00022986 → 0.00023,
+"0mapar.bmp" at `0x639310` → "fullmap.bmp" for every mission, and a `call`
+over `add esp, 0D4h` at `0x5a3955` (end of `C_game::Init`) that sets
+`m_bMapEnabled` (`0x6c406c`) when the selected save number (`0x6d46a4`) is
+0, 65, 200, 380, 425, 500 or 570. `0x623b08` is a pooled constant that dog,
+traffic-car, pursuit and car-exit code also read, so the ASI changed their
+behaviour too; it left the half window `0x627918` (0.275), the clamp
+immediate 0.45 and the arrow scale `0x627910` at retail and compensated by
+raising the v base by 0.55 / 3, which leaves the arrow wrong near the
+map's edges. The client applies the same projection centred properly
+(`SDK::UI::Map::kCountryside`: u = x * 0.00023 + 0.73464239,
+v = z * -0.0001694 + 0.68466663, window 0.4 x 0.18333334), checked against
+the stock road graphs and the retail map by image registration. The
+multiplayer already enables the map on every mission (`MapEnable`), so the
+save-number part is not needed.
+
+| Hook, patch or call | Original retail bytes | Convention, callers and effects | Lifetime and unload |
+| --- | --- | --- | --- |
+| `G_IndicatorsClass::Tick` `0x6027b0` | `83 EC 24 53 55 56 57 8B 7C 24 38 33 DB` | `void __thiscall(G_IndicatorsClass*, unsigned frameMs)`, `ret 4`; called from `GameLoopSingle` `0x5497e4` and `GameLoopSingle1` `0x5bea22`, after the mission tick and before the scene renders. When `m_bMapEnabled` (`+0x46ec`) is set and `m_pMapTexture` (`+0x4090`) is null it creates the texture from `"0mapar.bmp"` at `0x602812`. The hook runs first: on a countryside mission with the image it stores its own texture there, so the original skips creation; otherwise it leaves the pointer null for the retail texture. Either way it selects the matching projection below at that moment, so DrawAll never pairs one texture with the other's constants. | Installed in `PostInit` (not on the simulation host), removed in `PreShutdown`. Retains no indicator or texture pointer. |
+| DrawAll operands, `D8 /r [disp32]` with the disp32 at `+2`: `0x5ff585`, `0x5ff759` (`D8 0D 28 79 62 00`, u scale); `0x5ff5a1`, `0x5ff778` (`D8 0D 24 79 62 00`, v scale); `0x5ff5ad`, `0x5ff784` (`D8 05 20 79 62 00`, u base); `0x5ff5bf`, `0x5ff796` (`D8 05 1C 79 62 00`, v base); `0x5ff7d2`, `0x5ffdad`, `0x600174` (`D8 25 18 79 62 00`, half window v); `0x5ff833`, `0x5ff9b2` (`D8 05 08 3B 62 00`, window v); `0x5ffdcb` (`D8 0D 10 79 62 00`, player arrow v scale 0.74 / window); `0x60018c` (`D8 0D 08 79 62 00`, destination v scale 1 / window) | As listed | The first four pairs are the player (or camera) and compass-destination projections, then the window origin, the texture quad's v extent, the arrow offset and the destination marker offset. Every target in `0x627908`..`0x627928` is read by DrawAll alone; `0x623b08` is shared, which is why the operands are redirected to a client-owned `DrawConstants` block rather than any `.rdata` being written. The block holds the retail values (`kRetailDraw`, bit-identical) until a countryside texture is created. The horizontal window (`0x6236c0`, `0x6232f8`, `0x624bdc`, immediate 0.6) is the same in both projections and is not touched. | Written once at install under one `VirtualProtect` of `0x5ff585`..`0x600192`; `PreShutdown` writes the original disp32s back. The block is static in the client DLL, which outlives the patch. |
+| DrawAll window clamp `0x5ff848` | `C7 44 24 1C 66 66 E6 3E` (`mov dword [esp+1Ch], 0.45`) | The lowest window origin, 1 - window v, taken when the window would leave the texture's bottom. An immediate, so the projection switch rewrites its four bytes at `0x5ff84c` (0.45 retail, 0.81666666 countryside). | Rewritten only from the Tick hook on the game thread; `PreShutdown` restores 0.45. |
+| `IGraph::CreateITexture` vtable `+0x04` (LS3DF `0x1006c2c0`) | — | `LS3D_RESULT __stdcall(IGraph*, char* name, char* alpha, unsigned flags, ITexture** out)`; the four-argument overload sits before the no-argument one (VC6 order), as Tick's call shows. Flags `0x200001` skip the cached-name scan and pass `name` through; bit 0 is also `ITC_FROM_MEMORY`, so `name` is a 40-byte `BITMAPINFOHEADER` and bottom-up 24-bit rows, copied by `LoadImage` (LS3DF `0x10079150`) before `Create` returns. A memory texture neither reads a presaved `_1.565`/`.DXn` cache nor writes one, so nothing is written next to the image, and it goes on the uncached list. `ClampTextureSize` rounds each side up to a power of two (2619 x 3063 would become 4096 x 4096), so the client area-averages the image to 2048 x 2048 first. The image is read with `rw_data` `dtaOpen` (the asset ZIP overlay first, then the game's own files). | The texture belongs to `G_IndicatorsClass` once stored: `GameDone` `0x5f74a0` (from `C_game::Done` `0x5a3daf`) releases it through ITexture slot 0 (`Release`) and clears the pointer, like the retail texture. Nothing else keeps it. |
+
 ### Melee
 
 | Native call | Evidence and convention | Ownership and lifetime |
@@ -1568,6 +1811,8 @@ here matches reM's `IGraph` declaration order.
 | `G_IndicatorsClass::DrawCursor` `0x604770` | `81 EC 80 00 00 00 D9 84 24 84 00 00 00 D8 05 A4 34 62 00 8B 84 24 84 00` | `void __thiscall(indicators*, float x, float y)`, `ret 8`. Its only caller is `GM_Menu::Draw` at `0x5ea8a8` (reM `GM_Menu.cpp`: it draws for the active menu at `g_iMenuCursorDrawX/Y`). The hook skips the draw only while `Menu::SetNativeControlsSuppressed(true)` is in force, because the page draws its own cursor then. | Created with the other menu hooks before `MH_EnableHook(MH_ALL_HOOKS)` and removed in `UninstallMenuHooks`. It retains nothing. |
 | `g_iMenuMouseX/Y` `0x6bd8a0/0x6bd8a4` | Read and written by `GM_Menu::Tick` `0x5ea8c0`: `A1 A0 D8 6B 00` at `0x5ea8f3`, `8B 1D A4 D8 6B 00` at `0x5ea8fd`, `A3 A0 D8 6B 00` at `0x5ea90e` | The menu integrates `Mouse_rx/ry` into these ints and clamps them to `Scrn_sx/sy`. The web UI reads them in the Present hook, after the menu tick, and forwards them as CEF mouse moves. | Game statics. Read only while `g_pActiveMenu` (`0x6bd890`) is the main menu. |
 | Main menu suppression through component draw bit `0x10` | See "Retail main menu under the web UI". | While the page is active every retail main menu component is hidden, so it is neither drawn nor hit-tested, and `OnClick` ignores every item. The menu scene, camera and loop keep running. | Reapplied on `OnCreate`. Lifting the suppression (page stops answering, web UI shutdown) restores exactly the components it hid. |
+| `GM_LoadProgress::Present` `0x5e3d40` | `A1 E0 7E 64 00 56 8B F1 50 8B 08 FF 51 40 A1 E0 7E 64 00 6A 03 68 00 00` | `void __thiscall(GM_LoadProgress*)`, no stack arguments, plain `retn` at `0x5e3d9c`. It draws one complete frame through `g_IGraph` (`0x647ee0`): `ResetRenderProps` (`+0x40`), `Clear(0, 1.0f, 3)` (`+0x30`), `BeginScene` (`+0x34`), `SetState(alpha, 1)` (`+0x44`), `GM_Menu::Draw(-1)` (`0x5ea7e0`), `EndScene` (`+0x38`) and `Present` (`+0x3c`), matching reM `GM_LoadProgress.cpp`. IDA's only callers are `cbLoadScene` (`0x5bcc10`: at `0x5bccea` and `0x5bcd24` after `SetProgressMissionOpen`, at `0x5bcdad` right after `GM_Menu::Create` on the scene's first report) and `_show_progress_` (`0x5a3960`, after `SetProgressGameInit`), which `C_game::Init` calls at 11 sites. `cbLoadScene` presents only when the scene/mission progress moved by at least 0.02. While a server mission loads (`WorldService::IsLoading`) and the web UI is active, the hook pumps CEF once, then calls `Clear(0, 1.0f, 3)` and `Present` itself instead of the original, so the frame is black with the page composited by the `IGraph::Present` hook. Otherwise, or when the page has not acknowledged `loading` within 4 s, it calls the original. | The menu object is the loader's (`G_LoadSaveClass::m_pLoadProgress` at `0x6d4bfc`, created by `C_mission::Open` with its last argument true, deleted at the end of `C_game::Init`); the hook keeps no pointer to it. Installed and removed with the other web UI hooks. |
+| `GM_LoadProgress::SetProgressMissionOpen` `0x5e3d20` and `SetProgressGameInit` `0x5e3cf0` | `D9 44 24 04 D8 49 30 51 D9 1C 24 68 2C 01 00 00 E8 3B 73 00 00 C2 04 00` / `D9 05 38 32 62 00 D8 61 30 51 D8 4C 24 08 D8 41 30 D9 1C 24 68 2C 01 00 00 E8` | `void __thiscall(GM_LoadProgress*, float)`, `ret 4`. Both call `SetRawProgress(300, value)` (`0x5eb070`, the bar component): mission open draws `p * w`, game init draws `w + (1 - w) * p` (`flt_623238` is 1.0), with `w` the float at `+0x30` that the constructor (`0x5e3aa0`, vtable `0x6275c0`) stores from its second argument; `C_mission::Open` passes 0.7. Callers: `cbLoadScene` only for the first, `_show_progress_` for the second. The hooks report the same share of the whole load to the page and always call the original. `SetRawProgress` itself is not hooked: the options and free ride menus share it. | Same lifetime as the `Present` hook; they read `+0x30` of the live `this` and retain nothing. |
 
 ## Script world effects and client scripting natives
 
@@ -1614,6 +1859,43 @@ lifetime, radius and damage and `damageActors = damage > 0`; `C_fire::Tick`
 hits nothing without it. The source actor and parent frame are null, so the
 combat hooks do not report these as grenade detonations. A message for another
 mission generation is dropped.
+
+### Persistent fires and water jets
+
+`Fire` and `WaterJet` (replicated `FireEntity` / `WaterJetEntity`) do not go
+through `C_fire`: its damage scales with the remaining lifetime
+(`C_fire::Tick` `0x55da80`, damage x `m_iLifeRemaining`) and its particle is
+the self-decaying "fire_fading". `FireService` (client, `features/fire`) owns
+everything it creates and drops it in the mission-closing callback:
+
+- Flames: `C_ParticleManager::CreateParticle(int, const S_vector&, const
+  S_vector&, int, I3D_frame*)` `0x449690` on `C_mission +0x6c` (as
+  `C_game::AddHydrant` `0x5b9b90` calls it), effects "Fire" 6 and
+  "Fire_no_smoke" 57 of `tables\effects.tbl` (no emission decay), parented to
+  a dummy frame (`I3D_driver::CreateFrame(FRAME_DUMMY)`) we move for a fire on
+  a car; `DestroyParticle` `0x44a240` ends them. The table's order is
+  `EFFECTS.TXT`'s (`LoadData` `0x449380` appends in file order); C_fire's 21
+  and the hydrant's 87 match it.
+- Light: `C_game::SpawnFireFrameSlot(const S_vector&, float, int, short)`
+  `0x5b5b40` with `NewFire`'s size 10 and type 1, on the ten slots at
+  `C_game +0x2a48` (0xc each, time at +4). The slot's time is renewed while
+  the fire burns and cut to 500 ms when it goes out, so `C_game::Tick` fades
+  it as a retail fire's.
+- Sound: `C_sound_table::ConstructSound` `0x55f820` on `g_SoundManager`
+  `0x646f50` with C_fire's loop 20 (looped, as `C_fire::Init`) and
+  `NewFire`'s ignition 21, which `C_game::Play3DSound(I3D_sound*)` `0x5accb0`
+  owns and releases.
+- Water: effect "hadice" 89 (one type, flags 0x19: its velocity (5, 0, 0) and
+  spawn spread are turned by the parent frame's world matrix in
+  `C_Particle::Create`, scale included, since `S_vector::RotateByMatrix` is
+  the plain 3x3 product; phase gravity 9.8, 2 s life) on a dummy nozzle frame
+  whose x row is the launch direction and whose uniform scale is pressure / 5,
+  so the drops fly the lower ballistic arc onto the target. The hydrant loop
+  is sound table 327 (`AddHydrant` pushes `0x147`). The steam over a doused
+  fire is "smoke_parnik" 28; a put-out fire smokes with "slow_smoke" 55.
+
+The server decides intensity, dousing and damage (`CombatService::StartFire`
+every 500 ms with damage x intensity); clients only draw.
 
 ### HUD, fade and camera
 

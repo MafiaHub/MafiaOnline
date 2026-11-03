@@ -3,6 +3,8 @@
 #include "game/entities/native_object_registry.h"
 #include "shared/features/car/car_debris.h"
 
+#include <utils/snapshot_buffer.h>
+
 #include <chrono>
 #include <cstdint>
 #include <unordered_map>
@@ -24,11 +26,20 @@ namespace Mafia1Online::Features::Car {
         void OnNativeDestroyed(World::WorldService &world, void *actor);
 
       private:
+        // The controller's poses reach observers unstamped through the
+        // server's tick: dated on arrival, played a little behind.
+        inline static const Framework::Utils::SnapshotBufferConfig kSnapshotConfig {100.0f, 150.0f, 4.0f, 4.0f, true, 50.0f, 250.0f, 2.0f, 0.1f};
+
         struct LiveActor {
+            LiveActor(): snapshots(&kSnapshotConfig) {}
             Game::Entities::NativeObjectHandle handle;
             bool removalQueued = false;
             uint32_t movementSequence = 0;
             std::chrono::steady_clock::time_point lastMovement;
+            Framework::Utils::TransformSnapshotBuffer snapshots;
+            MafiaNet::Time lastTransformTime = 0;
+            double newestAt = 0.0;
+            glm::vec3 newestPosition {0.0f};
         };
         void CreateNative(World::WorldService &world, uint64_t networkId);
         void ReportMovement(World::WorldService &world, uint64_t networkId, LiveActor &live);

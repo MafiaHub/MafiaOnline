@@ -11,6 +11,8 @@ body {
     /* 11px up to 800x600, then following the smaller of height and width
        so a wide or a tall window cannot push panels off screen. */
     font-size: calc(clamp(11px, min(1.9vh, 1.35vw), 40px) * var(--ui-scale, 1));
+    font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+    color: #ece8e1;
     color-scheme: dark;
     font-variant-numeric: lining-nums;
     -webkit-font-smoothing: antialiased;
@@ -24,12 +26,18 @@ body {
     box-sizing: border-box;
 }
 
+button,
+input,
+select {
+    font-family: inherit;
+}
+
 input {
     user-select: text;
 }
 
 ::selection {
-    background: rgba(201, 164, 92, 0.45);
+    background: rgba(163, 32, 28, 0.7);
     color: #fff;
 }
 
@@ -38,7 +46,7 @@ input {
 }
 
 ::-webkit-scrollbar-thumb {
-    background: rgba(201, 164, 92, 0.4);
+    background: #4a4a4c;
 }
 
 [data-reduce-motion] *,

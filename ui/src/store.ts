@@ -1,6 +1,6 @@
 import { computed, signal } from '@preact/signals';
 
-export type Screen = 'hidden' | 'menu' | 'game';
+export type Screen = 'hidden' | 'menu' | 'game' | 'loading';
 export type Phase = 'disconnected' | 'connecting' | 'authenticating' | 'downloading' | 'starting' | 'connected';
 
 export interface CursorState {
@@ -70,6 +70,8 @@ export interface Player {
     health: number;
     alive: boolean;
     spawned: boolean;
+    // The server's round trip to the player, in milliseconds.
+    ping: number;
     local: boolean;
 }
 
@@ -126,6 +128,90 @@ export const gameplayMenu = signal<GameplayMenu | null>(null);
 export const scoreboardVisible = signal(false);
 export const roster = signal<{ players: Player[]; mission: string }>({ players: [], mission: '' });
 export const toasts = signal<Toast[]>([]);
+
+// The client's settings screen (code/client/src/features/settings). Slots are
+// "native:<retail slot>", "mod:<key>" and "script:<resource>/<key>".
+export interface SettingsSlot {
+    key: string;
+    label: string;
+    defaultLabel: string;
+    mouse: boolean;
+    wheel: boolean;
+    clearable: boolean;
+    conflicts: string[];
+}
+
+export interface SettingsGroup {
+    id: string;
+    label: string;
+    rows: { id: string; label: string; slots: string[] }[];
+}
+
+export type DisplayMode = 'borderless' | 'fullscreen' | 'windowed';
+
+export interface DisplaySettings {
+    mode: DisplayMode;
+    width: number;
+    height: number;
+}
+
+export interface GameSettings {
+    groups: SettingsGroup[];
+    slots: Record<string, SettingsSlot>;
+    mouse: {
+        sensitivityX: number;
+        sensitivityY: number;
+        turnLimit: number;
+        steering: number;
+        invertY: boolean;
+        doubleTapRoll: boolean;
+        mph: boolean;
+        crosshair: number;
+    };
+    audio: { sound: number; music: number; car: number; speech: number };
+    media: number;
+    voice: {
+        enabled: boolean;
+        volume: number;
+        mode: 'pushToTalk' | 'voiceActivity';
+        threshold: number;
+        releaseMs: number;
+        noiseSuppression: boolean;
+        device: string;
+    };
+    hud: { nametags: boolean; nametagHealth: boolean };
+    // The window for the next start (0 x 0 is the monitor's resolution), the
+    // one running now, the sizes exclusive fullscreen can use and the monitor.
+    display: DisplaySettings;
+    displayActive: DisplaySettings;
+    displayModes: [number, number][];
+    monitor: [number, number];
+    devices: string[];
+    voiceAvailable: boolean;
+    toggles: { resource: string; id: string; label: string; value: boolean }[];
+    // True while that part still follows the selected Mafia profile.
+    profile: { controls: boolean; audio: boolean };
+}
+
+export interface VoiceLevel {
+    level: number;
+    talking: boolean;
+    microphone: boolean;
+}
+
+// A server mission loading (the client's `loading` message). Progress is the
+// retail loader's share of the whole load, or -1 before it reports any.
+export interface LoadingState {
+    mission: string;
+    progress: number;
+    stage: 'preparing' | 'scene' | 'world';
+}
+
+export const loading = signal<LoadingState>({ mission: '', progress: -1, stage: 'preparing' });
+
+export const settingsOpen = signal(false);
+export const gameSettings = signal<GameSettings | null>(null);
+export const voiceLevel = signal<VoiceLevel>({ level: 0, talking: false, microphone: false });
 
 // Wall clock for fades, ticked by the HUD while it is on screen.
 export const now = signal(Date.now());

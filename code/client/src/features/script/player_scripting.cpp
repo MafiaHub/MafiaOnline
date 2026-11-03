@@ -160,8 +160,8 @@ namespace Mafia1Online::Scripting {
         }
     } // namespace
 
-    std::unique_ptr<v8pp::class_<Player>> Player::_class;
-    std::unique_ptr<v8pp::class_<Vehicle>> Vehicle::_class;
+    std::unordered_map<v8::Isolate *, std::unique_ptr<v8pp::class_<Player>>> Player::_classes;
+    std::unordered_map<v8::Isolate *, std::unique_ptr<v8pp::class_<Vehicle>>> Vehicle::_classes;
 
     Player::Player(uint64_t networkId): Framework::Scripting::Builtins::Player(networkId) {
         if (!ResolvePlayer()) {
@@ -262,7 +262,12 @@ namespace Mafia1Online::Scripting {
         return player ? "Player(" + std::to_string(GetId()) + ", " + player->nickname + ")" : "Player(" + std::to_string(GetId()) + ", gone)";
     }
 
+    void Player::UnregisterIsolate(v8::Isolate *isolate) {
+        _classes.erase(isolate);
+    }
+
     v8pp::class_<Player> &Player::GetClass(v8::Isolate *isolate) {
+        auto &_class = _classes[isolate];
         if (_class) {
             return *_class;
         }
@@ -350,7 +355,12 @@ namespace Mafia1Online::Scripting {
         return car ? "Vehicle(" + std::to_string(GetId()) + ", " + car->model + ")" : "Vehicle(" + std::to_string(GetId()) + ", gone)";
     }
 
+    void Vehicle::UnregisterIsolate(v8::Isolate *isolate) {
+        _classes.erase(isolate);
+    }
+
     v8pp::class_<Vehicle> &Vehicle::GetClass(v8::Isolate *isolate) {
+        auto &_class = _classes[isolate];
         if (_class) {
             return *_class;
         }

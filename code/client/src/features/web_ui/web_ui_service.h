@@ -22,6 +22,10 @@ namespace Mafia1Online::Features::World {
     class WorldService;
 } // namespace Mafia1Online::Features::World
 
+namespace Mafia1Online::Features::Settings {
+    class SettingsService;
+} // namespace Mafia1Online::Features::Settings
+
 namespace Mafia1Online::Features::WebUi {
     // The Chromium (CEF) front end: one full-screen off-screen view drawn into
     // the game's Direct3D 8 frame. It replaces the main menu and the chat once
@@ -33,16 +37,26 @@ namespace Mafia1Online::Features::WebUi {
             Hidden,
             Menu,
             Game,
+            // A server mission loads: from Play (or a server mission change)
+            // until its game loop runs. The page replaces the retail
+            // loading screen.
+            Loading,
         };
 
         // False leaves the native UI in charge; not an error for the caller.
-        bool Install(Framework::Integrations::Client::Instance &instance, Chat::ChatService &chat, const std::string &projectPath);
+        bool Install(Framework::Integrations::Client::Instance &instance, Chat::ChatService &chat, Settings::SettingsService &settings, const std::string &projectPath);
         void Shutdown();
         void Reset();
         void Update(World::WorldService &world);
 
         // Called by the IGraph::Present hook, outside any scene.
         void OnPresent();
+        // The retail loading screen's progress, as a share of the whole load.
+        void OnLoadingProgress(float progress, bool gameInit);
+        // Called instead of GM_LoadProgress::Present while a mission loads.
+        // True when the frame was presented with the page; false draws the
+        // retail screen.
+        bool OnLoadingPresent();
         // True swallows the message.
         bool OnWindowMessage(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
         // ReadKey router; true when the key belongs to the web UI.
@@ -92,6 +106,10 @@ namespace Mafia1Online::Features::WebUi {
         void Send(const char *type, const nlohmann::json &payload);
         void PushState(bool force);
         void PushPlayers(World::WorldService &world, bool force);
+        void PushLoading();
+        // The main menu closes for a mission only once the page shows the
+        // loading screen, or after a grace period.
+        bool LoadingScreenShown();
         void UpdateCapture();
         void ForwardMouse(Screen live, Framework::GUI::View *target);
         void UpdateCursor(Framework::GUI::View *target);
@@ -103,12 +121,18 @@ namespace Mafia1Online::Features::WebUi {
         bool OnKeyMessage(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
         bool ToggleInGame(uint32_t key);
         void OpenChat(const std::string &prefill);
-        void OpenPause();
+        void OpenPause(bool settings = false);
+        // The pause screen opened on its settings page, for Settings.open().
+        void OpenSettings();
+        void PushSettings(bool force);
+        void PushVoiceLevel();
         void CloseInGameScreens();
         Screen LiveScreen() const;
 
         Framework::Integrations::Client::Instance *_instance = nullptr;
+        World::WorldService *_world                          = nullptr;
         Chat::ChatService *_chat                             = nullptr;
+        Settings::SettingsService *_gameSettings             = nullptr;
         Framework::GUI::View *_view                          = nullptr;
         int _viewId                                          = -1;
         Framework::GUI::View *_cursorView                    = nullptr;
@@ -122,6 +146,13 @@ namespace Mafia1Online::Features::WebUi {
         bool _captured        = false;
         bool _chatOpen        = false;
         bool _pauseOpen       = false;
+        // The page's settings screen is up: Escape belongs to it (it backs
+        // out of a key capture or the screen) rather than closing the pause.
+        bool _settingsOpen    = false;
+        bool _voiceMeter      = false;
+        uint64_t _settingsRevision = 0;
+        std::string _lastVoiceLevel;
+        std::chrono::steady_clock::time_point _lastVoiceLevelPush;
         uint64_t _gameplayMenuId = 0;
         std::optional<GameplayMenuResponse> _gameplayMenuResponse;
         bool _scoreboardShown = false;
@@ -133,6 +164,11 @@ namespace Mafia1Online::Features::WebUi {
 
         std::string _lastState;
         std::string _lastPlayers;
+        std::string _lastLoading;
+        // -1 until the retail loader reports a share of the load.
+        float _loadingProgress = -1.0f;
+        bool _loadingGameInit  = false;
+        std::optional<std::chrono::steady_clock::time_point> _loadingSince;
         std::chrono::steady_clock::time_point _lastHeartbeat;
         uint32_t _silentTicks = 0;
         std::optional<std::chrono::steady_clock::time_point> _closeRequestedAt;

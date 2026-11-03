@@ -89,6 +89,7 @@ namespace Mafia1Online::SDK::Scene {
     inline constexpr uint32_t kFrameRotationValid = 0x8;
     inline constexpr uint32_t kFrameLocalMatrixBuilt = 0x10;
     inline constexpr uint32_t kFrameWorldMatrixValid = 0x20;
+    inline constexpr uint32_t kFramePositionLocked = 0x80;
     inline constexpr uint32_t kFrameWorldBoundValid = 0x100;
     inline constexpr uint32_t kFrameConstructed = 0x40000000;
 
@@ -139,6 +140,11 @@ namespace Mafia1Online::SDK::Scene {
         }
         // FRMFLAGS_ON, bit 0 of the flags SetOn (LS3DF 0x1001b400) writes at +0xac.
         bool IsOn() const { return (_flags & 1u) != 0; }
+        // I3D_frame m_iRenderStamp (+0x13c): the mission's render stamp
+        // (NativeMission::RenderStamp) on a frame drawn this pass.
+        uint32_t RenderStamp() const {
+            return *reinterpret_cast<const uint32_t *>(reinterpret_cast<const std::byte *>(this) + 0x13c);
+        }
         Player::NativeActor *ActorOwner() const {
             return _internalBuffer ? *static_cast<Player::NativeActor **>(_internalBuffer) : nullptr;
         }
@@ -188,6 +194,19 @@ namespace Mafia1Online::SDK::Scene {
             _rotation[3] = z / length;
             _flags &= ~(kFrameLocalMatrixScaled | kFrameLocalMatrixBuilt | kFrameWorldMatrixValid | kFrameWorldBoundValid);
             _flags |= kFrameRotationValid | kFrameConstructed;
+        }
+        // reM I3D_frame::SetPos (inline): the local translation row, unless
+        // FRMFLAGS_POS_LOCKED (0x80) is set; retail writes it the same way
+        // for the walker umbrella (0x4586f2-0x458729).
+        void SetLocalPosition(const Player::Vector3 &position) {
+            if (_flags & kFramePositionLocked) {
+                return;
+            }
+            _localMatrix[12] = position.x;
+            _localMatrix[13] = position.y;
+            _localMatrix[14] = position.z;
+            _flags &= ~(kFrameWorldMatrixValid | kFrameWorldBoundValid);
+            _flags |= kFrameConstructed;
         }
         void SetLocalScale(const Player::Vector3 &scale) {
             _scale[0] = scale.x;

@@ -9,7 +9,7 @@ target_include_directories(Mafia1OnlineMeshCheckpointTests PRIVATE "${CMAKE_CURR
 
 add_executable(Mafia1OnlineModAssetTests mod_asset_tests.cpp ../client/src/features/mod/mod_service.cpp)
 target_include_directories(Mafia1OnlineModAssetTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/.." "${CMAKE_CURRENT_SOURCE_DIR}/../client/src")
-target_link_libraries(Mafia1OnlineModAssetTests PRIVATE Framework)
+target_link_libraries(Mafia1OnlineModAssetTests PRIVATE Framework::Framework)
 
 if(MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 4)
     add_executable(Mafia1OnlineWineFpuTests
@@ -22,7 +22,81 @@ endif()
 
 add_executable(Mafia1OnlineCarSnapshotTests car_snapshot_tests.cpp)
 target_include_directories(Mafia1OnlineCarSnapshotTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
-target_link_libraries(Mafia1OnlineCarSnapshotTests PRIVATE Framework)
+target_link_libraries(Mafia1OnlineCarSnapshotTests PRIVATE Framework::Framework)
 
 add_executable(Mafia1OnlineMissionActorTests mission_actor_tests.cpp)
 target_include_directories(Mafia1OnlineMissionActorTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
+add_executable(Mafia1OnlineMapObjectTests
+    map_object_tests.cpp
+    ../client/src/features/map_object/collision_template.cpp
+    ../client/src/features/map_object/static_collision.cpp
+)
+target_include_directories(Mafia1OnlineMapObjectTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/.." "${CMAKE_CURRENT_SOURCE_DIR}/../client/src")
+target_link_libraries(Mafia1OnlineMapObjectTests PRIVATE Framework::Framework Mafia1OnlineSDK)
+
+add_executable(Mafia1OnlinePumperReportTests pumper_report_tests.cpp)
+target_include_directories(Mafia1OnlinePumperReportTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+target_link_libraries(Mafia1OnlinePumperReportTests PRIVATE Framework::Framework)
+
+add_executable(Mafia1OnlineTaxiProtocolTests taxi_protocol_tests.cpp)
+target_include_directories(Mafia1OnlineTaxiProtocolTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+target_link_libraries(Mafia1OnlineTaxiProtocolTests PRIVATE Framework::Framework)
+
+add_executable(Mafia1OnlineNetworkWireTests network_wire_tests.cpp)
+target_include_directories(Mafia1OnlineNetworkWireTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+target_link_libraries(Mafia1OnlineNetworkWireTests PRIVATE Framework::Framework)
+
+# The Framework's own snapshot buffer module, when the Framework is built from
+# a checkout alongside: its interpolation is what every replica here runs on.
+if(FW_SOURCE_DIR)
+    add_executable(Mafia1OnlineSnapshotBufferTests snapshot_buffer_tests.cpp)
+    target_include_directories(Mafia1OnlineSnapshotBufferTests PRIVATE "${FW_SOURCE_DIR}/code/tests")
+    target_link_libraries(Mafia1OnlineSnapshotBufferTests PRIVATE Framework::Framework)
+endif()
+
+add_executable(Mafia1OnlineContactSyncTests contact_sync_tests.cpp)
+target_include_directories(Mafia1OnlineContactSyncTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+target_link_libraries(Mafia1OnlineContactSyncTests PRIVATE Framework::Framework)
+
+add_executable(Mafia1OnlineMeleeTests melee_tests.cpp)
+target_include_directories(Mafia1OnlineMeleeTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+target_link_libraries(Mafia1OnlineMeleeTests PRIVATE Framework::Framework)
+
+add_executable(Mafia1OnlineSettingsTests
+    settings_tests.cpp
+    ../client/src/features/settings/key_catalog.cpp
+    ../client/src/features/settings/settings_model.cpp
+)
+target_include_directories(Mafia1OnlineSettingsTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../client/src")
+target_link_libraries(Mafia1OnlineSettingsTests PRIVATE Framework::Framework)
+
+add_executable(Mafia1OnlineSeatRulesTests seat_rules_tests.cpp)
+target_include_directories(Mafia1OnlineSeatRulesTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../client/src")
+
+add_executable(Mafia1OnlineProcessLogTests process_log_tests.cpp)
+target_include_directories(Mafia1OnlineProcessLogTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+target_link_libraries(Mafia1OnlineProcessLogTests PRIVATE Framework::Framework)
+
+add_executable(Mafia1OnlinePoliceCaseTests police_case_tests.cpp)
+target_include_directories(Mafia1OnlinePoliceCaseTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../client/src")
+
+add_executable(Mafia1OnlineEmptyCarHandoffTests empty_car_handoff_tests.cpp)
+target_include_directories(Mafia1OnlineEmptyCarHandoffTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
+add_executable(Mafia1OnlinePushToTalkTests push_to_talk_tests.cpp)
+target_include_directories(Mafia1OnlinePushToTalkTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../client/src")
+
+add_executable(Mafia1OnlineTrafficJamTests traffic_jam_tests.cpp)
+target_include_directories(Mafia1OnlineTrafficJamTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+target_link_libraries(Mafia1OnlineTrafficJamTests PRIVATE Framework::Framework)
+
+add_executable(Mafia1OnlineCrewCarRetireTests crew_car_retire_tests.cpp)
+target_include_directories(Mafia1OnlineCrewCarRetireTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../client/src")
+
+add_executable(Mafia1OnlineCityMapTests
+    city_map_tests.cpp
+    ../client/src/features/city_map/map_image.cpp
+)
+target_include_directories(Mafia1OnlineCityMapTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../client/src")
+target_link_libraries(Mafia1OnlineCityMapTests PRIVATE Mafia1OnlineSDK)

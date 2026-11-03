@@ -7,8 +7,8 @@ import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
-const toolsDir = path.join(root, 'code/projects/mafia1online/tools');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const toolsDir = path.join(root, 'tools');
 const options = new Set(process.argv.slice(2));
 const attach = options.has('--attach');
 const impair = options.has('--impair');

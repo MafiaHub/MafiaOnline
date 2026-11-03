@@ -16,6 +16,13 @@ import {
     type CursorState,
     gameplayMenu,
     type GameplayMenu,
+    loading,
+    type LoadingState,
+    gameSettings,
+    type GameSettings,
+    settingsOpen,
+    voiceLevel,
+    type VoiceLevel,
 } from './store';
 
 // The client talks to this page in two directions:
@@ -35,11 +42,14 @@ export type InboundMessage =
     | { type: 'chat:message'; payload: Omit<ChatLine, 'id'> }
     | { type: 'chat:history'; payload: Omit<ChatLine, 'id'>[] }
     | { type: 'chat:open'; payload: { prefill: string } }
-    | { type: 'pause:open'; payload: Record<string, never> }
+    | { type: 'pause:open'; payload: { settings?: boolean } }
+    | { type: 'settings'; payload: GameSettings }
+    | { type: 'settings:level'; payload: VoiceLevel }
     | { type: 'gameplay:open'; payload: GameplayMenu }
     | { type: 'gameplay:closed'; payload: Record<string, never> }
     | { type: 'scoreboard'; payload: { visible: boolean } }
     | { type: 'players'; payload: { players: Player[]; mission: string } }
+    | { type: 'loading'; payload: LoadingState }
     | { type: 'toast'; payload: { kind: Toast['kind']; text: string } }
     | { type: 'chat:closed'; payload: Record<string, never> }
     | { type: 'session:reset'; payload: Record<string, never> };
@@ -59,7 +69,15 @@ export type OutboundEvent =
     | 'gameplay:close'
     | 'servers:favorite'
     | 'servers:forget'
-    | 'settings:save';
+    | 'settings:save'
+    | 'settings:open'
+    | 'settings:close'
+    | 'settings:set'
+    | 'settings:bind'
+    | 'settings:reset'
+    | 'settings:toggle'
+    | 'settings:meter'
+    | 'settings:devices';
 
 let mockHandler: ((name: OutboundEvent, payload: unknown) => void) | null = null;
 
@@ -98,6 +116,13 @@ export function receive(message: InboundMessage) {
             gameplayMenu.value = null;
             chatOpen.value = null;
             pauseOpen.value = true;
+            settingsOpen.value = message.payload?.settings === true;
+            break;
+        case 'settings':
+            gameSettings.value = message.payload;
+            break;
+        case 'settings:level':
+            voiceLevel.value = message.payload;
             break;
         case 'gameplay:open':
             chatOpen.value = null;
@@ -113,6 +138,9 @@ export function receive(message: InboundMessage) {
         case 'players':
             roster.value = message.payload;
             break;
+        case 'loading':
+            loading.value = message.payload;
+            break;
         case 'toast':
             pushToast(message.payload.kind, message.payload.text);
             break;
@@ -120,12 +148,14 @@ export function receive(message: InboundMessage) {
             // The client took the keyboard back.
             chatOpen.value = null;
             pauseOpen.value = false;
+            settingsOpen.value = false;
             break;
         case 'session:reset':
             gameplayMenu.value = null;
             chat.value = [];
             chatOpen.value = null;
             pauseOpen.value = false;
+            settingsOpen.value = false;
             scoreboardVisible.value = false;
             roster.value = { players: [], mission: '' };
             break;

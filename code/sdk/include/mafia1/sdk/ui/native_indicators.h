@@ -16,12 +16,29 @@ namespace Mafia1Online::SDK::UI {
     inline constexpr uint32_t kRadarFlag = 0x80000;
     inline constexpr uint32_t kTimerFlag   = 0x8;
     inline constexpr uint32_t kCompassFlag = 0x80;
+    // G_IndicatorsClass::ConsoleAddTextByID(unsigned textId, unsigned color),
+    // thiscall, ret 8: the text database line (GetTextOrNULL 0x60fba0 on
+    // g_pTextDB) through ConsoleAddText; nothing for an unknown id. The
+    // police print 2100+ crime lines with it (VasekSelChlastatNaOslavu).
+    inline constexpr uintptr_t kConsoleAddTextById = 0x5f9de0;
+    // SetWantedLevel(int level, float alpha), thiscall, ret 8: the wanted
+    // badge level (+0x46e0, 1-3, 4 hidden) and its alpha (+0x46e4), drawn
+    // while kWantedFlag is set (C_shvestky::Tick 0x49b603).
+    inline constexpr uintptr_t kSetWantedLevel = 0x47a300;
+    inline constexpr uint32_t kWantedFlag      = 0x4000000;
 
     // Game-owned HUD singleton in the verified retail executable. Its
     // lifetime spans the initialized game UI; callers never own this view.
     struct NativeIndicators {
         static NativeIndicators &Get() {
             return *reinterpret_cast<NativeIndicators *>(kIndicators);
+        }
+
+        // G_IndicatorsClass::GameInit 0x5f73c0: reloads the dashboard
+        // textures for the profile's mph/km/h choice and the game's night
+        // mode. C_game::Init calls it on every mission load.
+        void GameInit() {
+            reinterpret_cast<void(__thiscall *)(NativeIndicators *)>(0x5f73c0)(this);
         }
 
         void SetAmmo(uint32_t loaded, uint32_t reserve) {
@@ -90,9 +107,33 @@ namespace Mafia1Online::SDK::UI {
         void ParheliaSetFov(void *camera, float radians) {
             reinterpret_cast<void(__thiscall *)(NativeIndicators *, void *, float)>(kParheliaSetFov)(this, camera, radians);
         }
+        // G_IndicatorsClass::ResolutionChanged 0x601520: lays the HUD out for
+        // IGraph's current Scrn_sx/Scrn_sy (scale, gauges, menu offset and the
+        // single/double/triple screen mode for width > 2 or 3 x height). Only
+        // arithmetic on this object; G_LoadSaveClass::Init calls it once.
+        void ResolutionChanged() {
+            reinterpret_cast<void(__thiscall *)(NativeIndicators *)>(0x601520)(this);
+        }
+        // ParheliaApplyViewport 0x604a80, thiscall, ret 4: the mission
+        // scene's viewport and its active camera's aspect for the screen mode
+        // ResolutionChanged chose, remembering singleScreen at +0x46f4. With
+        // singleScreen set in a double or triple mode it also clears and
+        // presents three frames.
+        void ParheliaApplyViewport(bool singleScreen) {
+            reinterpret_cast<void(__thiscall *)(NativeIndicators *, bool)>(0x604a80)(this, singleScreen);
+        }
+        bool ParheliaSingleScreen() const {
+            return *reinterpret_cast<const bool *>(reinterpret_cast<const std::byte *>(this) + 0x46f4);
+        }
         // Large white centred text; copies at most 127 characters.
         void RaceFlashText(const char *text, float seconds) {
             reinterpret_cast<void(__thiscall *)(NativeIndicators *, const char *, float)>(0x5fafc0)(this, text, seconds);
+        }
+        void ConsoleAddTextById(uint32_t textId, uint32_t rgb) {
+            reinterpret_cast<void(__thiscall *)(NativeIndicators *, uint32_t, uint32_t)>(kConsoleAddTextById)(this, textId, rgb);
+        }
+        void SetWantedLevel(int32_t level, float alpha) {
+            reinterpret_cast<void(__thiscall *)(NativeIndicators *, int32_t, float)>(kSetWantedLevel)(this, level, alpha);
         }
         // Five line console, five seconds per line; colour is 0xRRGGBB.
         void ConsoleAddText(const char *text, uint32_t rgb) {

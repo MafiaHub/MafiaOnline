@@ -1,0 +1,11 @@
+#pragma once
+
+#include <cstddef>
+
+namespace Mafia1Online::LauncherPatcherConfig {
+    inline constexpr bool Enabled = @M1O_PATCHER_ENABLED_CPP@;
+    inline constexpr const char *ApiUrl = R"m1opatchercfg(@M1O_PATCHER_API_URL@)m1opatchercfg";
+    inline constexpr const char *ModId = R"m1opatchercfg(@M1O_PATCHER_MOD_ID@)m1opatchercfg";
+    inline constexpr const char *DownloadToken = R"m1opatchercfg(@M1O_PATCHER_DOWNLOAD_TOKEN@)m1opatchercfg";
+    inline constexpr std::size_t DownloadConcurrency = @M1O_PATCHER_DOWNLOAD_CONCURRENCY@;
+} // namespace Mafia1Online::LauncherPatcherConfig

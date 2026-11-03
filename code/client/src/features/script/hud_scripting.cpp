@@ -8,6 +8,7 @@
 #include "shared/scripting_catalog.h"
 
 #include <core_modules.h>
+#include <mafia1/sdk/ui/native_indicators.h>
 
 #include <v8pp/convert.hpp>
 #include <v8pp/module.hpp>
@@ -93,6 +94,50 @@ namespace Mafia1Online::Scripting {
                 return;
             }
             Hud().ShowMessage(text, color);
+            info.GetReturnValue().Set(true);
+        }
+
+        // Retail police lines are red (VasekSelChlastatNaOslavu 0x49fb68).
+        constexpr uint32_t kPoliceTextColor = 0xFF0000;
+        constexpr uint32_t kMaximumTextId   = 0xFFFF;
+
+        void JS_ShowPoliceText(const v8::FunctionCallbackInfo<v8::Value> &info) {
+            auto *isolate = info.GetIsolate();
+            uint32_t textId = 0;
+            uint32_t color  = kPoliceTextColor;
+            if (info.Length() < 1 || info.Length() > 2 || !ReadUInt(info[0], kMaximumTextId, textId) || !ReadColor(info, 1, color)) {
+                Args::Throw(isolate, "Hud.showGameText(textId, color?) expects a text database id and a 0xRRGGBB color");
+                return;
+            }
+            if (!Hud().Ready()) {
+                info.GetReturnValue().Set(false);
+                return;
+            }
+            SDK::UI::NativeIndicators::Get().ConsoleAddTextById(textId, color);
+            info.GetReturnValue().Set(true);
+        }
+
+        void JS_SetWanted(const v8::FunctionCallbackInfo<v8::Value> &info) {
+            auto *isolate = info.GetIsolate();
+            uint32_t level = 0;
+            if (info.Length() < 1 || info.Length() > 2 || !ReadUInt(info[0], 4, level) || (info.Length() == 2 && !info[1]->IsUndefined() && !info[1]->IsBoolean())) {
+                Args::Throw(isolate, "Hud.setWanted(level, dimmed?) expects a level from 0 to 4 and a boolean");
+                return;
+            }
+            if (!Hud().Ready()) {
+                info.GetReturnValue().Set(false);
+                return;
+            }
+            auto &indicators = SDK::UI::NativeIndicators::Get();
+            if (level == 0) {
+                indicators.RemoveFlag(SDK::UI::kWantedFlag);
+            }
+            else {
+                // Retail dims the badge to 0.4 while the officers lost sight.
+                const bool dimmed = info.Length() == 2 && info[1]->IsBoolean() && info[1]->BooleanValue(isolate);
+                indicators.SetWantedLevel(static_cast<int32_t>(level), dimmed ? 0.4f : 1.0f);
+                indicators.AddFlag(SDK::UI::kWantedFlag);
+            }
             info.GetReturnValue().Set(true);
         }
 
@@ -410,6 +455,13 @@ namespace Mafia1Online::Scripting {
         hud.function("showMessage", &JS_ShowMessage,
             docs("boolean", {param("text", "string", false, "Message line; at most 127 characters are shown."), param("color", "number", true, "0xRRGGBB color; defaults to white.")},
                 "Adds a line to the native HUD console, which keeps the last five lines for five seconds each.", "False while no mission is loaded."));
+        hud.function("showGameText", &JS_ShowPoliceText,
+            docs("boolean", {param("textId", "number", false, "Retail text database id, such as the police lines 2100-2110 (\"Police! Shots fired!\" is 2101) or 2200 \"All Cops have been alerted!\"."),
+                             param("color", "number", true, "0xRRGGBB color; defaults to the retail police red.")},
+                "Prints a line of the game's own text database in the message console, as the retail police do.", "False while no mission is loaded."));
+        hud.function("setWanted", &JS_SetWanted,
+            docs("boolean", {param("level", "number", false, "Retail wanted badge: 0 hides it, 1 minor, 2 arrest, 3 lethal, 4 hidden."), param("dimmed", "boolean", true, "Drawn faded, as retail shows it while the officers lost sight.")},
+                "Shows or hides the retail wanted badge.", "False while no mission is loaded."));
         hud.function("announce", &JS_Announce,
             docs("boolean", {param("text", "string", false, "Announcement; at most 127 characters are shown."), param("durationSeconds", "number", true, "How long it stays; defaults to 3.")},
                 "Shows large white centred text, the race flash text, fading out over its last second.", "False while no mission is loaded."));

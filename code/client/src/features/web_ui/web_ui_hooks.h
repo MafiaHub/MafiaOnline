@@ -10,7 +10,9 @@ namespace Mafia1Online::Features::WebUi {
     // IGraph::Present (composites the web view into the finished frame), the
     // IGraph input queries the game polls directly (hidden from it while the
     // web UI owns that device) and a subclass of the game window (keyboard and
-    // IME messages for the focused view).
+    // IME messages for the focused view), and the retail loading screen's
+    // progress and Present (GM_LoadProgress), which the web UI replaces while
+    // a server mission loads.
     bool InstallWebUiHooks(WebUiService &service, HWND window);
     void UninstallWebUiHooks();
 

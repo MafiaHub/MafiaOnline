@@ -77,6 +77,25 @@ namespace Mafia1Online::SDK::Player {
             return mask;
         }
 
+        // Every occupied slot: the hand item, the small weapons, the coat
+        // weapon and the ordinary items.
+        template <typename Visit>
+        void ForEachItem(Visit &&visit) const {
+            const auto include = [&visit](const NativeGameItem &item) {
+                if (item.itemId != 0) {
+                    visit(item);
+                }
+            };
+            include(_selected);
+            for (const auto &weapon : _weapons) {
+                include(weapon);
+            }
+            include(_coatWeapon);
+            for (uint32_t i = 0; i < _itemCount && i < Shared::Combat::kOrdinaryItemSlots; ++i) {
+                include(_items[i]);
+            }
+        }
+
         // Rejects an unrepresentable set before changing any game-owned slot.
         bool Reconcile(std::span<const NativeStockItem> stock, uint16_t selectedId) {
             NativeGameItem hand {};

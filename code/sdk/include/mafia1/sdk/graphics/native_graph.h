@@ -38,11 +38,38 @@ namespace Mafia1Online::SDK::Graphics {
     };
     static_assert(sizeof(NativeViewport) == 0x18);
 
+    // LS3DF ITexture: slot 0 is Release (G_IndicatorsClass::GameDone
+    // 0x5f74ad), which frees the texture at the last reference.
+    struct NativeTexture {
+        struct VTable {
+            int(__stdcall *release)(NativeTexture *);
+        } *vtable;
+
+        void Release() { vtable->release(this); }
+    };
+
+    // IGraph::CreateITexture flags (LS3DF 0x1006c2c0 and ITexture::Create
+    // 0x10075f50). 0x200001 skips the cached-texture scan and passes the name
+    // through unresolved; its bit 0 is also ITC_FROM_MEMORY, which makes the
+    // name a 40-byte BITMAPINFOHEADER followed by uncompressed pixel rows.
+    // Such a texture is never read from or written to a presaved .565/.DXn
+    // cache file, and its pixels are copied before Create returns.
+    inline constexpr uint32_t kTextureFromMemory = 0x200001;
+
     struct NativeGraphVTable {
-        void *_unused00[0x0c / sizeof(void *)];
+        void *_unused00;
+        // CreateITexture(name, alphaName, flags, out) (VC6 places the
+        // four-argument overload first); G_IndicatorsClass::Tick calls it at
+        // 0x602812. Returns a negative LS3D_RESULT on failure.
+        int(__stdcall *createTexture)(NativeGraph *, const void *name, const char *alphaName, uint32_t flags, NativeTexture **out);
+        void *_unused08;
         bool(__stdcall *setTexture)(NativeGraph *, void *);
         void *(__stdcall *getMainHwnd)(NativeGraph *);
-        void *_unused14[(0x30 - 0x14) / sizeof(void *)];
+        // GetChildHWND (LS3DF 0x1006c810): the WS_CHILD window a windowed
+        // device renders through (flag 0x80), null otherwise.
+        void *(__stdcall *getChildHwnd)(NativeGraph *);
+        void *_unused18[(0x2c - 0x18) / sizeof(void *)];
+        void(__stdcall *processWinMessages)(NativeGraph *);
         void(__stdcall *clear)(NativeGraph *, uint32_t color, float depth, uint32_t flags);
         void *_unused34[(0x3c - 0x34) / sizeof(void *)];
         void(__stdcall *present)(NativeGraph *);
@@ -58,19 +85,26 @@ namespace Mafia1Online::SDK::Graphics {
         int(__stdcall *screenHeight)(NativeGraph *);
         void *_unused78[(0x8c - 0x78) / sizeof(void *)];
         int(__stdcall *keyboardInit)(NativeGraph *, uint32_t flags);
-        void *_unused90[(0xac - 0x90) / sizeof(void *)];
+        void *_unused90[(0x98 - 0x90) / sizeof(void *)];
+        void(__stdcall *updateKeyboardData)(NativeGraph *);
+        void *_unused9c[(0xac - 0x9c) / sizeof(void *)];
         bool(__stdcall *testKey)(NativeGraph *, uint8_t scanCode);
         void *_unusedb0[(0xb4 - 0xb0) / sizeof(void *)];
         int64_t(__stdcall *readKeys)(NativeGraph *);
-        void *_unusedb8[(0xe0 - 0xb8) / sizeof(void *)];
+        void *_unusedb8[(0xdc - 0xb8) / sizeof(void *)];
+        void(__stdcall *updateMouseData)(NativeGraph *);
         int(__stdcall *mouseDeltaX)(NativeGraph *);
         int(__stdcall *mouseDeltaY)(NativeGraph *);
         int(__stdcall *mouseWheel)(NativeGraph *);
         void *_unusedec[(0xf8 - 0xec) / sizeof(void *)];
         uint32_t(__stdcall *mouseButtons)(NativeGraph *);
+        void(__stdcall *nullTimer)(NativeGraph *);
+        uint32_t(__stdcall *getTimer)(NativeGraph *, uint32_t minimumMs, uint32_t maximumMs);
     };
+    static_assert(offsetof(NativeGraphVTable, createTexture) == 0x04);
     static_assert(offsetof(NativeGraphVTable, setTexture) == 0x0c);
     static_assert(offsetof(NativeGraphVTable, getMainHwnd) == 0x10);
+    static_assert(offsetof(NativeGraphVTable, getChildHwnd) == 0x14);
     static_assert(offsetof(NativeGraphVTable, present) == 0x3c);
     static_assert(offsetof(NativeGraphVTable, clear) == 0x30);
     static_assert(offsetof(NativeGraphVTable, setState) == 0x44);
@@ -86,6 +120,14 @@ namespace Mafia1Online::SDK::Graphics {
     static_assert(offsetof(NativeGraphVTable, mouseDeltaY) == 0xe4);
     static_assert(offsetof(NativeGraphVTable, mouseWheel) == 0xe8);
     static_assert(offsetof(NativeGraphVTable, mouseButtons) == 0xf8);
+    // GameLoopSingle1 (0x5be750) pumps messages through +0x2c, refreshes the
+    // DirectInput mouse (+0xdc) and keyboard (+0x98) and times each frame
+    // with GetTimer(16, 83) at +0x100 after NullTimer at +0xfc.
+    static_assert(offsetof(NativeGraphVTable, processWinMessages) == 0x2c);
+    static_assert(offsetof(NativeGraphVTable, updateKeyboardData) == 0x98);
+    static_assert(offsetof(NativeGraphVTable, updateMouseData) == 0xdc);
+    static_assert(offsetof(NativeGraphVTable, nullTimer) == 0xfc);
+    static_assert(offsetof(NativeGraphVTable, getTimer) == 0x100);
 
     // G_IndicatorsClass::DrawAll (0x5fb060) begins with
     // SetState(DX_ALPHASTATE, 1) at 0x5fb079 so translucent quads blend over
@@ -110,10 +152,88 @@ namespace Mafia1Online::SDK::Graphics {
     inline constexpr uintptr_t kD3DDeviceOffset     = 0x1c597c;
     inline constexpr uintptr_t kKeyboardFlagsOffset = 0x1c52bc;
 
+    // IGRAPH_INIT_DESC as IGraph::Init keeps it (LS3DF 0x101c55bc), the only
+    // copy of the screen setup. Scrn_sx/Scrn_sy (0x100704e0/0x10070500) test
+    // flag 0x80 at +0x2c (0x101c55e8) and return fullWidth/fullHeight (+0x20,
+    // +0x24) when it is set, else width/height (+0x10, +0x14). InitSystem
+    // always sets 0x80 and puts the windowed size in both pairs, fullLeft and
+    // fullTop at 0; the child window is created from the full* rectangle.
+    struct NativeInitDesc {
+        void *instance;
+        uint32_t adapter;
+        int32_t windowX;
+        int32_t windowY;
+        int32_t width;
+        int32_t height;
+        int32_t fullLeft;
+        int32_t fullTop;
+        int32_t fullWidth;
+        int32_t fullHeight;
+        uint8_t bitDepth;
+        uint8_t refreshRate;
+        uint8_t _reserved2a[2];
+        uint32_t flags;
+        void *menu;
+        void *messageHandler;
+    };
+    static_assert(sizeof(NativeInitDesc) == 0x38);
+    static_assert(offsetof(NativeInitDesc, width) == 0x10);
+    static_assert(offsetof(NativeInitDesc, fullWidth) == 0x20);
+    static_assert(offsetof(NativeInitDesc, flags) == 0x2c);
+    inline constexpr uintptr_t kInitDescOffset = 0x1c55bc;
+    // Init's 0x2 flag: an exclusive fullscreen device at width x height in a
+    // topmost window at (0, 0); Init then clears 0x80 and makes no child. The
+    // mouse code (UpdateMouseData 0x10071e20, SetMousePos 0x10071fc0) reads
+    // 0x2 as "screen coordinates are client coordinates".
+    inline constexpr uint32_t kInitDescExclusive = 0x2;
+    inline constexpr uint32_t kInitDescTripleBuffer = 0x4;
+    // Windowed through a child window of fullWidth x fullHeight: Scrn_sx/sy,
+    // the mouse code and IShow (0x100745a0) then use the child.
+    inline constexpr uint32_t kInitDescChildWindow = 0x80;
+    // Exclusive present interval ONE instead of IMMEDIATE (Init 0x1006eedb).
+    inline constexpr uint32_t kInitDescVSync = 0x100;
+    // g_childHWND, written by Init and read live by GetChildHWND (0x1006c810),
+    // the mouse code and IShow; the main window is at 0x101c5458.
+    inline constexpr uintptr_t kChildWindowOffset = 0x1c5408;
+
+    // D3DPRESENT_PARAMETERS (Direct3D 8) the device was created and is Reset
+    // with (LS3DF 0x101c52c0, pushed by ResetDevice at 0x1006e1f4). A
+    // windowed device leaves the back buffer size 0 at Init, so Reset sizes
+    // it from hDeviceWindow, the child window.
+    struct NativePresentParams {
+        uint32_t backBufferWidth;
+        uint32_t backBufferHeight;
+        uint32_t backBufferFormat;
+        uint32_t backBufferCount;
+        uint32_t multiSampleType;
+        uint32_t swapEffect;
+        void *deviceWindow;
+        int32_t windowed;
+        int32_t enableAutoDepthStencil;
+        uint32_t autoDepthStencilFormat;
+        uint32_t flags;
+        uint32_t refreshRate;
+        uint32_t presentationInterval;
+    };
+    static_assert(sizeof(NativePresentParams) == 0x34);
+    inline constexpr uintptr_t kPresentParamsOffset = 0x1c52c0;
+    inline constexpr uint32_t kPresentIntervalDefault   = 0;
+    inline constexpr uint32_t kPresentIntervalOne       = 1;
+    inline constexpr uint32_t kPresentIntervalImmediate = 0x80000000;
+
+    // ResetDevice (LS3DF 0x1006e1a0), __fastcall with the bool in CL: frees
+    // the engine's pooled video-memory vertex and index buffers and its state
+    // block, Resets the device with the present parameters above when the
+    // bool is set, then recreates its shaders, state block and global buffers
+    // and re-pushes its cached render states. IGraph::Present calls it with
+    // true to recover a lost device. Returns a negative LS3D_RESULT on failure.
+    inline constexpr uintptr_t kResetDeviceOffset = 0x6e1a0;
+
     struct NativeGraph {
         NativeGraphVTable *vtable;
 
         void *MainWindow() { return vtable->getMainHwnd(this); }
+        void *ChildWindow() { return vtable->getChildHwnd(this); }
         int ScreenWidth() { return vtable->screenWidth(this); }
         int ScreenHeight() { return vtable->screenHeight(this); }
         NativeViewport Viewport() { return *vtable->getViewport(this); }
@@ -123,6 +243,17 @@ namespace Mafia1Online::SDK::Graphics {
         bool TestKey(uint8_t scanCode) { return vtable->testKey(this, scanCode); }
         int MouseWheel() { return vtable->mouseWheel(this); }
         uint32_t MouseButtons() { return vtable->mouseButtons(this); }
+        void Present() { vtable->present(this); }
+        void ProcessWinMessages() { vtable->processWinMessages(this); }
+        void UpdateKeyboardData() { vtable->updateKeyboardData(this); }
+        void UpdateMouseData() { vtable->updateMouseData(this); }
+        int MouseDeltaX() { return vtable->mouseDeltaX(this); }
+        int MouseDeltaY() { return vtable->mouseDeltaY(this); }
+        void NullTimer() { vtable->nullTimer(this); }
+        // IGraph::GetTimer (LS3DF 0x10072100): milliseconds since the last
+        // call; sleeps out the rest of minimumMs and caps the result at
+        // maximumMs (0 = no cap).
+        uint32_t GetTimer(uint32_t minimumMs, uint32_t maximumMs) { return vtable->getTimer(this, minimumMs, maximumMs); }
     };
 
     inline NativeGraph *GetGraph() {
@@ -142,6 +273,24 @@ namespace Mafia1Online::SDK::Graphics {
 
     inline uint32_t KeyboardFlags() {
         return *reinterpret_cast<const uint32_t *>(Ls3dfBase() + kKeyboardFlagsOffset);
+    }
+
+    inline NativeInitDesc &InitDesc() {
+        return *reinterpret_cast<NativeInitDesc *>(Ls3dfBase() + kInitDescOffset);
+    }
+
+    inline void *&ChildWindowSlot() {
+        return *reinterpret_cast<void **>(Ls3dfBase() + kChildWindowOffset);
+    }
+
+    inline NativePresentParams &PresentParams() {
+        return *reinterpret_cast<NativePresentParams *>(Ls3dfBase() + kPresentParamsOffset);
+    }
+
+    // Only between frames on the game thread: never inside BeginScene/EndScene.
+    inline bool ResetDevice() {
+        using Reset = int(__fastcall *)(bool);
+        return reinterpret_cast<Reset>(Ls3dfBase() + kResetDeviceOffset)(true) >= 0;
     }
 #endif
 

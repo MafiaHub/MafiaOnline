@@ -22,6 +22,10 @@ namespace Mafia1Online::Features::Nametag {
         NametagService();
         void Render(World::WorldService &world);
         void Reset();
+        void SetVisible(bool names, bool health) {
+            _showNames  = names;
+            _showHealth = health;
+        }
 
       private:
         Framework::Integrations::Client::UI::Nametags::Config _config;
@@ -31,6 +35,8 @@ namespace Mafia1Online::Features::Nametag {
             SDK::Scene::NativeFrame *frame = nullptr;
         };
         std::unordered_map<uint64_t, std::string> _labels; // native code page, per player
+        bool _showNames  = true;
+        bool _showHealth = true;
         std::unordered_map<uint64_t, Neck> _necks;
     };
 } // namespace Mafia1Online::Features::Nametag

@@ -30,6 +30,11 @@ namespace Mafia1Online::Features::WebUi {
             return _nickname;
         }
 
+        // The most recently used server; RememberConnection keeps it first.
+        const Server *LastServer() const {
+            return _recent.empty() ? nullptr : &_recent.front();
+        }
+
         nlohmann::json ToJson() const;
 
       private:

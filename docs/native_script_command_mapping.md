@@ -30,6 +30,18 @@ ask one client to show a local effect.
 | `CAMERA_SETSWING` | `Camera.setSwing` | Client |
 | Camera field of view and range | `Camera.getFov`, `Camera.setFov`, `Camera.setRange` | Client |
 | `CAMERA_LOCK`, `CAMERA_UNLOCK` | `Camera.lock`, `Camera.unlock` | Client |
+| Mission enemy or companion (`C_entity` with its own program) | `Npc.spawn` | Server; simulation host runs the AI |
+| `Entity_ActionFollow` | `npc.follow` | Server; simulation host |
+| `EntityMoveToFrame`, `Entity_Move` | `npc.walkTo` | Server; simulation host |
+| `C_entity::scriptTick`'s step along its script path (`AI_human_goto_target`) with the AI asleep (`set_state SLEEP`) | `npc.walkTo(position, { direct: true })` | Server; simulation host |
+| `Entity_MoveToCar` + `Enemy_UseCar` | `npc.enterVehicle` | Server; simulation host drives the car |
+| `Enemy_UseCar` (leave) | `npc.exitVehicle` | Server; simulation host |
+| `Entity_CarMoveTo` | `npc.driveTo` | Server; simulation host |
+| `Entity_ActionFire` | `npc.attack` | Server; simulation host |
+| `Entity_ActionsClear` | `npc.stop` | Server; simulation host |
+| `PERSON_PLAYANIM`, `PERSON_STOPANIM` (`C_human::Do_PlayAnim`, `Do_StopAnim`) | `npc.playAnimation`, `npc.stopAnimation` | Server; simulation host plays it, players' copies replay it |
+| `ACTOR_SETDIR` on an entity | `npc.face` | Server; simulation host |
+| `HUMAN_ADDWEAPON` on an entity | `npc.giveWeapon`, `Npc.spawn` `weapon` | Server; simulation host |
 
 Stock `SETCITYTRAFFICVISIBLE` remains disabled in multiplayer: the retail
 traffic simulation would create independent NPC actors on each client. Native

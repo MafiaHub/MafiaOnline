@@ -74,21 +74,35 @@ namespace Mafia1Online::Shared::World {
     }
 
     // Doors need their native actors for interaction and multiplayer door sync.
-    inline bool LoadMissionActor(uint32_t type) {
-        return type == 6;
+    // Pedestrian generators (18) build their walker pools at GameInit; the
+    // simulation host runs them and players keep them idle for replicas. The
+    // car traffic (12, C_traffic_car) runs on the simulation host alone and
+    // reaches players as network cars. Every client loads the trams and metro
+    // trains (8, C_railway) in the same order: the host runs them and the
+    // players place theirs from its reports. The drawbridges (20, C_bridge)
+    // likewise: the host raises them, the players replay its phases. The
+    // physical props (35, C_box_new: boxes, railings, mail boxes) run on
+    // every client, which load them in the same order for their poses. The
+    // gas station attendants (25, C_pumper) too: the host runs them and
+    // serves the cars the server hands it, the players replay them.
+    inline bool LoadMissionActor(uint32_t type, bool simulationHost) {
+        return type == 6 || type == 8 || type == 18 || type == 20 || type == 25 || type == 35 || (simulationHost && type == 12);
     }
 
-    // Retain scenery even when its actor behaviour is suppressed. Doors retain
-    // both their geometry and their native actor.
+    // Retain scenery even when its actor behaviour is suppressed. Doors,
+    // railways, bridges, attendants and physical props retain both their
+    // geometry and their native actor.
     inline bool KeepMissionActorGeometry(uint32_t type) {
         switch (type) {
         case 1:
         case 6:
+        case 8:
         case 9:
         case 20:
         case 24:
         case 25:
-        case 34: return true;
+        case 34:
+        case 35: return true;
         default: return false;
         }
     }

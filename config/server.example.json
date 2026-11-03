@@ -1,6 +1,7 @@
 {
   "password": "",
   "mod": {
-    "mission": "freeride"
+    "mission": "freeride",
+    "simulationToken": ""
   }
 }

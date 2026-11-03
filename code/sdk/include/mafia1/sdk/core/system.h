@@ -13,6 +13,19 @@ namespace Mafia1Online::SDK::Core::System {
     inline constexpr uintptr_t kGameInit = 0x5A0810;
     inline constexpr uintptr_t kGameLoop = 0x5BE750;
     inline constexpr uintptr_t kGameSetState = 0x47B630;
+    // GameLoopSingle1 ticks C_cache_base_block (0x4020b0) on g_cacheBaseBlock
+    // after C_mission::Tick while its open flag is set (0x5be905-0x5be911).
+    // It streams cached city frames in and out around the active camera.
+    inline constexpr uintptr_t kCacheBaseBlock = 0x63D268;
+    inline constexpr uintptr_t kCacheBaseBlockOpen = 0x63D28C;
+    inline constexpr uintptr_t kCacheBaseBlockTick = 0x4020B0;
+
+    inline void TickCacheBaseBlock(unsigned int frameMs) {
+        if (*reinterpret_cast<const bool *>(kCacheBaseBlockOpen)) {
+            using Call = void(__thiscall *)(void *, unsigned int);
+            reinterpret_cast<Call>(kCacheBaseBlockTick)(reinterpret_cast<void *>(kCacheBaseBlock), frameMs);
+        }
+    }
 
     inline bool LoadCollision(const char *path) {
         using Call = int(__thiscall *)(void *, const char *, bool);

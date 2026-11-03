@@ -45,6 +45,10 @@ namespace Mafia1Online::Scripting {
     v8::Local<v8::Value> WrapPlayer(v8::Isolate *isolate, uint64_t networkId);
     v8::Local<v8::Value> WrapVehicle(v8::Isolate *isolate, uint64_t networkId);
     v8::Local<v8::Value> WrapPickup(v8::Isolate *isolate, uint64_t networkId);
+    v8::Local<v8::Value> WrapPedestrian(v8::Isolate *isolate, uint64_t networkId);
+    v8::Local<v8::Value> WrapNpc(v8::Isolate *isolate, uint64_t networkId);
+    // A Player, Npc or Vehicle for a native attacker's network id, else null.
+    v8::Local<v8::Value> WrapAttacker(v8::Isolate *isolate, uint64_t networkId);
     v8::Local<v8::Object> PlainVector(v8::Isolate *isolate, v8::Local<v8::Context> context, const glm::vec3 &value);
     void SetField(v8::Isolate *isolate, v8::Local<v8::Context> context, v8::Local<v8::Object> object, const char *key, v8::Local<v8::Value> value);
 

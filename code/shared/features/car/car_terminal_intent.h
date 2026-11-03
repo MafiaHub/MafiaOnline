@@ -9,7 +9,7 @@ namespace Mafia1Online::Shared::Car {
     // 31 (water) or 40 (fall volume), or the retail invalid-fall condition.
     // State uses CarEntity::TerminalState: 2 water, 3 fall/invalid.
     struct TerminalIntent {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarTerminalIntent");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarTerminalIntent");
 
         uint64_t networkId         = 0;
         uint64_t missionGeneration = 0;

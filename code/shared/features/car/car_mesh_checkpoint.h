@@ -23,7 +23,7 @@ namespace Mafia1Online::Shared::Car {
     }
 
     struct MeshReportChunk {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarMeshReportChunk");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarMeshReportChunk");
         uint64_t networkId = 0;
         uint64_t missionGeneration = 0;
         uint64_t baseRepairRevision = 0;
@@ -40,7 +40,7 @@ namespace Mafia1Online::Shared::Car {
     };
 
     struct MeshCheckpointChunk {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarMeshCheckpointChunk");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarMeshCheckpointChunk");
         uint64_t networkId = 0;
         uint64_t missionGeneration = 0;
         uint32_t sequence = 0; // low bits of the server revision
@@ -51,15 +51,18 @@ namespace Mafia1Online::Shared::Car {
         std::array<MeshVertex, kMeshVerticesPerChunk> vertices {};
         uint64_t revision = 0;
         uint64_t sourceGuid = 0;
+        // The car's repairRevision the mesh was reported against.
+        uint64_t repairRevision = 0;
         void Serialize(MafiaNet::BitStream *stream, bool write) {
             SerializeMeshChunk(*this, stream, write);
             stream->Serialize(write, revision);
             stream->Serialize(write, sourceGuid);
+            stream->Serialize(write, repairRevision);
         }
     };
 
     struct MeshCheckpointRequest {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarMeshCheckpointRequest");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::CarMeshCheckpointRequest");
         uint64_t networkId = 0;
         uint64_t missionGeneration = 0;
         void Serialize(MafiaNet::BitStream *stream, bool write) {

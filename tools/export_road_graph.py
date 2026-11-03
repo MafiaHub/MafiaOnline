@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+"""Export a mission's road graph as a server script module.
+
+The Free Ride gamemode builds its races, grid slots and world event spots
+from the game's own traffic roads, so every point it uses lies on a street.
+This reads MISSIONS/<mission>/road.bin from a stock a1.dta (--mission), or a
+loose road.bin extracted from a mod, and writes a CommonJS module with the
+crossings and the road polylines between them. It never writes game assets.
+
+The layout follows reM C_roads::LoadData (Game 0x559e60): version 2, then the
+S_road_crossing records (236 bytes each) and the S_road_node records (24 bytes
+each). FREERIDENOC carries the same crossings in another branch order.
+"""
+
+import argparse
+import importlib.util
+import json
+import pathlib
+import struct
+
+ROAD_FILE_VERSION = 2
+CROSSING_SIZE = 236
+PATH_SIZE = 52
+NODE_SIZE = 24
+INVALID_ID = 0xFFFF
+NODE_FLAG = 0x8000
+
+
+def load_dta_reader():
+    path = pathlib.Path(__file__).with_name("inspect_stock_dta.py")
+    spec = importlib.util.spec_from_file_location("inspect_stock_dta", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def read_member(archive, name):
+    dta = load_dta_reader()
+    first, second = dta.KEYS["a1"]
+    key = struct.pack("<II", first ^ 0x39475694, second ^ 0x34985762)
+    with archive.open("rb") as handle:
+        for entry in dta.archive_files(handle, key):
+            if entry[0].lower() == name.lower():
+                return bytes(dta.asset_bytes(handle, key, entry))
+    raise SystemExit(f"{name} not found in {archive}")
+
+
+def parse(data):
+    version, count = struct.unpack_from("<ii", data, 0)
+    if version != ROAD_FILE_VERSION:
+        raise SystemExit(f"unsupported road.bin version {version}")
+    offset = 8
+    crossings = []
+    for _ in range(count):
+        position = struct.unpack_from("<fff", data, offset)
+        road_nodes = struct.unpack_from("<4H", data, offset + 20)
+        paths = []
+        for branch in range(4):
+            path = offset + 28 + branch * PATH_SIZE
+            end, = struct.unpack_from("<H", data, path)
+            distance, = struct.unpack_from("<f", data, path + 4)
+            paths.append((end, distance, road_nodes[branch]))
+        crossings.append({"position": position, "paths": paths})
+        offset += CROSSING_SIZE
+    node_count, = struct.unpack_from("<i", data, offset)
+    offset += 4
+    nodes = []
+    for _ in range(node_count):
+        position = struct.unpack_from("<fff", data, offset)
+        neighbours = struct.unpack_from("<2H", data, offset + 16)
+        nodes.append({"position": position, "neighbours": neighbours})
+        offset += NODE_SIZE
+    if offset != len(data):
+        raise SystemExit(f"road.bin has {len(data) - offset} trailing bytes")
+    return crossings, nodes
+
+
+def walk(crossings, nodes, start, first_node, end):
+    """Road node positions from a crossing's branch to the next crossing."""
+    points = []
+    previous, current = start, first_node
+    for _ in range(len(nodes) + 1):
+        if current == INVALID_ID:
+            return None
+        if not current & NODE_FLAG:
+            return points if current == end else None
+        node = nodes[current & ~NODE_FLAG]
+        points.append(node["position"])
+        a, b = node["neighbours"]
+        previous, current = current, b if a == previous else a
+    return None
+
+
+def rounded(point):
+    return [round(value, 1) for value in point]
+
+
+def export(crossings, nodes):
+    edges = {}
+    for index, crossing in enumerate(crossings):
+        for end, distance, first_node in crossing["paths"]:
+            if end == INVALID_ID or end == index or end >= len(crossings):
+                continue
+            key = (min(index, end), max(index, end))
+            if key in edges:
+                continue
+            points = [] if first_node == INVALID_ID else walk(crossings, nodes, index, first_node, end)
+            if points is None:
+                continue
+            if index > end:
+                points = list(reversed(points))
+            edges[key] = [key[0], key[1], round(distance, 1), [rounded(point) for point in points]]
+    return {
+        "crossings": [rounded(crossing["position"]) for crossing in crossings],
+        "edges": [edges[key] for key in sorted(edges)],
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("source", type=pathlib.Path, help="Path to the stock a1.dta, or to a loose road.bin")
+    parser.add_argument("output", type=pathlib.Path, help="JavaScript module to write")
+    parser.add_argument("--mission", default="FREERIDE", help="Mission directory inside a1.dta (default FREERIDE)")
+    args = parser.parse_args()
+    if args.source.suffix.lower() == ".bin":
+        data, origin = args.source.read_bytes(), "loose road.bin of a mod"
+    else:
+        mission = args.mission.upper()
+        data, origin = read_member(args.source, f"MISSIONS\\{mission}\\road.bin"), f"stock {mission} road.bin"
+    crossings, nodes = parse(data)
+    graph = export(crossings, nodes)
+    body = json.dumps(graph, separators=(",", ":"))
+    args.output.write_text(
+        f"// Generated by tools/export_road_graph.py from the {origin}.\n"
+        "// crossings: [x, y, z]; edges: [from, to, length, [road points from -> to]].\n"
+        f"module.exports = {body};\n",
+        encoding="utf-8",
+    )
+    print(f"{len(graph['crossings'])} crossings, {len(graph['edges'])} roads -> {args.output}")
+
+
+if __name__ == "__main__":
+    main()

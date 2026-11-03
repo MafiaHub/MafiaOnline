@@ -48,6 +48,10 @@ namespace Mafia1Online::Shared::Entities {
         std::string frames;
         // "name=0.5\n" per visual; the same mission generation as frames.
         std::string frameOpacities;
+        // The server's round trip to the simulation host in ms, which players
+        // learn nowhere else: observers predict the host's cars by half of it
+        // plus half their own, as a player's car by its PlayerEntity::ping.
+        uint16_t simulationPing = 0;
 
         void OnSerializeConstruction(Framework::Networking::Replication::FieldSerializer &fields) override {
             fields.Field(weather);
@@ -66,6 +70,7 @@ namespace Mafia1Online::Shared::Entities {
             if (!fields.Writing()) {
                 frameOpacities = opacityText.C_String();
             }
+            fields.Field(simulationPing);
         }
 
         void SerializeFields(Framework::Networking::Replication::FieldSerializer &fields) override {
@@ -77,6 +82,7 @@ namespace Mafia1Online::Shared::Entities {
             fields.Field(frameGeneration);
             fields.Field(frames);
             fields.Field(frameOpacities);
+            fields.Field(simulationPing);
         }
 
         // Frame names the scripts may address: printable ASCII without the

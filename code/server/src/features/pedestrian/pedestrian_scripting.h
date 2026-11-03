@@ -1,0 +1,44 @@
+#pragma once
+
+#include "shared/features/pedestrian/pedestrian_entity.h"
+
+#include <scripting/builtins/entity.h>
+#include <scripting/builtins/vector3.h>
+
+#include <v8.h>
+#include <v8pp/class.hpp>
+
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <unordered_map>
+
+namespace Mafia1Online::Scripting {
+    // Server scripting handle for one walker life the simulation host runs.
+    // The host decides movement, reactions and death; scripts read the state
+    // and control the population.
+    class Pedestrian final: public Framework::Scripting::Builtins::Entity {
+      public:
+        Pedestrian(uint64_t networkId): Framework::Scripting::Builtins::Entity(networkId) {}
+
+        Shared::Entities::PedestrianEntity *ResolvePedestrian() const;
+
+        std::string GetModel() const;
+        Framework::Scripting::Builtins::Vector3 GetPedestrianPosition() const;
+        double GetHeading() const;
+        bool GetAlive() const;
+        bool GetUmbrella() const;
+        int32_t GetAnimation() const;
+        uint32_t GetWalkStyle() const;
+        bool Remove();
+        std::string ToString() const override;
+
+        static void Register(v8::Isolate *isolate, v8::Local<v8::Object> global);
+        static v8pp::class_<Pedestrian> &GetClass(v8::Isolate *isolate);
+        // Classes belong to the runtime (isolate) that built them; drop them when it goes.
+        static void UnregisterIsolate(v8::Isolate *isolate);
+
+      private:
+        static std::unordered_map<v8::Isolate *, std::unique_ptr<v8pp::class_<Pedestrian>>> _classes;
+    };
+} // namespace Mafia1Online::Scripting

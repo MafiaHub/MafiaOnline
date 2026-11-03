@@ -9,6 +9,8 @@ The author's DLL, binary patch and optional add-ons are not included. Original
 single-player mission scripts remain subject to Mafia1Online's existing script
 suppression; multiplayer gameplay comes from server resources.
 
+The Free Ride gamemode plays this map by default when the ZIP is present.
+
 Reproduce the example (adjust the source directory):
 
 ```bash
@@ -16,5 +18,9 @@ python3 tools/package_mod.py \
   "$HOME/Downloads/Mafia_Freeride_Extended_Mod_v3.1/Mafia Freeride Extended Mod v3.1" \
   mods/freeride-extended.zip --mission freeride:freeride_extended
 ```
+
+`countryside-map.zip` carries only `maps/fullmap.bmp` from MafiaCountrysideMap
+2.0, which the client shows as the city map on the countryside maps; see
+[server mods](../docs/server_mods.md#the-countryside-city-map).
 
 ZIP binaries and server snapshots are ignored by Git.

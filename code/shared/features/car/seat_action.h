@@ -13,10 +13,13 @@ namespace Mafia1Online::Shared::Car {
         ExitBlocked = 5,
         EnterBegin = 6,
         Move = 7,
+        // Server -> players only: a player stole a traffic car, whose driver
+        // is a crew model there; the thief plays only its pull-out.
+        StealTraffic = 8,
     };
 
     struct SeatIntent {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::SeatIntent");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::SeatIntent");
 
         uint64_t carId = 0;
         uint64_t playerId = 0;
@@ -42,7 +45,7 @@ namespace Mafia1Online::Shared::Car {
     };
 
     struct SeatEvent: SeatIntent {
-        static constexpr const char *kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::SeatEvent");
+        static constexpr auto kIdentifier = FW_RPC_IDENTIFIER("Mafia1Online::SeatEvent");
         uint64_t serverSequence = 0;
 
         void Serialize(MafiaNet::BitStream *stream, bool write) {

@@ -13,6 +13,7 @@
 #include <mafia1/sdk/scene/native_scene.h>
 #include <mafia1/sdk/ui/native_hud.h>
 #include <networking/replication/replication_manager.h>
+#include <voice/client/voice_client.h>
 
 #include <glm/geometric.hpp>
 
@@ -53,7 +54,32 @@ namespace Mafia1Online::Features::Nametag {
 
         struct Target {
             SDK::Player::Vector3 head;
+            bool talking = false;
         };
+
+        constexpr uint32_t kTalkingColor = 0xff58e07au;
+
+        // A speaker with three sound waves, bottom-centred on (x, bottom);
+        // the waves light up in turn while the player is heard.
+        void DrawTalking(float x, float bottom, float unit, float alpha) {
+            const uint32_t color = Tags::ModulateAlpha(kTalkingColor, alpha);
+            const float middle   = bottom - unit * 2.5f;
+            const float width    = unit * 5.4f;
+            float left           = x - width * 0.5f;
+            SDK::Graphics::FillRect(left, middle - unit * 0.8f, unit * 1.0f, unit * 1.6f, color);
+            left += unit * 1.0f;
+            SDK::Graphics::FillRect(left, middle - unit * 1.4f, unit * 0.5f, unit * 2.8f, color);
+            left += unit * 0.5f;
+            SDK::Graphics::FillRect(left, middle - unit * 2.0f, unit * 0.5f, unit * 4.0f, color);
+            left += unit * 1.0f;
+            const uint32_t step = (GetTickCount() / 180u) % 4u;
+            for (uint32_t wave = 0; wave < 3; ++wave) {
+                const float height = unit * (1.6f + 1.2f * static_cast<float>(wave));
+                const float lit    = wave < step ? 1.0f : 0.35f;
+                SDK::Graphics::FillRect(left, middle - height * 0.5f, unit * 0.45f, height, Tags::ModulateAlpha(kTalkingColor, alpha * lit));
+                left += unit * 0.95f;
+            }
+        }
 
         uint32_t HealthColor(float health, float alpha) {
             const float t = std::clamp(health, 0.0f, 1.0f);
@@ -100,6 +126,7 @@ namespace Mafia1Online::Features::Nametag {
             return;
         }
 
+        auto *voice = Framework::CoreModules::GetVoiceClient();
         std::unordered_map<uint64_t, Target> targets;
         _list.Begin(_config);
         replication->ForEach<Shared::Entities::PlayerEntity>([&](Shared::Entities::PlayerEntity *player) {
@@ -143,7 +170,8 @@ namespace Mafia1Online::Features::Nametag {
             candidate.healthPercent = std::clamp(player->health / 100.0f, 0.0f, 1.0f);
             candidate.label         = label.c_str();
             if (_list.Add(candidate)) {
-                targets[id] = {head};
+                // Heard here, so only within this client's hearing range.
+                targets[id] = {head, voice && voice->IsSpeakerTalking(player->controllerGuid)};
             }
         });
 
@@ -170,12 +198,17 @@ namespace Mafia1Online::Features::Nametag {
             const float fontHeight = appearance.fontHeight * screenHeight * 1.35f * tag.scale;
             const float boxWidth   = screenWidth * 0.3f;
             float barTop           = y;
-            if (tag.label) {
-                SDK::UI::DrawShadowedText(tag.label, x - boxWidth * 0.5f, y - fontHeight, boxWidth, fontHeight,
+            // The player's settings may hide names and bars; who is talking still shows.
+            const char *label = _showNames ? tag.label : nullptr;
+            if (target->second.talking) {
+                DrawTalking(x, label ? y - fontHeight * 1.15f : y - fontHeight * 0.2f, std::max(1.5f, fontHeight * 0.16f), alpha);
+            }
+            if (label) {
+                SDK::UI::DrawShadowedText(label, x - boxWidth * 0.5f, y - fontHeight, boxWidth, fontHeight,
                                   Tags::ModulateAlpha(tag.color, alpha), SDK::UI::kTextCentered);
                 barTop = y + appearance.healthBarGap * screenHeight * tag.scale;
             }
-            if (tag.healthPercent >= 0.0f) {
+            if (_showHealth && tag.healthPercent >= 0.0f) {
                 const float width  = appearance.healthBarWidth * screenWidth * 1.4f * tag.scale;
                 const float height = std::max(2.0f, appearance.healthBarHeight * screenHeight * 1.2f * tag.scale);
                 const float border = std::max(1.0f, appearance.healthBarBorder * screenHeight);

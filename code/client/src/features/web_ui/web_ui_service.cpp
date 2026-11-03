@@ -7,6 +7,7 @@
 #include "features/chat/chat_service.h"
 #include "features/menu/menu_hooks.h"
 #include "features/quick_join/quick_join.h"
+#include "features/settings/settings_service.h"
 #include "features/world/world_hooks.h"
 #include "features/world/world_service.h"
 #include "shared/features/chat/text_policy.h"
@@ -20,11 +21,13 @@
 #include <mafia1/sdk/graphics/native_graph.h>
 #include <mafia1/sdk/menu/native_menu.h>
 #include <networking/replication/replication_manager.h>
+#include <voice/client/voice_client.h>
 
 #include <imm.h>
 #include <windowsx.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <limits>
@@ -37,13 +40,12 @@ namespace Mafia1Online::Features::WebUi {
         using Clock = std::chrono::steady_clock;
 
         constexpr char kResourceHost[] = "mafia1online";
-        // DirectInput codes; window messages carry the same scan code with
-        // the extended flag, which DirectInput folds into bit 7 instead.
+        using Settings::ModKey;
+        // DirectInput code; window messages carry the same scan code with
+        // the extended flag, which DirectInput folds into bit 7 instead. The
+        // chat, command and player list keys (T, / and held F1 by default;
+        // Tab stays the retail city map) come from the player's settings.
         constexpr uint32_t kDikEscape  = 0x01;
-        // Tab is the retail city map; the player list is held F1 instead.
-        constexpr uint32_t kDikF1      = 0x3b;
-        constexpr uint32_t kDikT       = 0x14;
-        constexpr uint32_t kDikSlash   = 0x35;
         constexpr uint32_t kKeyEnter    = 0x01c;
         constexpr uint32_t kKeyNumEnter = 0x11c;
         // How long the page has to close its chat after Enter.
@@ -55,11 +57,23 @@ namespace Mafia1Online::Features::WebUi {
         constexpr auto kHeartbeatTimeout = std::chrono::seconds(8);
         constexpr uint32_t kHeartbeatTicks = 240;
         constexpr auto kPlayerInterval   = std::chrono::milliseconds(1000);
+        // The settings page's microphone meter, only while it asks for one.
+        constexpr auto kVoiceLevelInterval = std::chrono::milliseconds(66);
+        // How long the main menu waits for the page to show the loading
+        // screen before it closes for the mission anyway.
+        constexpr auto kLoadingMenuGrace = std::chrono::milliseconds(1500);
+        // How long a load draws black frames while the page has not shown
+        // the loading screen; after that the retail screen comes back.
+        constexpr auto kLoadingPageGrace = std::chrono::seconds(4);
+        // IGraph::Clear's target and depth flags, as GM_LoadProgress::Present
+        // (0x5e3d40) passes them.
+        constexpr uint32_t kClearTargetAndDepth = 3;
 
         const char *ScreenName(WebUiService::Screen screen) {
             switch (screen) {
             case WebUiService::Screen::Menu: return "menu";
             case WebUiService::Screen::Game: return "game";
+            case WebUiService::Screen::Loading: return "loading";
             default: return "hidden";
             }
         }
@@ -137,7 +151,7 @@ namespace Mafia1Online::Features::WebUi {
         }
     } // namespace
 
-    bool WebUiService::Install(Framework::Integrations::Client::Instance &instance, Chat::ChatService &chat, const std::string &projectPath) {
+    bool WebUiService::Install(Framework::Integrations::Client::Instance &instance, Chat::ChatService &chat, Settings::SettingsService &settings, const std::string &projectPath) {
         if (Compat::EnvironmentFlagEnabled(L"MAFIA1ONLINE_NATIVE_UI")) {
             Framework::Logging::GetLogger("Web")->info("CEF skipped by MAFIA1ONLINE_NATIVE_UI");
             return false;
@@ -174,6 +188,9 @@ namespace Mafia1Online::Features::WebUi {
             return false;
         }
         _view->LockToOrigin(url);
+        // The multiplayer menu, pause screen and chat stay above every resource
+        // view; only the cursor layer is higher.
+        _view->SetZIndex(std::numeric_limits<int>::max() - 1);
         _view->Display(false);
 
         // One noninteractive cursor layer shared by the shell and every
@@ -196,8 +213,9 @@ namespace Mafia1Online::Features::WebUi {
             _lastCursorState.clear();
         });
 
-        _instance = &instance;
-        _chat     = &chat;
+        _instance     = &instance;
+        _chat         = &chat;
+        _gameSettings = &settings;
         _window   = static_cast<HWND>(SDK::Graphics::GetGraph()->MainWindow());
         _settings.Load(SettingsPath(projectPath));
         BindPage();
@@ -210,8 +228,9 @@ namespace Mafia1Online::Features::WebUi {
             _cursorViewId = -1;
             _view     = nullptr;
             _viewId   = -1;
-            _instance = nullptr;
-            _chat     = nullptr;
+            _instance     = nullptr;
+            _chat         = nullptr;
+            _gameSettings = nullptr;
             return false;
         }
         chat.SetKeyRouter(
@@ -230,6 +249,10 @@ namespace Mafia1Online::Features::WebUi {
         }
         Deactivate();
         UninstallWebUiHooks();
+        if (_world) {
+            _world->SetMenuCloseGate({});
+            _world = nullptr;
+        }
         if (_chat) {
             _chat->SetKeyRouter({}, {});
         }
@@ -242,8 +265,9 @@ namespace Mafia1Online::Features::WebUi {
         _cursorReady  = false;
         _view     = nullptr;
         _viewId   = -1;
-        _instance = nullptr;
-        _chat     = nullptr;
+        _instance     = nullptr;
+        _chat         = nullptr;
+        _gameSettings = nullptr;
         _history.clear();
         _outgoing.clear();
     }
@@ -255,6 +279,8 @@ namespace Mafia1Online::Features::WebUi {
         _outgoing.clear();
         _chatOpen        = false;
         _pauseOpen       = false;
+        _settingsOpen    = false;
+        _voiceMeter      = false;
         _scoreboardShown = false;
         _lastPlayers.clear();
         if (_pageReady) {
@@ -264,7 +290,8 @@ namespace Mafia1Online::Features::WebUi {
 
     void WebUiService::BindPage() {
         for (const char *name : {"ui:ready", "ui:alive", "ui:screen", "menu:connect", "menu:disconnect", "menu:play", "app:quit", "chat:send", "chat:close",
-                                 "pause:close", "gameplay:select", "gameplay:close", "servers:favorite", "servers:forget", "settings:save"}) {
+                                 "pause:close", "gameplay:select", "gameplay:close", "servers:favorite", "servers:forget", "settings:save", "settings:open",
+                                 "settings:close", "settings:set", "settings:bind", "settings:reset", "settings:toggle", "settings:meter", "settings:devices"}) {
             const std::string eventName = name;
             _view->AddEventListener(eventName, [this, eventName](const std::string &payload) {
                 OnPageEvent(eventName, payload);
@@ -306,7 +333,7 @@ namespace Mafia1Online::Features::WebUi {
         }
         if (name == "ui:screen") {
             const std::string screen = data.is_string() ? data.get<std::string>() : std::string();
-            _pageScreen              = screen == "menu" ? Screen::Menu : screen == "game" ? Screen::Game : Screen::Hidden;
+            _pageScreen              = screen == "menu" ? Screen::Menu : screen == "game" ? Screen::Game : screen == "loading" ? Screen::Loading : Screen::Hidden;
             return;
         }
         if (name == "menu:connect") {
@@ -395,7 +422,81 @@ namespace Mafia1Online::Features::WebUi {
         if (name == "settings:save") {
             _settings.SetPreferences(data);
             PushState(false);
+            return;
         }
+        if (name == "settings:open") {
+            _settingsOpen = true;
+            _gameSettings->RefreshDevices();
+            PushSettings(true);
+            return;
+        }
+        if (name == "settings:close") {
+            _settingsOpen = false;
+            _voiceMeter   = false;
+            _gameSettings->Flush();
+            return;
+        }
+        if (name == "settings:devices") {
+            _gameSettings->RefreshDevices();
+            PushSettings(false);
+            return;
+        }
+        if (name == "settings:meter") {
+            const auto on = data.is_object() ? data.find("on") : data.end();
+            _voiceMeter   = _settingsOpen && on != data.end() && on->is_boolean() && on->get<bool>();
+            _lastVoiceLevel.clear();
+            return;
+        }
+        if (name == "settings:toggle") {
+            if (const auto value = data.is_object() ? data.find("value") : data.end(); value != data.end() && value->is_boolean()) {
+                _gameSettings->SetToggleFromPage(StringField(data, "resource"), StringField(data, "id"), value->get<bool>());
+                PushSettings(false);
+            }
+            return;
+        }
+        std::optional<std::string> error;
+        if (name == "settings:set") {
+            error = _gameSettings->Set(data);
+        }
+        else if (name == "settings:bind") {
+            error = data.is_object() ? _gameSettings->Bind(StringField(data, "slot"), StringField(data, "key")) : std::optional<std::string>("Unknown control");
+        }
+        else if (name == "settings:reset") {
+            error = _gameSettings->Reset(data.is_object() ? StringField(data, "section") : std::string());
+        }
+        if (error) {
+            Send("toast", {{"kind", "error"}, {"text", *error}});
+            // The page drew its guess; put the real state back.
+            PushSettings(true);
+            return;
+        }
+        PushSettings(false);
+    }
+
+    // Only while the page shows its settings, and only after a change.
+    void WebUiService::PushSettings(bool force) {
+        if (!_pageReady || !_settingsOpen || (!force && _settingsRevision == _gameSettings->Revision())) {
+            return;
+        }
+        _settingsRevision = _gameSettings->Revision();
+        Send("settings", _gameSettings->PageState());
+    }
+
+    void WebUiService::PushVoiceLevel() {
+        const auto now = Clock::now();
+        if (!_voiceMeter || now - _lastVoiceLevelPush < kVoiceLevelInterval) {
+            return;
+        }
+        _lastVoiceLevelPush = now;
+        auto *voice         = Framework::CoreModules::GetVoiceClient();
+        const auto level    = voice ? std::round(std::clamp(voice->GetInputLevel(), 0.0f, 1.0f) * 200.0f) / 200.0f : 0.0f;
+        const nlohmann::json payload = {{"level", level}, {"talking", voice && voice->IsLocalTalking()}, {"microphone", voice && voice->HasMicrophone()}};
+        std::string encoded = payload.dump();
+        if (encoded == _lastVoiceLevel) {
+            return;
+        }
+        _lastVoiceLevel = std::move(encoded);
+        Send("settings:level", payload);
     }
 
     void WebUiService::Activate() {
@@ -408,6 +509,8 @@ namespace Mafia1Online::Features::WebUi {
         _silentTicks         = 0;
         _lastState.clear();
         _lastPlayers.clear();
+        _lastLoading.clear();
+        _settingsRevision = 0;
         _mouseX       = -1;
         _mouseY       = -1;
         _mouseButtons = 0;
@@ -432,6 +535,8 @@ namespace Mafia1Online::Features::WebUi {
         _pageReady          = false;
         _chatOpen           = false;
         _pauseOpen          = false;
+        _settingsOpen       = false;
+        _voiceMeter         = false;
         _scoreboardShown    = false;
         _pageScreen         = Screen::Hidden;
         UpdateCapture();
@@ -457,6 +562,12 @@ namespace Mafia1Online::Features::WebUi {
     }
 
     WebUiService::Screen WebUiService::LiveScreen() const {
+        // First: across a mission change the old mission's ready state and
+        // the native mission flag are still set, and the main menu may still
+        // be open while its close waits for this screen.
+        if (_world && _world->IsLoading()) {
+            return Screen::Loading;
+        }
         // The retail main-menu pointer may remain live after its close result
         // has handed control to a loaded mission. The mission is authoritative
         // here; otherwise CEF keeps the connection page over gameplay and
@@ -489,8 +600,18 @@ namespace Mafia1Online::Features::WebUi {
         }
         const auto current   = _instance->GetCurrentState();
         std::string nickname = menu.nickname;
+        std::string host     = menu.host;
+        uint16_t port        = menu.port;
         if (!quick.enabled && !_settings.Nickname().empty()) {
             nickname = _settings.Nickname();
+        }
+        // Without quick join the form starts at the last server the player
+        // connected to, which the settings file remembers across launches.
+        if (!quick.enabled) {
+            if (const auto *last = _settings.LastServer()) {
+                host = last->host;
+                port = last->port;
+            }
         }
 
         const nlohmann::json state = {
@@ -511,7 +632,7 @@ namespace Mafia1Online::Features::WebUi {
               {"filesTotal", download.filesTotal},
               {"bytesDownloaded", download.bytesDownloaded},
               {"bytesTotal", download.bytesTotal}}},
-            {"defaults", {{"nickname", nickname}, {"host", menu.host}, {"port", menu.port}}},
+            {"defaults", {{"nickname", nickname}, {"host", host}, {"port", port}}},
             {"settings", _settings.ToJson()},
         };
         std::string encoded = state.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
@@ -543,6 +664,7 @@ namespace Mafia1Online::Features::WebUi {
                                  {"health", player->health},
                                  {"alive", player->alive},
                                  {"spawned", player->spawned},
+                                 {"ping", player->ping},
                                  {"local", player->controllerGuid == myGuid}}});
             });
         }
@@ -562,12 +684,87 @@ namespace Mafia1Online::Features::WebUi {
         Send("players", payload);
     }
 
+    // Only while loading, and only when the rounded progress or stage moved.
+    void WebUiService::PushLoading() {
+        const char *stage = _loadingProgress < 0.0f ? "preparing" : _loadingGameInit ? "world" : "scene";
+        const nlohmann::json payload = {
+            {"mission", _world ? _world->SelectedMission() : std::string()},
+            {"progress", _loadingProgress < 0.0f ? -1.0 : std::round(std::clamp(_loadingProgress, 0.0f, 1.0f) * 100.0) / 100.0},
+            {"stage", stage},
+        };
+        std::string encoded = payload.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+        if (encoded == _lastLoading) {
+            return;
+        }
+        _lastLoading = std::move(encoded);
+        Send("loading", payload);
+    }
+
+    bool WebUiService::LoadingScreenShown() {
+        if (!_pageReady || _pageScreen == Screen::Loading) {
+            return true;
+        }
+        const auto now = Clock::now();
+        if (!_loadingSince) {
+            _loadingSince = now;
+        }
+        return now - *_loadingSince > kLoadingMenuGrace;
+    }
+
+    void WebUiService::OnLoadingProgress(float progress, bool gameInit) {
+        if (std::isfinite(progress)) {
+            _loadingProgress = std::max(_loadingProgress, std::clamp(progress, 0.0f, 1.0f));
+            _loadingGameInit = gameInit;
+        }
+    }
+
+    // A mission load blocks the main loop: no client tick, no CEF pump, no
+    // frame but the retail loader's own. Each of its frames pumps CEF once
+    // (the page's paint and its ui:screen answer arrive here) and is
+    // presented black, with the page composited by OnPresent once it shows
+    // the loading screen.
+    bool WebUiService::OnLoadingPresent() {
+        if (!_pageReady) {
+            return false;
+        }
+        _screen = LiveScreen();
+        if (_screen != Screen::Loading) {
+            return false;
+        }
+        const auto now = Clock::now();
+        if (!_loadingSince) {
+            _loadingSince = now;
+        }
+        PushState(false);
+        PushLoading();
+        _instance->GetWebManager()->Update();
+        if (_pageScreen != Screen::Loading && now - *_loadingSince > kLoadingPageGrace) {
+            return false;
+        }
+        auto *graph = SDK::Graphics::GetGraph();
+        graph->Clear(0, 1.0f, kClearTargetAndDepth);
+        graph->Present();
+        return true;
+    }
+
     void WebUiService::Update(World::WorldService &world) {
         if (!_view) {
             return;
         }
+        if (!_world) {
+            _world = &world;
+            world.SetMenuCloseGate([this] {
+                return LoadingScreenShown();
+            });
+        }
         _missionReady = world.IsReady();
         _screen       = LiveScreen();
+        if (_screen != Screen::Loading) {
+            _loadingSince.reset();
+            _loadingProgress = -1.0f;
+            _loadingGameInit = false;
+            _lastLoading.clear();
+        }
         if (!_pageReady) {
             return;
         }
@@ -587,7 +784,14 @@ namespace Mafia1Online::Features::WebUi {
             _chatOpen  = false;
             _pauseOpen = false;
         }
-        const bool scoreboard = _screen == Screen::Game && !_captured && Native::TestKey(static_cast<uint8_t>(kDikF1));
+        // A script's Settings.open() this tick; dropped where it cannot show.
+        if (_gameSettings->TakeOpenRequest()) {
+            OpenSettings();
+        }
+        PushSettings(false);
+        PushVoiceLevel();
+        const uint16_t playerList = _gameSettings->ModKeyDik(ModKey::PlayerList);
+        const bool scoreboard     = _screen == Screen::Game && !_captured && playerList != 0 && Native::TestKey(static_cast<uint8_t>(playerList));
         if (scoreboard != _scoreboardShown) {
             _scoreboardShown = scoreboard;
             if (scoreboard) {
@@ -598,6 +802,9 @@ namespace Mafia1Online::Features::WebUi {
         PushState(false);
         if (_screen == Screen::Game) {
             PushPlayers(world, false);
+        }
+        if (_screen == Screen::Loading) {
+            PushLoading();
         }
         if (_closeRequestedAt && Clock::now() - *_closeRequestedAt > kCloseGrace) {
             CloseInGameScreens();
@@ -639,8 +846,11 @@ namespace Mafia1Online::Features::WebUi {
         if (!_chatOpen && !_pauseOpen) {
             return;
         }
-        _chatOpen  = false;
-        _pauseOpen = false;
+        _chatOpen     = false;
+        _pauseOpen    = false;
+        _settingsOpen = false;
+        _voiceMeter   = false;
+        _gameSettings->Flush();
         Send("chat:closed", nlohmann::json::object());
         UpdateCapture();
     }
@@ -655,14 +865,23 @@ namespace Mafia1Online::Features::WebUi {
         Send("chat:open", {{"prefill", prefill}});
     }
 
-    void WebUiService::OpenPause() {
+    void WebUiService::OpenPause(bool settings) {
         CloseGameplayMenu();
         _latched |= _keysDown;
         _pauseOpen = true;
         UpdateCapture();
         _lastPlayers.clear();
         _lastPlayerPush = {};
-        Send("pause:open", nlohmann::json::object());
+        Send("pause:open", {{"settings", settings}});
+    }
+
+    void WebUiService::OpenSettings() {
+        if (!_pageReady || LiveScreen() != Screen::Game || _pageScreen != Screen::Game || _settingsOpen) {
+            return;
+        }
+        _chatOpen = false;
+        _closeRequestedAt.reset();
+        OpenPause(true);
     }
 
     bool WebUiService::ToggleInGame(uint32_t key) {
@@ -670,6 +889,9 @@ namespace Mafia1Online::Features::WebUi {
             return false;
         }
         if (key == kDikEscape) {
+            if (_settingsOpen) {
+                return false;
+            }
             if (_chatOpen || _pauseOpen || _gameplayMenuId) {
                 CloseInGameScreens();
             }
@@ -678,8 +900,10 @@ namespace Mafia1Online::Features::WebUi {
             }
             return true;
         }
-        if (!_captured && (key == kDikT || key == kDikSlash)) {
-            OpenChat(key == kDikSlash ? "/" : "");
+        const uint32_t chat    = _gameSettings->ModKeyMessage(ModKey::Chat);
+        const uint32_t command = _gameSettings->ModKeyMessage(ModKey::Command);
+        if (!_captured && key != 0 && (key == chat || key == command)) {
+            OpenChat(key == command ? "/" : "");
             return true;
         }
         return false;
@@ -722,7 +946,8 @@ namespace Mafia1Online::Features::WebUi {
         if (HidesKeyboard()) {
             return true;
         }
-        return LiveScreen() == Screen::Game && (scanCode == kDikT || scanCode == kDikSlash || scanCode == kDikEscape);
+        return LiveScreen() == Screen::Game &&
+               (scanCode == kDikEscape || scanCode == _gameSettings->ModKeyDik(ModKey::Chat) || scanCode == _gameSettings->ModKeyDik(ModKey::Command));
     }
 
     void WebUiService::ApplyFocus() {
@@ -731,8 +956,11 @@ namespace Mafia1Online::Features::WebUi {
         }
     }
 
+    // While the built-in page captures input (main menu, pause, chat, gameplay
+    // menu) it sits above every resource view, so it owns focus, keys, mouse
+    // and display until it closes; the resource view keeps its own state.
     Framework::GUI::View *WebUiService::FocusedResourceView() const {
-        if (!_instance) {
+        if (!_instance || _captured) {
             return nullptr;
         }
         auto *manager = _instance->GetWebManager();
@@ -768,15 +996,14 @@ namespace Mafia1Online::Features::WebUi {
             }
         }
         _heldKeys.clear();
-        auto browser = target->GetBrowser();
-        if (browser && _mouseButtons != 0) {
+        if (target->HasBrowser() && _mouseButtons != 0) {
             CefMouseEvent event;
             event.x = _mouseX - static_cast<int>(target->GetPosition().x);
             event.y = _mouseY - static_cast<int>(target->GetPosition().y);
             for (const auto &[bit, type] : {std::pair {SDK::Graphics::kMouseLeft, MBT_LEFT}, std::pair {SDK::Graphics::kMouseRight, MBT_RIGHT},
                                             std::pair {SDK::Graphics::kMouseMiddle, MBT_MIDDLE}}) {
                 if (_mouseButtons & bit) {
-                    browser->GetHost()->SendMouseClickEvent(event, type, true, 1);
+                    target->SendMouseClick(event, type, true, 1);
                 }
             }
         }
@@ -913,14 +1140,12 @@ namespace Mafia1Online::Features::WebUi {
     // Off-screen CEF has no window for the IME to draw into, so compositions
     // go through the browser host's IME API instead of WM_IME_CHAR.
     bool WebUiService::HandleIme(Framework::GUI::View *target, HWND window, UINT message, LPARAM lParam) {
-        auto browser = target->GetBrowser();
-        if (!browser) {
+        if (!target->HasBrowser()) {
             return false;
         }
-        auto host = browser->GetHost();
         switch (message) {
         case WM_IME_STARTCOMPOSITION: return true;
-        case WM_IME_ENDCOMPOSITION: host->ImeFinishComposingText(false); return false;
+        case WM_IME_ENDCOMPOSITION: target->ImeFinishComposingText(false); return false;
         case WM_IME_CHAR: return true;
         default: break;
         }
@@ -937,12 +1162,12 @@ namespace Mafia1Online::Features::WebUi {
             return text;
         };
         if (lParam & GCS_RESULTSTR) {
-            host->ImeCommitText(read(GCS_RESULTSTR), CefRange::InvalidRange(), 0);
+            target->ImeCommitText(read(GCS_RESULTSTR));
         }
         if (lParam & GCS_COMPSTR) {
             const std::wstring composition = read(GCS_COMPSTR);
             const int cursor               = lParam & GCS_CURSORPOS ? static_cast<int>(ImmGetCompositionStringW(context, GCS_CURSORPOS, nullptr, 0) & 0xffff) : static_cast<int>(composition.size());
-            host->ImeSetComposition(composition, {}, CefRange::InvalidRange(), CefRange(cursor, cursor));
+            target->ImeSetComposition(composition, cursor, cursor);
         }
         ImmReleaseContext(window, context);
         return true;
@@ -979,13 +1204,11 @@ namespace Mafia1Online::Features::WebUi {
     }
 
     void WebUiService::ForwardMouse(Screen live, Framework::GUI::View *target) {
-        auto browser = target->GetBrowser();
-        if (!browser) {
+        if (!target->HasBrowser()) {
             return;
         }
-        auto host = browser->GetHost();
-        int x     = 0;
-        int y     = 0;
+        int x = 0;
+        int y = 0;
         if (live == Screen::Menu) {
             x = SDK::Menu::MenuMouseX();
             y = SDK::Menu::MenuMouseY();
@@ -1010,7 +1233,7 @@ namespace Mafia1Online::Features::WebUi {
         if (x != _mouseX || y != _mouseY) {
             _mouseX = x;
             _mouseY = y;
-            host->SendMouseMoveEvent(event, false);
+            target->SendMouseMove(event, false);
         }
         const struct {
             uint32_t bit;
@@ -1019,12 +1242,12 @@ namespace Mafia1Online::Features::WebUi {
         for (const auto &button : buttons) {
             const bool down = (now & button.bit) != 0;
             if (down != ((_mouseButtons & button.bit) != 0)) {
-                host->SendMouseClickEvent(event, button.type, !down, 1);
+                target->SendMouseClick(event, button.type, !down, 1);
             }
         }
         _mouseButtons = now;
         if (wheel != 0) {
-            host->SendMouseWheelEvent(event, 0, wheel);
+            target->SendMouseWheel(event, 0, wheel);
         }
     }
 

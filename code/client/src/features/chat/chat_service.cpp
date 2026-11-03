@@ -29,9 +29,7 @@ namespace Mafia1Online::Features::Chat {
 
         constexpr uint32_t kDikEscape    = 0x01;
         constexpr uint32_t kDikBackspace = 0x0e;
-        constexpr uint32_t kDikT         = 0x14;
         constexpr uint32_t kDikEnter     = 0x1c;
-        constexpr uint32_t kDikSlash     = 0x35;
         constexpr uint32_t kDikNumEnter  = 0x9c;
         constexpr uint32_t kDikHome      = 0xc7;
         constexpr uint32_t kDikUp        = 0xc8;
@@ -262,7 +260,7 @@ namespace Mafia1Online::Features::Chat {
     }
 
     bool ChatService::ShouldConsumeNativeKey(uint32_t scanCode) const {
-        return _inputActive || scanCode == kDikT || scanCode == kDikSlash || (scanCode != 0 && scanCode == _swallowedScanCode);
+        return _inputActive || (scanCode != 0 && (scanCode == _chatKey || scanCode == _commandKey || scanCode == _swallowedScanCode));
     }
 
     void ChatService::OpenInput(const std::string &prefill) {
@@ -291,7 +289,7 @@ namespace Mafia1Online::Features::Chat {
             _swallowedScanCode = 0;
             return;
         }
-        if (_inputActive || scanCode == kDikT || scanCode == kDikSlash) {
+        if (_inputActive || scanCode == _chatKey || scanCode == _commandKey) {
             _swallowedScanCode = scanCode;
         }
         if (scanCode == _lastScanCode) {
@@ -307,10 +305,10 @@ namespace Mafia1Online::Features::Chat {
         _keyDownSince = now;
         _lastRepeat   = now;
         if (!_inputActive) {
-            if (scanCode == kDikT) {
+            if (scanCode == _chatKey) {
                 OpenInput({});
             }
-            else if (scanCode == kDikSlash) {
+            else if (scanCode == _commandKey) {
                 OpenInput("/");
             }
             else if (_missionReady && _gameKeys.size() < 16) {
